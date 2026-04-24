@@ -91,7 +91,7 @@ class MigrationRegistry:
     "password": "password123"
 }
 ''',
-                    documentation_url="https://docs.prsm.org/migration/v1.0-to-v1.1/auth-fields"
+                    documentation_url="https://docs.prsm-network.com/migration/v1.0-to-v1.1/auth-fields"
                 ),
                 MigrationStep(
                     step_id="balance_fields",
@@ -113,7 +113,7 @@ class MigrationRegistry:
     "locked_balance": 100.0
 }
 ''',
-                    documentation_url="https://docs.prsm.org/migration/v1.0-to-v1.1/balance-fields"
+                    documentation_url="https://docs.prsm-network.com/migration/v1.0-to-v1.1/balance-fields"
                 ),
                 MigrationStep(
                     step_id="session_fields",
@@ -135,7 +135,7 @@ class MigrationRegistry:
     "ftns_spent": 125.0
 }
 ''',
-                    documentation_url="https://docs.prsm.org/migration/v1.0-to-v1.1/session-fields"
+                    documentation_url="https://docs.prsm-network.com/migration/v1.0-to-v1.1/session-fields"
                 ),
                 MigrationStep(
                     step_id="enhanced_errors",
@@ -159,7 +159,7 @@ class MigrationRegistry:
     "request_id": "req_123456789"
 }
 ''',
-                    documentation_url="https://docs.prsm.org/migration/v1.0-to-v1.1/error-handling"
+                    documentation_url="https://docs.prsm-network.com/migration/v1.0-to-v1.1/error-handling"
                 ),
                 MigrationStep(
                     step_id="update_sdks",
@@ -177,7 +177,7 @@ npm install @prsm/js-sdk@^1.1.0
 # Update client initialization
 client = PRSMClient(api_version="1.1")
 ''',
-                    documentation_url="https://docs.prsm.org/migration/v1.0-to-v1.1/sdk-update"
+                    documentation_url="https://docs.prsm-network.com/migration/v1.0-to-v1.1/sdk-update"
                 )
             ],
             prerequisites=[
@@ -209,7 +209,7 @@ client = PRSMClient(api_version="1.1")
                     estimated_time_minutes=180,
                     breaking_change=True,
                     required=True,
-                    documentation_url="https://docs.prsm.org/migration/v1.1-to-v2.0/auth-restructure"
+                    documentation_url="https://docs.prsm-network.com/migration/v1.1-to-v2.0/auth-restructure"
                 ),
                 MigrationStep(
                     step_id="marketplace_api",
@@ -218,7 +218,7 @@ client = PRSMClient(api_version="1.1")
                     complexity=MigrationComplexity.MODERATE,
                     estimated_time_minutes=120,
                     breaking_change=True,
-                    documentation_url="https://docs.prsm.org/migration/v1.1-to-v2.0/marketplace-api"
+                    documentation_url="https://docs.prsm-network.com/migration/v1.1-to-v2.0/marketplace-api"
                 ),
                 MigrationStep(
                     step_id="websocket_format",
@@ -227,7 +227,7 @@ client = PRSMClient(api_version="1.1")
                     complexity=MigrationComplexity.MODERATE,
                     estimated_time_minutes=90,
                     breaking_change=True,
-                    documentation_url="https://docs.prsm.org/migration/v1.1-to-v2.0/websocket-format"
+                    documentation_url="https://docs.prsm-network.com/migration/v1.1-to-v2.0/websocket-format"
                 )
             ],
             prerequisites=[

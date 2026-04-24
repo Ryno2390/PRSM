@@ -1,7 +1,7 @@
 global:
   smtp_smarthost: 'smtp.gmail.com:587'
-  smtp_from: 'alerts@prsm.org'
-  smtp_auth_username: 'alerts@prsm.org'
+  smtp_from: 'alerts@prsm-network.com'
+  smtp_auth_username: 'alerts@prsm-network.com'
   smtp_auth_password: '$SMTP_PASSWORD'
   smtp_require_tls: true
   slack_api_url: '$SLACK_WEBHOOK_URL'
@@ -91,7 +91,7 @@ receivers:
     description: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
     severity: '{{ .GroupLabels.severity }}'
     client: 'PRSM Alertmanager'
-    client_url: 'https://grafana.prsm.org'
+    client_url: 'https://grafana.prsm-network.com'
     details:
       environment: '{{ .GroupLabels.environment }}'
       cluster: '{{ .GroupLabels.cluster }}'
@@ -109,12 +109,12 @@ receivers:
       *Severity:* {{ .GroupLabels.severity }}
       *Summary:* {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
       *Details:* {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
-      *Runbook:* {{ .CommonAnnotations.runbook_url | default "https://docs.prsm.org/runbooks" }}
+      *Runbook:* {{ .CommonAnnotations.runbook_url | default "https://docs.prsm-network.com/runbooks" }}
     send_resolved: true
 
 - name: 'dev-team'
   email_configs:
-  - to: 'dev-team@prsm.org'
+  - to: 'dev-team@prsm-network.com'
     subject: '[{{ .Status | toUpper }}] PRSM Alert: {{ .GroupLabels.alertname }}'
     body: |
       {{ range .Alerts }}
@@ -126,7 +126,7 @@ receivers:
       Started: {{ .StartsAt }}
       {{ if .EndsAt }}Ended: {{ .EndsAt }}{{ end }}
       Runbook: {{ .Annotations.runbook_url }}
-      Grafana: https://grafana.prsm.org/d/overview/prsm-overview
+      Grafana: https://grafana.prsm-network.com/d/overview/prsm-overview
       {{ end }}
   
   slack_configs:
@@ -144,7 +144,7 @@ receivers:
 
 - name: 'security-team'
   email_configs:
-  - to: 'security@prsm.org'
+  - to: 'security@prsm-network.com'
     subject: '[SECURITY ALERT] {{ .GroupLabels.alertname }}'
     body: |
       SECURITY INCIDENT DETECTED
@@ -160,7 +160,7 @@ receivers:
       Started: {{ .StartsAt }}
       
       Immediate Actions Required:
-      1. Review security logs at https://grafana.prsm.org/d/security/security-dashboard
+      1. Review security logs at https://grafana.prsm-network.com/d/security/security-dashboard
       2. Check incident response playbook
       3. Assess if immediate system isolation is needed
       
@@ -183,7 +183,7 @@ receivers:
 
 - name: 'database-team'
   email_configs:
-  - to: 'database@prsm.org'
+  - to: 'database@prsm-network.com'
     subject: '[DATABASE] {{ .GroupLabels.alertname }}'
     body: |
       Database Alert Triggered
@@ -219,7 +219,7 @@ receivers:
 
 - name: 'blockchain-team'
   email_configs:
-  - to: 'blockchain@prsm.org'
+  - to: 'blockchain@prsm-network.com'
     subject: '[WEB3/FTNS] {{ .GroupLabels.alertname }}'
     body: |
       Web3/Blockchain Alert
@@ -257,7 +257,7 @@ receivers:
 
 - name: 'performance-team'
   email_configs:
-  - to: 'performance@prsm.org'
+  - to: 'performance@prsm-network.com'
     subject: '[PERFORMANCE] {{ .GroupLabels.alertname }}'
     body: |
       Performance Alert

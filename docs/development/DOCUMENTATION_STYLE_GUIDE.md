@@ -241,7 +241,7 @@ async def dispatch_agent(request: AgentDispatchRequest) -> AgentResult:
 # Good: Complete, realistic configuration
 PRSM_CONFIG = {
     "api_key": "your_api_key_here",
-    "base_url": "https://api.prsm.org",
+    "base_url": "https://api.prsm-network.com",
     "timeout": 30,
     "retry_attempts": 3
 }

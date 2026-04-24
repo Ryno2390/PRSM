@@ -617,10 +617,10 @@ python -m cProfile -o profile.stats script.py
 **Diagnosis**:
 ```bash
 # Test network connectivity
-ping api.prsm.org
+ping api.prsm-network.com
 
 # Check network latency
-traceroute api.prsm.org
+traceroute api.prsm-network.com
 
 # Monitor network usage
 iftop
@@ -871,21 +871,21 @@ Before contacting support, gather:
    - Reddit: r/PRSM
 
 3. **Email Support**: Critical issues and enterprise support
-   - Technical: support@prsm.org
-   - Security: security@prsm.org
-   - Enterprise: enterprise@prsm.org
+   - Technical: support@prsm-network.com
+   - Security: security@prsm-network.com
+   - Enterprise: enterprise@prsm-network.com
 
 4. **Documentation**: Comprehensive guides and references
-   - Main docs: https://docs.prsm.org
-   - API reference: https://api-docs.prsm.org
-   - Tutorials: https://tutorials.prsm.org
+   - Main docs: https://docs.prsm-network.com
+   - API reference: https://api-docs.prsm-network.com
+   - Tutorials: https://tutorials.prsm-network.com
 
 ### Emergency Contacts
 
 For critical production issues:
 - **Emergency Hotline**: +1-555-PRSM-911
-- **Security Incidents**: security@prsm.org
-- **Status Page**: https://status.prsm.org
+- **Security Incidents**: security@prsm-network.com
+- **Status Page**: https://status.prsm-network.com
 
 ---
 
@@ -895,7 +895,7 @@ For critical production issues:
 **Last Updated**: June 11, 2025  
 **Next Review**: July 11, 2025  
 **Owner**: PRSM Support Team  
-**Contact**: support@prsm.org  
+**Contact**: support@prsm-network.com  
 
 **Related Documentation**:
 - [Production Operations Manual](PRODUCTION_OPERATIONS_MANUAL.md)

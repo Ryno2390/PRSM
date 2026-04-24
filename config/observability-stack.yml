@@ -280,7 +280,7 @@ alerting:
           
     email-notifications:
       email_configs:
-        - to: "team@prsm.org"
+        - to: "team@prsm-network.com"
           subject: "PRSM Alert: {{ .GroupLabels.alertname }}"
 
 # ===================================

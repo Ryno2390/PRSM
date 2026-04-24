@@ -27,10 +27,10 @@ patches:
 
 images:
   - name: prsm-api
-    newName: registry.prsm.org/prsm-api
+    newName: registry.prsm-network.com/prsm-api
     newTag: v1.0.0
   - name: prsm-worker
-    newName: registry.prsm.org/prsm-worker
+    newName: registry.prsm-network.com/prsm-worker
     newTag: v1.0.0
 
 replicas:
@@ -73,4 +73,4 @@ commonAnnotations:
   deployment.kubernetes.io/environment: production
   deployment.kubernetes.io/managed-by: kustomize
   deployment.kubernetes.io/revision: "1"
-  contact: team@prsm.org
+  contact: team@prsm-network.com

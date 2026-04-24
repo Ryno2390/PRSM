@@ -31,8 +31,8 @@ The PRSM API provides a RESTful interface for interacting with PRSM — a P2P in
 
 ### Base URLs
 
-- **Production**: `https://api.prsm.org`
-- **Staging**: `https://staging-api.prsm.org`
+- **Production**: `https://api.prsm-network.com`
+- **Staging**: `https://staging-api.prsm-network.com`
 - **Development**: `http://localhost:8000`
 
 ### API Versioning
@@ -1702,7 +1702,7 @@ Content-Type: application/json
 
 ### Connection
 ```javascript
-wss://api.prsm.org/ws?token=<jwt_token>
+wss://api.prsm-network.com/ws?token=<jwt_token>
 ```
 
 ### Message Format
@@ -1820,7 +1820,7 @@ from prsm_sdk import PRSMClient
 # Initialize client
 client = PRSMClient(
     api_key="your_api_key",
-    base_url="https://api.prsm.org"
+    base_url="https://api.prsm-network.com"
 )
 
 # Submit research query
@@ -1846,7 +1846,7 @@ import { PRSMClient } from '@prsm/sdk';
 
 const client = new PRSMClient({
   apiKey: 'your_api_key',
-  baseUrl: 'https://api.prsm.org'
+  baseUrl: 'https://api.prsm-network.com'
 });
 
 // Submit research query
@@ -1872,7 +1872,7 @@ ws.subscribe('session_updates', response.sessionId, (update) => {
 
 #### Submit Query
 ```bash
-curl -X POST "https://api.prsm.org/api/v1/nwtn/query" \
+curl -X POST "https://api.prsm-network.com/api/v1/nwtn/query" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1884,13 +1884,13 @@ curl -X POST "https://api.prsm.org/api/v1/nwtn/query" \
 
 #### Check Session Status
 ```bash
-curl -X GET "https://api.prsm.org/api/v1/nwtn/sessions/sess_abc123" \
+curl -X GET "https://api.prsm-network.com/api/v1/nwtn/sessions/sess_abc123" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
 #### Get FTNS Balance
 ```bash
-curl -X GET "https://api.prsm.org/api/v1/web3/balance" \
+curl -X GET "https://api.prsm-network.com/api/v1/web3/balance" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
@@ -1901,7 +1901,7 @@ curl -X GET "https://api.prsm.org/api/v1/web3/balance" \
 **Version**: 2.0
 **Last Updated**: March 5, 2026
 **API Version**: v1
-**Contact**: api-support@prsm.org
+**Contact**: api-support@prsm-network.com
 
 ### Endpoint Summary
 
@@ -1938,9 +1938,9 @@ The legacy Platform API (NWTN research sessions, SEAL autonomous improvement, ho
 - [WebSocket API](#websocket-api) - Real-time communication endpoints
 - [Authentication](#authentication) - JWT Bearer and API Key authentication
 - [FTNS Tokenomics Documentation](FTNS_API_DOCUMENTATION.md)
-- [SDK Documentation](https://docs.prsm.org/sdks)
-- [Postman Collection](https://docs.prsm.org/postman)
+- [SDK Documentation](https://docs.prsm-network.com/sdks)
+- [Postman Collection](https://docs.prsm-network.com/postman)
 
 ---
 
-*For support and questions, please contact our API support team at api-support@prsm.org or visit our [Developer Portal](https://developers.prsm.org).*
+*For support and questions, please contact our API support team at api-support@prsm-network.com or visit our [Developer Portal](https://developers.prsm-network.com).*

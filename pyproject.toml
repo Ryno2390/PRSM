@@ -12,10 +12,10 @@ description = "Protocol for Recursive Scientific Modeling - A P2P infrastructure
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "PRSM Team", email = "team@prsm.org"}
+    {name = "PRSM Team", email = "team@prsm-network.com"}
 ]
 maintainers = [
-    {name = "PRSM Team", email = "team@prsm.org"}
+    {name = "PRSM Team", email = "team@prsm-network.com"}
 ]
 keywords = [
     "scientific-modeling",

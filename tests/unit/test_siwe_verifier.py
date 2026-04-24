@@ -33,9 +33,9 @@ from prsm.interface.onboarding.siwe import (
     verify,
 )
 
-DOMAIN = "app.prsm.org"
+DOMAIN = "app.prsm-network.com"
 CHAIN_ID = 8453  # Base mainnet
-URI = "https://app.prsm.org/login"
+URI = "https://app.prsm-network.com/login"
 VERSION = "1"
 STATEMENT = "Sign in to PRSM."
 

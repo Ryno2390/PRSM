@@ -76,7 +76,7 @@ def create_enhanced_docs_ui(app: FastAPI) -> None:
             "variable": [
                 {
                     "key": "base_url",
-                    "value": "https://api.prsm.org",
+                    "value": "https://api.prsm-network.com",
                     "type": "string"
                 },
                 {
@@ -233,7 +233,7 @@ def generate_curl_examples() -> Dict[str, Dict[str, str]]:
     
     return {
         "authentication": {
-            "register": '''curl -X POST "https://api.prsm.org/api/v1/auth/register" \\
+            "register": '''curl -X POST "https://api.prsm-network.com/api/v1/auth/register" \\
   -H "Content-Type: application/json" \\
   -d '{
     "email": "researcher@university.edu",
@@ -243,7 +243,7 @@ def generate_curl_examples() -> Dict[str, Dict[str, str]]:
     "role": "researcher"
   }'
 ''',
-            "login": '''curl -X POST "https://api.prsm.org/api/v1/auth/login" \\
+            "login": '''curl -X POST "https://api.prsm-network.com/api/v1/auth/login" \\
   -H "Content-Type: application/json" \\
   -d '{
     "email": "researcher@university.edu",
@@ -252,17 +252,17 @@ def generate_curl_examples() -> Dict[str, Dict[str, str]]:
 '''
         },
         "marketplace": {
-            "search": '''curl -X GET "https://api.prsm.org/api/v1/marketplace/resources?query=machine%20learning&resource_type=ai_model&max_price=200" \\
+            "search": '''curl -X GET "https://api.prsm-network.com/api/v1/marketplace/resources?query=machine%20learning&resource_type=ai_model&max_price=200" \\
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ''',
-            "purchase": '''curl -X POST "https://api.prsm.org/api/v1/marketplace/resources/res_123456789/purchase" \\
+            "purchase": '''curl -X POST "https://api.prsm-network.com/api/v1/marketplace/resources/res_123456789/purchase" \\
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{"payment_method": "ftns_balance"}'
 '''
         },
         "sessions": {
-            "create": '''curl -X POST "https://api.prsm.org/api/v1/sessions" \\
+            "create": '''curl -X POST "https://api.prsm-network.com/api/v1/sessions" \\
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -273,12 +273,12 @@ def generate_curl_examples() -> Dict[str, Dict[str, str]]:
     "tags": ["climate", "machine-learning"]
   }'
 ''',
-            "list": '''curl -X GET "https://api.prsm.org/api/v1/sessions" \\
+            "list": '''curl -X GET "https://api.prsm-network.com/api/v1/sessions" \\
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 '''
         },
         "tasks": {
-            "create": '''curl -X POST "https://api.prsm.org/api/v1/tasks" \\
+            "create": '''curl -X POST "https://api.prsm-network.com/api/v1/tasks" \\
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -291,10 +291,10 @@ def generate_curl_examples() -> Dict[str, Dict[str, str]]:
 '''
         },
         "tokens": {
-            "balance": '''curl -X GET "https://api.prsm.org/api/v1/users/YOUR_USER_ID/balance" \\
+            "balance": '''curl -X GET "https://api.prsm-network.com/api/v1/users/YOUR_USER_ID/balance" \\
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ''',
-            "transfer": '''curl -X POST "https://api.prsm.org/api/v1/transactions/transfer" \\
+            "transfer": '''curl -X POST "https://api.prsm-network.com/api/v1/transactions/transfer" \\
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -320,7 +320,7 @@ import asyncio
 # Initialize client
 client = PRSMClient(
     api_key="your_api_key_here",
-    base_url="https://api.prsm.org"
+    base_url="https://api.prsm-network.com"
 )
 
 # Authenticate
@@ -367,7 +367,7 @@ import json
 
 async def handle_real_time_updates():
     # Connect to WebSocket
-    uri = f"wss://api.prsm.org/ws/{user_id}?token={access_token}"
+    uri = f"wss://api.prsm-network.com/ws/{user_id}?token={access_token}"
     
     async with websockets.connect(uri) as websocket:
         print("Connected to PRSM real-time updates")
@@ -399,14 +399,14 @@ npm install @prsm/js-sdk
 yarn add @prsm/js-sdk
 
 // Browser CDN (for quick testing)
-<script src="https://cdn.prsm.org/js-sdk/v1.0.0/prsm-sdk.min.js"></script>
+<script src="https://cdn.prsm-network.com/js-sdk/v1.0.0/prsm-sdk.min.js"></script>
 ''',
         "basic_usage": '''import { PRSMClient } from '@prsm/js-sdk';
 
 // Initialize client
 const client = new PRSMClient({
   apiKey: 'your_api_key_here',
-  baseURL: 'https://api.prsm.org'
+  baseURL: 'https://api.prsm-network.com'
 });
 
 // Authenticate
@@ -437,7 +437,7 @@ const PRSMDashboard = () => {
     const initializeClient = async () => {
       const prsmClient = new PRSMClient({
         apiKey: process.env.REACT_APP_PRSM_API_KEY,
-        baseURL: 'https://api.prsm.org'
+        baseURL: 'https://api.prsm-network.com'
       });
       
       await prsmClient.auth.login(
@@ -483,7 +483,7 @@ const PRSMDashboard = () => {
 export default PRSMDashboard;
 ''',
         "websocket_integration": '''// WebSocket connection for real-time updates
-const ws = new WebSocket('wss://api.prsm.org/ws/user_123?token=your_jwt_token');
+const ws = new WebSocket('wss://api.prsm-network.com/ws/user_123?token=your_jwt_token');
 
 ws.onopen = () => {
   console.log('Connected to PRSM real-time updates');

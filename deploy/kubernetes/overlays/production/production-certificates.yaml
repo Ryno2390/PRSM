@@ -9,8 +9,8 @@ spec:
     name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
-  - prsm.org
-  - www.prsm.org
+  - prsm-network.com
+  - www.prsm-network.com
   usages:
   - digital signature
   - key encipherment
@@ -22,7 +22,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: security@prsm.org
+    email: security@prsm-network.com
     privateKeySecretRef:
       name: letsencrypt-prod
     solvers:
