@@ -1159,7 +1159,7 @@ Be thorough - this helps the community make informed decisions." required></text
     <div class="footer">
         <p>
             <strong>PRSM Governance Portal</strong><br>
-            Democratic decision-making for the Protocol for Recursive Scientific Modeling<br>
+            Democratic decision-making for the Protocol for Research, Storage, and Modeling<br>
             <a href="https://github.com/prsm-network/PRSM" target="_blank">GitHub</a> |
             <a href="../state_of_network_dashboard.py" target="_blank">Network Status</a> |
             <a href="../testnet_interface.py" target="_blank">Public Testnet</a>

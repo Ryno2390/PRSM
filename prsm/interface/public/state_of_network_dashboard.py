@@ -646,7 +646,7 @@ class StateOfNetworkDashboard:
     
     <div class="footer">
         <p>
-            <strong>PRSM Protocol for Recursive Scientific Modeling</strong><br>
+            <strong>PRSM Protocol for Research, Storage, and Modeling</strong><br>
             Open-source, decentralized AI coordination and validation<br>
             <a href="https://github.com/prsm-network/PRSM" target="_blank">GitHub Repository</a> |
             <a href="evidence/latest/LATEST_EVIDENCE_REPORT.md" target="_blank">Latest Evidence Report</a> |

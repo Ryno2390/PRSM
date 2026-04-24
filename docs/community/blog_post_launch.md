@@ -10,7 +10,7 @@ We built PRSM to take a different path.
 
 ### What PRSM Is
 
-PRSM stands for Protocol for Recursive Scientific Modeling, but the short version is this: **it's a P2P infrastructure protocol for open-source collaboration**. Nodes on a mesh network share their latent storage, compute, and data. Contributors earn FTNS tokens for sharing those resources. Any third-party LLM — Claude, GPT, a local Llama, whatever — can reach the network through MCP (Model Context Protocol) tools.
+PRSM stands for Protocol for Research, Storage, and Modeling, but the short version is this: **it's a P2P infrastructure protocol for open-source collaboration**. Nodes on a mesh network share their latent storage, compute, and data. Contributors earn FTNS tokens for sharing those resources. Any third-party LLM — Claude, GPT, a local Llama, whatever — can reach the network through MCP (Model Context Protocol) tools.
 
 Crucially, **PRSM is not an AGI framework**. Reasoning happens inside the caller's LLM. PRSM doesn't host models. When you ask a question, your LLM decomposes it into WASM mobile-agent instructions, PRSM dispatches those agents to the nodes holding the relevant data, the agents execute in zero-persistence Wasmtime sandboxes, and the results flow back to the LLM for final synthesis. The code goes to the data — not the other way around.
 

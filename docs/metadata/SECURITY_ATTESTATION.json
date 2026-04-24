@@ -2,7 +2,7 @@
   "security_attestation": {
     "document_version": "1.0.0",
     "attestation_date": "2025-06-30",
-    "scope": "PRSM Protocol for Recursive Scientific Modeling",
+    "scope": "PRSM Protocol for Research, Storage, and Modeling",
     "assessment_type": "Self-Assessment and Code Review",
     "overall_security_score": "85/100",
     "classification": "Enterprise Framework Implemented"

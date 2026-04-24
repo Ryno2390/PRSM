@@ -475,7 +475,7 @@ def _get_version():
 @click.pass_context
 def main(ctx):
     """
-    PRSM: Protocol for Recursive Scientific Modeling
+    PRSM: Protocol for Research, Storage, and Modeling
     
     A decentralized AI framework for scientific discovery.
     """

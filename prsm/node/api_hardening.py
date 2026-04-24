@@ -658,7 +658,7 @@ def generate_openapi_schema(app: FastAPI) -> Dict[str, Any]:
         title="PRSM Node API",
         version="1.0.0",
         description="""
-# Protocol for Recursive Scientific Modeling (PRSM) Node API
+# Protocol for Research, Storage, and Modeling (PRSM) Node API
 
 This API provides comprehensive management and monitoring capabilities for PRSM network nodes.
 

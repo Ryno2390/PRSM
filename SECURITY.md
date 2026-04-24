@@ -2,7 +2,7 @@
 
 ## Overview
 
-The security of PRSM (Protocol for Recursive Scientific Modeling) is of paramount importance. As a platform handling AI research, distributed systems, and scientific data, we take security seriously and appreciate the community's help in identifying and addressing potential vulnerabilities.
+The security of PRSM (Protocol for Research, Storage, and Modeling) is of paramount importance. As a platform handling AI research, distributed systems, and scientific data, we take security seriously and appreciate the community's help in identifying and addressing potential vulnerabilities.
 
 ## 🛡️ Security Model
 

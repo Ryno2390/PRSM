@@ -5,7 +5,7 @@ P2P infrastructure protocol that lets any LLM reach distributed compute and data
 
 ## Body
 
-Hi r/MachineLearning — sharing PRSM (Protocol for Recursive Scientific Modeling), a **P2P infrastructure protocol** that lets any LLM reach distributed compute, storage, and data through MCP (Model Context Protocol) tools. Flagging upfront: **PRSM is not an AGI framework**. Reasoning happens in the caller's LLM. We just provide the distributed infrastructure that LLM can use.
+Hi r/MachineLearning — sharing PRSM (Protocol for Research, Storage, and Modeling), a **P2P infrastructure protocol** that lets any LLM reach distributed compute, storage, and data through MCP (Model Context Protocol) tools. Flagging upfront: **PRSM is not an AGI framework**. Reasoning happens in the caller's LLM. We just provide the distributed infrastructure that LLM can use.
 
 **What's interesting architecturally:**
 

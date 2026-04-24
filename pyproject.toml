@@ -1,4 +1,4 @@
-# PRSM - Protocol for Recursive Scientific Modeling
+# PRSM - Protocol for Research, Storage, and Modeling
 # Modern Python packaging configuration
 
 [build-system]
@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "prsm-network"
 version = "1.7.0"
-description = "Protocol for Recursive Scientific Modeling - A P2P infrastructure protocol for open-source collaboration"
+description = "Protocol for Research, Storage, and Modeling - A P2P infrastructure protocol for open-source collaboration"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [

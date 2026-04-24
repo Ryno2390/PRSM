@@ -7,7 +7,7 @@
 > - [`REMEDIATION_HARDENING_MASTER_PLAN.md`](REMEDIATION_HARDENING_MASTER_PLAN.md) — historical (March 2026) 12-week sprint plan; superseded framing but technical reference material. See post-v1.6 status audit at top of that doc.
 > - [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) Phase 6 (P2P hardening) and Phase 7 (storage + slashing + content confidentiality) for protocol-layer hardening scope.
 >
-> **Terminology note:** "PRSM" expands to "Protocol for Research, Storage, and Modeling." Earlier docs in this suite occasionally used "Protocol for Recursive Scientific Modeling" — that expansion is legacy and should be disregarded.
+> **Terminology note:** "PRSM" expands to "Protocol for Research, Storage, and Modeling." Earlier docs in this suite occasionally used "Protocol for Research, Storage, and Modeling" — that expansion is legacy and should be disregarded.
 
 ## Overview
 

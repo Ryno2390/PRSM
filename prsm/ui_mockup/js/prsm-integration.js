@@ -749,7 +749,7 @@ class PRSMProductionClient {
                         <i class="fas fa-brain"></i>
                         <h3>PRSM Neural Network</h3>
                     </div>
-                    <p>Connected to the Protocol for Recursive Scientific Modeling</p>
+                    <p>Connected to the Protocol for Research, Storage, and Modeling</p>
                     <p>Ask questions, request analysis, or explore the decentralized AI marketplace.</p>
                     <div class="quick-actions">
                         <button class="quick-action" onclick="prsmClient.quickQuery('Explain FTNS tokenomics')">

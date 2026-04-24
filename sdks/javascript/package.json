@@ -1,7 +1,7 @@
 {
   "name": "prsm-sdk",
   "version": "0.37.1",
-  "description": "Official JavaScript/TypeScript SDK for PRSM (Protocol for Recursive Scientific Modeling)",
+  "description": "Official JavaScript/TypeScript SDK for PRSM (Protocol for Research, Storage, and Modeling)",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
   "types": "dist/index.d.ts",

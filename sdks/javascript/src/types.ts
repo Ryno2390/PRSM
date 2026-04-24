@@ -1,6 +1,6 @@
 /**
  * TypeScript type definitions for PRSM SDK
- * Comprehensive type definitions for the Protocol for Recursive Scientific Modeling
+ * Comprehensive type definitions for the Protocol for Research, Storage, and Modeling
  */
 
 // ============================================================================

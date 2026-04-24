@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI application with standardized configuration
 app = FastAPI(
     title="PRSM API",
-    description="Protocol for Recursive Scientific Modeling - Standardized API",
+    description="Protocol for Research, Storage, and Modeling - Standardized API",
     version="1.0.0",
     docs_url="/docs" if not settings.is_production else None,
     redoc_url="/redoc" if not settings.is_production else None,
@@ -109,7 +109,7 @@ async def root():
     return {
         "name": "PRSM API",
         "version": "1.0.0",
-        "description": "Protocol for Recursive Scientific Modeling",
+        "description": "Protocol for Research, Storage, and Modeling",
         "environment": settings.environment.value,
         "api_version": APIConfig.API_VERSION,
         "status": "operational",

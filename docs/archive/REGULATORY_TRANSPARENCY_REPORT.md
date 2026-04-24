@@ -1,7 +1,7 @@
 # PRSM Regulatory Transparency Report (2026)
 
 ## Executive Summary
-This report details the architectural and economic design of the Protocol for Recursive Scientific Modeling (PRSM) to ensure compliance with global AI and data privacy regulations. PRSM is designed as a decentralized public good for scientific research, distinctly separated from commercial exploitation.
+This report details the architectural and economic design of the Protocol for Research, Storage, and Modeling (PRSM) to ensure compliance with global AI and data privacy regulations. PRSM is designed as a decentralized public good for scientific research, distinctly separated from commercial exploitation.
 
 ## 1. The SRO (Scientific Reputation Oracle) as a Fraud Prevention Tool
 Contrary to financial speculation, the SRO is a fundamental security layer.

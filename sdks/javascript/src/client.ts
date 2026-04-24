@@ -1,6 +1,6 @@
 /**
  * PRSM Main Client
- * The central client for interacting with the Protocol for Recursive Scientific Modeling
+ * The central client for interacting with the Protocol for Research, Storage, and Modeling
  */
 
 import { EventEmitter } from 'eventemitter3';

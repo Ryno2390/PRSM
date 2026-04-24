@@ -219,7 +219,7 @@ async def test_full_pipeline():
     
     # Test content processing
     test_content = """
-    PRSM: Protocol for Recursive Scientific Modeling
+    PRSM: Protocol for Research, Storage, and Modeling
     
     PRSM is a revolutionary approach to scientific knowledge management that enables
     researchers to build upon each other's work in a decentralized, transparent manner.

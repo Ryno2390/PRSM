@@ -247,7 +247,7 @@ def custom_openapi_schema(app: FastAPI) -> Dict[str, Any]:
         title="PRSM API",
         version="0.2.0",
         description="""
-# Protocol for Recursive Scientific Modeling (PRSM) API
+# Protocol for Research, Storage, and Modeling (PRSM) API
 
 ## Overview
 

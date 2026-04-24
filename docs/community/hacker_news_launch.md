@@ -5,7 +5,7 @@ Show HN: PRSM – P2P infrastructure protocol that lets any LLM reach distribute
 
 ## Body
 
-We built PRSM (Protocol for Recursive Scientific Modeling) because we wanted a way to point any LLM — Claude, GPT, local Llama — at distributed compute, storage, and proprietary data without routing everything through a centralized API. Today we're opening it up.
+We built PRSM (Protocol for Research, Storage, and Modeling) because we wanted a way to point any LLM — Claude, GPT, local Llama — at distributed compute, storage, and proprietary data without routing everything through a centralized API. Today we're opening it up.
 
 The short pitch: PRSM is a P2P infrastructure protocol where consumer nodes share their latent storage, compute, and data. Contributors earn FTNS tokens. Any third-party LLM can reach the network through MCP tools. **Reasoning always happens in the caller's LLM** — PRSM doesn't host models. When your LLM calls `prsm_analyze`, it decomposes the query into WASM mobile-agent instructions; PRSM dispatches those agents to the nodes holding the relevant data, the agents execute in zero-persistence Wasmtime sandboxes, and the results flow back. The code goes to the data.
 

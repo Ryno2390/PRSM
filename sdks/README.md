@@ -1,6 +1,6 @@
 # PRSM SDKs
 
-Official Software Development Kits for the Protocol for Recursive Scientific Modeling (PRSM).
+Official Software Development Kits for the Protocol for Research, Storage, and Modeling (PRSM).
 
 ## Available SDKs
 

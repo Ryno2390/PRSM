@@ -123,7 +123,7 @@ def create_app(
 def _get_api_description() -> str:
     """Get API description based on environment."""
     base_description = """
-# Protocol for Recursive Scientific Modeling (PRSM)
+# Protocol for Research, Storage, and Modeling (PRSM)
 
 API for decentralized AI collaboration and knowledge synthesis.
 

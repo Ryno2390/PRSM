@@ -1,6 +1,6 @@
 /**
  * PRSM SDK Error Classes
- * Comprehensive error handling for the Protocol for Recursive Scientific Modeling
+ * Comprehensive error handling for the Protocol for Research, Storage, and Modeling
  */
 
 import { APIError, SafetyLevel } from './types';

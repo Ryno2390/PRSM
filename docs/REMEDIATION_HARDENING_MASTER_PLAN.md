@@ -1451,7 +1451,7 @@ def create_app(
     """
     app = FastAPI(
         title=title,
-        description="Protocol for Recursive Scientific Modeling - API for decentralized AI collaboration",
+        description="Protocol for Research, Storage, and Modeling - API for decentralized AI collaboration",
         version=version,
         docs_url="/docs",
         redoc_url="/redoc",

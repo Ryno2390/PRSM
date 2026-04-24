@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: PRSM API
   description: |
-    # Protocol for Recursive Scientific Modeling (PRSM) API
+    # Protocol for Research, Storage, and Modeling (PRSM) API
 
     ## Overview
     PRSM is a comprehensive decentralized AI framework designed for scientific discovery and collaboration. 
@@ -584,7 +584,7 @@ paths:
                     example: "0.1.0"
                   description:
                     type: string
-                    example: Protocol for Recursive Scientific Modeling
+                    example: Protocol for Research, Storage, and Modeling
                   environment:
                     type: string
                     example: production

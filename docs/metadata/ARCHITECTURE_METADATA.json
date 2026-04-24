@@ -1,6 +1,6 @@
 {
   "architecture_overview": {
-    "name": "PRSM - Protocol for Recursive Scientific Modeling",
+    "name": "PRSM - Protocol for Research, Storage, and Modeling",
     "version": "1.0.0-production",
     "architecture_type": "distributed_federated_ai",
     "last_updated": "2025-07-02",

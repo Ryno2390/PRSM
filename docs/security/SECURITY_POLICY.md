@@ -6,7 +6,7 @@
 
 ## Overview
 
-This document outlines the security policy for the Protocol for Recursive Scientific Modeling (PRSM) project. It defines the security measures, reporting procedures, and compliance requirements.
+This document outlines the security policy for the Protocol for Research, Storage, and Modeling (PRSM) project. It defines the security measures, reporting procedures, and compliance requirements.
 
 ## Table of Contents
 

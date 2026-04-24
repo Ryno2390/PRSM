@@ -17,7 +17,7 @@
 > - [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) — master roadmap; Phase 1 on-chain ops + Phase 6 P2P hardening change operational surface
 > - [`2026-04-11-phase1.3-sepolia-bakein-log.md`](2026-04-11-phase1.3-sepolia-bakein-log.md) — live bake-in operations log as of April 2026
 >
-> **Terminology:** "PRSM" expands to "Protocol for Research, Storage, and Modeling." Earlier drafts of this doc used "Recursive Scientific Modeling" — that is legacy and should be disregarded. Metrics sections below mention "Model Training Success Rate," "Marketplace Transaction Volume," and "Governance Participation" — the first two were NWTN-era framings (NWTN orchestrator deleted in v1.6 scope alignment, April 2026); the third depends on governance structure not yet finalized. These metric names are retained in the manual as illustrative examples of the *kind* of operational metric worth tracking, but the specific metric names may not map to current code.
+> **Terminology:** "PRSM" expands to "Protocol for Research, Storage, and Modeling." Earlier drafts of this doc used "Research, Storage, and Modeling" — that is legacy and should be disregarded. Metrics sections below mention "Model Training Success Rate," "Marketplace Transaction Volume," and "Governance Participation" — the first two were NWTN-era framings (NWTN orchestrator deleted in v1.6 scope alignment, April 2026); the third depends on governance structure not yet finalized. These metric names are retained in the manual as illustrative examples of the *kind* of operational metric worth tracking, but the specific metric names may not map to current code.
 
 ## Table of Contents
 

@@ -830,7 +830,7 @@ This explanation was optimized by PRSM's Recursive Learning Teacher system to ma
     
     <div class="footer">
         <p>
-            <strong>PRSM Protocol for Recursive Scientific Modeling</strong><br>
+            <strong>PRSM Protocol for Research, Storage, and Modeling</strong><br>
             Experience the future of AI coordination and democratic intelligence<br>
             <a href="https://github.com/prsm-network/PRSM" target="_blank">GitHub</a> |
             <a href="../state_of_network_dashboard.py" target="_blank">Network Status</a> |

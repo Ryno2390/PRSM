@@ -1,6 +1,6 @@
 /**
  * PRSM JavaScript/TypeScript SDK
- * Official client library for the Protocol for Recursive Scientific Modeling
+ * Official client library for the Protocol for Research, Storage, and Modeling
  * 
  * Features:
  * - Complete API client with all PRSM endpoints

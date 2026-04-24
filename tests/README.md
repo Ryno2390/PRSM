@@ -2,7 +2,7 @@
 
 ## Overview
 
-This directory contains the comprehensive test suite for PRSM (Protocol for Recursive Scientific Modeling). The test suite has been improved to address external audit findings regarding test consistency and quality.
+This directory contains the comprehensive test suite for PRSM (Protocol for Research, Storage, and Modeling). The test suite has been improved to address external audit findings regarding test consistency and quality.
 
 ## Test Suite Improvements
 

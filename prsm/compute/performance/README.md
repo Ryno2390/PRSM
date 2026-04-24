@@ -2,7 +2,7 @@
 
 ## 📊 Overview
 
-The PRSM Performance Validation Framework is a comprehensive suite of tools for benchmarking, monitoring, and analyzing the performance characteristics of the PRSM (Protocol for Recursive Scientific Modeling) system. This framework addresses the critical performance validation gaps identified in the AI review process.
+The PRSM Performance Validation Framework is a comprehensive suite of tools for benchmarking, monitoring, and analyzing the performance characteristics of the PRSM (Protocol for Research, Storage, and Modeling) system. This framework addresses the critical performance validation gaps identified in the AI review process.
 
 ## 🎯 Key Components
 
@@ -300,4 +300,4 @@ result = await suite.run_benchmark(config)
 
 **PRSM Performance Validation Framework** - Comprehensive performance measurement and analysis for distributed consensus systems.
 
-*Part of the PRSM (Protocol for Recursive Scientific Modeling) project.*
+*Part of the PRSM (Protocol for Research, Storage, and Modeling) project.*
