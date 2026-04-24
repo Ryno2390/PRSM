@@ -37,6 +37,6 @@ prsm mcp-server
 # Exposes 16 tools to any MCP-compatible LLM
 ```
 
-GitHub: https://github.com/Ryno2390/PRSM
+GitHub: https://github.com/prsm-network/PRSM
 
 If you've thought about contribution-minted tokens, stake-weighted settlement, or Sybil resistance in permissionless node networks — I'd like to hear where the economic model has holes.

@@ -27,7 +27,7 @@ Clone the repository and install PRSM in editable mode:
 
 ```bash
 # Clone the repository
-git clone https://github.com/Ryno2390/PRSM.git
+git clone https://github.com/prsm-network/PRSM.git
 cd PRSM
 
 # Create and activate virtual environment

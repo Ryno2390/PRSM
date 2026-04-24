@@ -14,7 +14,7 @@ pip install prsm-network
 
 Or from source:
 ```bash
-git clone https://github.com/Ryno2390/PRSM.git
+git clone https://github.com/prsm-network/PRSM.git
 cd PRSM
 pip install -e .
 ```

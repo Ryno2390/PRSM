@@ -863,7 +863,7 @@ Before contacting support, gather:
 ### Support Channels
 
 1. **GitHub Issues**: Report bugs and feature requests
-   - Repository: https://github.com/Ryno2390/PRSM/issues
+   - Repository: https://github.com/prsm-network/PRSM/issues
    - Include system info and logs
 
 2. **Community Forum**: General questions and discussions

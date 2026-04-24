@@ -51,11 +51,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Ryno2390/PRSM.git",
+    "url": "https://github.com/prsm-network/PRSM.git",
     "directory": "sdks/javascript"
   },
   "bugs": {
-    "url": "https://github.com/Ryno2390/PRSM/issues"
+    "url": "https://github.com/prsm-network/PRSM/issues"
   },
   "homepage": "https://docs.prsm.ai/javascript-sdk",
   "dependencies": {

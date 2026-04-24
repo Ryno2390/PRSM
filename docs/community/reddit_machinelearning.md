@@ -39,6 +39,6 @@ prsm node start
 prsm mcp-server    # Point Claude Desktop / any MCP client at this
 ```
 
-GitHub: https://github.com/Ryno2390/PRSM
+GitHub: https://github.com/prsm-network/PRSM
 
 What I'd value feedback on: the WASM agent SDK ergonomics, the semantic sharding clustering approach (centroid + cosine similarity), and the incentive surface for contributing proprietary data to an otherwise-open network. Happy to go deep on any of the design decisions in the comments.

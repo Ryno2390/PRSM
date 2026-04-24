@@ -211,7 +211,7 @@ For the full argument (evaluation framework, honest comparison of major chains, 
 |----------|---------|------|
 | **Python** | `pip install prsm-network` | [SDK Guide](docs/SDK_DEVELOPER_GUIDE.md) |
 | **JavaScript** | `npm install prsm-sdk` | [sdks/javascript/](sdks/javascript/) |
-| **Go** | `go get github.com/Ryno2390/PRSM/sdks/go@v0.37.0` | [sdks/go/](sdks/go/) |
+| **Go** | `go get github.com/prsm-network/PRSM/sdks/go@v0.37.0` | [sdks/go/](sdks/go/) |
 
 ```python
 from prsm.sdk import PRSMClient
@@ -275,7 +275,7 @@ See [Deployment Guide](deploy/production/DEPLOYMENT_GUIDE.md) for full instructi
 ## Contributing
 
 ```bash
-git clone https://github.com/Ryno2390/PRSM.git
+git clone https://github.com/prsm-network/PRSM.git
 cd PRSM && pip install -e ".[dev]"
 pytest --timeout=120    # Run test suite
 ```

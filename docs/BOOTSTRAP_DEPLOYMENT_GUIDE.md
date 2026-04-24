@@ -129,7 +129,7 @@ usermod -aG docker $USER
 apt install docker-compose-plugin -y
 
 # Clone repository
-git clone https://github.com/Ryno2390/PRSM.git
+git clone https://github.com/prsm-network/PRSM.git
 cd PRSM
 ```
 
@@ -884,5 +884,5 @@ After successful deployment:
 ## Support
 
 For issues or questions:
-- GitHub Issues: https://github.com/Ryno2390/PRSM/issues
+- GitHub Issues: https://github.com/prsm-network/PRSM/issues
 - Documentation: this file (`docs/BOOTSTRAP_DEPLOYMENT_GUIDE.md`)

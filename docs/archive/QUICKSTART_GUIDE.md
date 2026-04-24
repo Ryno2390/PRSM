@@ -13,7 +13,7 @@ Get from zero to a running PRSM instance in under 5 minutes.
 ### 1. Clone and Set Up Environment
 
 ```bash
-git clone https://github.com/Ryno2390/PRSM.git
+git clone https://github.com/prsm-network/PRSM.git
 cd PRSM
 python3 -m venv .venv && source .venv/bin/activate
 ```

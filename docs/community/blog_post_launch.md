@@ -49,6 +49,6 @@ pip install prsm-network
 prsm node start
 ```
 
-GitHub: https://github.com/Ryno2390/PRSM
+GitHub: https://github.com/prsm-network/PRSM
 
 The network gets more useful with every node that joins. Come help us build it.

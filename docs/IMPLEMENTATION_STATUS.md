@@ -95,7 +95,7 @@ Third-party LLM (Claude / GPT / local) calls prsm_analyze via MCP
 | MCP Server | Shipped | 16 tools exposed via `prsm mcp-server` / `prsm/mcp_server.py` |
 | Python SDK | Published | `pip install prsm-network` (v1.7.0) |
 | JavaScript/TypeScript SDK | Published | `npm install prsm-sdk` |
-| Go SDK | Published | `go get github.com/Ryno2390/PRSM/sdks/go` |
+| Go SDK | Published | `go get github.com/prsm-network/PRSM/sdks/go` |
 | Payment Gateway (Stripe/PayPal) | Code complete — needs keys | See `prsm/economy/payments/fiat_gateway.py` |
 | FTNS Token (Base mainnet) | Deployed | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` |
 | Chronos FTNS↔USD/USDT bridge | Shipped (mock exchanges) | `prsm/compute/chronos/` — routing/clearing/cashout API real; Coinbase/Binance/Kraken integrations are sandbox mocks pending API keys |

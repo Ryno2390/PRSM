@@ -239,7 +239,7 @@ For additional support:
 1. Check the [PRSM Documentation](https://docs.prsm.ai)
 2. Review the [API Reference](https://api.prsm.ai/docs)
 3. Join the [PRSM Community](https://community.prsm.ai)
-4. Submit issues on [GitHub](https://github.com/Ryno2390/PRSM/sdks/go)
+4. Submit issues on [GitHub](https://github.com/prsm-network/PRSM/sdks/go)
 
 ## License
 

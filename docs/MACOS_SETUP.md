@@ -108,7 +108,7 @@ python -c "import numpy; print(numpy.__version__)"
 ## Quick Start (Recommended)
 ```bash
 # Clone repository
-git clone https://github.com/Ryno2390/PRSM.git
+git clone https://github.com/prsm-network/PRSM.git
 cd PRSM
 
 # Use conda for easiest setup

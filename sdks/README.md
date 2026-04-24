@@ -17,9 +17,9 @@ Official Software Development Kits for the Protocol for Recursive Scientific Mod
 - **Documentation:** [JavaScript SDK Docs](javascript/README.md)
 
 ### 🐹 Go SDK (`go/`)
-- **Module:** `github.com/Ryno2390/PRSM/sdks/go` — **v0.2.0 published ✅**
-- **Installation:** `go get github.com/Ryno2390/PRSM/sdks/go@v0.2.0`
-- **Package page:** [pkg.go.dev/github.com/Ryno2390/PRSM/sdks/go](https://pkg.go.dev/github.com/Ryno2390/PRSM/sdks/go)
+- **Module:** `github.com/prsm-network/PRSM/sdks/go` — **v0.2.0 published ✅**
+- **Installation:** `go get github.com/prsm-network/PRSM/sdks/go@v0.2.0`
+- **Package page:** [pkg.go.dev/github.com/prsm-network/PRSM/sdks/go](https://pkg.go.dev/github.com/prsm-network/PRSM/sdks/go)
 - **Documentation:** [Go SDK Docs](go/README.md)
 
 ## Quick Start
@@ -44,7 +44,7 @@ console.log(response.content);
 
 ### Go
 ```go
-import "github.com/Ryno2390/PRSM/sdks/go/client"
+import "github.com/prsm-network/PRSM/sdks/go/client"
 
 client := client.New("your_api_key")
 response, err := client.Query("Explain quantum computing")

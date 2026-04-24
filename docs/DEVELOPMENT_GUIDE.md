@@ -36,7 +36,7 @@ This guide provides step-by-step instructions for setting up a complete PRSM dev
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Ryno2390/PRSM.git
+git clone https://github.com/prsm-network/PRSM.git
 cd PRSM
 
 # 2. Run the automated setup script

@@ -26,6 +26,6 @@ prsm mcp-server
 
 Real talk on state: this is v1.6.2. Rings 1-10 are shipped and tested. A fine-tuned NWTN LLM for WASM agent generation (Ring 9) is future work — only the training pipeline ships today. Node bootstrap is single-region (NYC3) with EU/APAC deployment docs ready. The network has a small number of nodes. What we want right now is node operators, early integrators, and people who will break things and tell us about it.
 
-GitHub: https://github.com/Ryno2390/PRSM
+GitHub: https://github.com/prsm-network/PRSM
 
 Happy to answer questions about the ring architecture, the MCP tool surface, the WASM agent SDK, or the 80/15/5 revenue split (80% to data owner, 15% to compute, 5% to treasury).

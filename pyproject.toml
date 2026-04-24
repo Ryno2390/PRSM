@@ -198,11 +198,11 @@ all = [
 prsm = "prsm.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Ryno2390/PRSM"
+Homepage = "https://github.com/prsm-network/PRSM"
 Documentation = "https://prsm.readthedocs.io"
-Repository = "https://github.com/Ryno2390/PRSM.git"
-Issues = "https://github.com/Ryno2390/PRSM/issues"
-Changelog = "https://github.com/Ryno2390/PRSM/blob/main/CHANGELOG.md"
+Repository = "https://github.com/prsm-network/PRSM.git"
+Issues = "https://github.com/prsm-network/PRSM/issues"
+Changelog = "https://github.com/prsm-network/PRSM/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["."]

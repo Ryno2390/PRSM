@@ -77,7 +77,7 @@
 ```bash
 mkdir -p libp2p/cmd/libprsm libp2p/internal libp2p/build
 cd libp2p
-go mod init github.com/Ryno2390/PRSM/libp2p
+go mod init github.com/prsm-network/PRSM/libp2p
 ```
 
 - [ ] **Step 2: Write handle registry**
@@ -146,7 +146,7 @@ import (
 	"log"
 	"unsafe"
 
-	"github.com/Ryno2390/PRSM/libp2p/internal"
+	"github.com/prsm-network/PRSM/libp2p/internal"
 )
 
 //export PrsmStart
