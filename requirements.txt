@@ -78,15 +78,20 @@ twilio>=8.10.0
 pypd>=1.1.0
 
 # OpenTelemetry and Observability
-opentelemetry-api>=1.21.0
-opentelemetry-sdk>=1.21.0
-opentelemetry-instrumentation>=0.42b0
-opentelemetry-exporter-jaeger>=1.21.0
-opentelemetry-exporter-otlp>=1.21.0
-opentelemetry-instrumentation-redis>=0.42b0
-opentelemetry-instrumentation-sqlalchemy>=0.42b0
-opentelemetry-instrumentation-asyncpg>=0.42b0
-opentelemetry-instrumentation-fastapi>=0.42b0
+# Note: opentelemetry-exporter-jaeger was deprecated in opentelemetry
+# 1.35 (Jan 2024) and removed in 1.36. Pinning it >=1.21 force-pinned
+# the whole stack to pre-1.36 versions, whose transitive wrapt
+# constraint (<1.14) fails on Python 3.12 (inspect.formatargspec
+# removed in 3.11). Replaced with otlp exporter which is the modern
+# OTel-recommended successor for distributed tracing.
+opentelemetry-api>=1.36.0
+opentelemetry-sdk>=1.36.0
+opentelemetry-instrumentation>=0.57b0
+opentelemetry-exporter-otlp>=1.36.0
+opentelemetry-instrumentation-redis>=0.57b0
+opentelemetry-instrumentation-sqlalchemy>=0.57b0
+opentelemetry-instrumentation-asyncpg>=0.57b0
+opentelemetry-instrumentation-fastapi>=0.57b0
 
 # Economy & Blockchain
 web3>=6.11.0

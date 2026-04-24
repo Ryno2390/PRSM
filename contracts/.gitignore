@@ -15,7 +15,9 @@ build-info
 deployments/*.json
 
 # Package manager
-package-lock.json
+# package-lock.json is committed for reproducible CI builds (hardhat
+# tests require it via `npm ci`). Re-add here if ever switching to a
+# fresh lockfile workflow.
 yarn.lock
 
 # IDE
