@@ -1,6 +1,13 @@
 # Archive (pre-v1.0 files moved during repo cleanup)
 archive/
 
+# MaxMind GeoLite2 databases — operator-downloaded; MaxMind EULA
+# prohibits redistribution. See data/geoip/README.md for setup.
+data/geoip/*.mmdb
+data/geoip/*.tar.gz
+data/geoip/*.md5
+data/geoip/*.sha256
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
