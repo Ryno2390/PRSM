@@ -1,19 +1,22 @@
 # PRSM-GOV-1: PRSM Foundation Governance Charter
 
 **Document identifier:** PRSM-GOV-1
-**Version:** 0.1 Draft
+**Version:** 0.2 Draft (revised 2026-04-24)
 **Status:** Pre-legal-formation draft. Principles + options for attorney consultation before entity formation. Specific jurisdictional choices flagged throughout as *decisions required*.
-**Date:** 2026-04-21
+**Date:** 2026-04-21 (revised 2026-04-24)
 **Drafting authority:** PRSM founder, pending Foundation convocation
+
+**Revision note (2026-04-24):** Per canonical Vision docs (`PRSM_Vision.md`, `Prismatica_Vision.md` in founder materials), the confidential-silicon standard (PRSM-CIS-1) is scoped as **deferred research exploration**, not an active protocol standard the Foundation currently ratifies or certifies. This charter was initially drafted assuming CIS-1 was a day-1 Foundation standard and Prismatica a first-implementer of chips conforming to it. That framing has been corrected. The Foundation's standards-ratification authority remains, but the Foundation is no longer positioned as a chip-certification body, and Prismatica's commercial activities are re-scoped to the six-stream architecture specified in `Prismatica_Vision.md` §2 (commons curation, T3/T4 compute operations, FTNS treasury, protocol-native VC fund, commissioned datasets, domain foundation models) plus three growth adjacencies (managed enterprise inference, scholarly publishing, data clean-rooms). Sections referencing CIS-1 are updated inline; CIS-1-dependent prohibited amendments (e.g., multi-manufacturer requirement, Foundation certifies Prismatica chips on same terms) are removed. Legal counsel engaged for Foundation formation will re-draft this charter in full; this revision is a directional correction of the inputs, not the final legal instrument.
+
 **Companions:**
-- `docs/2026-04-21-prsm-cis-1-confidential-inference-silicon.md` — the Confidential Inference Silicon standard this charter governs.
 - `docs/TECH_CHOICES.md` — PRSM technical-choice rationale for investor context.
 
 **Standards ratifying under this charter (added 2026-04-22):**
 - `docs/2026-04-22-prsm-supply-1-supply-diversity-standard.md` — **PRSM-SUPPLY-1**, supply-side diversity standard. First standard drafted under §9 ratification path (still pre-ratification pending Foundation convocation). Measures provider + geographic concentration; activates soft-cap mechanisms + Foundation diversity bonus when triggers fire. Amendable via §9.2; parameter adjustments are simple majority, threshold lowering below 20% requires supermajority.
+- `docs/2026-04-23-prsm-policy-jurisdiction-1.md` — **PRSM-POLICY-JURISDICTION-1**, Foundation boundary subsidiary policy codifying the anti-censorship-advocacy stance + §3.2 negative obligations. Ratification pending Foundation convocation; interim binding on founder per §9.
 
 **Research program coordinated under this charter (added 2026-04-22):**
-- `docs/2026-04-14-phase4plus-research-track.md` + its 6 per-item partner-handoff docs (R2/R3/R4/R6/R7/R8 as of 2026-04-22). Foundation-funded research partnerships identified as viable delivery model for items R1-R3 per §R8's 2026-04-19 governance split. Combined R2+R3+R7+R8 research-program budget scopes at $950k-$1.65M over 6-8 quarters; Foundation R&D line-item per §4.6.
+- `docs/2026-04-14-phase4plus-research-track.md` + its 6 per-item partner-handoff docs (R2/R3/R4/R6/R7/R8 as of 2026-04-22). PRSM-CIS-1 moved to "deferred research" category within this track as of 2026-04-24 revision. Foundation-funded research partnerships identified as viable delivery model for items R1-R3 per §R8's 2026-04-19 governance split. Combined R2+R3+R7+R8 research-program budget scopes at $950k-$1.65M over 6-8 quarters; Foundation R&D line-item per §4.6.
 
 **This document is not legal advice.** Before acting on any specific provision, the founder MUST consult qualified corporate counsel in each intended jurisdiction (US, Switzerland, Cayman Islands, or other candidates identified in §5.1).
 
@@ -24,7 +27,7 @@
 This charter specifies the governance relationship between two legal entities that together operate the PRSM ecosystem:
 
 1. **The PRSM Foundation** — a non-profit entity owning and governing the protocol, its standards, and the trust-anchor infrastructure.
-2. **Prismatica** — a for-profit commercial entity operating first-implementer hardware, first-deployed meganodes, and other revenue-earning services built on top of PRSM.
+2. **Prismatica** — a for-profit commercial entity (Delaware C-corp) operating six core revenue streams on PRSM: curated commons data, T3/T4 compute operations, organic FTNS treasury accumulation, a protocol-native venture fund, commissioned dataset origination, and domain-specific foundation models. Three growth adjacencies (managed enterprise inference, scholarly open-access publishing, data clean-rooms) mature over years 2-5.
 
 The charter establishes the structural separation between these entities, the mechanisms that prevent the founder or any successor from collapsing them into a single commercial interest, and the processes by which standards are ratified, amended, and enforced.
 
@@ -43,7 +46,7 @@ Any economic return earned by Prismatica through its ecosystem role is subject t
 Founder holds concrete formal authority during the bootstrapping phase (roughly Years 1-3, see §8). After that phase, the founder's authority devolves to community governance under rules ratified in advance. The founder cannot postpone this devolution.
 
 **P3. The Foundation is authoritative for standards; Prismatica is authoritative for its commercial operations. Neither can override the other.**
-The Foundation cannot tell Prismatica how to price its products. Prismatica cannot tell the Foundation what the silicon standard requires. The boundary is maintained by entity separation + conflict recusal + public audit.
+The Foundation cannot tell Prismatica how to price its products. Prismatica cannot direct Foundation standards work or ratification outcomes. The boundary is maintained by entity separation + conflict recusal + public audit.
 
 **P4. Transparency is the default; opacity requires justification.**
 Voting records, financial statements, committee correspondence (with routing delay for operational security), and certification decisions are all public by default. Exceptions require a documented public rationale.
@@ -58,7 +61,7 @@ These principles are the tests applied when any ambiguous governance question ar
 |---|---|---|
 | **Legal form** | Non-profit (specific vehicle TBD, §5.1) | For-profit corporation (Delaware C-corp recommended) |
 | **Tax status** | Tax-exempt where jurisdiction permits | Taxable |
-| **Purpose** | Protocol stewardship, standards, public infrastructure | Commercial products: T4 meganodes, first-implementer CIS hardware, managed services |
+| **Purpose** | Protocol stewardship, standards, public infrastructure | Commercial products: curated commons data, T3/T4 compute, commissioned datasets, domain models, venture capital, enterprise-managed services |
 | **Board** | 5-7 members, diverse, staggered terms | 3-7 members, standard corporate form |
 | **Revenue** | Grants, FTNS allocation, certification fees (cost-recovery) | Product sales, services, Prismatica-owned IP licensing |
 | **Assets** | Protocol contracts, trademarks, registries, standards docs, treasury FTNS | Hardware designs (circuit-level), proprietary performance optimizations, customer relationships, equity |
@@ -73,7 +76,7 @@ These principles are the tests applied when any ambiguous governance question ar
 
 ### 4.1 Mission statement
 
-The PRSM Foundation's mission is to steward the PRSM protocol and its open standards such that any qualified party can participate as a node operator, model publisher, chip manufacturer, or governance participant, without any single entity (including the Foundation itself) holding rent-extracting leverage.
+The PRSM Foundation's mission is to steward the PRSM protocol and its open standards such that any qualified party can participate as a node operator, model publisher, dataset creator, or governance participant, without any single entity (including the Foundation itself) holding rent-extracting leverage.
 
 The Foundation's measure of success is NOT the size of its treasury, the number of Foundation-employed staff, or the market capitalization of FTNS. It is the diversity of the PRSM ecosystem — the count of independent implementers at each protocol layer, the breadth of model publishers, the geographic and institutional diversity of node operators — measured against targets published in its annual report (§11).
 
@@ -81,9 +84,9 @@ The Foundation's measure of success is NOT the size of its treasury, the number 
 
 The Foundation has exclusive authority over:
 
-1. **Protocol standards.** PRSM-CIS-1 (silicon), successor standards for future primitives, and amendments thereto. Standards are ratified by the process in §9.
+1. **Protocol standards.** PRSM-SUPPLY-1 (supply-side diversity), PRSM-POLICY-JURISDICTION-1 (Foundation boundary policy), successor standards for future primitives, and amendments thereto. Standards are ratified by the process in §9. *Historical note:* PRSM-CIS-1 (confidential-silicon) was drafted as a standards candidate but has been scoped to deferred research per 2026-04-24 revision; the Foundation does not currently certify silicon.
 2. **Contract governance.** The Foundation holds upgrade authority for Base-deployed contracts: ProvenanceRegistry, RoyaltyDistributor, AttestationRegistry, and successor contracts. Upgrade execution requires 2-of-3 hardware multi-sig (§10.3). No upgrade proceeds without published justification and a 30-day community review period.
-3. **Certification authority.** The Foundation grants and revokes PRSM-CIS-1 certifications per §15 of that standard. The certification committee is a Foundation-elected body with the composition constraints specified in PRSM-CIS-1 §15.4.
+3. **Certification authority.** The Foundation grants and revokes certifications for any protocol standards that require formal certification (presently: none, pending Foundation ratification of PRSM-SUPPLY-1 and future standards). Certification committees are Foundation-elected bodies with composition constraints specified per-standard. *Historical note:* earlier drafts positioned the Foundation as a PRSM-CIS-1 chip-certification body; that role is rescinded per the 2026-04-24 revision.
 4. **Trademark and domain ownership.** "PRSM," the PRSM logo (when registered), and the `prsm.network` / `prsm-network.com` domain assets (or successor domains) are Foundation-owned.
 5. **Treasury management.** Foundation-held FTNS treasury allocation, fiat reserves, and grants are managed by the Foundation board within limits set by its charter. Any single transaction over $250,000 equivalent requires the full board's approval and 48-hour notice period.
 6. **Research grants.** Foundation sponsors academic and independent-research work on PRSM-adjacent topics (R1-R8 from the research track). Grant decisions are made by a research committee reporting to the Foundation board; no grant may flow to any entity in which the founder or any board member has material financial interest without supermajority approval AND full recusal of conflicted members.
@@ -92,7 +95,7 @@ The Foundation has exclusive authority over:
 
 The Foundation MUST NOT:
 
-1. **Develop or sell commercial products competing with implementers.** No Foundation-branded chip. No Foundation-operated meganodes. No Foundation-managed customer relationships.
+1. **Develop or sell commercial products competing with implementers.** No Foundation-operated meganodes. No Foundation-managed customer relationships. No Foundation-branded commercial products of any kind. (This includes — and has always included — no Foundation-branded chip or silicon product, though the historical framing of the Foundation as a chip-certification body has been withdrawn per the 2026-04-24 revision.)
 2. **Subsidize or favor Prismatica (or any single implementer) in its economic operations.** Certification fees are cost-recovery. Grants are open-bid. On-chain contract operations are policy-blind to who operates them.
 3. **Make the founder employed by the Foundation if the founder simultaneously holds executive roles at Prismatica.** During the bootstrapping phase (§8), the founder may serve as an *uncompensated* Foundation board director while holding an executive Prismatica role; after the bootstrapping phase, the founder MUST choose one affiliation (§8.3).
 4. **Hold more than 20% of circulating FTNS supply after Year 5.** Foundation treasury allocation is large during bootstrap to fund grants and operations, but its long-run stake is capped.
@@ -108,12 +111,12 @@ The Foundation board has **5-7 voting members** (odd-count preferred; 7 is the r
 | Academic / research | 1-2 | Nominated by a committee of existing academic members + confirmed by supermajority board vote |
 | PRSM-staked community | 2 | Elected by token-weighted staker vote (Phase 7+); before staking contracts ship, appointed by founder + confirmed by existing board |
 | Independent technical | 1-2 | External security/cryptography expertise; no commercial relationship with any PRSM ecosystem participant |
-| Ecosystem operators | 1 | Meganode operator, chip designer, model publisher, etc. — rotating category |
+| Ecosystem operators | 1 | Meganode operator, model publisher, dataset creator, venture-fund participant, etc. — rotating category |
 | Founder (bootstrap only) | 1 | Founder holds seat during bootstrapping phase only (§8) |
 
 Board member terms are **3 years**, staggered (one-third of seats turn over each year after full ramp). Members may serve **at most 2 terms** (6 years consecutive). After a mandatory 1-term off-board period, former members may stand again.
 
-No more than **one member** may be affiliated with Prismatica at any given time. No more than **one member** may be affiliated with any other single first-implementer entity.
+No more than **one member** may be affiliated with Prismatica at any given time. No more than **one member** may be affiliated with any other single major commercial operator on PRSM.
 
 Board members who develop disqualifying conflicts mid-term must resign or be removed by 2/3 vote of remaining members. "Disqualifying conflicts" include: taking material equity in any PRSM implementer after appointment; taking a paid executive role at any implementer; being named in material litigation involving PRSM.
 
@@ -136,7 +139,7 @@ Foundation revenue comes from, in order of expected magnitude over time:
 
 1. **Initial FTNS treasury allocation.** The protocol's genesis token distribution reserves a Foundation tranche (specific percentage TBD in PRSM-TOK-1 — see §7.2). This funds operations during bootstrap.
 2. **Annual FTNS protocol fees.** A small percentage of on-chain transaction fees flows to the Foundation treasury for ongoing operations. Percentage TBD; target is enough to cover operations without making the Foundation dependent on protocol-level fee extraction.
-3. **Certification fees** at cost-recovery for PRSM-CIS-1 certification work.
+3. **Certification fees** at cost-recovery for any future formal certification work the Foundation ratifies (none presently active; PRSM-CIS-1 certification fees were anticipated in earlier drafts but are not currently applicable following the 2026-04-24 revision).
 4. **Research-track donations.** Earmarked funding from industry partners, philanthropic organizations, grant programs.
 5. **Never: revenue-sharing arrangements with Prismatica or any implementer.**
 
@@ -195,7 +198,7 @@ Whichever jurisdiction is chosen, the founding documents MUST explicitly:
 
 ### 6.1 Mission statement
 
-Prismatica is a for-profit commercial entity that builds and operates PRSM-compatible commercial products. Its first focus is the T4 meganode — a large-scale inference operation running on CIS-compliant hardware — and the design + operation of first-implementer silicon conforming to PRSM-CIS-1.
+Prismatica is a for-profit commercial entity (Delaware C-corp) that builds and operates PRSM-compatible commercial products. Its primary focus is the six-stream commercial architecture specified in `Prismatica_Vision.md` §2: curated commons data, T3/T4 compute operations, organic FTNS treasury, a protocol-native venture fund, commissioned dataset origination, and domain-specific foundation models.
 
 Prismatica's commercial success is expected and healthy for the ecosystem; PRSM's open-standards approach only works if implementers can earn sustainable returns. **What Prismatica CANNOT do is become the de facto controller of PRSM standards or infrastructure.** The charter enforces this separation.
 
@@ -203,7 +206,7 @@ Prismatica's commercial success is expected and healthy for the ecosystem; PRSM'
 
 Prismatica MAY:
 
-1. **Design and manufacture CIS-compliant chips** through contracted fabs. Prismatica owns its specific circuit designs, its fab relationships, its performance optimizations.
+1. **Operate T3 cloud-arbitrage and T4 dedicated-meganode compute infrastructure** on PRSM. Prismatica owns its specific operational stacks, cloud-provider relationships, capacity-management optimizations, and enterprise contracts.
 2. **Build and operate T4 meganodes** at its own cost, capture revenue from the services they provide, subject to PRSM protocol fees that apply to all operators.
 3. **Offer managed services** to model publishers who want Prismatica to handle the deployment of their weights to Prismatica-operated meganodes. These commercial relationships are outside PRSM's protocol scope.
 4. **License its non-PRSM-essential IP** to third parties on commercial terms.
@@ -212,8 +215,8 @@ Prismatica MAY:
 
 Prismatica MUST NOT:
 
-1. **Claim authority over PRSM standards.** All Prismatica public communications MUST represent Prismatica as "a first implementer of PRSM-CIS-1" rather than "the standard-bearer" or equivalent wording. The distinction is strict; marketing teams sometimes get this wrong and the Foundation reserves the right to publicly correct.
-2. **Misrepresent certification status.** Only chips certified by the Foundation can be marketed as "PRSM-CIS-1 certified." Provisional or in-progress certifications must be represented as such.
+1. **Claim authority over PRSM standards.** All Prismatica public communications MUST represent Prismatica as "an operator on PRSM" or "a first-mover commercial builder on PRSM" rather than "the standard-bearer" or equivalent wording that implies standards-authoring authority. The distinction is strict; marketing teams sometimes get this wrong and the Foundation reserves the right to publicly correct.
+2. **Misrepresent certification or compliance status.** Any future formal certifications the Foundation ratifies can only be claimed after explicit grant. Provisional or in-progress certifications must be represented as such.
 3. **Use Foundation trademarks** beyond the Foundation's standard licensing terms (which are symmetric to all implementers).
 4. **Hold on-chain governance power disproportionate to its operational stake.** Prismatica may hold FTNS for treasury reasons but MUST NOT make Foundation-unfavorable votes as a strategy. Prismatica's on-chain voting behavior is subject to disclosure in its investor reports.
 
@@ -248,7 +251,7 @@ The Foundation MAY, at its option, appoint a non-voting observer to Prismatica's
 - Is bound by standard NDA for board materials not affecting the public-policy surface.
 - Reports to the Foundation board — NOT to the Foundation ED — on governance-relevant observations.
 
-The observer provision gives the Foundation visibility into Prismatica's planning without granting governance authority over Prismatica's commercial decisions. Whether Prismatica agrees to this arrangement is a matter of negotiation; the Foundation cannot compel it. The expectation: Prismatica as first implementer agrees voluntarily as a credibility signal that it is not trying to escape governance scrutiny.
+The observer provision gives the Foundation visibility into Prismatica's planning without granting governance authority over Prismatica's commercial decisions. Whether Prismatica agrees to this arrangement is a matter of negotiation; the Foundation cannot compel it. The expectation: Prismatica as first-mover commercial builder agrees voluntarily as a credibility signal that it is not trying to escape governance scrutiny.
 
 ---
 
@@ -339,9 +342,10 @@ By Year 3 end (end of bootstrap):
 ### 9.1 Standards scope
 
 PRSM standards include:
-- PRSM-CIS-1 (silicon, this charter's companion).
-- PRSM-CIS-n for n > 1 (successor silicon standards).
-- PRSM-ATTEST-n (attestation protocols beyond silicon — e.g., for TEE attestation in the interim before CIS silicon ships).
+- PRSM-SUPPLY-1 (supply-side diversity standard).
+- PRSM-POLICY-JURISDICTION-1 (Foundation boundary subsidiary policy).
+- PRSM-ATTEST-n (attestation protocols — e.g., for TEE attestation schema used in Phase 2 Rings 7-10).
+- *Deferred research (pre-pivot draft, not currently active):* PRSM-CIS-1 (confidential-silicon standard) and successors. If revived as active standards, will re-enter via §9 ratification path.
 - PRSM-ECON-n (tokenomics and economic parameters).
 - PRSM-CONTRACT-n (on-chain contract architecture standards).
 - Other standards the Foundation ratifies from time to time.
@@ -353,7 +357,7 @@ A new standard (or substantive amendment to an existing one) proceeds through:
 1. **Working-group formation** (§9.3). Working groups are constituted for each standard; membership is set by the Foundation board on open nomination.
 2. **Draft development.** Working group produces drafts. Drafts are numbered v0.1, v0.2, etc. Major version bumps indicate breaking changes; minor version bumps indicate clarifications or additive features.
 3. **Public comment period.** Once the working group believes a draft is ready for external review, it is published with an explicit comment period of at least 60 days for v0.x drafts and at least 120 days for v1.0 ratification.
-4. **Committee review.** The relevant Foundation committee (certification committee for CIS standards, economic committee for ECON standards, etc.) produces a formal review incorporating public comments.
+4. **Committee review.** The relevant Foundation committee (supply-diversity committee for PRSM-SUPPLY-1 matters, economic committee for ECON standards, policy committee for PRSM-POLICY-* matters, etc.) produces a formal review incorporating public comments.
 5. **Board vote.** The Foundation board votes on ratification. Ratification of a v1.0 (first normative release) requires supermajority (2/3). Amendments to ratified standards require simple majority unless they would affect existing implementers' certification status, in which case supermajority is required.
 6. **On-chain anchoring.** A cryptographic hash of the ratified document is recorded in the Foundation's StandardsRegistry contract on Base, with the Foundation's multi-sig signature (§10.3) as the authority attestation.
 7. **Effective date.** Standards become effective on a date specified in their ratification resolution. First-release standards typically allow 6-12 months before certification testing against them begins.
@@ -517,7 +521,7 @@ Amendments affecting Sections 2 (Principles), 4.3 (Foundation Express Limits), 6
 Certain provisions are **not amendable** by the standard process. Changes to these require Foundation dissolution and reformation (i.e., the community forms a new foundation with different rules):
 
 - The principle that the Foundation does not develop or operate commercial products competing with implementers.
-- The multi-manufacturer requirement at C2+ in PRSM-CIS-1.
+- *(Removed 2026-04-24):* The multi-manufacturer requirement at C2+ in PRSM-CIS-1 was listed as a prohibited amendment in v0.1. Removed per the 2026-04-24 revision since PRSM-CIS-1 is no longer an active Foundation standard. If PRSM-CIS-1 is later ratified under §9, appropriate implementer-diversity protections for that specific standard will be re-specified then.
 - The prohibition on Foundation-to-Prismatica revenue-sharing arrangements.
 
 The rationale for prohibited amendments: these are the load-bearing commitments that make the governance split credible. An amendment process that could unravel them would undermine the credibility from day one.
@@ -590,7 +594,7 @@ Drafting of this charter draws on governance patterns established by:
 - **Confidential Computing Consortium** — domain-specific standards-setting body.
 - **Trusted Computing Group** — hardware-security standards with implementer diversity.
 
-Specific rhyming decisions with these precedents are noted inline. Where this charter diverges, it is typically toward stricter founder-containment than the precedents require — PRSM's specific threat model (single-founder + first-implementer affiliation from day one) justifies the additional rigor.
+Specific rhyming decisions with these precedents are noted inline. Where this charter diverges, it is typically toward stricter founder-containment than the precedents require — PRSM's specific threat model (single founder + ownership interest in Prismatica, the primary commercial operator on the protocol, from day one) justifies the additional rigor.
 
 ---
 
