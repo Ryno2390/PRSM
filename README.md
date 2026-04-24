@@ -10,7 +10,7 @@ PRSM is a peer-to-peer protocol that unifies three resource markets — data, co
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-16-blue.svg)](#mcp-integration)
 
-> **Community** — Discord + GitHub Discussions launching 2026-04-24. Links will be added here once servers are live.
+> **Community** — Join us on [Discord](https://discord.gg/WNHwgFwuF) for dev / node-operator / governance discussion. GitHub Discussions enabled on this repo for async Q&A + proposals.
 
 ---
 
