@@ -51,7 +51,7 @@ click>=8.1.0
 docker>=6.1.0
 
 # Documentation
-mkdocs>=1.5.0
+mkdocs>=1.6.1
 mkdocs-material>=9.4.0
 mkdocstrings[python]>=0.24.0
 sphinx>=7.2.0
