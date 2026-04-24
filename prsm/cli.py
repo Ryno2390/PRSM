@@ -476,8 +476,11 @@ def _get_version():
 def main(ctx):
     """
     PRSM: Protocol for Research, Storage, and Modeling
-    
-    A decentralized AI framework for scientific discovery.
+
+    A peer-to-peer protocol unifying data, compute, and economic layers.
+    Frontier LLMs (Claude, GPT, Gemini, or local) call PRSM via MCP as
+    a retrieval + heavy-compute substrate. Contributors earn FTNS for
+    sharing storage, compute, and data.
     """
     # Auto-migrate old node_config.json -> config.yaml for existing users
     try:
@@ -672,31 +675,41 @@ def dashboard(port: int, api_port: int):
 @click.option("--user-id", default="cli-user", help="User ID for the query")
 @click.option("--api-url", default="http://127.0.0.1:8000", help="PRSM API URL")
 def query(query: str, context: int, user_id: str, api_url: str):
-    """Submit a query to NWTN (requires running server)"""
+    """Submit a query to a running PRSM node (dev / testing convenience).
+
+    The recommended end-user flow is: run ``prsm mcp-server`` and configure
+    your LLM client (Claude Desktop / Gemini CLI / local MCP-compatible
+    tool) to point at it. Your LLM will then invoke PRSM tools directly
+    whenever a query needs retrieval, heavy compute, or provenance.
+
+    This ``query`` command hits the legacy ``/query`` REST endpoint
+    directly without going through an LLM. Useful for development and
+    integration testing; not the primary user flow.
+    """
     import httpx
     from rich.panel import Panel
-    
-    console.print(f"🧠 Submitting query to NWTN...", style="bold blue")
+
+    console.print(f"Submitting query to PRSM node at {api_url}...", style="bold blue")
     console.print(f"Query: {query}")
     console.print(f"Context allocation: {context} FTNS")
-    
+
     payload = {
         "prompt": query,
         "context_allocation": str(context),
         "user_id": user_id
     }
-    
+
     try:
-        with console.status("[bold green]NWTN Orchestrator is reasoning..."):
+        with console.status("[bold green]PRSM node processing query..."):
             with httpx.Client(timeout=120.0) as client:
                 response = client.post(f"{api_url}/query", json=payload)
-                
+
         if response.status_code == 200:
             data = response.json()
             answer = data.get("final_answer", "No answer provided.")
-            
+
             console.print("\n")
-            console.print(Panel(answer, title="[bold green]NWTN Synthesis[/bold green]", border_style="green"))
+            console.print(Panel(answer, title="[bold green]PRSM Response[/bold green]", border_style="green"))
             
             trace = data.get("reasoning_trace", [])
             if trace:
