@@ -181,7 +181,7 @@ See [Confidential Compute Spec](docs/CONFIDENTIAL_COMPUTE_SPEC.md) for details.
 
 ## Built on Ethereum + Base
 
-PRSM's smart contracts target **Base**, an Ethereum Layer 2 operated by Coinbase. The FTNS token is implemented as a standard ERC-20 (`FTNSTokenSimple.sol`) deployed to **Base Sepolia testnet**. Mainnet deploy is hardware-gated pending multi-sig quorum; the Foundation's 2-of-3 Safe on Base mainnet is the deployer of record for Phase 1.3 contracts (FTNSToken + ProvenanceRegistry + RoyaltyDistributor). See [`docs/2026-04-22-prsm-investor-executive-summary.md`](docs/2026-04-22-prsm-investor-executive-summary.md) for the current shipped-state summary.
+PRSM's smart contracts target **Base**, an Ethereum Layer 2 operated by Coinbase. The FTNS token is implemented as a standard ERC-20 (`FTNSTokenSimple.sol`) deployed to **Base Sepolia testnet**. Mainnet deploy is hardware-gated pending multi-sig quorum; the Foundation's 2-of-3 Safe on Base mainnet is the deployer of record for Phase 1.3 contracts (FTNSToken + ProvenanceRegistry + RoyaltyDistributor).
 
 **Why Ethereum:**
 
@@ -196,14 +196,14 @@ PRSM's smart contracts target **Base**, an Ethereum Layer 2 operated by Coinbase
 **Why Base (not Ethereum L1 directly, not Solana, not a new chain):**
 
 - **~$0.01 transactions, 2-second blocks** — viable economics for micropayment royalty flow
-- **Coinbase as operator** — immediate legitimacy narrative for investor conversations
+- **Operated by Coinbase** with public uptime SLAs and a deep tooling ecosystem
 - **Native USDC from Circle** — zero-friction fiat on-ramp for Phase 5 (Coinbase → Base in seconds)
 - **OP Stack foundation** — most battle-tested L2 codebase, portable to any OP Stack chain if Base ever falters
 - **Inherits Ethereum L1 security** — fraud proofs and trust-minimized withdrawals, not a trust-in-Coinbase promise
 
-**One-sentence answer for investors asking "why not Solana?":** *"We need Ethereum's decentralization and tooling, we don't need Solana's peak speed for our use case, and we get near-Solana performance via Base L2 without giving up any of Ethereum's other advantages."*
+**Short answer to "why not Solana?":** *"We need Ethereum's decentralization and tooling, we don't need Solana's peak speed for our use case, and we get near-Solana performance via Base L2 without giving up any of Ethereum's other advantages."*
 
-For the full argument (evaluation framework, honest comparison of major chains, responses to common investor pushback), see [Technology Choices](docs/TECH_CHOICES.md).
+For the full argument (evaluation framework, honest comparison of major chains, responses to common pushback), see [Technology Choices](docs/TECH_CHOICES.md).
 
 ---
 
@@ -256,16 +256,14 @@ See [Deployment Guide](deploy/production/DEPLOYMENT_GUIDE.md) for full instructi
 
 ## Documentation
 
-**Start here:** [`docs/INDEX.md`](docs/INDEX.md) — navigable map of the full docs surface (97 docs) with audience-oriented entry points (investors / auditors / Foundation officers / research partners / new engineers).
+**Start here:** [`docs/INDEX.md`](docs/INDEX.md) — navigable map of the full docs surface with audience-oriented entry points (auditors / Foundation officers / research partners / new engineers).
 
 **Commonly-referenced docs:**
 
 | Document | Description |
 |----------|------------|
 | [Getting Started](docs/GETTING_STARTED.md) | Install → configure → first query in 5 minutes |
-| [Executive Summary](docs/2026-04-22-prsm-investor-executive-summary.md) | Investor / partner positioning + shipped-coverage (v2, aligned with canonical Vision docs) |
-| [Pitch Deck](docs/2026-04-23-prsm-pitch-deck.md) | 12-slide investor pitch deck (v2) — companion to the executive summary |
-| [Technology Choices](docs/TECH_CHOICES.md) | Why Ethereum + Base — investor-facing chain-choice rationale |
+| [Technology Choices](docs/TECH_CHOICES.md) | Why Ethereum + Base — chain-choice rationale |
 | [Sovereign-Edge AI Spec](docs/SOVEREIGN_EDGE_AI_SPEC.md) | Phase 1 architecture (Rings 1-6) |
 | [Confidential Compute Spec](docs/CONFIDENTIAL_COMPUTE_SPEC.md) | Phase 2 architecture (Rings 7-10) |
 | [Audit-Gap Roadmap](docs/2026-04-10-audit-gap-roadmap.md) | Master roadmap — phase status + scope + planning-artifact pointers |

@@ -7,9 +7,9 @@ PRSM's canonical acronym expansion is **Protocol for Research, Storage, and Mode
 
 If you don't know where to start:
 
-- **Investors / partners** — [`2026-04-22-prsm-investor-executive-summary.md`](./2026-04-22-prsm-investor-executive-summary.md) (executive summary, v2 aligned with canonical Vision docs) + [`2026-04-23-prsm-pitch-deck.md`](./2026-04-23-prsm-pitch-deck.md) (12-slide pitch deck, v2).
+- **Investors / partners** — investor + commercial materials live in the private companion repo (`prsm-network/prsm-private`); request access via `investors@prsm-network.com`. Public-facing audit + protocol docs are below.
 - **Auditors** — [`2026-04-10-audit-gap-roadmap.md`](./2026-04-10-audit-gap-roadmap.md) (master roadmap) + per-phase audit-prep docs in §2 below.
-- **Foundation officers + legal counsel** — governance charters in §4 + [`2026-04-23-foundation-jurisdiction-scoping.md`](./2026-04-23-foundation-jurisdiction-scoping.md) (two-entity scoping: Cayman Foundation + Delaware C-corp + inter-entity structuring) + [`2026-04-23-legal-counsel-shortlist-and-rfp.md`](./2026-04-23-legal-counsel-shortlist-and-rfp.md) + [`2026-04-24-outreach-drafts.md`](./2026-04-24-outreach-drafts.md) (send-ready RFPs).
+- **Foundation officers** — governance charters in §4. Foundation jurisdiction + legal-counsel materials live in the private companion repo (`prsm-network/prsm-private`).
 - **Research partners** — R-track scoping docs in §3.
 - **New engineers** — [`GETTING_STARTED.md`](./GETTING_STARTED.md) + [`architecture.md`](./architecture.md) + [`DEVELOPMENT_GUIDE.md`](./DEVELOPMENT_GUIDE.md) in §5.
 
@@ -91,13 +91,9 @@ Phases ordered by number. Each row: design/plan doc + status + any follow-on run
 | [`2026-04-21-audit-bundle-coordinator.md`](./2026-04-21-audit-bundle-coordinator.md) | Bundled audit engagement pattern | Reference |
 | [`2026-04-23-testnet-rehearsal-plan.md`](./2026-04-23-testnet-rehearsal-plan.md) | Mainnet deploy rehearsal — bundled deploy scripts + local hardhat dry-run | Rehearsal infra live; hardware day is mechanical |
 | [`2026-04-23-auditor-shortlist-and-rfp.md`](./2026-04-23-auditor-shortlist-and-rfp.md) | Audit firm shortlist (6 firms) + decision criteria + copy-paste RFP email template | Send-ready once Foundation/multi-sig provisioned |
-| [`2026-04-23-foundation-jurisdiction-scoping.md`](./2026-04-23-foundation-jurisdiction-scoping.md) | Foundation jurisdiction scoping (5 jurisdictions) + §2.7 Prismatica Delaware C-corp profile + §5.5 inter-entity structuring (Foundation ↔ Prismatica equity + dividends + UBIT + arms-length) | Hand-off ready for incoming legal counsel (two-entity scope) |
-| [`2026-04-23-legal-counsel-shortlist-and-rfp.md`](./2026-04-23-legal-counsel-shortlist-and-rfp.md) | Legal counsel shortlist (6 Cayman + 3 Swiss firms) + decision criteria + RFP email template. **Scope expanded 2026-04-24** to cover (A) Cayman Foundation formation, (B) Prismatica Delaware C-corp + Reg D 506(c) offering, (C) inter-entity structuring. | Send-ready under two-entity scope |
-| [`2026-04-23-prsm-pitch-deck.md`](./2026-04-23-prsm-pitch-deck.md) | 12-slide investor pitch deck (v2 rewritten 2026-04-24 to match canonical Vision docs — Prismatica's 6 core streams + 3 growth adjacencies, MCP/TUI framing, use-of-proceeds rebalanced away from deferred CIS-1 silicon work) + 8 appendix slides | v2 for founder review before Figma/Keynote build |
-| [`2026-04-23-foundation-officer-jds-and-outreach.md`](./2026-04-23-foundation-officer-jds-and-outreach.md) | Foundation officer JDs (5 board seats + ED) + compensation philosophy + independence rubric + per-seat outreach email templates. **Revised 2026-04-24** to remove CIS-1 chip-designer archetypes. | Ready for legal-counsel review + Q3 2026 board recruitment |
+| [`2026-04-23-foundation-officer-jds-and-outreach.md`](./2026-04-23-foundation-officer-jds-and-outreach.md) | Foundation officer JDs (5 board seats + ED) + compensation philosophy + independence rubric + per-seat outreach email templates. | Ready for legal-counsel review + Q3 2026 board recruitment |
 | [`2026-04-23-r9-transport-censorship-resistance-scoping.md`](./2026-04-23-r9-transport-censorship-resistance-scoping.md) | R9-SCOPING-1: pluggable-transport architecture for jurisdictional censorship resistance (Tor / V2Ray / Trojan / Shadowsocks as opt-in) + peer-jurisdiction filter + content self-filter + Foundation policy boundaries | Scoping draft; code-complete Phase 6.2-6.4 |
 | [`2026-04-23-prsm-policy-jurisdiction-1.md`](./2026-04-23-prsm-policy-jurisdiction-1.md) | PRSM-POLICY-JURISDICTION-1 subsidiary governance policy codifying R9 §8 Foundation boundary commitments; prohibited amendments; user-facing risk disclaimer template | Draft ready for legal-counsel review + post-formation board ratification |
-| [`2026-04-24-outreach-drafts.md`](./2026-04-24-outreach-drafts.md) | Six send-ready outreach emails: 3 auditor RFPs (Spearbit/Cantina, Trail of Bits, OpenZeppelin) + 3 legal-counsel RFPs (Walkers, Carey Olsen, Maples). All placeholders except recipient contact name/email pre-resolved. Includes per-recipient anchor citations, routing logistics, expected response windows, and tracking-table locations. | Send-ready — founder action to personalize contact + send |
 
 ### Phase 7-storage — content durability + confidentiality
 
@@ -144,7 +140,6 @@ Partner-handoff-ready items as of 2026-04-24.
 | [`2026-04-21-prsm-tok-1-ftns-tokenomics.md`](./2026-04-21-prsm-tok-1-ftns-tokenomics.md) | **PRSM-TOK-1** | FTNS tokenomics specification (v0.2, revised 2026-04-24 — CIS-1 references updated to reflect deferred-research status; economic-model companion archived; core tokenomics primitives unchanged) |
 | [`2026-04-22-prsm-supply-1-supply-diversity-standard.md`](./2026-04-22-prsm-supply-1-supply-diversity-standard.md) | **PRSM-SUPPLY-1** | Operator-supply diversity standard |
 | [`2026-04-23-prsm-policy-jurisdiction-1.md`](./2026-04-23-prsm-policy-jurisdiction-1.md) | **PRSM-POLICY-JURISDICTION-1** | Foundation boundary subsidiary policy (codifies R9 §8 non-operational commitments) |
-| [`2026-04-14-hybrid-tokenomics-legal-tracking.md`](./2026-04-14-hybrid-tokenomics-legal-tracking.md) | — | Hybrid tokenomics legal/governance workstream tracker |
 
 ### 4.2 Deferred / archived research
 
@@ -163,14 +158,14 @@ Partner-handoff-ready items as of 2026-04-24.
 
 ---
 
-## 5. Investor / partner communications
+## 5. Communications
+
+Investor + commercial materials (round terms, risk factors, pitch deck, business model, SAFE template, cap table, executive summaries, Foundation jurisdiction scoping, legal-counsel RFPs, outreach drafts, hybrid-tokenomics legal tracking) live in the **private companion repo** `prsm-network/prsm-private`. Access is restricted; route requests via `investors@prsm-network.com`.
+
+Public-facing collateral that remains in this repo:
 
 | Doc | Purpose |
 |---|---|
-| [`investor/README.md`](./investor/README.md) | **Investor data room — read first.** Navigable index for the 10-doc data room (round terms, risk factors, use of funds, entity structure, business model, founder bio, FAQ, SAFE template, cap table). $1.25M on YC post-money SAFE at $10M cap. **Use this for all serious investor conversations.** |
-| [`2026-04-21-prsm-investor-executive-summary.md`](./2026-04-21-prsm-investor-executive-summary.md) | Prior executive summary (Phase 3 as most-recent milestone, pre-Vision-alignment framing) — **superseded** |
-| [`2026-04-22-prsm-investor-executive-summary.md`](./2026-04-22-prsm-investor-executive-summary.md) | Current executive summary (v2, rewritten 2026-04-24 — aligned with canonical Vision docs: 3-layer P2P protocol + MCP + TUI framing, Prismatica's 6 core streams + 3 growth adjacencies, Reg D 506(c) equity raise framing, no CIS-1 headline moat). **Use this.** |
-| [`2026-04-23-prsm-pitch-deck.md`](./2026-04-23-prsm-pitch-deck.md) | 12-slide pitch deck (v2 rewritten 2026-04-24) — companion to exec summary. See §2 Phase 7 for full entry. |
 | [`2026-04-22-session-summary-engineering-sprint.md`](./2026-04-22-session-summary-engineering-sprint.md) | 2026-04-22 engineering-sprint changelog (Phase 4/5/6/7-storage/8 sprint) |
 | *Economic model white paper moved 2026-04-24 to [`archive/research/`](./archive/research/)* — the v1 paper was CIS-priced; a successor paper around Prismatica's six-stream business remains to be drafted |
 | [`SCIENCE_FIRST_MEDIA_KIT.md`](./SCIENCE_FIRST_MEDIA_KIT.md) | Science-first framing media kit |
