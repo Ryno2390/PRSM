@@ -114,7 +114,7 @@ The PRSM repository has been comprehensively audited and organized to meet profe
 ### ✅ **Files Verified as Properly Located**
 
 **Active Documentation:**
-- Production roadmap remains in `docs/business/roadmaps/`
+- Production roadmap in `docs/` (phase plan + audit-gap roadmap docs)
 - Ethical data ingestion roadmap remains in `prsm/nwtn/`
 - All API documentation in `docs/api/`
 

@@ -21,7 +21,7 @@
 **Source material consolidated by this document:**
 - `PRSM_Tokenomics.md` (external vault, 701 lines) — detailed design + mathematical models.
 - `docs/2026-04-16-halving-schedule-implementation-plan.md` — halving operational + migration plan.
-- `docs/2026-04-14-hybrid-tokenomics-legal-tracking.md` — hybrid-model legal-ratification track.
+- Hybrid-model legal-ratification track (relocated to private repo).
 
 This document does NOT replace the source material; it formalizes the subset of parameters and commitments that constitute the ratifiable standard. The source material remains the authoritative reference for scenario math, sensitivity analyses, and worked examples.
 
@@ -334,7 +334,7 @@ User-set royalty rates 0–98% determine the creator's share of each access paym
 
 ### 8.5 Hybrid fee model — **[COUNSEL REQUIRED]**
 
-Per `docs/2026-04-14-hybrid-tokenomics-legal-tracking.md`, an alternative fee structure is under legal review:
+Per the hybrid-model legal-ratification track (private repo), an alternative fee structure is under legal review:
 
 - Reduce baseline network fee from 2% to **50 bps (0.5%)**.
 - Foundation takes a **15-25% equity stake in Prismatica** in exchange.
@@ -464,7 +464,7 @@ Prismatica's marketing of its own equity is separate — Prismatica is selling s
 
 The following items REQUIRE counsel opinion before finalization (flagged **[COUNSEL]**):
 
-1. §8.5 hybrid fee model — four legal gates per `docs/2026-04-14-hybrid-tokenomics-legal-tracking.md`.
+1. §8.5 hybrid fee model — four legal gates per the hybrid-model legal-ratification track (private repo).
 2. §11.3 international positioning in each target jurisdiction.
 3. Genesis allocation §7 specifics under the chosen Foundation jurisdiction's non-profit rules.
 4. Prismatica's initial allocation mechanics — whether it constitutes a compensation grant, a sale, or something requiring Reg D filing.
@@ -549,7 +549,7 @@ Input data: PRSM_Tokenomics.md §6 scenario simulations (bull / base / bear) pro
 
 ### 13.3 Hybrid fee model — adopt or retain 2% baseline **[COUNSEL + RATIFY]**
 
-§8.5 + `docs/2026-04-14-hybrid-tokenomics-legal-tracking.md`. Four gates:
+§8.5 + hybrid-model legal-ratification track (private repo). Four gates:
 1. Internal alignment on 15-25% stake + 50 bps fee floor.
 2. Prismatica founder term sheet.
 3. Counsel opinion (3-6 months, $100K-$300K).
@@ -594,7 +594,7 @@ If Foundation is offshore (Swiss / Cayman) and contributor-recipients are US per
 This standard consolidates design work recorded in:
 - `PRSM_Tokenomics.md` (external vault, authoritative mathematical models).
 - `docs/2026-04-16-halving-schedule-implementation-plan.md` (halving operational + migration).
-- `docs/2026-04-14-hybrid-tokenomics-legal-tracking.md` (hybrid-model legal track).
+- Hybrid-model legal track (private repo).
 
 Design inheritances:
 - **Bitcoin** — halving cadence, compensation-based distribution, non-security-preserving structure.

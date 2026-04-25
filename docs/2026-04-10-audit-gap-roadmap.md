@@ -268,7 +268,7 @@ These run on independent cadence from the engineering phases:
 Review cadence: semi-annual. Next review: 2026-10-14.
 
 ### Hybrid Tokenomics Legal/Governance Track
-[`2026-04-14-hybrid-tokenomics-legal-tracking.md`](./2026-04-14-hybrid-tokenomics-legal-tracking.md) — tracks the 5-gate workflow for ratifying the Tokenomics §11 hybrid model (reduced 50 bps tax + 15-30% foundation equity in Prismatica). Gates:
+Hybrid tokenomics legal-ratification track (private repo) — tracks the 5-gate workflow for ratifying the Tokenomics §11 hybrid model (reduced 50 bps tax + 15-30% foundation equity in operating entity). Gates:
 
 1. **Internal alignment** (founders) — open; blocked on founder time + Prismatica founder conversation
 2. **Prismatica founder alignment** — blocked on Gate 1

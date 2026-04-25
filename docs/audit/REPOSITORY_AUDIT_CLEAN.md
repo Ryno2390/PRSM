@@ -160,7 +160,7 @@ PRSM/
 ## 🎯 Next Steps for External Review
 
 ### For Investors
-1. **Executive Summary** - `docs/business/INVESTOR_MATERIALS.md`
+1. **Executive Summary** - Available on request (commercial materials in private repo)
 2. **Technical Due Diligence** - `docs/audit/INVESTOR_AUDIT_GUIDE.md`
 3. **Financial Projections** - `docs/tokenomics/TOKENOMICS_OVERVIEW.md`
 4. **Demo Environment** - `scripts/demo_successful_integration.py`

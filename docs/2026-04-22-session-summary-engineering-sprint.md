@@ -1,7 +1,7 @@
 # PRSM Engineering Sprint — 2026-04-22 Session Summary
 
 **Prismatica, Inc.** | **April 22, 2026**
-**Companion to:** [`2026-04-22-prsm-investor-executive-summary.md`](./2026-04-22-prsm-investor-executive-summary.md) — read the executive summary first for positioning + opportunity; this doc is the engineering-progression changelog covering a single focused sprint that advanced four phases from "design-doc drafted" to either merge-ready-tagged or partner-handoff-scoped.
+Engineering-progression changelog covering a single focused sprint that advanced four phases from "design-doc drafted" to either merge-ready-tagged or partner-handoff-scoped.
 
 **Audience:** investors tracking engineering velocity, technical partners evaluating integration readiness, Foundation officers planning execution-phase allocation.
 
@@ -264,4 +264,4 @@ It is a changelog for investors + partners tracking engineering progression. The
 
 ## 11. Changelog
 
-- **0.1 (2026-04-22):** initial session summary. Documents a 36-commit / 442-test / 3-tag / 7-doc sprint that advanced four phases from design-doc to either merge-ready-tagged (Phase 6 / 7-storage / 8) or backend-complete-with-green-light-path (Phase 4 / 5). Companion to `2026-04-22-prsm-investor-executive-summary.md`.
+- **0.1 (2026-04-22):** initial session summary. Documents a 36-commit / 442-test / 3-tag / 7-doc sprint that advanced four phases from design-doc to either merge-ready-tagged (Phase 6 / 7-storage / 8) or backend-complete-with-green-light-path (Phase 4 / 5).

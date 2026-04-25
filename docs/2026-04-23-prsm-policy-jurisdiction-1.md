@@ -10,8 +10,8 @@
 **Related documents:**
 - `docs/2026-04-23-r9-transport-censorship-resistance-scoping.md` — R9-SCOPING-1, the design doc this policy codifies as ratified governance commitment.
 - `docs/2026-04-21-prsm-gov-1-foundation-governance-charter.md` §4.3 — Foundation express limits (this policy's anchor).
-- `docs/2026-04-23-foundation-jurisdiction-scoping.md` — jurisdiction choice (Cayman Foundation Company) this policy operates within.
-- `docs/2026-04-23-foundation-officer-jds-and-outreach.md` §3 — independence rubric this policy cross-references.
+- Foundation jurisdiction-scoping analysis (Cayman Foundation Company) — this policy operates within that jurisdiction choice (document in private repo).
+- Foundation officer independence rubric — this policy cross-references §3 of that document (in private repo).
 - `docs/2026-04-22-r3-threat-model.md` — operator-level threat model this policy's user-facing risk disclaimer references.
 - `docs/2026-04-22-prsm-supply-1-supply-diversity-standard.md` — geographic-concentration metrics this policy's peer-filter primitive consumes.
 - `prsm/node/transport_adapter.py` + `prsm/node/jurisdiction_filter.py` + `prsm/node/content_self_filter.py` — the protocol-layer mechanisms this policy governs.

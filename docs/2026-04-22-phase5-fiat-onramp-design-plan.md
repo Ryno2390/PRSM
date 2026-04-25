@@ -7,7 +7,7 @@
 - Phase 1.3 mainnet deploy (FTNS live on Base).
 - Phase 4 Wallet SDK (consumer onboarding path).
 - PRSM-GOV-1 Foundation formation (required for the money-services-business (MSB) analysis and for Stripe production underwriting).
-- `docs/2026-04-14-hybrid-tokenomics-legal-tracking.md` — equity-investment-architecture legal track resolved (FTNS securities classification posture).
+- Equity-investment-architecture legal track resolved (FTNS securities classification posture) — tracked in private repo.
 
 ---
 

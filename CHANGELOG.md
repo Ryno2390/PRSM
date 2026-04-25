@@ -360,8 +360,6 @@ No code changes. Test suite and installed package behavior identical to v1.6.2.
   `docs/DEVELOPMENT_GUIDE.md`, `docs/TROUBLESHOOTING_GUIDE.md`,
   `docs/SDK_DEVELOPER_GUIDE.md`, `docs/FTNS_API_DOCUMENTATION.md`** — legacy
   examples replaced with current public surface
-- **`docs/business/INVESTOR_MATERIALS.md`** — thesis, market positioning,
-  revenue model rewritten to match current scope
 - **Community launch posts** (`blog_post_launch.md`, `hacker_news_launch.md`,
   `reddit_ethereum.md`, `reddit_machinelearning.md`) — rewritten for P2P
   infrastructure pitch
@@ -395,10 +393,7 @@ No code changes. Test suite and installed package behavior identical to v1.6.2.
 - Legacy API/code docs: `API_DOCUMENTATION.md`, `CODE_REVIEW.md`,
   `EXAMPLES_COOKBOOK.md`, `api/PHASE_7_API_REFERENCE.md`,
   `TECHNICAL_ADVANTAGES.md`
-- Legacy investor: `audit/INVESTOR_AUDIT_GUIDE.md`,
-  `business/INVESTMENT_READINESS_REPORT.md`, `business/INVESTOR_QUICKSTART.md`,
-  `business/roadmaps/PRODUCTION_ROADMAP.md`, `INVESTOR_QUICKSTART.md`,
-  `GAME_THEORETIC_INVESTOR_THESIS.md`
+- Legacy commercial collateral (relocated out of public repo)
 - AI-auditor docs (all 4 files referenced deleted 7-phase Newton spectrum):
   `ai-auditor/{AI_AUDIT_GUIDE,AI_AUDITOR_INDEX,README,TECHNICAL_CLAIMS_VALIDATION}.md`
 - Other legacy: `COLLABORATION_PLATFORM_COMPLETION_SUMMARY.md`,

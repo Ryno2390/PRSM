@@ -8,7 +8,7 @@
 **Companions:**
 - `docs/2026-04-21-prsm-cis-1-confidential-inference-silicon.md` — silicon standard this paper prices.
 - `docs/2026-04-21-prsm-tok-1-ftns-tokenomics.md` — tokenomics standard.
-- `docs/2026-04-22-prsm-investor-executive-summary.md` — scannable investor-facing overview (refreshed 2026-04-22 post-Phase-7.1x).
+- Investor-facing overview (relocated to private repo; refreshed 2026-04-22 post-Phase-7.1x).
 
 **Post-v0.1 state updates (noted 2026-04-22):**
 

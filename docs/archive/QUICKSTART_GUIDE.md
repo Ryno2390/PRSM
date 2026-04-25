@@ -159,5 +159,5 @@ prsm serve --port 8001
 
 - Explore the API at `http://localhost:8000/docs`
 - Read the [Architecture Guide](ARCHITECTURE.md) for deeper technical details
-- Check `docs/business/` for project roadmap and tokenomics
+- Check `docs/` for project roadmap and tokenomics documentation
 - Run `pytest` to verify everything works
