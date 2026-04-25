@@ -5,7 +5,7 @@
 # Logs results to stdout — paste into the bake-in log.
 #
 # Usage:
-#   cd /Users/ryneschultz/Documents/GitHub/PRSM
+#   cd /path/to/PRSM
 #   bash scripts/sepolia-daily-check.sh
 #
 # Prerequisites:
