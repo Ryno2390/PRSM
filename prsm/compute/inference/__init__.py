@@ -30,6 +30,11 @@ from prsm.compute.inference.executor import (
     UnsupportedModelError,
     default_mock_executor,
 )
+from prsm.compute.inference.receipt import (
+    is_signed,
+    sign_receipt,
+    verify_receipt,
+)
 
 __all__ = [
     # Models
@@ -41,6 +46,10 @@ __all__ = [
     "InferenceExecutor",
     "MockInferenceExecutor",
     "default_mock_executor",
+    # Receipt signing (Task 2)
+    "sign_receipt",
+    "verify_receipt",
+    "is_signed",
     # Exceptions
     "InferenceExecutorError",
     "InsufficientBudgetError",
