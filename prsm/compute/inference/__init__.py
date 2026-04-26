@@ -27,6 +27,7 @@ from prsm.compute.inference.executor import (
     InsufficientBudgetError,
     MockInferenceExecutor,
     TEERequirementError,
+    TensorParallelInferenceExecutor,
     UnsupportedModelError,
     default_mock_executor,
 )
@@ -57,6 +58,7 @@ __all__ = [
     # Executor interface
     "InferenceExecutor",
     "MockInferenceExecutor",
+    "TensorParallelInferenceExecutor",
     "default_mock_executor",
     # Receipt signing (Task 2)
     "sign_receipt",

@@ -202,3 +202,253 @@ def default_mock_executor() -> MockInferenceExecutor:
     Useful in tests that don't need to customize models or pricing.
     """
     return MockInferenceExecutor()
+
+
+# --------------------------------------------------------------------------
+# Real executor — Phase 3.x.1 Task 4
+# --------------------------------------------------------------------------
+
+
+class TensorParallelInferenceExecutor(InferenceExecutor):
+    """Real inference executor: tensor-parallel forward pass + DP noise + receipt.
+
+    Adapter from ``InferenceRequest`` to the existing
+    ``TensorParallelExecutor`` (Phase 2 Ring 8 — already shipped) and
+    ``DPNoiseInjector`` (Phase 2 TEE — already shipped).
+
+    Composition:
+      1. Validate model + budget + TEE.
+      2. Encode prompt → numpy float64 input vector sized to model's
+         first-shard input dim.
+      3. Build all-local node assignments and call
+         ``TensorParallelExecutor.execute_parallel(...)`` for the
+         per-shard forward pass + ring all-reduce aggregation.
+      4. Inject calibrated Gaussian DP noise on the aggregated output
+         per ``request.privacy_tier`` (NONE skips).
+      5. Format human-readable output + sha256(output_hash).
+      6. Build ``InferenceReceipt`` with TEE attestation +
+         duration + cost. ``settler_signature`` is set to zeros here;
+         the API layer (Task 5 — ``/compute/inference``) signs the
+         receipt under the serving node's identity before returning.
+
+    Single-node by default (all shards local). Distributed dispatch
+    via ``TensorParallelExecutor.remote_dispatcher`` is wired through
+    when callers supply a ``tensor_executor`` configured with one.
+
+    Production use note: the model registry passed at construction
+    time is in-memory. A persistent registry (model store + signed
+    manifest) is out of scope for Phase 3.x.1 and lands later.
+    """
+
+    def __init__(
+        self,
+        model_registry: "Dict[str, ShardedModel]",  # noqa: F821 — fwd ref
+        *,
+        tensor_executor: "Optional[TensorParallelExecutor]" = None,  # noqa: F821
+        tee_runtime: "Optional[TEERuntime]" = None,  # noqa: F821
+        cost_per_shard: Decimal = Decimal("0.05"),
+        privacy_overhead: "Optional[Dict[PrivacyLevel, Decimal]]" = None,
+        allow_software_tee_for_privacy: bool = True,
+    ) -> None:
+        # Imports done lazily to avoid heavyweight numpy/runtime cost when
+        # callers only need the abstract interface or the mock executor.
+        from prsm.compute.model_sharding.executor import TensorParallelExecutor
+        from prsm.compute.tee.runtime import SoftwareTEERuntime
+
+        self._models = dict(model_registry)
+        self._tensor = tensor_executor or TensorParallelExecutor()
+        self._tee_runtime = tee_runtime or SoftwareTEERuntime()
+        self._cost_per_shard = Decimal(cost_per_shard)
+        self._privacy_overhead = privacy_overhead or {
+            PrivacyLevel.NONE: Decimal("1.00"),
+            PrivacyLevel.STANDARD: Decimal("1.10"),
+            PrivacyLevel.HIGH: Decimal("1.25"),
+            PrivacyLevel.MAXIMUM: Decimal("1.50"),
+        }
+        self._allow_software_tee_for_privacy = allow_software_tee_for_privacy
+
+    @property
+    def tee_runtime(self):
+        """Expose the underlying TEE runtime for callers/tests."""
+        return self._tee_runtime
+
+    def supported_models(self) -> list[str]:
+        return sorted(self._models.keys())
+
+    def register_model(self, model: "ShardedModel") -> None:  # noqa: F821
+        """Add or replace a model in the in-memory registry."""
+        self._models[model.model_id] = model
+
+    async def estimate_cost(self, request: InferenceRequest) -> Decimal:
+        if request.model_id not in self._models:
+            raise UnsupportedModelError(f"Unknown model_id: {request.model_id}")
+        sharded = self._models[request.model_id]
+        base = self._cost_per_shard * Decimal(sharded.total_shards)
+        overhead = self._privacy_overhead.get(request.privacy_tier, Decimal("1.0"))
+        return base * overhead
+
+    async def execute(self, request: InferenceRequest) -> InferenceResult:
+        # 1. Model lookup
+        if request.model_id not in self._models:
+            return InferenceResult.failure(
+                request.request_id, f"Unknown model_id: {request.model_id}"
+            )
+        sharded = self._models[request.model_id]
+
+        # 2. Budget check
+        cost = await self.estimate_cost(request)
+        if request.budget_ftns < cost:
+            return InferenceResult.failure(
+                request.request_id,
+                f"Insufficient budget: {request.budget_ftns} FTNS < required {cost} FTNS",
+            )
+
+        # 3. TEE check for privacy_tier != NONE
+        if request.privacy_tier != PrivacyLevel.NONE:
+            if (
+                self._tee_runtime.tee_type == TEEType.SOFTWARE
+                and not self._allow_software_tee_for_privacy
+            ):
+                return InferenceResult.failure(
+                    request.request_id,
+                    f"privacy_tier={request.privacy_tier.value} requires hardware TEE; "
+                    f"available={self._tee_runtime.tee_type.value}",
+                )
+
+        started_at = time.time()
+
+        # 4. Encode prompt → numpy bytes sized to first shard's input dim
+        try:
+            input_data = self._encode_prompt(request.prompt, sharded)
+        except (ValueError, IndexError) as e:
+            return InferenceResult.failure(
+                request.request_id, f"Prompt encoding failed: {e}"
+            )
+
+        # 5. All-local assignments — one entry per shard
+        assignments = [
+            {"shard_index": s.shard_index, "node_id": "local"}
+            for s in sharded.shards
+        ]
+
+        # 6. Tensor-parallel forward pass
+        try:
+            tp_result = await self._tensor.execute_parallel(
+                sharded, input_data, assignments
+            )
+        except Exception as e:
+            return InferenceResult.failure(
+                request.request_id, f"Tensor-parallel execution failed: {e}"
+            )
+
+        if tp_result.get("status") != "success":
+            return InferenceResult.failure(
+                request.request_id,
+                f"Tensor-parallel execution failed: {tp_result.get('errors')}",
+            )
+
+        # 7. Apply DP noise on aggregated output
+        import numpy as np
+        from prsm.compute.tee.dp_noise import DPNoiseInjector
+
+        aggregated = np.asarray(tp_result["aggregated_output"], dtype=np.float64)
+        dp_config = PrivacyLevel.config_for_level(request.privacy_tier)
+        if request.privacy_tier != PrivacyLevel.NONE:
+            injector = DPNoiseInjector(dp_config)
+            aggregated = injector.inject(aggregated)
+            epsilon_spent = dp_config.epsilon
+        else:
+            epsilon_spent = 0.0
+
+        # 8. Format output + receipt
+        output = self._format_output(request, aggregated)
+        output_hash = hashlib.sha256(output.encode("utf-8")).digest()
+        job_id = f"infer-job-{uuid.uuid4().hex[:12]}"
+        duration = time.time() - started_at
+
+        receipt = InferenceReceipt(
+            job_id=job_id,
+            request_id=request.request_id,
+            model_id=request.model_id,
+            content_tier=request.content_tier,
+            privacy_tier=request.privacy_tier,
+            epsilon_spent=epsilon_spent,
+            tee_type=self._tee_runtime.tee_type,
+            tee_attestation=self._build_attestation(job_id),
+            output_hash=output_hash,
+            duration_seconds=duration,
+            cost_ftns=cost,
+            settler_signature=b"\x00" * 64,  # signed at API layer (Task 5)
+            settler_node_id="",  # populated at API layer
+        )
+
+        return InferenceResult(
+            request_id=request.request_id,
+            success=True,
+            output=output,
+            receipt=receipt,
+        )
+
+    @staticmethod
+    def _encode_prompt(prompt: str, model) -> bytes:
+        """Encode a prompt string as numpy float64 bytes sized to the
+        first shard's input dimension.
+
+        This is a deterministic hash-based encoding — NOT real LLM
+        tokenization. Real tokenization (BPE/SentencePiece) lands when
+        a real model registry replaces the in-memory one. The numerics
+        contract for now: same prompt + same model → identical bytes,
+        suitable as input to ``execute_shard_locally``.
+        """
+        import numpy as np
+
+        if not model.shards:
+            raise ValueError(f"model {model.model_id!r} has no shards")
+        first = model.shards[0]
+        tensor = np.frombuffer(first.tensor_data, dtype=np.float64).reshape(
+            first.tensor_shape
+        )
+        if tensor.ndim == 2:
+            input_dim = int(tensor.shape[1])
+        else:
+            input_dim = int(tensor.shape[0])
+        if input_dim <= 0:
+            raise ValueError(f"non-positive input dim: {input_dim}")
+
+        digest = hashlib.sha256(prompt.encode("utf-8")).digest()
+        # Spread digest bytes across input_dim float values in [-1, 1].
+        floats = np.array(
+            [(digest[i % len(digest)] / 128.0 - 1.0) for i in range(input_dim)],
+            dtype=np.float64,
+        )
+        return floats.tobytes()
+
+    @staticmethod
+    def _format_output(request: InferenceRequest, aggregated) -> str:
+        """Human-readable summary of the aggregated tensor output.
+
+        Real LLM inference would decode logits → tokens here; until a
+        real model registry lands, callers see the tensor stats.
+        """
+        flat = aggregated.flatten()
+        sample = [round(float(x), 6) for x in flat[:8].tolist()]
+        return (
+            f"[{request.model_id}] tensor-parallel inference complete | "
+            f"prompt_len={len(request.prompt)} | "
+            f"privacy={request.privacy_tier.value} | "
+            f"content_tier={request.content_tier.value} | "
+            f"output_dim={int(flat.size)} | "
+            f"sample={sample}"
+        )
+
+    @staticmethod
+    def _build_attestation(job_id: str) -> bytes:
+        """Produce a job-bound attestation blob.
+
+        Real hardware TEE attestation includes enclave measurements +
+        platform certificate; software fallback emits a 64-byte job-bound
+        marker so receipts have a consistent shape regardless of
+        runtime. Verifiers MUST check ``receipt.tee_type`` before
+        relying on the attestation as a confidentiality proof.
+        """
+        return hashlib.sha512(f"sw-tee:{job_id}".encode("utf-8")).digest()
