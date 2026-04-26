@@ -712,11 +712,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # below commits the spend; can_spend here gates entry.
         expected_epsilon: Optional[float] = None
         if request.privacy_tier != PrivacyLevel.NONE:
-            expected_epsilon = {
-                PrivacyLevel.STANDARD: 8.0,
-                PrivacyLevel.HIGH: 4.0,
-                PrivacyLevel.MAXIMUM: 1.0,
-            }.get(request.privacy_tier, 8.0)
+            # Route through PrivacyLevel.config_for_level so any future
+            # tier↔ε rebalancing in prsm/compute/tee/models.py stays in
+            # one place — duplicating the map here would silently desync
+            # the pre-flight gate from the executor's actual ε spend.
+            expected_epsilon = PrivacyLevel.config_for_level(
+                request.privacy_tier
+            ).epsilon
             if (
                 hasattr(node, 'privacy_budget')
                 and node.privacy_budget
