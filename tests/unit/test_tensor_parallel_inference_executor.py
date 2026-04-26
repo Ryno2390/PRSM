@@ -24,6 +24,10 @@ from prsm.compute.inference import (
     TensorParallelInferenceExecutor,
     UnsupportedModelError,
 )
+from prsm.compute.inference.executor import (
+    SOFTWARE_TEE_ATTESTATION_PREFIX,
+    SOFTWARE_TEE_PRIVACY_ENV,
+)
 from prsm.compute.inference.models import ContentTier
 from prsm.compute.model_sharding.models import ModelShard, ShardedModel
 from prsm.compute.tee.models import PrivacyLevel, TEEType
@@ -224,6 +228,19 @@ class TestExecuteHappyPath:
         assert r1.receipt.tee_attestation != r2.receipt.tee_attestation
         assert r1.receipt.job_id != r2.receipt.job_id
 
+    @pytest.mark.asyncio
+    async def test_software_tee_attestation_has_dev_marker_prefix(self, executor):
+        # Software-TEE attestations must start with the DEV-ONLY prefix so
+        # a single byte-prefix check flags them as non-production proofs,
+        # without requiring the verifier to inspect receipt.tee_type.
+        result = await executor.execute(_make_request())
+        att = result.receipt.tee_attestation
+        assert att.startswith(SOFTWARE_TEE_ATTESTATION_PREFIX)
+        assert len(att) == 64
+        # The 16-byte prefix is human-readable ASCII so the marker is
+        # visible in any hex/log dump of the receipt.
+        assert SOFTWARE_TEE_ATTESTATION_PREFIX == b"DEV-ONLY-SW-TEE:"
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # DP noise injection per privacy tier
@@ -255,18 +272,15 @@ class TestDPNoise:
     @pytest.mark.asyncio
     async def test_dp_noise_is_actually_applied(self, executor):
         # Same prompt + model_id + content_tier under NONE vs MAXIMUM
-        # privacy must produce different output strings, since DP noise
-        # perturbs the aggregated tensor.
-        np.random.seed(42)
+        # privacy must produce different output strings: NONE skips DP
+        # entirely, MAXIMUM clips + adds calibrated Gaussian noise to
+        # the aggregated tensor. The test holds regardless of RNG seed
+        # because the privacy-tier branch decides whether noise runs at
+        # all — there's no "noise == zero" coincidence to defend against.
         r_none = await executor.execute(_make_request(privacy_tier=PrivacyLevel.NONE))
-
-        np.random.seed(42)
         r_max = await executor.execute(
             _make_request(privacy_tier=PrivacyLevel.MAXIMUM, prompt="the quick brown fox")
         )
-        # The deterministic part of output (model_id, prompt_len, output_dim)
-        # is identical across runs; the `sample=[...]` tail differs because
-        # MAXIMUM applies noise.
         assert r_none.output != r_max.output
 
 
@@ -365,6 +379,78 @@ class TestNumerics:
 # ──────────────────────────────────────────────────────────────────────────
 # Public-API contract: drop-in for MockInferenceExecutor
 # ──────────────────────────────────────────────────────────────────────────
+
+
+class TestSoftwareTEEPrivacyResolution:
+    """Round 2 review LOW#3 — operator-facing controls for the
+    software-TEE-accepts-privacy default."""
+
+    def test_explicit_arg_takes_precedence_over_env(self, registry, monkeypatch):
+        # Even when env says off, an explicit True wins.
+        monkeypatch.setenv(SOFTWARE_TEE_PRIVACY_ENV, "0")
+        ex = TensorParallelInferenceExecutor(
+            model_registry=registry, allow_software_tee_for_privacy=True
+        )
+        assert ex._allow_software_tee_for_privacy is True
+
+    def test_explicit_false_arg_overrides_env(self, registry, monkeypatch):
+        monkeypatch.setenv(SOFTWARE_TEE_PRIVACY_ENV, "1")
+        ex = TensorParallelInferenceExecutor(
+            model_registry=registry, allow_software_tee_for_privacy=False
+        )
+        assert ex._allow_software_tee_for_privacy is False
+
+    def test_env_off_disables_when_arg_unset(self, registry, monkeypatch):
+        for value in ["0", "false", "FALSE", "no", "off", ""]:
+            monkeypatch.setenv(SOFTWARE_TEE_PRIVACY_ENV, value)
+            ex = TensorParallelInferenceExecutor(model_registry=registry)
+            assert ex._allow_software_tee_for_privacy is False, (
+                f"env={value!r} should disable"
+            )
+
+    def test_env_on_enables_when_arg_unset(self, registry, monkeypatch):
+        for value in ["1", "true", "TRUE", "yes", "on"]:
+            monkeypatch.setenv(SOFTWARE_TEE_PRIVACY_ENV, value)
+            ex = TensorParallelInferenceExecutor(model_registry=registry)
+            assert ex._allow_software_tee_for_privacy is True, (
+                f"env={value!r} should enable"
+            )
+
+    def test_default_is_true_when_neither_arg_nor_env_set(self, registry, monkeypatch):
+        monkeypatch.delenv(SOFTWARE_TEE_PRIVACY_ENV, raising=False)
+        ex = TensorParallelInferenceExecutor(model_registry=registry)
+        assert ex._allow_software_tee_for_privacy is True
+
+    def test_constructor_warns_when_software_tee_accepts_privacy(
+        self, registry, monkeypatch, caplog
+    ):
+        import logging
+        monkeypatch.delenv(SOFTWARE_TEE_PRIVACY_ENV, raising=False)
+        caplog.set_level(logging.WARNING, logger="prsm.compute.inference.executor")
+        TensorParallelInferenceExecutor(model_registry=registry)
+        # The warning should mention the env var name so an operator
+        # who sees the log knows exactly what to set.
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert any(
+            SOFTWARE_TEE_PRIVACY_ENV in r.message
+            and "software TEE accepts" in r.message
+            for r in warnings
+        ), f"missing operator warning; got: {[r.message for r in warnings]}"
+
+    def test_no_warning_when_software_tee_rejects_privacy(
+        self, registry, monkeypatch, caplog
+    ):
+        import logging
+        caplog.set_level(logging.WARNING, logger="prsm.compute.inference.executor")
+        TensorParallelInferenceExecutor(
+            model_registry=registry, allow_software_tee_for_privacy=False
+        )
+        # When the strict default is selected, no operator warning is
+        # needed — the strict configuration is the safe one.
+        assert not any(
+            "software TEE accepts" in r.message
+            for r in caplog.records
+        )
 
 
 class TestInterfaceContract:

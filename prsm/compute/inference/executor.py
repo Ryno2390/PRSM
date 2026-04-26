@@ -20,10 +20,30 @@ from __future__ import annotations
 
 import abc
 import hashlib
+import logging
+import os
 import time
 import uuid
 from decimal import Decimal
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Public marker that brands software-TEE attestation blobs as
+# dev-only. Verifiers MUST treat any receipt whose tee_attestation
+# starts with this prefix as having NO confidentiality guarantee
+# beyond the job_id binding, regardless of what tee_type the receipt
+# claims. Hardware-TEE attestations never have this prefix — they
+# carry platform-vendor signed enclave measurements.
+SOFTWARE_TEE_ATTESTATION_PREFIX = b"DEV-ONLY-SW-TEE:"
+
+# Environment variable that controls whether a software-TEE
+# executor accepts non-NONE privacy tiers at construction time.
+# Set to "0" / "false" / "no" on production nodes serving Tier B/C
+# confidential workloads. Default (unset) preserves the
+# constructor-arg default (currently True) so dev/test runs
+# don't break.
+SOFTWARE_TEE_PRIVACY_ENV = "PRSM_ALLOW_SOFTWARE_TEE_FOR_PRIVACY"
 
 from prsm.compute.inference.models import (
     ContentTier,
@@ -248,7 +268,7 @@ class TensorParallelInferenceExecutor(InferenceExecutor):
         tee_runtime: "Optional[TEERuntime]" = None,  # noqa: F821
         cost_per_shard: Decimal = Decimal("0.05"),
         privacy_overhead: "Optional[Dict[PrivacyLevel, Decimal]]" = None,
-        allow_software_tee_for_privacy: bool = True,
+        allow_software_tee_for_privacy: Optional[bool] = None,
     ) -> None:
         # Imports done lazily to avoid heavyweight numpy/runtime cost when
         # callers only need the abstract interface or the mock executor.
@@ -265,7 +285,39 @@ class TensorParallelInferenceExecutor(InferenceExecutor):
             PrivacyLevel.HIGH: Decimal("1.25"),
             PrivacyLevel.MAXIMUM: Decimal("1.50"),
         }
-        self._allow_software_tee_for_privacy = allow_software_tee_for_privacy
+
+        # Resolve allow_software_tee_for_privacy in this precedence order:
+        #   1. explicit constructor arg (highest)
+        #   2. PRSM_ALLOW_SOFTWARE_TEE_FOR_PRIVACY env var
+        #   3. default True (Phase 3.x.1 dev-friendly default)
+        # When the resolved value is True AND the runtime is software,
+        # emit an operator-facing warning so accidental production runs
+        # don't ship Tier B/C confidential workloads on a software TEE.
+        self._allow_software_tee_for_privacy = self._resolve_swtee_privacy_flag(
+            explicit=allow_software_tee_for_privacy
+        )
+        if (
+            self._allow_software_tee_for_privacy
+            and self._tee_runtime.tee_type == TEEType.SOFTWARE
+        ):
+            logger.warning(
+                "TensorParallelInferenceExecutor: software TEE accepts non-NONE "
+                "privacy tiers (allow_software_tee_for_privacy=True). DP-ε spends "
+                "will be recorded on receipts but the underlying confidentiality "
+                "guarantee is software-only. Set %s=0 on production nodes serving "
+                "Tier B/C confidential workloads.",
+                SOFTWARE_TEE_PRIVACY_ENV,
+            )
+
+    @staticmethod
+    def _resolve_swtee_privacy_flag(*, explicit: Optional[bool]) -> bool:
+        """Resolve allow_software_tee_for_privacy from explicit arg / env / default."""
+        if explicit is not None:
+            return bool(explicit)
+        env_value = os.environ.get(SOFTWARE_TEE_PRIVACY_ENV)
+        if env_value is not None:
+            return env_value.strip().lower() not in {"0", "false", "no", "off", ""}
+        return True  # Phase 3.x.1 dev-friendly default
 
     @property
     def tee_runtime(self):
@@ -446,9 +498,21 @@ class TensorParallelInferenceExecutor(InferenceExecutor):
         """Produce a job-bound attestation blob.
 
         Real hardware TEE attestation includes enclave measurements +
-        platform certificate; software fallback emits a 64-byte job-bound
-        marker so receipts have a consistent shape regardless of
-        runtime. Verifiers MUST check ``receipt.tee_type`` before
-        relying on the attestation as a confidentiality proof.
+        platform certificate signed by the platform vendor (Intel ASP,
+        AMD KDS, Apple SEP, etc.). Software fallback emits a 64-byte
+        DEV-ONLY-marked blob: a 16-byte ASCII prefix
+        (``SOFTWARE_TEE_ATTESTATION_PREFIX``) followed by 48 bytes of
+        sha384("sw-tee:" + job_id) for job binding.
+
+        Verifiers MUST reject any attestation starting with the
+        DEV-ONLY prefix as a confidentiality proof, regardless of the
+        receipt's claimed tee_type. The prefix exists so a single
+        bytestring inspection — no parsing of receipt fields — is
+        enough to flag the attestation as non-production.
         """
-        return hashlib.sha512(f"sw-tee:{job_id}".encode("utf-8")).digest()
+        digest = hashlib.sha384(f"sw-tee:{job_id}".encode("utf-8")).digest()
+        blob = SOFTWARE_TEE_ATTESTATION_PREFIX + digest
+        # Belt-and-suspenders length check: 16 + 48 = 64. If the prefix
+        # ever drifts, fail loudly instead of silently shrinking receipts.
+        assert len(blob) == 64, f"sw-tee attestation must be 64 bytes, got {len(blob)}"
+        return blob
