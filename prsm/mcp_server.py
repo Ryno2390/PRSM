@@ -408,6 +408,30 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_billing_status",
+        description=(
+            "Look up the FTNS billing state for any prior PRSM tool invocation by job_id. "
+            "Returns escrow status (pending / released / refunded), amount locked, "
+            "requester / provider identifiers, and on-chain transaction references "
+            "if settlement reached the chain. Use this to reconcile costs across multiple "
+            "tool calls or to investigate why a particular job's escrow did not release."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "description": (
+                        "The job ID returned by a previous PRSM tool call "
+                        "(e.g. forge-abc123, infer-def456). Found in the cost-reconciliation "
+                        "footer of any FTNS-consuming tool response."
+                    ),
+                },
+            },
+            "required": ["job_id"],
+        },
+    ),
+    Tool(
         name="prsm_inference",
         description=(
             "Run TEE-attested model inference on PRSM with verifiable receipts. "
@@ -573,10 +597,26 @@ async def handle_prsm_analyze(
         if emit_progress:
             await emit_progress("Analysis complete.", 4.0, 4.0)
 
+        # Cost reconciliation footer (Phase 3.x.1 Task 7).
+        # The /compute/forge response includes job_id but doesn't currently
+        # surface the actual settled cost in the response shape — fall back
+        # to budget_ftns until the API exposes settled cost as a top-level
+        # field. (Recoverable separately via prsm_billing_status.)
+        footer = _format_cost_footer(
+            job_id=job_id or "unknown",
+            cost_ftns=result.get("cost_ftns"),
+            budget_ftns=budget,
+            extra_fields={
+                "Route": route,
+                "Privacy level": privacy,
+            },
+        )
+
         return (
-            f"PRSM Analysis Result (route: {route})\n"
-            f"Job ID: {job_id}\n\n"
-            f"{response}"
+            f"PRSM Analysis Result\n"
+            f"====================\n\n"
+            f"{response}\n"
+            f"{footer}"
         )
     except Exception as e:
         return f"PRSM analysis failed: {str(e)}. Is your PRSM node running? (prsm node start)"
@@ -767,12 +807,26 @@ async def handle_prsm_create_agent(arguments: Dict[str, Any]) -> str:
 
         lines.append(f"  Target shards: {target_shards or '(auto-discover)'}")
         lines.append(f"  Hardware tier: {hardware_tier}")
-        lines.append(f"  Budget: {budget} FTNS")
         lines.append(f"")
         lines.append(f"  Manifest JSON (pass to prsm_dispatch_agent):")
         lines.append(f"  {manifest_json}")
 
-        return "\n".join(lines)
+        # Cost reconciliation footer (Phase 3.x.1 Task 7).
+        # prsm_create_agent does not itself consume FTNS — it builds the
+        # manifest. Spend happens at prsm_dispatch_agent time, so the footer
+        # carries the planned budget rather than a settled cost. There is no
+        # job_id yet (one will be allocated at dispatch).
+        footer = _format_cost_footer(
+            job_id="(none — assigned at dispatch)",
+            budget_ftns=budget,
+            extra_fields={
+                "Hardware tier": hardware_tier,
+                "Operations": str(len(instructions)),
+            },
+            note="ℹ️  Manifest only — no FTNS consumed yet. "
+                 "Cost will be charged when dispatched via prsm_dispatch_agent.",
+        )
+        return "\n".join(lines) + "\n" + footer
 
     except Exception as e:
         return f"Agent creation failed: {str(e)}"
@@ -802,13 +856,22 @@ async def handle_prsm_dispatch_agent(arguments: Dict[str, Any]) -> str:
             })
             route = result.get("route", "unknown")
             response = result.get("response", str(result))
+            job_id = result.get("job_id", "unknown")
+
+            footer = _format_cost_footer(
+                job_id=job_id,
+                cost_ftns=result.get("cost_ftns"),
+                budget_ftns=budget,
+                extra_fields={
+                    "Route": route,
+                    "Operations": str(len(manifest.instructions)),
+                },
+            )
             return (
                 f"Agent Dispatched\n"
-                f"  Query: {manifest.query}\n"
-                f"  Operations: {len(manifest.instructions)}\n"
-                f"  Route: {route}\n"
-                f"  Budget: {budget} FTNS\n\n"
-                f"Result:\n{response}"
+                f"  Query: {manifest.query}\n\n"
+                f"Result:\n{response}\n"
+                f"{footer}"
             )
         except Exception as e:
             return (
@@ -1153,34 +1216,135 @@ async def handle_prsm_inference(
         await emit_progress("Inference complete; signing receipt...", 3.0, 4.0)
         await emit_progress("Settling escrow and finalizing...", 4.0, 4.0)
 
-    # Format successful response with cost reconciliation footer per Phase 3.x.1
-    # design plan §3.4 (per-tool billing visibility).
+    # Format successful response with cost reconciliation footer
+    # (Phase 3.x.1 Task 7 — uses shared _format_cost_footer helper).
     output = result.get("output", "")
     receipt = result.get("receipt") or {}
 
-    lines = [
-        "PRSM Inference Result",
-        "=====================",
-        "",
-        output,
-        "",
-        "—" * 60,
-        f"Job ID:           {receipt.get('job_id', 'unknown')}",
-        f"Model:            {receipt.get('model_id', model_id)}",
-        f"Privacy tier:     {receipt.get('privacy_tier', privacy_tier)}"
-        f" (ε={receipt.get('epsilon_spent', '?')})",
-        f"Content tier:     {receipt.get('content_tier', content_tier)}",
-        f"TEE backend:      {receipt.get('tee_type', 'unknown')}",
-        f"Cost:             {receipt.get('cost_ftns', '?')} FTNS",
-        f"Duration:         {receipt.get('duration_seconds', '?')}s",
-        f"Settler:          {receipt.get('settler_node_id', 'unknown')}",
-        "—" * 60,
-    ]
+    extra: Dict[str, str] = {
+        "Model": str(receipt.get("model_id", model_id)),
+        "Privacy tier": f"{receipt.get('privacy_tier', privacy_tier)} (ε={receipt.get('epsilon_spent', '?')})",
+        "Content tier": str(receipt.get("content_tier", content_tier)),
+        "TEE backend": str(receipt.get("tee_type", "unknown")),
+        "Duration": f"{receipt.get('duration_seconds', '?')}s",
+        "Settler": str(receipt.get("settler_node_id", "unknown")),
+    }
+    note = None
     if receipt.get("settler_signature"):
-        lines.append(
-            "Receipt is signed. Verify with: prsm.compute.inference.verify_receipt("
-            "receipt, public_key_b64=<settler_pubkey>)"
+        note = (
+            "Receipt is signed. Verify with: "
+            "prsm.compute.inference.verify_receipt(receipt, "
+            "public_key_b64=<settler_pubkey>)"
         )
+
+    footer = _format_cost_footer(
+        job_id=str(receipt.get("job_id", result.get("job_id", "unknown"))),
+        cost_ftns=receipt.get("cost_ftns"),
+        budget_ftns=budget,
+        extra_fields=extra,
+        note=note,
+    )
+
+    return (
+        f"PRSM Inference Result\n"
+        f"=====================\n\n"
+        f"{output}\n"
+        f"{footer}"
+    )
+
+
+def _format_cost_footer(
+    *,
+    job_id: str,
+    cost_ftns: Optional[Any] = None,
+    budget_ftns: Optional[Any] = None,
+    extra_fields: Optional[Dict[str, str]] = None,
+    note: Optional[str] = None,
+) -> str:
+    """Build a uniform cost-reconciliation footer for FTNS-consuming tool responses.
+
+    Phase 3.x.1 Task 7 — extracts the pattern from prsm_inference (Task 6) into a
+    shared helper applied to all four FTNS-consuming tools (prsm_analyze,
+    prsm_inference, prsm_create_agent, prsm_dispatch_agent).
+
+    Args:
+        job_id: required — the FTNS job identifier the LLM should pass to
+            prsm_billing_status if it wants to reconcile later.
+        cost_ftns: actual settled cost (post-execution). Falls back to "?" when
+            the underlying API didn't surface it.
+        budget_ftns: prepaid budget from the call. Used when cost_ftns isn't
+            available, to communicate the upper-bound spend.
+        extra_fields: per-tool fields (route, model, privacy tier, etc.).
+            Inserted between the standard rows.
+        note: optional trailing line below the rule (e.g. "Manifest only — no
+            FTNS consumed yet" for prsm_create_agent).
+
+    Returns the footer block as a single string ready to append to the response.
+    """
+    rule = "—" * 60
+    lines = ["", rule, f"Job ID:           {job_id or 'unknown'}"]
+
+    if extra_fields:
+        for label, value in extra_fields.items():
+            lines.append(f"{(label + ':'):<18}{value}")
+
+    if cost_ftns is not None:
+        lines.append(f"Cost:             {cost_ftns} FTNS")
+    elif budget_ftns is not None:
+        lines.append(f"Budget reserved:  {budget_ftns} FTNS")
+
+    lines.append(f"Reconcile via:    prsm_billing_status(job_id=\"{job_id}\")")
+    lines.append(rule)
+
+    if note:
+        lines.append(note)
+    return "\n".join(lines)
+
+
+async def handle_prsm_billing_status(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_billing_status — query escrow state for a prior job_id.
+
+    Phase 3.x.1 Task 7. Calls /billing/{job_id} on the node API; formats
+    the response as a structured billing report.
+    """
+    job_id = (arguments.get("job_id") or "").strip()
+    if not job_id:
+        return "Missing required 'job_id' argument."
+
+    try:
+        result = await _call_node_api("GET", f"/billing/{job_id}")
+    except Exception as e:
+        return (
+            f"Failed to query billing for job_id={job_id}: {e}\n"
+            f"  • Is your PRSM node running? (prsm node start)"
+        )
+
+    if isinstance(result, dict) and result.get("detail"):
+        # FastAPI surfaces 404 as {"detail": "..."} — pass through as-is for
+        # the LLM to read and explain to the user.
+        return f"Billing query for {job_id}: {result['detail']}"
+
+    if not isinstance(result, dict):
+        return f"Unexpected billing response shape for {job_id}: {result!r}"
+
+    lines = [
+        f"PRSM Billing Status — {result.get('job_id', job_id)}",
+        "=" * 60,
+        f"Escrow ID:        {result.get('escrow_id', 'unknown')}",
+        f"Status:           {result.get('status', 'unknown')}",
+        f"Amount locked:    {result.get('amount_ftns', '?')} FTNS",
+        f"Requester:        {result.get('requester_id', 'unknown')}",
+    ]
+    if result.get("provider_winner"):
+        lines.append(f"Provider:         {result['provider_winner']}")
+    if result.get("tx_lock"):
+        lines.append(f"Lock tx:          {result['tx_lock']}")
+    if result.get("tx_release"):
+        lines.append(f"Release tx:       {result['tx_release']}")
+    if result.get("created_at"):
+        lines.append(f"Created at:       {result['created_at']}")
+    if result.get("completed_at"):
+        lines.append(f"Completed at:     {result['completed_at']}")
     return "\n".join(lines)
 
 
@@ -1203,6 +1367,7 @@ TOOL_HANDLERS = {
     "prsm_privacy_status": handle_prsm_privacy_status,
     "prsm_training_status": handle_prsm_training_status,
     "prsm_inference": handle_prsm_inference,
+    "prsm_billing_status": handle_prsm_billing_status,
 }
 
 

@@ -8,7 +8,7 @@ PRSM is a peer-to-peer protocol that unifies three resource markets — data, co
 
 [![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://pypi.org/project/prsm-network/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-17-blue.svg)](#mcp-integration)
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-18-blue.svg)](#mcp-integration)
 
 > **Community** — Join us on [Discord](https://discord.gg/R8dhCBCUp3) for dev / node-operator / governance discussion. GitHub Discussions enabled on this repo for async Q&A + proposals.
 
@@ -95,7 +95,7 @@ Third-party LLM (Claude/GPT/local): calls prsm_analyze via MCP
 
 ## MCP Integration
 
-Any LLM can use PRSM as a compute backend via the Model Context Protocol. **17 tools** are exposed.
+Any LLM can use PRSM as a compute backend via the Model Context Protocol. **18 tools** are exposed.
 
 ### Three install paths
 
@@ -149,6 +149,7 @@ Then Claude (or any MCP-compatible LLM) can:
 | `prsm_node_status` | Ring 1-10 health check |
 | `prsm_agent_status` | Check running agent |
 | `prsm_settlement_stats` | FTNS settlement queue |
+| `prsm_billing_status` | Look up FTNS escrow state by job_id |
 | `prsm_privacy_status` | Differential privacy budget |
 | `prsm_training_status` | NWTN training corpus quality |
 

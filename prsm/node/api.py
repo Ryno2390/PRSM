@@ -782,6 +782,42 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 detail=f"Inference pipeline error: {str(e)}",
             )
 
+    @app.get("/billing/{job_id}")
+    async def get_billing_status(job_id: str) -> Dict[str, Any]:
+        """Return escrow + billing state for a given job_id.
+
+        Phase 3.x.1 Task 7 — backs the prsm_billing_status MCP tool.
+        Queries PaymentEscrow.get_escrow() for the job and returns a
+        structured billing snapshot. Returns 404 if no escrow exists for
+        the given job_id.
+        """
+        if not hasattr(node, '_payment_escrow') or node._payment_escrow is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Payment escrow not initialized on this node.",
+            )
+
+        entry = node._payment_escrow.get_escrow(job_id)
+        if entry is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No escrow found for job_id={job_id}",
+            )
+
+        return {
+            "job_id": entry.job_id,
+            "escrow_id": entry.escrow_id,
+            "requester_id": entry.requester_id,
+            "amount_ftns": entry.amount,
+            "status": entry.status.value,
+            "provider_winner": entry.provider_winner,
+            "tx_lock": entry.tx_lock,
+            "tx_release": entry.tx_release,
+            "created_at": entry.created_at,
+            "completed_at": entry.completed_at,
+            "metadata": entry.metadata,
+        }
+
     @app.post("/content/upload")
     async def upload_content(req: ContentUploadRequest) -> Dict[str, Any]:
         """Upload text content to IPFS with provenance tracking."""
