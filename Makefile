@@ -11,7 +11,12 @@
         k8s-deploy k8s-deploy-production k8s-status k8s-logs \
         obs-stack-up obs-stack-down obs-metrics obs-logs obs-dashboards \
         docs docs-serve metrics \
-        build publish-test publish docker-push bootstrap-build smoke
+        build publish publish-test \
+        publish-pypi publish-pypi-dry-run \
+        publish-npm publish-npm-dry-run \
+        publish-homebrew publish-homebrew-dry-run \
+        publish-all-dry-run \
+        docker-push bootstrap-build smoke
 
 # Default target
 help:
@@ -74,10 +79,17 @@ help:
 	@echo "  docs                 Build mkdocs site"
 	@echo "  docs-serve           Serve docs locally"
 	@echo ""
-	@echo "Deployment:"
-	@echo "  build                Build Python wheel + sdist (dist/)"
-	@echo "  publish-test         Publish to TestPyPI"
-	@echo "  publish              Publish to PyPI (production)"
+	@echo "Deployment — Multi-channel publishing:"
+	@echo "  build                          Build Python wheel + sdist (dist/)"
+	@echo "  publish-test                   Publish to TestPyPI (staging)"
+	@echo "  publish-pypi                   Publish to PyPI (production, irreversible)"
+	@echo "  publish-pypi-dry-run           Validate PyPI artifacts without uploading"
+	@echo "  publish-npm                    Publish prsm-mcp wrapper to npm (irreversible)"
+	@echo "  publish-npm-dry-run            Validate npm package without publishing"
+	@echo "  publish-homebrew               Publish Homebrew formula (Task 10 pending)"
+	@echo "  publish-homebrew-dry-run       Validate Homebrew formula"
+	@echo "  publish-all-dry-run            Run all three dry-runs in sequence"
+	@echo "  publish                        Back-compat alias for publish-pypi"
 	@echo "  smoke                Quick smoke test (bootstrap server)"
 
 # ==============================================================================
@@ -277,8 +289,13 @@ docs-serve:
 ci-test: lint test-cov
 
 # ==============================================================================
-# Deployment — Python package publishing
+# Deployment — Multi-channel publishing
 # ==============================================================================
+# Three channels, canonical naming `publish-{pypi,npm,homebrew}` per Phase 3.x.1
+# Task 11 design plan. Each channel has a dry-run variant that validates without
+# actually publishing.
+#
+# `publish` (no suffix) is preserved as a back-compat alias for `publish-pypi`.
 
 # Build Python package (creates .whl and .tar.gz in dist/)
 build: clean
@@ -286,7 +303,21 @@ build: clean
 	python -m build
 	@echo "✅ Built. Check dist/"
 
-# Publish to TestPyPI.
+# ---------- PyPI ----------
+
+# Validate PyPI package without uploading
+publish-pypi-dry-run: build
+	@echo "🧪 Validating PyPI artifacts..."
+	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist 2>/dev/null)" ]; then \
+		echo "❌ No dist/ directory found. Build failed."; \
+		exit 1; \
+	fi
+	twine check dist/*
+	@echo "📦 Would upload these files to PyPI:"
+	@ls -1 dist/
+	@echo "✅ PyPI dry-run complete. Run 'make publish-pypi' to upload for real."
+
+# Publish to TestPyPI (staging).
 # Requires TWINE_USERNAME + TWINE_PASSWORD env vars.
 publish-test:
 	@echo "🧪 Publishing to TestPyPI..."
@@ -295,18 +326,76 @@ publish-test:
 		exit 1; \
 	fi
 	twine upload --repository testpypi dist/*
-	@echo "✅ Published. Verify: https://test.pypi.org/project/prsm/"
+	@echo "✅ Published. Verify: https://test.pypi.org/project/prsm-network/"
 
 # Publish to PyPI (production) — irreversible.
 # Requires TWINE_USERNAME + TWINE_PASSWORD env vars.
-publish:
+publish-pypi:
 	@echo "🚀 Publishing to PyPI (production)..."
 	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist 2>/dev/null)" ]; then \
 		echo "❌ No dist/ directory found. Run 'make build' first."; \
 		exit 1; \
 	fi
 	twine upload dist/*
-	@echo "✅ Published. Verify: https://pypi.org/project/prsm/"
+	@echo "✅ Published. Verify: https://pypi.org/project/prsm-network/"
+
+# Back-compat alias.
+publish: publish-pypi
+
+# ---------- npm ----------
+
+# Validate npm package without publishing.
+publish-npm-dry-run:
+	@echo "🧪 Validating npm package..."
+	@cd npm && bash test.sh
+	@echo "📦 Would publish these files to npm:"
+	@cd npm && npm pack --dry-run
+	@echo "✅ npm dry-run complete. Run 'make publish-npm' to publish for real."
+
+# Publish to npm registry. Requires `npm login` first.
+publish-npm:
+	@echo "🚀 Publishing prsm-mcp to npm..."
+	@cd npm && bash test.sh
+	@cd npm && npm publish --access public
+	@echo "✅ Published. Verify: https://www.npmjs.com/package/prsm-mcp"
+
+# ---------- Homebrew ----------
+
+# Validate Homebrew formula without publishing.
+# Note: Phase 3.x.1 Task 10 (Homebrew tap formula) is pending; this dry-run
+# currently just verifies the published prsm-network sdist is reachable so
+# the future formula can compute its sha256 against a known artifact.
+#
+# Single-recipe shell command so `exit 0` short-circuits the brew audit
+# step when the tap scaffold isn't present yet (Task 10 pending).
+publish-homebrew-dry-run:
+	@echo "🧪 Validating Homebrew formula..."
+	@if [ ! -d "ops/homebrew-tap" ]; then \
+		echo "ℹ️  Homebrew tap formula scaffold not yet present (Task 10 pending)."; \
+		echo "   Once Task 10 ships, this target will:"; \
+		echo "     1. Verify Formula/prsm.rb syntax via 'brew audit --new-formula'"; \
+		echo "     2. Test the formula against a clean macOS environment"; \
+		echo "     3. Verify sha256 matches the published PyPI sdist"; \
+		echo "   For now, dry-run is a no-op."; \
+	else \
+		cd ops/homebrew-tap && brew audit --new-formula --strict ./Formula/prsm.rb && \
+		echo "✅ Homebrew formula dry-run complete."; \
+	fi
+
+# Publish Homebrew formula to the prsm/homebrew-tap repo.
+publish-homebrew:
+	@echo "🚀 Publishing Homebrew formula..."
+	@if [ ! -d "ops/homebrew-tap" ]; then \
+		echo "❌ Homebrew tap formula not yet scaffolded (Phase 3.x.1 Task 10 pending)."; \
+		echo "   See docs/2026-04-26-phase3.x.1-mcp-server-completion-design-plan.md."; \
+		exit 1; \
+	fi
+	@echo "ℹ️  Push ops/homebrew-tap/Formula/prsm.rb to prsm-network/homebrew-tap repo."
+	@echo "   Verify: brew tap prsm-network/tap && brew install prsm"
+
+# Convenience: run all three dry-runs in sequence.
+publish-all-dry-run: publish-pypi-dry-run publish-npm-dry-run publish-homebrew-dry-run
+	@echo "✅ All dry-runs complete."
 
 # ==============================================================================
 # Smoke test

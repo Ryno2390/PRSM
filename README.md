@@ -95,16 +95,40 @@ Third-party LLM (Claude/GPT/local): calls prsm_analyze via MCP
 
 ## MCP Integration
 
-Any LLM can use PRSM as a compute backend via the Model Context Protocol. **17 tools** are exposed:
+Any LLM can use PRSM as a compute backend via the Model Context Protocol. **17 tools** are exposed.
 
+### Three install paths
+
+Pick whichever your environment prefers — all three launch the same Python MCP server underneath.
+
+**1. npm (recommended for MCP-client integration):**
 ```bash
-prsm mcp-server    # Start the MCP server
+npx prsm-mcp        # auto-detects Python; one-time prompt to install prsm-network
 ```
 
-Configure in Claude Desktop (`~/.claude/claude_desktop_config.json`):
+Add to `~/.claude/claude_desktop_config.json`:
 ```json
-{"mcpServers": {"prsm": {"command": "python", "args": ["scripts/prsm_mcp_server.py"]}}}
+{"mcpServers": {"prsm": {"command": "npx", "args": ["prsm-mcp"]}}}
 ```
+
+**2. Homebrew (macOS / Linuxbrew):**
+```bash
+brew install prsm/tap/prsm
+prsm mcp-server
+```
+
+**3. PyPI (direct Python install — canonical):**
+```bash
+pip install prsm-network
+prsm mcp-server
+```
+
+Then add to your MCP client config:
+```json
+{"mcpServers": {"prsm": {"command": "prsm", "args": ["mcp-server"]}}}
+```
+
+The `prsm-network` Python package is the source of truth; npm and Homebrew are convenience wrappers.
 
 Then Claude (or any MCP-compatible LLM) can:
 
