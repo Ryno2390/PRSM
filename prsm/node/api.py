@@ -698,6 +698,46 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     status_code=402,
                     detail=f"Escrow creation failed (insufficient FTNS?): {e}",
                 )
+            # PaymentEscrow.create_escrow returns None (does NOT raise) when
+            # the requester has insufficient FTNS balance. Without this guard
+            # the request would proceed unbilled.
+            if escrow_entry is None:
+                raise HTTPException(
+                    status_code=402,
+                    detail="Insufficient FTNS balance to lock escrow for inference",
+                )
+
+        # Privacy budget pre-flight: reject before executor runs if the
+        # cumulative DP epsilon would be exceeded. Post-hoc record_spend
+        # below commits the spend; can_spend here gates entry.
+        expected_epsilon: Optional[float] = None
+        if request.privacy_tier != PrivacyLevel.NONE:
+            expected_epsilon = {
+                PrivacyLevel.STANDARD: 8.0,
+                PrivacyLevel.HIGH: 4.0,
+                PrivacyLevel.MAXIMUM: 1.0,
+            }.get(request.privacy_tier, 8.0)
+            if (
+                hasattr(node, 'privacy_budget')
+                and node.privacy_budget
+                and not node.privacy_budget.can_spend(expected_epsilon)
+            ):
+                if escrow_entry and node._payment_escrow:
+                    try:
+                        await node._payment_escrow.refund_escrow(
+                            job_id, "privacy budget exhausted"
+                        )
+                    except Exception as refund_exc:
+                        logger.warning(
+                            f"Escrow refund after privacy-budget rejection failed: {refund_exc}"
+                        )
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        f"Privacy budget exhausted: ε={expected_epsilon} would "
+                        f"exceed remaining budget"
+                    ),
+                )
 
         try:
             result = await node.inference_executor.execute(request)

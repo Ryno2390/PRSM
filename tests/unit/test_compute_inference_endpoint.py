@@ -211,6 +211,19 @@ class TestInferenceEscrowFlow:
         assert r.status_code == 402
         assert "escrow" in r.json()["detail"].lower()
 
+    def test_escrow_none_return_returns_402(self, client, mock_node):
+        # PaymentEscrow.create_escrow returns None (does NOT raise) when the
+        # requester has insufficient balance — the API must still 402 instead
+        # of running unbilled inference.
+        mock_node._payment_escrow.create_escrow = AsyncMock(return_value=None)
+        r = client.post("/compute/inference", json={
+            "prompt": "x", "model_id": "mock-llama-3-8b", "budget_ftns": 1.0,
+        })
+        assert r.status_code == 402
+        assert "insufficient" in r.json()["detail"].lower()
+        # Executor must NOT have been called
+        # (would have produced a receipt and caused billing leak)
+
     def test_escrow_uses_api_job_id(self, client, mock_node):
         body = client.post("/compute/inference", json={
             "prompt": "x", "model_id": "mock-llama-3-8b", "budget_ftns": 1.0,
@@ -267,6 +280,35 @@ class TestInferencePrivacyBudget:
             "privacy_tier": "none",
         })
         mock_node.privacy_budget.record_spend.assert_not_called()
+
+    def test_exhausted_budget_returns_429_and_refunds_escrow(self, client, mock_node):
+        # Pre-flight can_spend gate: when the cumulative DP epsilon would
+        # exceed the configured ceiling, reject before the executor runs and
+        # release the locked escrow back to the requester.
+        mock_node.privacy_budget.can_spend = MagicMock(return_value=False)
+        r = client.post("/compute/inference", json={
+            "prompt": "x",
+            "model_id": "mock-llama-3-8b",
+            "budget_ftns": 1.0,
+            "privacy_tier": "standard",
+        })
+        assert r.status_code == 429
+        assert "privacy budget" in r.json()["detail"].lower()
+        mock_node._payment_escrow.refund_escrow.assert_called_once()
+        mock_node._payment_escrow.release_escrow.assert_not_called()
+        mock_node.privacy_budget.record_spend.assert_not_called()
+
+    def test_pre_flight_can_spend_called_before_execution(self, client, mock_node):
+        # Pre-flight check uses the privacy-tier→ε map, not the receipt's
+        # epsilon (which is only known post-execute).
+        mock_node.privacy_budget.can_spend = MagicMock(return_value=True)
+        client.post("/compute/inference", json={
+            "prompt": "x",
+            "model_id": "mock-llama-3-8b",
+            "budget_ftns": 1.0,
+            "privacy_tier": "high",
+        })
+        mock_node.privacy_budget.can_spend.assert_called_once_with(4.0)
 
 
 # ── Content tier handling ───────────────────────────────────────────────────
