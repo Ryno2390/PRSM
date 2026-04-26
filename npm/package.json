@@ -1,0 +1,52 @@
+{
+  "name": "prsm-mcp",
+  "version": "0.1.0",
+  "description": "MCP server wrapper for PRSM — Protocol for Research, Storage, and Modeling. Exposes 17 PRSM tools to any MCP-compatible LLM client (Claude Desktop, Cursor, Continue, etc.). Shells out to a local Python install of the prsm-network package; preserves MCP stdio purity.",
+  "license": "MIT",
+  "homepage": "https://github.com/prsm-network/PRSM",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prsm-network/PRSM.git",
+    "directory": "npm"
+  },
+  "bugs": {
+    "url": "https://github.com/prsm-network/PRSM/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "prsm",
+    "ai",
+    "decentralized",
+    "compute",
+    "storage",
+    "claude",
+    "anthropic",
+    "cursor",
+    "continue"
+  ],
+  "author": "PRSM Network <https://www.prsm-network.com>",
+  "main": "bin/prsm-mcp.js",
+  "bin": {
+    "prsm-mcp": "bin/prsm-mcp.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bash test.sh",
+    "test:python-detect": "node -e \"console.error(JSON.stringify(require('./lib/python-detect').detectPython()))\""
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "dependencies": {}
+}
