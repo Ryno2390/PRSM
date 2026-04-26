@@ -601,6 +601,187 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             logger.error(f"Forge pipeline error: {e}")
             raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
+    @app.post("/compute/inference")
+    async def compute_inference(body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Run TEE-attested model inference with verifiable signed receipts.
+
+        Phase 3.x.1 Task 5 — wires the prsm.compute.inference module
+        (Tasks 1-2) to the HTTP layer so the prsm_inference MCP tool
+        (Task 6) can route through this endpoint.
+
+        Mirrors /compute/forge: validate → lock escrow → run executor →
+        sign receipt → track privacy budget → release/refund escrow.
+
+        POST body:
+        {
+            "prompt": "...",                  // required
+            "model_id": "mock-llama-3-8b",    // required
+            "budget_ftns": 1.0,
+            "privacy_tier": "standard",        // none|standard|high|maximum
+            "content_tier": "A",               // A|B|C
+            "max_tokens": 256,                 // optional
+            "temperature": 0.7,                // optional
+        }
+        """
+        # Lazy imports keep the inference module's dependencies (and any
+        # future heavy ones like wasmtime/torch) out of the API import graph
+        # for nodes that don't run inference.
+        import dataclasses
+        from decimal import Decimal
+
+        from prsm.compute.inference import (
+            ContentTier,
+            InferenceRequest,
+            sign_receipt,
+        )
+        from prsm.compute.tee.models import PrivacyLevel
+
+        if not hasattr(node, 'inference_executor') or node.inference_executor is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Inference executor not initialized. "
+                    "This node does not currently serve inference requests."
+                ),
+            )
+
+        prompt = body.get("prompt", "")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Missing 'prompt' field")
+
+        model_id = body.get("model_id", "")
+        if not model_id:
+            raise HTTPException(status_code=400, detail="Missing 'model_id' field")
+
+        budget_ftns = float(body.get("budget_ftns", 1.0))
+        if budget_ftns <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "FTNS budget required for inference. "
+                    "Set budget_ftns to at least 0.01 FTNS. "
+                    "Use the prsm_quote MCP tool to estimate cost first."
+                ),
+            )
+
+        # Build the request — coerce enum fields, surface bad values as 400s.
+        try:
+            request = InferenceRequest(
+                prompt=prompt,
+                model_id=model_id,
+                budget_ftns=Decimal(str(budget_ftns)),
+                privacy_tier=PrivacyLevel(body.get("privacy_tier", "standard")),
+                content_tier=ContentTier(body.get("content_tier", "A")),
+                max_tokens=body.get("max_tokens"),
+                temperature=body.get("temperature"),
+                requester_node_id=node.identity.node_id if node.identity else None,
+            )
+        except (ValueError, TypeError) as e:
+            raise HTTPException(status_code=400, detail=f"Invalid request: {e}")
+
+        # Allocate API-side job_id; this becomes the canonical job_id for
+        # both the escrow and the signed receipt.
+        job_id = "infer-" + _uuid.uuid4().hex[:12]
+
+        # Lock escrow up-front (pre-pay billing pattern per Phase 3.x.1
+        # design plan §6.2).
+        escrow_entry = None
+        if hasattr(node, '_payment_escrow') and node._payment_escrow:
+            try:
+                escrow_entry = await node._payment_escrow.create_escrow(
+                    job_id=job_id,
+                    amount=budget_ftns,
+                    requester_id=node.identity.node_id if node.identity else "unknown",
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Escrow creation failed (insufficient FTNS?): {e}",
+                )
+
+        try:
+            result = await node.inference_executor.execute(request)
+
+            if not result.success:
+                # Inference rejected the request (unknown model, budget too
+                # low for this executor's pricing, etc.). Refund the escrow.
+                if escrow_entry and node._payment_escrow:
+                    try:
+                        await node._payment_escrow.refund_escrow(
+                            job_id, result.error or "inference failed"
+                        )
+                    except Exception as refund_exc:
+                        logger.warning(f"Inference escrow refund failed: {refund_exc}")
+                return {
+                    "success": False,
+                    "error": result.error or "inference failed",
+                    "job_id": job_id,
+                    "request_id": request.request_id,
+                }
+
+            # Replace the executor's internal job_id with the API-side
+            # job_id so the receipt's job_id matches the escrow id +
+            # response payload, then sign with the node's identity.
+            receipt = result.receipt
+            if receipt is not None:
+                receipt = dataclasses.replace(receipt, job_id=job_id)
+                if node.identity:
+                    try:
+                        receipt = sign_receipt(receipt, node.identity)
+                    except Exception as e:
+                        logger.warning(f"Receipt signing failed: {e}")
+
+            # Track DP epsilon spend (privacy budget) for non-none privacy
+            # tiers — same accounting flow as /compute/forge.
+            if (
+                hasattr(node, 'privacy_budget')
+                and node.privacy_budget
+                and request.privacy_tier != PrivacyLevel.NONE
+                and receipt is not None
+            ):
+                try:
+                    node.privacy_budget.record_spend(
+                        receipt.epsilon_spent,
+                        "inference",
+                        job_id,
+                    )
+                except Exception as e:
+                    logger.warning(f"Privacy budget tracking failed: {e}")
+
+            # Release escrow to the serving node identity (us, in the
+            # local-execution case).
+            if escrow_entry and node._payment_escrow:
+                try:
+                    await node._payment_escrow.release_escrow(
+                        job_id=job_id,
+                        provider_id=node.identity.node_id if node.identity else "self",
+                    )
+                except Exception as e:
+                    logger.warning(f"Inference escrow release failed: {e}")
+
+            return {
+                "success": True,
+                "job_id": job_id,
+                "request_id": request.request_id,
+                "output": result.output,
+                "receipt": receipt.to_dict() if receipt is not None else None,
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Refund on unexpected failure (executor crashed, etc.)
+            if escrow_entry and node._payment_escrow:
+                try:
+                    await node._payment_escrow.refund_escrow(job_id, str(e))
+                except Exception:
+                    pass
+            logger.error(f"Inference pipeline error: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Inference pipeline error: {str(e)}",
+            )
+
     @app.post("/content/upload")
     async def upload_content(req: ContentUploadRequest) -> Dict[str, Any]:
         """Upload text content to IPFS with provenance tracking."""
