@@ -119,10 +119,15 @@ class TestConstruction:
         executor.register_model(m2)
         assert "test-mistral" in executor.supported_models()
 
-    def test_register_model_replaces_existing(self, executor, registry):
+    def test_register_model_duplicate_raises(self, executor, registry):
+        # Phase 3.x.2 changes the contract from silent-replace to
+        # explicit-rejection. Registry-backed semantics: a duplicate
+        # model_id is a publisher conflict, not an upsert. Callers
+        # needing replacement must build a fresh registry.
+        from prsm.compute.model_registry import ModelAlreadyRegisteredError
         m_new = _make_model("test-llama", num_shards=5)
-        executor.register_model(m_new)
-        assert executor._models["test-llama"].total_shards == 5
+        with pytest.raises(ModelAlreadyRegisteredError):
+            executor.register_model(m_new)
 
     def test_default_tee_runtime_is_software(self, registry):
         ex = TensorParallelInferenceExecutor(model_registry=registry)
@@ -451,6 +456,139 @@ class TestSoftwareTEEPrivacyResolution:
             "software TEE accepts" in r.message
             for r in caplog.records
         )
+
+
+class TestModelRegistryIntegration:
+    """Phase 3.x.2 Task 5 — executor accepts ModelRegistry directly,
+    and registry-level verification (signature + shard sha256) gates
+    every execute() call. Tampering surfaces as InferenceResult.failure,
+    not silent corruption."""
+
+    @pytest.fixture
+    def real_identity(self):
+        from prsm.node.identity import generate_node_identity
+        return generate_node_identity(display_name="phase3.x.2-task5-publisher")
+
+    @pytest.fixture
+    def in_memory_registry(self, model, real_identity):
+        from prsm.compute.model_registry import InMemoryModelRegistry
+        reg = InMemoryModelRegistry()
+        reg.register(model, identity=real_identity)
+        return reg
+
+    def test_constructor_accepts_model_registry(self, in_memory_registry):
+        ex = TensorParallelInferenceExecutor(model_registry=in_memory_registry)
+        assert ex.supported_models() == ["test-llama"]
+
+    def test_constructor_accepts_dict_for_back_compat(self, model):
+        # Phase 3.x.1 callers continue to work unchanged
+        ex = TensorParallelInferenceExecutor(model_registry={model.model_id: model})
+        assert ex.supported_models() == ["test-llama"]
+
+    def test_constructor_rejects_other_types(self):
+        with pytest.raises(TypeError, match="ModelRegistry"):
+            TensorParallelInferenceExecutor(model_registry=["not", "a", "dict"])
+
+    def test_dict_constructor_uses_scaffold_identity(self, model):
+        # Dict-arg path generates a scaffold identity to sign in-memory
+        # manifests. The scaffold publisher_node_id appears on the
+        # manifest; never on inference receipts.
+        ex = TensorParallelInferenceExecutor(model_registry={model.model_id: model})
+        manifest = ex.registry.get_manifest(model.model_id)
+        assert manifest.publisher_node_id == ex._scaffold_identity.node_id
+
+    def test_registry_constructor_does_not_create_scaffold(self, in_memory_registry):
+        # When the caller supplied a real registry, the executor MUST
+        # NOT spawn a scaffold identity unprompted (it would be unused).
+        ex = TensorParallelInferenceExecutor(model_registry=in_memory_registry)
+        assert ex._scaffold_identity is None
+
+    @pytest.mark.asyncio
+    async def test_happy_path_via_explicit_registry(
+        self, in_memory_registry
+    ):
+        ex = TensorParallelInferenceExecutor(model_registry=in_memory_registry)
+        result = await ex.execute(_make_request())
+        assert result.success
+        assert result.receipt is not None
+
+    @pytest.mark.asyncio
+    async def test_unknown_model_via_registry(self, in_memory_registry):
+        ex = TensorParallelInferenceExecutor(model_registry=in_memory_registry)
+        result = await ex.execute(_make_request(model_id="nonexistent"))
+        assert not result.success
+        assert "Unknown model_id" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_shard_tamper_at_execute_returns_failure(
+        self, model, real_identity
+    ):
+        # Build a registry, register, then mutate stored shard bytes
+        # directly. The next execute() must fail with a verification
+        # error in the result, NOT raise.
+        from prsm.compute.model_registry import InMemoryModelRegistry
+        reg = InMemoryModelRegistry()
+        reg.register(model, identity=real_identity)
+        # Reach into the registry's stored model and corrupt a shard
+        from prsm.compute.model_sharding.models import ModelShard
+        stored = reg._models[model.model_id]
+        s0 = stored.shards[0]
+        stored.shards[0] = ModelShard(
+            shard_id=s0.shard_id, model_id=s0.model_id,
+            shard_index=s0.shard_index, total_shards=s0.total_shards,
+            tensor_data=bytes([s0.tensor_data[0] ^ 0xFF]) + s0.tensor_data[1:],
+            tensor_shape=s0.tensor_shape, layer_range=s0.layer_range,
+            size_bytes=s0.size_bytes, checksum=s0.checksum,
+        )
+        ex = TensorParallelInferenceExecutor(model_registry=reg)
+        result = await ex.execute(_make_request())
+        assert not result.success
+        assert "verification failed" in (result.error or "").lower()
+        assert result.receipt is None
+
+    @pytest.mark.asyncio
+    async def test_estimate_cost_via_get_manifest(self, in_memory_registry):
+        # estimate_cost must use the cheaper get_manifest path. Even if
+        # we corrupt shard bytes, the cost estimate should still work
+        # because it doesn't read shard data.
+        from prsm.compute.model_sharding.models import ModelShard
+        stored = in_memory_registry._models["test-llama"]
+        s0 = stored.shards[0]
+        stored.shards[0] = ModelShard(
+            shard_id=s0.shard_id, model_id=s0.model_id,
+            shard_index=s0.shard_index, total_shards=s0.total_shards,
+            tensor_data=bytes([s0.tensor_data[0] ^ 0xFF]) + s0.tensor_data[1:],
+            tensor_shape=s0.tensor_shape, layer_range=s0.layer_range,
+            size_bytes=s0.size_bytes, checksum=s0.checksum,
+        )
+        ex = TensorParallelInferenceExecutor(model_registry=in_memory_registry)
+        # Cost should still be computable
+        cost = await ex.estimate_cost(_make_request())
+        assert cost > 0
+
+    def test_register_model_with_explicit_identity(
+        self, in_memory_registry, real_identity
+    ):
+        ex = TensorParallelInferenceExecutor(model_registry=in_memory_registry)
+        m2 = _make_model("second-model")
+        ex.register_model(m2, identity=real_identity)
+        # Manifest carries the explicit publisher's node_id, not a
+        # scaffold's
+        manifest = ex.registry.get_manifest("second-model")
+        assert manifest.publisher_node_id == real_identity.node_id
+
+    def test_register_model_without_identity_uses_scaffold(
+        self, in_memory_registry
+    ):
+        ex = TensorParallelInferenceExecutor(model_registry=in_memory_registry)
+        # Real-registry construction left scaffold None; first
+        # register_model() without identity generates one and stashes it.
+        assert ex._scaffold_identity is None
+        m2 = _make_model("second-model")
+        ex.register_model(m2)
+        assert ex._scaffold_identity is not None
+        manifest = ex.registry.get_manifest("second-model")
+        assert manifest.publisher_node_id == ex._scaffold_identity.node_id
 
 
 class TestInterfaceContract:

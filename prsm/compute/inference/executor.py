@@ -255,14 +255,21 @@ class TensorParallelInferenceExecutor(InferenceExecutor):
     via ``TensorParallelExecutor.remote_dispatcher`` is wired through
     when callers supply a ``tensor_executor`` configured with one.
 
-    Production use note: the model registry passed at construction
-    time is in-memory. A persistent registry (model store + signed
-    manifest) is out of scope for Phase 3.x.1 and lands later.
+    Model registry: as of Phase 3.x.2 the constructor accepts either a
+    ``ModelRegistry`` (production path — typically
+    ``FilesystemModelRegistry`` for restart survival, or
+    ``InMemoryModelRegistry`` for tests) or a ``Dict[str, ShardedModel]``
+    (Phase 3.x.1 back-compat). Dict callers get a scaffold identity
+    that signs the auto-built manifests; the scaffold key never
+    touches inference receipts (those continue to be signed by the
+    node identity at the API layer). Every ``execute()`` re-verifies
+    the registry's signature + shard sha256 commitments — tampering
+    surfaces as ``InferenceResult.failure(...)``, not silent corruption.
     """
 
     def __init__(
         self,
-        model_registry: "Dict[str, ShardedModel]",  # noqa: F821 — fwd ref
+        model_registry,  # Dict[str, ShardedModel] OR ModelRegistry
         *,
         tensor_executor: "Optional[TensorParallelExecutor]" = None,  # noqa: F821
         tee_runtime: "Optional[TEERuntime]" = None,  # noqa: F821
@@ -272,10 +279,38 @@ class TensorParallelInferenceExecutor(InferenceExecutor):
     ) -> None:
         # Imports done lazily to avoid heavyweight numpy/runtime cost when
         # callers only need the abstract interface or the mock executor.
+        from prsm.compute.model_registry import (
+            InMemoryModelRegistry,
+            ModelRegistry,
+        )
         from prsm.compute.model_sharding.executor import TensorParallelExecutor
         from prsm.compute.tee.runtime import SoftwareTEERuntime
+        from prsm.node.identity import generate_node_identity
 
-        self._models = dict(model_registry)
+        # Phase 3.x.2 Task 5 — accept either a ModelRegistry (preferred,
+        # production path) or a Dict[str, ShardedModel] (Phase 3.x.1
+        # back-compat). Dict callers get a scaffold identity that signs
+        # the in-memory manifests on their behalf; the scaffold key
+        # never touches inference receipts (those are signed by the
+        # node identity at the API layer).
+        if isinstance(model_registry, ModelRegistry):
+            self._registry = model_registry
+            self._scaffold_identity = None
+        elif isinstance(model_registry, dict):
+            scaffold = generate_node_identity(
+                display_name="prsm-tpie-scaffold"
+            )
+            registry = InMemoryModelRegistry()
+            for model in model_registry.values():
+                registry.register(model, identity=scaffold)
+            self._registry = registry
+            self._scaffold_identity = scaffold
+        else:
+            raise TypeError(
+                f"model_registry must be a ModelRegistry or "
+                f"Dict[str, ShardedModel], got {type(model_registry).__name__}"
+            )
+
         self._tensor = tensor_executor or TensorParallelExecutor()
         self._tee_runtime = tee_runtime or SoftwareTEERuntime()
         self._cost_per_shard = Decimal(cost_per_shard)
@@ -324,28 +359,83 @@ class TensorParallelInferenceExecutor(InferenceExecutor):
         """Expose the underlying TEE runtime for callers/tests."""
         return self._tee_runtime
 
-    def supported_models(self) -> list[str]:
-        return sorted(self._models.keys())
+    @property
+    def registry(self):
+        """The underlying ModelRegistry — exposed for callers/tests."""
+        return self._registry
 
-    def register_model(self, model: "ShardedModel") -> None:  # noqa: F821
-        """Add or replace a model in the in-memory registry."""
-        self._models[model.model_id] = model
+    def supported_models(self) -> list[str]:
+        return self._registry.list_models()
+
+    def register_model(
+        self,
+        model,  # ShardedModel
+        *,
+        identity=None,  # Optional[NodeIdentity]
+    ) -> None:
+        """Register a model with the underlying registry.
+
+        Identity precedence:
+          1. Explicit ``identity`` kwarg (production path: caller owns
+             the publisher key).
+          2. Scaffold identity generated for dict-arg constructions.
+          3. Fresh scaffold (cached) for callers who passed a real
+             ``ModelRegistry`` but didn't supply an identity for this
+             call — preserves the Phase 3.x.1 ``register_model(m)``
+             call shape.
+
+        Raises ``ModelAlreadyRegisteredError`` on duplicate model_id —
+        explicit semantics replace the Phase 3.x.1 silent-overwrite
+        behavior. Callers needing replacement must build a fresh
+        registry or, in the future, call an explicit ``unregister``
+        (not in v1 scope).
+        """
+        from prsm.node.identity import generate_node_identity
+
+        publisher = identity
+        if publisher is None:
+            if self._scaffold_identity is None:
+                # First call on a real-registry executor without an
+                # identity — generate and stash so subsequent calls
+                # use the same publisher.
+                self._scaffold_identity = generate_node_identity(
+                    display_name="prsm-tpie-scaffold"
+                )
+            publisher = self._scaffold_identity
+        self._registry.register(model, identity=publisher)
 
     async def estimate_cost(self, request: InferenceRequest) -> Decimal:
-        if request.model_id not in self._models:
-            raise UnsupportedModelError(f"Unknown model_id: {request.model_id}")
-        sharded = self._models[request.model_id]
-        base = self._cost_per_shard * Decimal(sharded.total_shards)
+        # Use get_manifest (metadata only) — cheaper than get() because
+        # it skips shard byte verification.
+        from prsm.compute.model_registry import ModelNotFoundError
+        try:
+            manifest = self._registry.get_manifest(request.model_id)
+        except ModelNotFoundError as e:
+            raise UnsupportedModelError(f"Unknown model_id: {request.model_id}") from e
+        base = self._cost_per_shard * Decimal(manifest.total_shards)
         overhead = self._privacy_overhead.get(request.privacy_tier, Decimal("1.0"))
         return base * overhead
 
     async def execute(self, request: InferenceRequest) -> InferenceResult:
-        # 1. Model lookup
-        if request.model_id not in self._models:
+        # 1. Model lookup — registry.get() verifies signature + shard
+        # sha256 commitments. Tampering surfaces as ManifestVerificationError
+        # which we map to InferenceResult.failure (rather than letting it
+        # propagate) so the caller gets a structured response.
+        from prsm.compute.model_registry import (
+            ManifestVerificationError,
+            ModelNotFoundError,
+        )
+        try:
+            sharded = self._registry.get(request.model_id)
+        except ModelNotFoundError:
             return InferenceResult.failure(
                 request.request_id, f"Unknown model_id: {request.model_id}"
             )
-        sharded = self._models[request.model_id]
+        except ManifestVerificationError as e:
+            return InferenceResult.failure(
+                request.request_id,
+                f"Model registry verification failed: {e}",
+            )
 
         # 2. Budget check
         cost = await self.estimate_cost(request)
