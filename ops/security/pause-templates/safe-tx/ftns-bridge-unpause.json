@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1745625600000,
+  "meta": {
+    "name": "PRSM RECOVERY: Unpause FTNSBridge",
+    "description": "Resumes bridge operations after pause. PRECONDITIONS for cosigning: (1) bridge patch deployed if vulnerability triggered pause, (2) cross-chain reconciliation complete (verify bridgedOut == bridgedIn delta is intentional), (3) auditor sign-off if patch deployed, (4) public bridge-resumption announcement queued. See EXPLOIT_RESPONSE_PLAYBOOK.md §4 (Recover phase).",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "REPLACE_WITH_COUNCIL_OPERATIONAL_SAFE_ADDRESS",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "REPLACE_WITH_DEPLOYED_FTNS_BRIDGE_PROXY_ADDRESS",
+      "value": "0",
+      "data": "0x3f4ba83a",
+      "contractMethod": {
+        "inputs": [],
+        "name": "unpause",
+        "payable": false
+      },
+      "contractInputsValues": null
+    }
+  ]
+}

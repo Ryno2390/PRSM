@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1745625600000,
+  "meta": {
+    "name": "PRSM EMERGENCY: Pause EmissionController minting",
+    "description": "Halts all `mintAuthorized` calls from EmissionController. Vested grants and existing balances unaffected; ONLY new emissions are blocked. USE FOR: halving-bug detection, emission rate anomaly, spurious mint authorization, EmissionController contract bug post-Phase 8. Note: function gated by `onlyOwner`, NOT a role — Owner is the foundation governance multi-sig (4-of-5 threshold per Q6 ratification). Does not unwind existing mint history; resume continues from lastMintTimestamp.",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "REPLACE_WITH_COUNCIL_GOVERNANCE_SAFE_ADDRESS",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "REPLACE_WITH_DEPLOYED_EMISSION_CONTROLLER_ADDRESS",
+      "value": "0",
+      "data": "0xda8fbf2a",
+      "contractMethod": {
+        "inputs": [],
+        "name": "pauseMinting",
+        "payable": false
+      },
+      "contractInputsValues": null
+    }
+  ]
+}

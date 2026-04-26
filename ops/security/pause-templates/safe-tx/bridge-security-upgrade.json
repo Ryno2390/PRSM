@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1745625600000,
+  "meta": {
+    "name": "PRSM UPGRADE: BridgeSecurity via UUPS",
+    "description": "Upgrades BridgeSecurity proxy. This contract handles signature verification for FTNSBridge messages. Upgrade only — BridgeSecurity has no pause function. PRECONDITIONS for cosigning: (1) new implementation source-verified on Basescan, (2) auditor SAFE-TO-DEPLOY verdict, (3) signature-verification-logic diff publicly disclosed (high-stakes — cryptography), (4) 4-of-5 governance threshold, (5) extra scrutiny: bridge security upgrades are highest-risk class of upgrade because flaws are immediately exploitable.",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "REPLACE_WITH_COUNCIL_GOVERNANCE_SAFE_ADDRESS",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "REPLACE_WITH_DEPLOYED_BRIDGE_SECURITY_PROXY_ADDRESS",
+      "value": "0",
+      "data": "REPLACE_WITH_UPGRADE_CALLDATA",
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address", "name": "newImplementation", "type": "address" }
+        ],
+        "name": "upgradeTo",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "newImplementation": "REPLACE_WITH_NEW_IMPLEMENTATION_ADDRESS"
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1745625600000,
+  "meta": {
+    "name": "PRSM EMERGENCY: Pause FTNSBridge",
+    "description": "Pauses bridge operations between Ethereum L1 and Base L2. Stops bridge-out (locking) and bridge-in (minting) calls; in-flight messages remain pending until unpause. USE FOR: bridge exploit, double-spend across chains, signature-verification failure, BridgeSecurity contract anomaly. Bridge-only pause does NOT affect normal Base-side FTNS transfers — that requires FTNSTokenSimple pause separately. See EXPLOIT_RESPONSE_PLAYBOOK.md §6 + Risk Register A5.",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "REPLACE_WITH_COUNCIL_OPERATIONAL_SAFE_ADDRESS",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "REPLACE_WITH_DEPLOYED_FTNS_BRIDGE_PROXY_ADDRESS",
+      "value": "0",
+      "data": "0x8456cb59",
+      "contractMethod": {
+        "inputs": [],
+        "name": "pause",
+        "payable": false
+      },
+      "contractInputsValues": null
+    }
+  ]
+}

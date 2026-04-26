@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1745625600000,
+  "meta": {
+    "name": "PRSM UPGRADE: FTNSBridge via UUPS",
+    "description": "Upgrades FTNSBridge proxy to a new implementation. Calls `upgradeTo(address)` on the proxy, gated by DEFAULT_ADMIN_ROLE. PRECONDITIONS for cosigning: (1) new implementation source-verified on Basescan, (2) auditor SAFE-TO-DEPLOY verdict, (3) diff vs. current implementation publicly disclosed, (4) 4-of-5 governance threshold (NOT operational), (5) timelock elapsed if applicable. THIS IS A GOVERNANCE TX, NOT OPERATIONAL.",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "REPLACE_WITH_COUNCIL_GOVERNANCE_SAFE_ADDRESS",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "REPLACE_WITH_DEPLOYED_FTNS_BRIDGE_PROXY_ADDRESS",
+      "value": "0",
+      "data": "REPLACE_WITH_UPGRADE_CALLDATA",
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address", "name": "newImplementation", "type": "address" }
+        ],
+        "name": "upgradeTo",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "newImplementation": "REPLACE_WITH_NEW_IMPLEMENTATION_ADDRESS"
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1745625600000,
+  "meta": {
+    "name": "PRSM RECOVERY: Unpause FTNSTokenSimple",
+    "description": "Resumes FTNS token transfers after pause. PRECONDITIONS for cosigning: (1) patched contract deployed via upgradeTo, (2) auditor sign-off on patch, (3) 24-hour Sepolia bake-in of patched version, (4) public unpause announcement queued for T+0 of execution. See EXPLOIT_RESPONSE_PLAYBOOK.md §4 (Recover phase).",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "REPLACE_WITH_COUNCIL_OPERATIONAL_SAFE_ADDRESS",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "REPLACE_WITH_DEPLOYED_FTNS_TOKEN_PROXY_ADDRESS",
+      "value": "0",
+      "data": "0x3f4ba83a",
+      "contractMethod": {
+        "inputs": [],
+        "name": "unpause",
+        "payable": false
+      },
+      "contractInputsValues": null
+    }
+  ]
+}

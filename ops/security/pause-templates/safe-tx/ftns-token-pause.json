@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1745625600000,
+  "meta": {
+    "name": "PRSM EMERGENCY: Pause FTNSTokenSimple",
+    "description": "Pauses ALL FTNS token transfers. Halts royalty distributions, escrow operations, staking flows. USE ONLY DURING ACTIVE P0 INCIDENT — token-level pause is a sledgehammer. Cosigning council members must verify (a) incident severity warrants full-token pause, (b) less-disruptive options (specific contract pause) are not applicable. See EXPLOIT_RESPONSE_PLAYBOOK.md §6.",
+  "txBuilderVersion": "1.16.5",
+  "createdFromSafeAddress": "REPLACE_WITH_COUNCIL_OPERATIONAL_SAFE_ADDRESS",
+  "createdFromOwnerAddress": "",
+  "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "REPLACE_WITH_DEPLOYED_FTNS_TOKEN_PROXY_ADDRESS",
+      "value": "0",
+      "data": "0x8456cb59",
+      "contractMethod": {
+        "inputs": [],
+        "name": "pause",
+        "payable": false
+      },
+      "contractInputsValues": null
+    }
+  ]
+}

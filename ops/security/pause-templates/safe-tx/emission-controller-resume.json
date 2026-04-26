@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1745625600000,
+  "meta": {
+    "name": "PRSM RECOVERY: Resume EmissionController minting",
+    "description": "Resumes EmissionController emissions after pauseMinting. Resume continues from lastMintTimestamp — no retroactive minting for the paused period. PRECONDITIONS for cosigning: (1) emission-bug patched if pause triggered by bug, (2) auditor sign-off on patch, (3) public resumption announcement queued, (4) reconcile expected emission accumulation during pause period vs. actual. Note: governance threshold (4-of-5).",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "REPLACE_WITH_COUNCIL_GOVERNANCE_SAFE_ADDRESS",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "REPLACE_WITH_DEPLOYED_EMISSION_CONTROLLER_ADDRESS",
+      "value": "0",
+      "data": "0x59ae340e",
+      "contractMethod": {
+        "inputs": [],
+        "name": "resumeMinting",
+        "payable": false
+      },
+      "contractInputsValues": null
+    }
+  ]
+}
