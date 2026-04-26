@@ -28,6 +28,8 @@ lib/
 lib64/
 # Exception: Solidity library sources for Ed25519 verifier live under contracts/contracts/lib/
 !contracts/contracts/lib/
+# Exception: npm wrapper helper modules live under npm/lib/
+!npm/lib/
 parts/
 sdist/
 var/
