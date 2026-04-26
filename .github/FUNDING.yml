@@ -1,0 +1,15 @@
+# PRSM funding configuration
+#
+# PRSM does not currently accept individual GitHub Sponsors. The project is
+# funded via Prismatica equity investment (the for-profit operating company)
+# raised via Reg D 506(c) private placement to accredited investors.
+#
+# FTNS is distributed only as compensation for network services rendered —
+# never sold to investors by the foundation.
+#
+# To contribute compute, storage, or data: run a PRSM node and earn FTNS for
+# services rendered. See https://github.com/prsm-network/PRSM/blob/main/docs/GETTING_STARTED.md
+
+# Custom funding URL — points to project documentation explaining the
+# equity-investment architecture for accredited investors.
+custom: ["https://www.prsm-network.com"]
