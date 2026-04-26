@@ -1,0 +1,19 @@
+{
+  "name": "PRSM Network Detection Bot",
+  "description": "Detects anomalies on PRSM smart contracts: unauthorized mints/burns, role escalation, rapid registration spam, royalty distribution anomalies, settlement-challenge spikes, escrow drain attempts, and supply-cap proximity. Per Exploit Response Playbook Phase 1 (Detect).",
+  "version": "0.1.0",
+  "longDescription": "PRSM is a peer-to-peer protocol for distributed AI compute, storage, and data with on-chain creator royalties. This bot monitors the protocol's deployed contracts on Base mainnet and Sepolia testnet for behaviors that match known smart-contract exploit patterns or deviate from normal protocol operation. Findings emit to the Forta network with structured metadata enabling Foundation council triage per published playbook. See https://github.com/prsm-network/PRSM/blob/main/docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md",
+  "repository": "https://github.com/prsm-network/PRSM",
+  "chainIds": [
+    8453,
+    1,
+    11155111,
+    84532
+  ],
+  "chainSettings": {
+    "default": {
+      "shards": 1,
+      "target": 3
+    }
+  }
+}
