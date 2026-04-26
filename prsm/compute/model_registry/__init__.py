@@ -26,10 +26,20 @@ from prsm.compute.model_registry.models import (
     ManifestShardEntry,
     ModelManifest,
 )
+from prsm.compute.model_registry.signing import (
+    is_signed,
+    sign_manifest,
+    verify_manifest,
+)
 
 __all__ = [
+    # Models (Task 1)
     "MANIFEST_SCHEMA_VERSION",
     "MANIFEST_SIGNING_DOMAIN",
     "ManifestShardEntry",
     "ModelManifest",
+    # Signing (Task 2)
+    "is_signed",
+    "sign_manifest",
+    "verify_manifest",
 ]
