@@ -31,6 +31,15 @@ from prsm.compute.model_registry.signing import (
     sign_manifest,
     verify_manifest,
 )
+from prsm.compute.model_registry.registry import (
+    InMemoryModelRegistry,
+    ManifestVerificationError,
+    ModelAlreadyRegisteredError,
+    ModelNotFoundError,
+    ModelRegistry,
+    ModelRegistryError,
+    manifest_from_model,
+)
 
 __all__ = [
     # Models (Task 1)
@@ -42,4 +51,13 @@ __all__ = [
     "is_signed",
     "sign_manifest",
     "verify_manifest",
+    # Registry (Task 3)
+    "ModelRegistry",
+    "InMemoryModelRegistry",
+    "manifest_from_model",
+    # Exceptions (Task 3)
+    "ModelRegistryError",
+    "ModelNotFoundError",
+    "ModelAlreadyRegisteredError",
+    "ManifestVerificationError",
 ]

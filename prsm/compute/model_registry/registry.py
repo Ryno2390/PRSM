@@ -1,0 +1,293 @@
+"""
+Model registry — abstract interface + in-memory implementation.
+
+Phase 3.x.2 Task 3.
+
+The ABC pins the contract every backend (in-memory, filesystem,
+future DHT, future on-chain anchor) must satisfy:
+
+- ``register(model, identity)`` builds a signed ``ModelManifest`` from
+  the model's actual bytes and stores it.
+- ``get(model_id)`` returns the model only after BOTH cryptographic
+  checks pass: (a) the manifest's publisher signature verifies, AND
+  (b) every shard's actual ``tensor_data`` sha256 matches the manifest
+  entry. Any mismatch raises ``ManifestVerificationError`` — fail closed.
+- ``verify(model_id)`` is the audit-only variant; default impl wraps
+  ``get`` and catches.
+
+The in-memory implementation here is the drop-in replacement for the
+``Dict[str, ShardedModel]`` that ``TensorParallelInferenceExecutor``
+accepted in Phase 3.x.1; preserves test ergonomics and the dict-arg
+back-compat path lands in Task 5.
+"""
+
+from __future__ import annotations
+
+import abc
+import hashlib
+import time
+from typing import Dict, List, Optional
+
+from prsm.compute.model_registry.models import (
+    ManifestShardEntry,
+    ModelManifest,
+)
+from prsm.compute.model_registry.signing import sign_manifest, verify_manifest
+from prsm.compute.model_sharding.models import ModelShard, ShardedModel
+from prsm.node.identity import NodeIdentity
+
+
+# --------------------------------------------------------------------------
+# Exceptions
+# --------------------------------------------------------------------------
+
+
+class ModelRegistryError(Exception):
+    """Base error for any registry-layer failure."""
+
+
+class ModelNotFoundError(ModelRegistryError):
+    """No manifest registered for the given model_id."""
+
+
+class ModelAlreadyRegisteredError(ModelRegistryError):
+    """A manifest already exists for the model_id; first-write-wins per node."""
+
+
+class ManifestVerificationError(ModelRegistryError):
+    """Manifest signature failed verification, or a shard's actual sha256
+    didn't match its manifest entry. Either way, do not trust the model.
+    """
+
+
+# --------------------------------------------------------------------------
+# Helpers
+# --------------------------------------------------------------------------
+
+
+def _hash_shard(shard: ModelShard) -> str:
+    """sha256 of a shard's tensor_data bytes — the load-bearing
+    commitment that tampering breaks."""
+    return hashlib.sha256(shard.tensor_data).hexdigest()
+
+
+def manifest_from_model(
+    model: ShardedModel,
+    *,
+    publisher_node_id: str,
+    published_at: Optional[float] = None,
+) -> ModelManifest:
+    """Build an unsigned manifest from a ``ShardedModel``.
+
+    Hashes every shard's ``tensor_data`` to produce the canonical
+    sha256 commitment in each ``ManifestShardEntry``. The manifest is
+    returned UNSIGNED (publisher_signature=b""); call
+    :func:`prsm.compute.model_registry.signing.sign_manifest` to seal it.
+
+    Exposed as a module-level helper so callers building manifests
+    outside the registry (e.g., for offline-signing workflows or
+    cross-registry verification) reuse the same hashing rules the
+    registry uses internally.
+    """
+    entries = tuple(
+        ManifestShardEntry(
+            shard_id=s.shard_id,
+            shard_index=s.shard_index,
+            tensor_shape=tuple(s.tensor_shape),
+            sha256=_hash_shard(s),
+            size_bytes=len(s.tensor_data),
+        )
+        for s in sorted(model.shards, key=lambda s: s.shard_index)
+    )
+    return ModelManifest(
+        model_id=model.model_id,
+        model_name=model.model_name,
+        publisher_node_id=publisher_node_id,
+        total_shards=model.total_shards,
+        shards=entries,
+        published_at=published_at if published_at is not None else time.time(),
+    )
+
+
+# --------------------------------------------------------------------------
+# ABC
+# --------------------------------------------------------------------------
+
+
+class ModelRegistry(abc.ABC):
+    """Abstract registry of signed model manifests.
+
+    All implementations MUST honor:
+
+    1. ``register`` builds the manifest from the model's actual bytes,
+       signs it under ``identity``, and stores enough state to verify
+       later. Raise :class:`ModelAlreadyRegisteredError` on duplicate
+       ``model_id`` (no first-write-wins assumption changes per backend).
+    2. ``get`` returns the model only if BOTH the manifest signature
+       AND every shard's sha256 verify. Anything else → raise
+       :class:`ManifestVerificationError`.
+    3. Missing ``model_id`` → :class:`ModelNotFoundError`.
+
+    The ABC's ``verify`` default impl reuses ``get``; subclasses MAY
+    override for audit-faster paths that skip returning the model bytes.
+    """
+
+    @abc.abstractmethod
+    def register(
+        self, model: ShardedModel, *, identity: NodeIdentity
+    ) -> ModelManifest:
+        """Register and sign. Returns the signed manifest."""
+
+    @abc.abstractmethod
+    def get(self, model_id: str) -> ShardedModel:
+        """Load + verify. Raises ``ModelNotFoundError`` or
+        ``ManifestVerificationError``."""
+
+    @abc.abstractmethod
+    def list_models(self) -> List[str]:
+        """Sorted list of registered ``model_id`` values."""
+
+    @abc.abstractmethod
+    def get_manifest(self, model_id: str) -> ModelManifest:
+        """Return the stored manifest (metadata only; no shard bytes)."""
+
+    def verify(self, model_id: str) -> bool:
+        """Audit-only: True iff ``get(model_id)`` would succeed.
+
+        Catches both ``ModelNotFoundError`` and
+        ``ManifestVerificationError``. Anything else propagates so a
+        caller can distinguish "model doesn't verify" from "registry
+        is broken."
+        """
+        try:
+            self.get(model_id)
+            return True
+        except (ModelNotFoundError, ManifestVerificationError):
+            return False
+
+
+# --------------------------------------------------------------------------
+# In-memory implementation
+# --------------------------------------------------------------------------
+
+
+class InMemoryModelRegistry(ModelRegistry):
+    """Process-local model registry — backwards-compatible with the
+    Phase 3.x.1 ``Dict[str, ShardedModel]`` consumer pattern.
+
+    Suitable for tests, single-process scaffolds, and the dict-arg
+    back-compat path in ``TensorParallelInferenceExecutor`` (Task 5).
+    NOT suitable for production deployment alone — restart drops all
+    registrations. Use ``FilesystemModelRegistry`` (Task 4) for
+    persistent state.
+
+    Single-writer assumption: no internal locking. Concurrent
+    registration of the same ``model_id`` from multiple threads has
+    undefined ordering; one will win, the loser raises
+    :class:`ModelAlreadyRegisteredError`.
+
+    Verification stash: the registry stores the publisher's
+    ``public_key_b64`` at register time so ``get()`` can verify the
+    signature without needing the publisher's full ``NodeIdentity``
+    on the read path. This matches the offline-verifier model: a
+    client holding only the publisher's public key can verify any
+    manifest, no live trust path needed.
+    """
+
+    def __init__(self) -> None:
+        # Three parallel dicts keyed by model_id. Kept separate so
+        # get_manifest() can return metadata without touching the
+        # heavyweight model bytes.
+        self._manifests: Dict[str, ModelManifest] = {}
+        self._models: Dict[str, ShardedModel] = {}
+        self._publisher_keys: Dict[str, str] = {}  # b64-encoded pubkey
+
+    # -- write path --
+
+    def register(
+        self, model: ShardedModel, *, identity: NodeIdentity
+    ) -> ModelManifest:
+        if model.model_id in self._manifests:
+            raise ModelAlreadyRegisteredError(
+                f"model_id {model.model_id!r} already registered "
+                f"(publisher: {self._manifests[model.model_id].publisher_node_id})"
+            )
+
+        unsigned = manifest_from_model(
+            model, publisher_node_id=identity.node_id
+        )
+        signed = sign_manifest(unsigned, identity)
+
+        # Sanity check: signature must verify under the same identity
+        # we just used to sign. A failure here means something is very
+        # wrong with the signing flow; better to fail fast than ship
+        # an unverifiable manifest.
+        if not verify_manifest(signed, identity=identity):
+            raise ManifestVerificationError(
+                "post-sign self-verification failed; signing flow is broken"
+            )
+
+        self._manifests[model.model_id] = signed
+        self._models[model.model_id] = model
+        self._publisher_keys[model.model_id] = identity.public_key_b64
+        return signed
+
+    # -- read path --
+
+    def get(self, model_id: str) -> ShardedModel:
+        manifest = self._get_manifest_or_raise(model_id)
+        public_key_b64 = self._publisher_keys[model_id]
+
+        # Step 1: signature check
+        if not verify_manifest(manifest, public_key_b64=public_key_b64):
+            raise ManifestVerificationError(
+                f"manifest signature for {model_id!r} failed verification"
+            )
+
+        # Step 2: shard-byte check — every shard's actual tensor_data
+        # must hash to the manifest's recorded sha256. Catches in-place
+        # shard tampering between register() and get().
+        model = self._models[model_id]
+        manifest_by_index = {e.shard_index: e for e in manifest.shards}
+        for shard in model.shards:
+            entry = manifest_by_index.get(shard.shard_index)
+            if entry is None:
+                raise ManifestVerificationError(
+                    f"shard {shard.shard_index} present in model but missing "
+                    f"from manifest of {model_id!r}"
+                )
+            actual_sha = _hash_shard(shard)
+            if actual_sha != entry.sha256:
+                raise ManifestVerificationError(
+                    f"shard {shard.shard_index} of {model_id!r}: "
+                    f"sha256 mismatch (manifest={entry.sha256}, "
+                    f"actual={actual_sha})"
+                )
+            if len(shard.tensor_data) != entry.size_bytes:
+                raise ManifestVerificationError(
+                    f"shard {shard.shard_index} of {model_id!r}: "
+                    f"size mismatch (manifest={entry.size_bytes}, "
+                    f"actual={len(shard.tensor_data)})"
+                )
+        # Confirm the model's shard count matches the manifest's
+        # — guards against silently stripping a shard post-register.
+        if len(model.shards) != len(manifest.shards):
+            raise ManifestVerificationError(
+                f"{model_id!r}: model has {len(model.shards)} shards, "
+                f"manifest expects {len(manifest.shards)}"
+            )
+        return model
+
+    def list_models(self) -> List[str]:
+        return sorted(self._manifests.keys())
+
+    def get_manifest(self, model_id: str) -> ModelManifest:
+        return self._get_manifest_or_raise(model_id)
+
+    # -- internals --
+
+    def _get_manifest_or_raise(self, model_id: str) -> ModelManifest:
+        manifest = self._manifests.get(model_id)
+        if manifest is None:
+            raise ModelNotFoundError(f"no model registered for {model_id!r}")
+        return manifest
