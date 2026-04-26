@@ -35,6 +35,18 @@ from prsm.compute.inference.receipt import (
     sign_receipt,
     verify_receipt,
 )
+from prsm.compute.inference.content_tier_gate import (
+    ContentTierGateError,
+    MissingMaterialError,
+    TEEContext,
+    TEEContextRequiredError,
+    TierBMaterial,
+    TierCMaterial,
+    open_content,
+    open_tier_a,
+    open_tier_b,
+    open_tier_c,
+)
 
 __all__ = [
     # Models
@@ -50,9 +62,20 @@ __all__ = [
     "sign_receipt",
     "verify_receipt",
     "is_signed",
+    # Content tier gate (Task 3)
+    "TEEContext",
+    "TierBMaterial",
+    "TierCMaterial",
+    "open_content",
+    "open_tier_a",
+    "open_tier_b",
+    "open_tier_c",
     # Exceptions
     "InferenceExecutorError",
     "InsufficientBudgetError",
     "TEERequirementError",
     "UnsupportedModelError",
+    "ContentTierGateError",
+    "TEEContextRequiredError",
+    "MissingMaterialError",
 ]
