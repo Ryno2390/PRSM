@@ -32,6 +32,7 @@ from prsm.compute.model_registry.signing import (
     verify_manifest,
 )
 from prsm.compute.model_registry.registry import (
+    FilesystemModelRegistry,
     InMemoryModelRegistry,
     ManifestVerificationError,
     ModelAlreadyRegisteredError,
@@ -51,9 +52,10 @@ __all__ = [
     "is_signed",
     "sign_manifest",
     "verify_manifest",
-    # Registry (Task 3)
+    # Registry (Tasks 3-4)
     "ModelRegistry",
     "InMemoryModelRegistry",
+    "FilesystemModelRegistry",
     "manifest_from_model",
     # Exceptions (Task 3)
     "ModelRegistryError",

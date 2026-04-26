@@ -25,8 +25,12 @@ from __future__ import annotations
 
 import abc
 import hashlib
+import json
+import os
+import re
 import time
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Union
 
 from prsm.compute.model_registry.models import (
     ManifestShardEntry,
@@ -35,6 +39,23 @@ from prsm.compute.model_registry.models import (
 from prsm.compute.model_registry.signing import sign_manifest, verify_manifest
 from prsm.compute.model_sharding.models import ModelShard, ShardedModel
 from prsm.node.identity import NodeIdentity
+
+
+# Strict allowlist for filesystem-mapped identifiers. Rejects path
+# traversal (.. /), absolute paths, null bytes, and any character that
+# would surprise a typical filesystem. Publishers picking model/shard
+# ids that don't match this need to use the InMemoryRegistry or hash
+# the id themselves before registration.
+_SAFE_FS_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _validate_fs_id(kind: str, value: str) -> None:
+    """Reject identifiers unsafe for direct filesystem mapping."""
+    if not value or not _SAFE_FS_ID.fullmatch(value):
+        raise ValueError(
+            f"{kind}={value!r} unsafe for filesystem registry: must match "
+            f"{_SAFE_FS_ID.pattern} (got non-conforming characters)"
+        )
 
 
 # --------------------------------------------------------------------------
@@ -291,3 +312,251 @@ class InMemoryModelRegistry(ModelRegistry):
         if manifest is None:
             raise ModelNotFoundError(f"no model registered for {model_id!r}")
         return manifest
+
+
+# --------------------------------------------------------------------------
+# Filesystem implementation
+# --------------------------------------------------------------------------
+
+
+# Filename for the publisher's b64-encoded public key, stored alongside
+# the manifest so a process restart can verify the manifest signature
+# without needing the publisher's live NodeIdentity. NOT included in the
+# manifest itself — the manifest is the wire format and stays minimal;
+# the sidecar is local-verification metadata.
+_PUBLISHER_KEY_FILENAME = "publisher.pubkey"
+_MANIFEST_FILENAME = "manifest.json"
+_SHARDS_DIRNAME = "shards"
+
+
+class FilesystemModelRegistry(ModelRegistry):
+    """Persistent model registry — manifest.json + shards/*.bin on disk.
+
+    Layout per design plan §3.2::
+
+        <root>/
+        ├── <model_id>/
+        │   ├── manifest.json        — ModelManifest as canonical JSON
+        │   ├── publisher.pubkey     — b64 publisher pubkey (sidecar)
+        │   └── shards/
+        │       ├── <shard_id>.bin   — raw tensor_data bytes
+        │       └── ...
+
+    Survives node restarts. Two registry instances pointing at the same
+    ``root`` see each other's writes after they hit the filesystem
+    (no shared state in memory; reads always go to disk).
+
+    Identifier safety: ``model_id`` and every ``shard_id`` MUST match
+    ``[A-Za-z0-9._-]+``. Path traversal (``..``, ``/``, ``\\``, null
+    bytes) is rejected at register time with ``ValueError``. Publishers
+    needing arbitrary identifiers should hash them before registration
+    or use ``InMemoryModelRegistry``.
+
+    Atomicity: manifest + sidecar writes are atomic
+    (``.tmp`` + ``os.replace``). Shard writes are not atomic
+    individually but the manifest is written LAST, so a crashed
+    registration leaves either a complete model or no manifest (which
+    the next ``list_models()`` call won't surface — no half-published
+    state visible to readers).
+
+    Single-writer assumption per node; no cross-process locking.
+    Concurrent writers on the same root may interleave shards from
+    different registrations; the last-writer-wins on the manifest
+    means the orphaned shards waste disk but don't corrupt reads.
+    """
+
+    def __init__(self, root: Union[str, Path]) -> None:
+        self._root = Path(root)
+        if not self._root.exists():
+            raise FileNotFoundError(
+                f"FilesystemModelRegistry root {self._root} does not exist; "
+                f"create the directory before constructing the registry"
+            )
+        if not self._root.is_dir():
+            raise NotADirectoryError(
+                f"FilesystemModelRegistry root {self._root} is not a directory"
+            )
+
+    # -- write path --
+
+    def register(
+        self, model: ShardedModel, *, identity: NodeIdentity
+    ) -> ModelManifest:
+        _validate_fs_id("model_id", model.model_id)
+        for shard in model.shards:
+            _validate_fs_id("shard_id", shard.shard_id)
+
+        model_dir = self._model_dir(model.model_id)
+        if (model_dir / _MANIFEST_FILENAME).exists():
+            raise ModelAlreadyRegisteredError(
+                f"model_id {model.model_id!r} already registered at {model_dir}"
+            )
+
+        unsigned = manifest_from_model(
+            model, publisher_node_id=identity.node_id
+        )
+        signed = sign_manifest(unsigned, identity)
+
+        # Defense-in-depth: signing flow self-check before we write
+        # anything to disk.
+        if not verify_manifest(signed, identity=identity):
+            raise ManifestVerificationError(
+                "post-sign self-verification failed; signing flow is broken"
+            )
+
+        # Create the model directory + shards subdirectory.
+        shards_dir = model_dir / _SHARDS_DIRNAME
+        shards_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write shards FIRST. The manifest is the publication marker
+        # (its presence is what list_models() looks for). Writing
+        # shards before the manifest means a crashed registration
+        # leaves an incomplete model directory but no visible
+        # registration — readers will see "model not found," not
+        # "manifest signed but bytes missing."
+        for shard in model.shards:
+            shard_path = shards_dir / f"{shard.shard_id}.bin"
+            self._atomic_write_bytes(shard_path, shard.tensor_data)
+
+        # Sidecar pubkey before manifest, same reasoning.
+        self._atomic_write_text(
+            model_dir / _PUBLISHER_KEY_FILENAME,
+            identity.public_key_b64,
+        )
+
+        # Manifest LAST — its presence means "everything else is on disk."
+        manifest_json = json.dumps(signed.to_dict(), sort_keys=True, indent=2)
+        self._atomic_write_text(
+            model_dir / _MANIFEST_FILENAME, manifest_json
+        )
+
+        return signed
+
+    # -- read path --
+
+    def get(self, model_id: str) -> ShardedModel:
+        _validate_fs_id("model_id", model_id)
+        manifest = self._load_manifest_or_raise(model_id)
+        public_key_b64 = self._load_publisher_key_or_raise(model_id)
+
+        # Step 1: signature
+        if not verify_manifest(manifest, public_key_b64=public_key_b64):
+            raise ManifestVerificationError(
+                f"manifest signature for {model_id!r} failed verification"
+            )
+
+        # Step 2: reconstruct each ModelShard from on-disk bytes,
+        # verifying sha256 + size as we go.
+        model_dir = self._model_dir(model_id)
+        shards_dir = model_dir / _SHARDS_DIRNAME
+
+        reconstructed: List[ModelShard] = []
+        for entry in manifest.shards:
+            shard_path = shards_dir / f"{entry.shard_id}.bin"
+            if not shard_path.exists():
+                raise ManifestVerificationError(
+                    f"shard file missing for {model_id!r} shard "
+                    f"{entry.shard_index} ({entry.shard_id!r}): {shard_path}"
+                )
+            data = shard_path.read_bytes()
+            actual_sha = hashlib.sha256(data).hexdigest()
+            if actual_sha != entry.sha256:
+                raise ManifestVerificationError(
+                    f"shard {entry.shard_index} of {model_id!r}: "
+                    f"sha256 mismatch (manifest={entry.sha256}, "
+                    f"actual={actual_sha})"
+                )
+            if len(data) != entry.size_bytes:
+                raise ManifestVerificationError(
+                    f"shard {entry.shard_index} of {model_id!r}: "
+                    f"size mismatch (manifest={entry.size_bytes}, "
+                    f"actual={len(data)})"
+                )
+            reconstructed.append(
+                ModelShard(
+                    shard_id=entry.shard_id,
+                    model_id=manifest.model_id,
+                    shard_index=entry.shard_index,
+                    total_shards=manifest.total_shards,
+                    tensor_data=data,
+                    tensor_shape=tuple(entry.tensor_shape),
+                    layer_range=(0, 0),
+                    size_bytes=entry.size_bytes,
+                    checksum=entry.sha256,
+                )
+            )
+
+        return ShardedModel(
+            model_id=manifest.model_id,
+            model_name=manifest.model_name,
+            total_shards=manifest.total_shards,
+            shards=reconstructed,
+        )
+
+    def list_models(self) -> List[str]:
+        models: List[str] = []
+        if not self._root.exists():
+            return models
+        for child in self._root.iterdir():
+            if not child.is_dir():
+                continue
+            if not _SAFE_FS_ID.fullmatch(child.name):
+                # Skip directories that don't match our naming policy
+                # — they're foreign to this registry.
+                continue
+            if (child / _MANIFEST_FILENAME).exists():
+                models.append(child.name)
+        return sorted(models)
+
+    def get_manifest(self, model_id: str) -> ModelManifest:
+        _validate_fs_id("model_id", model_id)
+        return self._load_manifest_or_raise(model_id)
+
+    # -- internals --
+
+    def _model_dir(self, model_id: str) -> Path:
+        # _validate_fs_id already ran in the public methods; this is an
+        # internal helper, but we use the validated id only.
+        return self._root / model_id
+
+    def _load_manifest_or_raise(self, model_id: str) -> ModelManifest:
+        manifest_path = self._model_dir(model_id) / _MANIFEST_FILENAME
+        if not manifest_path.exists():
+            raise ModelNotFoundError(f"no model registered for {model_id!r}")
+        try:
+            data = json.loads(manifest_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ManifestVerificationError(
+                f"manifest.json for {model_id!r} unreadable or corrupt: {exc}"
+            ) from exc
+        try:
+            return ModelManifest.from_dict(data)
+        except (TypeError, ValueError, KeyError) as exc:
+            raise ManifestVerificationError(
+                f"manifest.json for {model_id!r} schema error: {exc}"
+            ) from exc
+
+    def _load_publisher_key_or_raise(self, model_id: str) -> str:
+        key_path = self._model_dir(model_id) / _PUBLISHER_KEY_FILENAME
+        if not key_path.exists():
+            raise ManifestVerificationError(
+                f"publisher.pubkey sidecar missing for {model_id!r}: "
+                f"can't verify signature without the publisher's public key"
+            )
+        return key_path.read_text().strip()
+
+    @staticmethod
+    def _atomic_write_bytes(path: Path, data: bytes) -> None:
+        """Write bytes atomically: <path>.tmp, fsync, os.replace."""
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+
+    @staticmethod
+    def _atomic_write_text(path: Path, text: str) -> None:
+        FilesystemModelRegistry._atomic_write_bytes(
+            path, text.encode("utf-8")
+        )
