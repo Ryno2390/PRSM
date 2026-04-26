@@ -386,6 +386,79 @@ TOOLS = [
             "properties": {},
         },
     ),
+    Tool(
+        name="prsm_inference",
+        description=(
+            "Run TEE-attested model inference on PRSM with verifiable receipts. "
+            "Routes the prompt through PRSM's confidential-compute layer (Phase 2 TEE + "
+            "Phase 7 content-tier gating) and returns the inference output along with a "
+            "signed receipt that the caller can independently verify against the settling "
+            "node's published Ed25519 public key.\n\n"
+            "TWO LAYERS OF PRIVACY (per PRSM_Vision.md §7):\n"
+            "- content_tier — encryption status of data being queried:\n"
+            "    A = public content (default; no encryption)\n"
+            "    B = encrypted-before-sharding (Phase 7-storage)\n"
+            "    C = Tier B + Reed-Solomon erasure coding + Shamir-split keys\n"
+            "- privacy_tier — TEE attestation + DP noise on activations:\n"
+            "    none     = no DP noise\n"
+            "    standard = ε=8.0 (default)\n"
+            "    high     = ε=4.0\n"
+            "    maximum  = ε=1.0\n\n"
+            "End-to-end privacy for data-sensitive workloads requires both layers configured.\n\n"
+            "IMPORTANT: privacy_tier other than 'none' requires a hardware-backed TEE "
+            "(SGX / TDX / SEV-SNP / TrustZone / Apple Secure Enclave). On nodes with only "
+            "software TEE, requests with non-none privacy_tier are rejected.\n\n"
+            "REQUIRES FTNS budget > 0. Use prsm_quote first to estimate cost. "
+            "Minimum budget: 0.01 FTNS."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "The text prompt to send to the model",
+                },
+                "model_id": {
+                    "type": "string",
+                    "description": (
+                        "Identifier of the model to run. Foundation-curated models for "
+                        "Phase 3.x.1: mock-llama-3-8b, mock-mistral-7b, mock-phi-3 "
+                        "(real model registry lands in Task 4)."
+                    ),
+                    "default": "mock-llama-3-8b",
+                },
+                "budget_ftns": {
+                    "type": "number",
+                    "description": "FTNS tokens to spend (REQUIRED, minimum 0.01).",
+                    "minimum": 0.01,
+                    "default": 1.0,
+                },
+                "privacy_tier": {
+                    "type": "string",
+                    "description": "Inference-layer privacy: none, standard (ε=8), high (ε=4), maximum (ε=1)",
+                    "enum": ["none", "standard", "high", "maximum"],
+                    "default": "standard",
+                },
+                "content_tier": {
+                    "type": "string",
+                    "description": "Content encryption tier: A (public), B (encrypted), C (encrypted+sharded)",
+                    "enum": ["A", "B", "C"],
+                    "default": "A",
+                },
+                "max_tokens": {
+                    "type": "integer",
+                    "description": "Maximum tokens to generate (model-dependent; default unbounded within budget)",
+                },
+                "temperature": {
+                    "type": "number",
+                    "description": "Sampling temperature 0.0-2.0 (default model-specific)",
+                    "minimum": 0.0,
+                    "maximum": 2.0,
+                },
+            },
+            "required": ["prompt"],
+        },
+    ),
 ]
 
 
@@ -952,6 +1025,102 @@ async def handle_prsm_training_status(arguments: Dict[str, Any]) -> str:
         )
 
 
+async def handle_prsm_inference(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_inference — TEE-attested model inference with verifiable receipt.
+
+    Builds an InferenceRequest, calls the node API at /compute/inference, and
+    formats the response. Per Phase 3.x.1 design plan, the API endpoint is
+    Task 5 (pending); when unavailable, a clear error is returned. The handler
+    itself (this Task 6) ships now so MCP clients can begin exposing the tool
+    surface and developers can wire it into their MCP configs.
+    """
+    prompt = arguments.get("prompt", "")
+    model_id = arguments.get("model_id", "mock-llama-3-8b")
+    budget = arguments.get("budget_ftns", 1.0)
+    privacy_tier = arguments.get("privacy_tier", "standard")
+    content_tier = arguments.get("content_tier", "A")
+    max_tokens = arguments.get("max_tokens")
+    temperature = arguments.get("temperature")
+
+    if not prompt:
+        return "Missing required 'prompt' argument."
+
+    # Enforce minimum budget — same pattern as handle_prsm_analyze
+    if budget <= 0:
+        return (
+            "PRSM inference requires an FTNS budget. "
+            "Set budget_ftns to at least 0.01 FTNS.\n\n"
+            "Tip: Use prsm_quote first to estimate the cost for your model + prompt."
+        )
+    if budget < MINIMUM_BUDGET_FTNS:
+        return (
+            f"Budget {budget} FTNS is below minimum ({MINIMUM_BUDGET_FTNS} FTNS). "
+            f"Use prsm_quote to estimate the required budget."
+        )
+
+    request_payload: Dict[str, Any] = {
+        "prompt": prompt,
+        "model_id": model_id,
+        "budget_ftns": budget,
+        "privacy_tier": privacy_tier,
+        "content_tier": content_tier,
+    }
+    if max_tokens is not None:
+        request_payload["max_tokens"] = int(max_tokens)
+    if temperature is not None:
+        request_payload["temperature"] = float(temperature)
+
+    try:
+        result = await _call_node_api("POST", "/compute/inference", request_payload)
+    except Exception as e:
+        return (
+            f"PRSM inference failed: {e}.\n"
+            f"Possible causes:\n"
+            f"  • PRSM node not running (start with: prsm node start)\n"
+            f"  • /compute/inference endpoint not yet deployed (Phase 3.x.1 Task 5 pending; "
+            f"see docs/2026-04-26-phase3.x.1-mcp-server-completion-design-plan.md)\n"
+            f"  • Network connectivity issue between MCP server and node API"
+        )
+
+    # Surface API-level errors with helpful context
+    if isinstance(result, dict) and result.get("error"):
+        return f"Inference rejected: {result['error']}"
+    if not isinstance(result, dict) or not result.get("success"):
+        return (
+            f"Inference failed: {result.get('error') if isinstance(result, dict) else 'unknown error'}"
+        )
+
+    # Format successful response with cost reconciliation footer per Phase 3.x.1
+    # design plan §3.4 (per-tool billing visibility).
+    output = result.get("output", "")
+    receipt = result.get("receipt") or {}
+
+    lines = [
+        "PRSM Inference Result",
+        "=====================",
+        "",
+        output,
+        "",
+        "—" * 60,
+        f"Job ID:           {receipt.get('job_id', 'unknown')}",
+        f"Model:            {receipt.get('model_id', model_id)}",
+        f"Privacy tier:     {receipt.get('privacy_tier', privacy_tier)}"
+        f" (ε={receipt.get('epsilon_spent', '?')})",
+        f"Content tier:     {receipt.get('content_tier', content_tier)}",
+        f"TEE backend:      {receipt.get('tee_type', 'unknown')}",
+        f"Cost:             {receipt.get('cost_ftns', '?')} FTNS",
+        f"Duration:         {receipt.get('duration_seconds', '?')}s",
+        f"Settler:          {receipt.get('settler_node_id', 'unknown')}",
+        "—" * 60,
+    ]
+    if receipt.get("settler_signature"):
+        lines.append(
+            "Receipt is signed. Verify with: prsm.compute.inference.verify_receipt("
+            "receipt, public_key_b64=<settler_pubkey>)"
+        )
+    return "\n".join(lines)
+
+
 # Tool dispatch map
 TOOL_HANDLERS = {
     "prsm_analyze": handle_prsm_analyze,
@@ -970,6 +1139,7 @@ TOOL_HANDLERS = {
     "prsm_settlement_stats": handle_prsm_settlement_stats,
     "prsm_privacy_status": handle_prsm_privacy_status,
     "prsm_training_status": handle_prsm_training_status,
+    "prsm_inference": handle_prsm_inference,
 }
 
 
@@ -979,12 +1149,14 @@ def create_server() -> Server:
     """Create and configure the PRSM MCP server."""
     server = Server(
         name="prsm",
-        version="0.38.0",
+        version="0.39.0",
         instructions=(
             "PRSM is a decentralized AI compute network. Use these tools to "
-            "submit analysis queries, estimate costs, browse datasets, and "
-            "monitor node health. The network dispatches WASM mobile agents "
-            "to edge nodes for distributed computation."
+            "submit analysis queries, run TEE-attested inference, estimate "
+            "costs, browse datasets, and monitor node health. The network "
+            "dispatches WASM mobile agents to edge nodes for distributed "
+            "computation, and runs sharded inference under TEE attestation "
+            "for verifiable confidential compute."
         ),
     )
 

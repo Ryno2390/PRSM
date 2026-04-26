@@ -8,7 +8,7 @@ PRSM is a peer-to-peer protocol that unifies three resource markets — data, co
 
 [![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://pypi.org/project/prsm-network/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-16-blue.svg)](#mcp-integration)
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-17-blue.svg)](#mcp-integration)
 
 > **Community** — Join us on [Discord](https://discord.gg/R8dhCBCUp3) for dev / node-operator / governance discussion. GitHub Discussions enabled on this repo for async Q&A + proposals.
 
@@ -95,7 +95,7 @@ Third-party LLM (Claude/GPT/local): calls prsm_analyze via MCP
 
 ## MCP Integration
 
-Any LLM can use PRSM as a compute backend via the Model Context Protocol. **16 tools** are exposed:
+Any LLM can use PRSM as a compute backend via the Model Context Protocol. **17 tools** are exposed:
 
 ```bash
 prsm mcp-server    # Start the MCP server
@@ -111,6 +111,7 @@ Then Claude (or any MCP-compatible LLM) can:
 | Tool | What It Does |
 |------|-------------|
 | `prsm_analyze` | Full Ring 1-10 pipeline — query in, answer out |
+| `prsm_inference` | TEE-attested model inference with verifiable signed receipts |
 | `prsm_quote` | Cost estimate before committing (free) |
 | `prsm_create_agent` | Build custom agent with 11 data operations |
 | `prsm_dispatch_agent` | Execute agent on the network |
