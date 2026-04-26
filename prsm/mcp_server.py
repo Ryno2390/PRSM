@@ -23,10 +23,11 @@ Configure in Claude Desktop:
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
-from typing import Any, Dict, Sequence
+from typing import Any, Awaitable, Callable, Dict, Optional, Sequence
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -34,6 +35,26 @@ from mcp.types import (
     Tool,
     TextContent,
 )
+
+
+# Streaming helper type — callable that emits progress notifications when the
+# MCP client supplied a `progressToken` in its request meta. Phase 3.x.1 Task 8.
+#
+# Signature: emit(message: str, progress: float, total: float | None = None) -> None
+# Handlers accepting an `emit_progress` keyword argument receive a real emitter
+# during streaming requests, or None for non-streaming requests. They use it
+# inline like:
+#
+#     async def handle_prsm_inference(args, *, emit_progress=None):
+#         if emit_progress: await emit_progress("Submitting...", 1, 4)
+#         result = await _call_node_api(...)
+#         if emit_progress: await emit_progress("Inference complete.", 4, 4)
+#         return format_response(result)
+#
+# Progress notifications are SIDE-CHANNEL — they do NOT replace the final
+# TextContent response. Non-streaming clients see only the final return value;
+# streaming clients see both the progress updates and the final response.
+ProgressEmitter = Callable[[str, float, Optional[float]], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
@@ -499,8 +520,18 @@ async def _call_node_api(method: str, path: str, data: Dict = None) -> Dict[str,
 MINIMUM_BUDGET_FTNS = 0.01
 
 
-async def handle_prsm_analyze(arguments: Dict[str, Any]) -> str:
-    """Handle prsm_analyze tool call."""
+async def handle_prsm_analyze(
+    arguments: Dict[str, Any],
+    *,
+    emit_progress: Optional[ProgressEmitter] = None,
+) -> str:
+    """Handle prsm_analyze tool call.
+
+    Streaming-aware (Phase 3.x.1 Task 8): if the MCP client included a
+    progressToken, intermediate stages emit as progress notifications.
+    Non-streaming clients see only the final return value (unchanged
+    backwards-compatible behavior).
+    """
     query = arguments.get("query", "")
     budget = arguments.get("budget_ftns", 10.0)
     privacy = arguments.get("privacy_level", "standard")
@@ -519,16 +550,28 @@ async def handle_prsm_analyze(arguments: Dict[str, Any]) -> str:
             f"Use prsm_quote to estimate the required budget for your query."
         )
 
+    if emit_progress:
+        await emit_progress("Submitting query to PRSM gateway...", 1.0, 4.0)
+
     try:
+        if emit_progress:
+            await emit_progress("Dispatching agents to swarm...", 2.0, 4.0)
+
         result = await _call_node_api("POST", "/compute/forge", {
             "query": query,
             "budget_ftns": budget,
             "privacy_level": privacy,
         })
 
+        if emit_progress:
+            await emit_progress("Aggregating swarm results...", 3.0, 4.0)
+
         response = result.get("response", "")
         route = result.get("route", "unknown")
         job_id = result.get("job_id", "")
+
+        if emit_progress:
+            await emit_progress("Analysis complete.", 4.0, 4.0)
 
         return (
             f"PRSM Analysis Result (route: {route})\n"
@@ -1025,14 +1068,24 @@ async def handle_prsm_training_status(arguments: Dict[str, Any]) -> str:
         )
 
 
-async def handle_prsm_inference(arguments: Dict[str, Any]) -> str:
+async def handle_prsm_inference(
+    arguments: Dict[str, Any],
+    *,
+    emit_progress: Optional[ProgressEmitter] = None,
+) -> str:
     """Handle prsm_inference — TEE-attested model inference with verifiable receipt.
 
     Builds an InferenceRequest, calls the node API at /compute/inference, and
-    formats the response. Per Phase 3.x.1 design plan, the API endpoint is
-    Task 5 (pending); when unavailable, a clear error is returned. The handler
-    itself (this Task 6) ships now so MCP clients can begin exposing the tool
-    surface and developers can wire it into their MCP configs.
+    formats the response with cost-reconciliation footer.
+
+    Streaming-aware (Phase 3.x.1 Task 8): if the MCP client included a
+    progressToken, intermediate stages emit as progress notifications:
+      1. Building inference request
+      2. Locking escrow + dispatching to executor
+      3. Inference execution (TEE-attested)
+      4. Receipt signing + escrow settlement
+
+    Non-streaming clients see only the final formatted response.
     """
     prompt = arguments.get("prompt", "")
     model_id = arguments.get("model_id", "mock-llama-3-8b")
@@ -1058,6 +1111,9 @@ async def handle_prsm_inference(arguments: Dict[str, Any]) -> str:
             f"Use prsm_quote to estimate the required budget."
         )
 
+    if emit_progress:
+        await emit_progress(f"Building inference request for model {model_id}...", 1.0, 4.0)
+
     request_payload: Dict[str, Any] = {
         "prompt": prompt,
         "model_id": model_id,
@@ -1069,6 +1125,9 @@ async def handle_prsm_inference(arguments: Dict[str, Any]) -> str:
         request_payload["max_tokens"] = int(max_tokens)
     if temperature is not None:
         request_payload["temperature"] = float(temperature)
+
+    if emit_progress:
+        await emit_progress("Locking FTNS escrow and dispatching to TEE executor...", 2.0, 4.0)
 
     try:
         result = await _call_node_api("POST", "/compute/inference", request_payload)
@@ -1089,6 +1148,10 @@ async def handle_prsm_inference(arguments: Dict[str, Any]) -> str:
         return (
             f"Inference failed: {result.get('error') if isinstance(result, dict) else 'unknown error'}"
         )
+
+    if emit_progress:
+        await emit_progress("Inference complete; signing receipt...", 3.0, 4.0)
+        await emit_progress("Settling escrow and finalizing...", 4.0, 4.0)
 
     # Format successful response with cost reconciliation footer per Phase 3.x.1
     # design plan §3.4 (per-tool billing visibility).
@@ -1171,12 +1234,76 @@ def create_server() -> Server:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
         try:
-            result_text = await handler(arguments or {})
+            # Streaming opt-in: handlers that accept an `emit_progress` keyword
+            # parameter receive a real emitter when the MCP client supplied a
+            # progressToken in its request meta. Per Phase 3.x.1 Task 8.
+            kwargs: Dict[str, Any] = {}
+            if _handler_accepts_emit_progress(handler):
+                emitter = _build_progress_emitter(server)
+                # Pass the emitter even when None — handlers should treat None
+                # as "client didn't ask for streaming." Passing it consistently
+                # keeps the handler's kwargs surface stable across calls.
+                kwargs["emit_progress"] = emitter
+
+            result_text = await handler(arguments or {}, **kwargs)
             return [TextContent(type="text", text=result_text)]
         except Exception as e:
             return [TextContent(type="text", text=f"Error: {str(e)}")]
 
     return server
+
+
+def _handler_accepts_emit_progress(handler: Callable) -> bool:
+    """True iff `handler` accepts an `emit_progress` keyword parameter.
+
+    Used to opt handlers into streaming without changing the dispatcher
+    contract for the other 15 tools.
+    """
+    try:
+        sig = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return False
+    return "emit_progress" in sig.parameters
+
+
+def _build_progress_emitter(server: Server) -> Optional[ProgressEmitter]:
+    """Build a ProgressEmitter from the current MCP request context.
+
+    Returns None when:
+      - No request_context is active (server isn't currently handling a request)
+      - Client did not provide a progressToken in request meta
+
+    Returns a callable when the client opted into progress streaming. The
+    callable safely no-ops if the underlying session call raises (we don't
+    want a failed progress notification to break the tool response).
+    """
+    try:
+        ctx = server.request_context
+    except Exception:
+        return None
+
+    if ctx is None or ctx.meta is None:
+        return None
+    progress_token = getattr(ctx.meta, "progressToken", None)
+    if progress_token is None:
+        return None
+
+    session = ctx.session
+
+    async def _emit(message: str, progress: float, total: Optional[float] = None) -> None:
+        try:
+            await session.send_progress_notification(
+                progress_token=progress_token,
+                progress=progress,
+                total=total,
+                message=message,
+            )
+        except Exception as exc:
+            # Log but don't propagate — a dropped progress notification
+            # should not break the tool response.
+            logger.warning(f"send_progress_notification failed: {exc}")
+
+    return _emit
 
 
 async def run_server():
