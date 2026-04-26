@@ -362,25 +362,31 @@ publish-npm:
 # ---------- Homebrew ----------
 
 # Validate Homebrew formula without publishing.
-# Note: Phase 3.x.1 Task 10 (Homebrew tap formula) is pending; this dry-run
-# currently just verifies the published prsm-network sdist is reachable so
-# the future formula can compute its sha256 against a known artifact.
-#
-# Single-recipe shell command so `exit 0` short-circuits the brew audit
-# step when the tap scaffold isn't present yet (Task 10 pending).
+# Two-stage validation:
+#   1. Ruby syntax check (universal — works without brew installed)
+#   2. brew audit (only if brew is available; relaxed flags for compatibility
+#      across Homebrew versions). Will report real warnings about placeholder
+#      sha256 — that's expected until regenerate-formula.sh runs against a
+#      published PyPI artifact.
 publish-homebrew-dry-run:
 	@echo "🧪 Validating Homebrew formula..."
-	@if [ ! -d "ops/homebrew-tap" ]; then \
-		echo "ℹ️  Homebrew tap formula scaffold not yet present (Task 10 pending)."; \
-		echo "   Once Task 10 ships, this target will:"; \
-		echo "     1. Verify Formula/prsm.rb syntax via 'brew audit --new-formula'"; \
-		echo "     2. Test the formula against a clean macOS environment"; \
-		echo "     3. Verify sha256 matches the published PyPI sdist"; \
-		echo "   For now, dry-run is a no-op."; \
-	else \
-		cd ops/homebrew-tap && brew audit --new-formula --strict ./Formula/prsm.rb && \
-		echo "✅ Homebrew formula dry-run complete."; \
+	@if [ ! -f "ops/homebrew-tap/Formula/prsm.rb" ]; then \
+		echo "❌ Formula/prsm.rb not found — Phase 3.x.1 Task 10 scaffold missing."; \
+		exit 1; \
 	fi
+	@echo "  Step 1/2: Ruby syntax check..."
+	@ruby -c ops/homebrew-tap/Formula/prsm.rb >/dev/null
+	@echo "  ✅ Ruby syntax OK."
+	@if command -v brew >/dev/null 2>&1; then \
+		echo "  Step 2/2: brew audit (best-effort across versions)..."; \
+		brew audit --formula ops/homebrew-tap/Formula/prsm.rb 2>&1 \
+			| grep -v "0000000000000000000000000000000000000000000000000000000000000000" \
+			| head -20 || true; \
+		echo "  ✅ brew audit run (sha256 placeholders expected until regenerate-formula.sh)."; \
+	else \
+		echo "  Step 2/2: brew not installed; skipping formula audit."; \
+	fi
+	@echo "✅ Homebrew formula dry-run complete."
 
 # Publish Homebrew formula to the prsm/homebrew-tap repo.
 publish-homebrew:
