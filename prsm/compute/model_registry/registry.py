@@ -46,7 +46,14 @@ from prsm.node.identity import NodeIdentity
 # would surprise a typical filesystem. Publishers picking model/shard
 # ids that don't match this need to use the InMemoryRegistry or hash
 # the id themselves before registration.
+#
+# IMPORTANT: the regex alone permits the bare strings "." and ".." (each
+# is one or more characters from the allowlist). Both are illegal as
+# directory names because they resolve to the parent or current dir.
+# _validate_fs_id() rejects them explicitly; do not loosen this without
+# the corresponding `path.is_relative_to(root)` defense-in-depth check.
 _SAFE_FS_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+_RESERVED_FS_NAMES = frozenset({".", ".."})
 
 
 def _validate_fs_id(kind: str, value: str) -> None:
@@ -55,6 +62,11 @@ def _validate_fs_id(kind: str, value: str) -> None:
         raise ValueError(
             f"{kind}={value!r} unsafe for filesystem registry: must match "
             f"{_SAFE_FS_ID.pattern} (got non-conforming characters)"
+        )
+    if value in _RESERVED_FS_NAMES:
+        raise ValueError(
+            f"{kind}={value!r} is a reserved filesystem name "
+            f"(would resolve to current/parent dir and escape registry root)"
         )
 
 
@@ -363,6 +375,29 @@ class FilesystemModelRegistry(ModelRegistry):
     Concurrent writers on the same root may interleave shards from
     different registrations; the last-writer-wins on the manifest
     means the orphaned shards waste disk but don't corrupt reads.
+
+    SECURITY — TRUST BOUNDARY:
+        The registry root is assumed to be a local trust boundary.
+        An attacker with write access to ``<root>/<model_id>/`` can
+        replace ``publisher.pubkey`` AND re-sign ``manifest.json``
+        under their own key — the registry will happily verify the
+        substitute. This is acceptable for a node-local registry
+        protected by filesystem permissions; it is NOT acceptable
+        as a cross-node chain-of-custody anchor. Cross-node
+        verification requires the on-chain manifest anchor planned
+        for Phase 3.x.3, where the publisher's public key resolves
+        from publisher_node_id via an authoritative source rather
+        than a sidecar file.
+
+    WRITE-ORDER INVARIANT (do not change without updating tests):
+        register() writes shards/*.bin → publisher.pubkey →
+        manifest.json. The manifest is the publication marker —
+        list_models() and get() both gate on its presence. A crashed
+        registration leaves either an incomplete-but-invisible
+        directory (no manifest) or a complete model. Reordering
+        could create a manifest-present-but-pubkey-missing window;
+        get() would then raise ManifestVerificationError, which is
+        safe but visible to readers as a pseudo-corruption.
     """
 
     def __init__(self, root: Union[str, Path]) -> None:
@@ -515,9 +550,20 @@ class FilesystemModelRegistry(ModelRegistry):
     # -- internals --
 
     def _model_dir(self, model_id: str) -> Path:
-        # _validate_fs_id already ran in the public methods; this is an
-        # internal helper, but we use the validated id only.
-        return self._root / model_id
+        # Pre: model_id was validated by _validate_fs_id() in the
+        # public method. Defense in depth: even if a regression in the
+        # validator someday lets a traversal slip through, the
+        # is_relative_to() check below stops the request before any
+        # filesystem state changes. Always raise ValueError on escape
+        # — same exception type as _validate_fs_id() for caller parity.
+        candidate = (self._root / model_id).resolve()
+        root_resolved = self._root.resolve()
+        if not candidate.is_relative_to(root_resolved):
+            raise ValueError(
+                f"model_id={model_id!r} resolves to {candidate} which "
+                f"escapes registry root {root_resolved}"
+            )
+        return candidate
 
     def _load_manifest_or_raise(self, model_id: str) -> ModelManifest:
         manifest_path = self._model_dir(model_id) / _MANIFEST_FILENAME

@@ -99,8 +99,11 @@ def verify_manifest(
     try:
         if identity is not None:
             return identity.verify(payload, signature_b64)
-        # public_key_b64 is not None per the early-return above
-        assert public_key_b64 is not None  # for type-checkers
+        # public_key_b64 is not None per the early-return above; the
+        # explicit check here doesn't disappear under `python -O` the
+        # way a bare `assert` would.
+        if public_key_b64 is None:
+            return False
         return verify_signature(public_key_b64, payload, signature_b64)
     except Exception:
         # NodeIdentity.verify / verify_signature should already return

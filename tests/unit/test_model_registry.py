@@ -479,6 +479,52 @@ class TestFilesystemRegistryRegister:
         with pytest.raises(ValueError, match="shard_id"):
             fs_registry.register(m, identity=identity)
 
+    def test_dotdot_model_id_rejected(self, fs_registry, identity, tmp_path):
+        # Round 2 review HIGH finding: the regex [A-Za-z0-9._-]+
+        # accepts the bare string ".." (each char is in the allowlist).
+        # Rejected explicitly via _RESERVED_FS_NAMES + defense-in-depth
+        # is_relative_to(root) check in _model_dir.
+        bad_model = ShardedModel(
+            model_id="..",
+            model_name="escape attempt",
+            total_shards=1,
+            shards=[_make_shard("..", 0, 1)],
+        )
+        with pytest.raises(ValueError, match="reserved|escapes"):
+            fs_registry.register(bad_model, identity=identity)
+        # Verify nothing was written outside the registry root
+        parent = tmp_path.parent
+        for entry in parent.iterdir():
+            assert entry == tmp_path or "manifest.json" not in str(entry)
+
+    def test_dot_model_id_rejected(self, fs_registry, identity):
+        # Bare "." would map to <root>/. (current dir). Same defense.
+        bad_model = ShardedModel(
+            model_id=".",
+            model_name="escape attempt",
+            total_shards=1,
+            shards=[_make_shard(".", 0, 1)],
+        )
+        with pytest.raises(ValueError, match="reserved|escapes"):
+            fs_registry.register(bad_model, identity=identity)
+
+    def test_dotdot_shard_id_rejected(self, fs_registry, identity):
+        # Same finding applies to shard_id — a malicious shard_id of
+        # ".." would escape the model's shards/ subdirectory.
+        bad_shard = _make_shard("ok-model", 0, 1)
+        bad_shard.shard_id = ".."
+        m = ShardedModel(
+            model_id="ok-model", model_name="ok", total_shards=1, shards=[bad_shard]
+        )
+        with pytest.raises(ValueError, match="reserved|shard_id"):
+            fs_registry.register(m, identity=identity)
+
+    def test_get_with_dotdot_rejected(self, fs_registry):
+        # The read path also runs _validate_fs_id, so bare ".." raises
+        # before any disk access.
+        with pytest.raises(ValueError, match="reserved"):
+            fs_registry.get("..")
+
 
 class TestFilesystemRegistryGet:
     def test_get_returns_byte_identical_model(

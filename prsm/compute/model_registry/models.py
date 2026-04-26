@@ -121,18 +121,12 @@ class ModelManifest:
         # this, two manifests with the same shards in different orders
         # would produce different signing payloads → different
         # signatures → false negatives at verify time.
-        if not isinstance(self.shards, tuple):
-            shards_tuple = tuple(
-                s if isinstance(s, ManifestShardEntry) else ManifestShardEntry.from_dict(s)
-                for s in self.shards
-            )
-        else:
-            shards_tuple = tuple(
-                s if isinstance(s, ManifestShardEntry) else ManifestShardEntry.from_dict(s)
-                for s in self.shards
-            )
-        # Sort by shard_index for canonical order
-        shards_sorted = tuple(sorted(shards_tuple, key=lambda s: s.shard_index))
+        # Accepts: tuple, list, generator, list-of-dict (JSON load path).
+        coerced = tuple(
+            s if isinstance(s, ManifestShardEntry) else ManifestShardEntry.from_dict(s)
+            for s in self.shards
+        )
+        shards_sorted = tuple(sorted(coerced, key=lambda s: s.shard_index))
         object.__setattr__(self, "shards", shards_sorted)
 
         if not isinstance(self.total_shards, int):
