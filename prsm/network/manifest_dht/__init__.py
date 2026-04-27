@@ -26,6 +26,10 @@ from prsm.network.manifest_dht.dht_client import (
     SendMessageFn,
     TransportFailureError,
 )
+from prsm.network.manifest_dht.dht_server import (
+    UNKNOWN_REQUEST_ID,
+    ManifestDHTServer,
+)
 from prsm.network.manifest_dht.local_index import LocalManifestIndex
 from prsm.network.manifest_dht.protocol import (
     DHT_PROTOCOL_VERSION,
@@ -78,4 +82,7 @@ __all__ = [
     "DHTClientError",
     "ManifestNotFoundError",
     "TransportFailureError",
+    # DHT server (Task 4)
+    "ManifestDHTServer",
+    "UNKNOWN_REQUEST_ID",
 ]
