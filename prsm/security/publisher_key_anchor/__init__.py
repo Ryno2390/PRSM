@@ -26,11 +26,20 @@ from prsm.security.publisher_key_anchor.exceptions import (
     PublisherKeyAnchorError,
     PublisherNotRegisteredError,
 )
+from prsm.security.publisher_key_anchor.verifiers import (
+    verify_entry_with_anchor,
+    verify_manifest_with_anchor,
+    verify_receipt_with_anchor,
+)
 
 __all__ = [
     # Client (Task 3)
     "PublisherKeyAnchorClient",
     "PUBLISHER_KEY_ANCHOR_ABI",
+    # Verifier wrappers (Task 4)
+    "verify_manifest_with_anchor",
+    "verify_entry_with_anchor",
+    "verify_receipt_with_anchor",
     # Exceptions
     "PublisherKeyAnchorError",
     "PublisherAlreadyRegisteredError",
