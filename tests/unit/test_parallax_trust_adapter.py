@@ -562,7 +562,12 @@ class TestTrustStack:
             ),
         )
 
-    def test_filter_pool_applies_anchor_only(self):
+    def test_filter_pool_applies_anchor_and_stake_admission(self):
+        """filter_pool enforces BOTH anchor verification AND stake
+        eligibility. The latter prevents the upstream router's
+        roofline fallback from routing to a zero-stake GPU based on
+        advertised hardware specs alone (caught by Phase 3.x.6 Task 7
+        E2E)."""
         stack = self._stack(
             registered={"alice": "pk", "bob": "pk"},
             stakes={"alice": 1_000_000, "bob": 0},
@@ -571,9 +576,29 @@ class TestTrustStack:
 
         out = stack.filter_pool(gpus)
 
-        # ghost is unregistered → excluded. bob's zero stake doesn't
-        # filter at the pool level (that's Adapter C's job at the
-        # profile-source layer).
+        # ghost is unregistered → excluded by anchor.
+        # bob has zero stake → excluded by stake-admission.
+        # Only alice survives both filters.
+        assert {g.node_id for g in out} == {"alice"}
+
+    def test_filter_pool_passes_through_when_profile_lacks_is_eligible(self):
+        """If the wired profile_source doesn't expose ``is_eligible``,
+        only anchor filtering applies (back-compat with custom
+        ProfileSource implementations)."""
+        # Build a TrustStack whose profile_source is a bare
+        # InMemoryProfileSource (no is_eligible method).
+        stack = TrustStack(
+            anchor_verify=AnchorVerifyAdapter(
+                anchor=FakeAnchor({"alice": "pk", "bob": "pk"})
+            ),
+            tier_gate=TierGateAdapter(),
+            profile_source=InMemoryProfileSource(),
+            consensus_hook=ConsensusMismatchHook(
+                submitter=RecordingSubmitter(), sample_rate=0.0
+            ),
+        )
+        out = stack.filter_pool([_gpu("alice"), _gpu("bob"), _gpu("ghost")])
+        # ghost excluded by anchor; alice + bob both pass (no stake gate).
         assert {g.node_id for g in out} == {"alice", "bob"}
 
     def test_filter_for_request_applies_tier_gate(self):
@@ -624,14 +649,16 @@ class TestTrustStack:
             _gpu("ghost", tier_attestation="tier-sgx"),
         ]
 
-        # Step 1: pool-level anchor filter → drops ghost.
+        # Step 1: pool-level filter → ghost excluded by anchor; bob
+        # excluded by stake-admission (zero stake). Only alice remains.
         post_anchor = stack.filter_pool(pool)
-        assert {g.node_id for g in post_anchor} == {"alice", "bob"}
+        assert {g.node_id for g in post_anchor} == {"alice"}
 
-        # Step 2: per-request tier filter (HIGH privacy → all hardware) → both pass.
+        # Step 2: per-request tier filter (HIGH privacy → all hardware).
         post_tier = stack.filter_for_request(post_anchor, PrivacyLevel.HIGH)
-        assert {g.node_id for g in post_tier} == {"alice", "bob"}
+        assert {g.node_id for g in post_tier} == {"alice"}
 
-        # Step 3: profile lookups — alice gets full speed, bob excluded by stake.
+        # Step 3: profile lookups — alice gets full speed, bob (zero
+        # stake) returns None even if queried directly.
         assert stack.profile_source.get_snapshot("alice") is not None
         assert stack.profile_source.get_snapshot("bob") is None

@@ -273,6 +273,19 @@ class StakeWeightedTrustAdapter:
                 ".get_stake(node_id) → int"
             )
 
+    def is_eligible(self, node_id: str) -> bool:
+        """Returns True iff the node's stake meets the participation
+        threshold. Used by ``TrustStack.filter_pool`` to drop zero-stake
+        GPUs from the allocation pool BEFORE Phase-1 — without this
+        filter the upstream router can fall back to a roofline latency
+        estimate from hardware specs and route to a zero-stake liar
+        anyway, defeating the design-plan intent that zero-stake GPUs
+        are 'effectively excluded from routing'."""
+        return (
+            self.stake_lookup.get_stake(node_id)
+            >= self.min_stake_for_participation
+        )
+
     def get_snapshot(self, node_id: str) -> Optional[ProfileSnapshot]:
         """Implements ``ProfileSource``. Falls through to inner source
         for the raw snapshot, then rescales latency by stake confidence."""
@@ -457,10 +470,21 @@ class TrustStack:
     consensus_hook: ConsensusMismatchHook
 
     def filter_pool(self, gpus: Sequence[ParallaxGPU]) -> List[ParallaxGPU]:
-        """Pre-Phase-1: Adapter A only. Tier filtering happens later
-        per-request because the privacy tier is a request property,
-        not a pool property."""
-        return self.anchor_verify.filter(gpus)
+        """Pre-Phase-1 pool filter: anchor verification + stake-eligibility
+        admission. Tier filtering happens later per-request because the
+        privacy tier is a request property, not a pool property.
+
+        Stake admission piggybacks on the stake-weighted profile source's
+        ``is_eligible`` method when present (any ``ProfileSource``
+        without that method passes through unchanged). This closes the
+        design-plan gap where Adapter C only rescaled snapshots — the
+        router's roofline fallback would otherwise route to a zero-
+        stake liar based on advertised hardware specs alone."""
+        anchor_filtered = self.anchor_verify.filter(gpus)
+        is_eligible = getattr(self.profile_source, "is_eligible", None)
+        if not callable(is_eligible):
+            return anchor_filtered
+        return [gpu for gpu in anchor_filtered if is_eligible(gpu.node_id)]
 
     def filter_for_request(
         self,
