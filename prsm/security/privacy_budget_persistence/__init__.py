@@ -35,6 +35,7 @@ from prsm.security.privacy_budget_persistence.signing import (
     verify_entry,
 )
 from prsm.security.privacy_budget_persistence.store import (
+    FilesystemPrivacyBudgetStore,
     InMemoryPrivacyBudgetStore,
     JournalCorruptionError,
     OutOfOrderAppendError,
@@ -54,9 +55,10 @@ __all__ = [
     "is_signed",
     "sign_entry",
     "verify_entry",
-    # Store (Task 3)
+    # Store (Tasks 3-4)
     "PrivacyBudgetStore",
     "InMemoryPrivacyBudgetStore",
+    "FilesystemPrivacyBudgetStore",
     "hash_entry_payload",
     # Exceptions (Task 3)
     "PrivacyBudgetStoreError",

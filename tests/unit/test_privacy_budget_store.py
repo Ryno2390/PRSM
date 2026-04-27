@@ -16,6 +16,7 @@ import hashlib
 import pytest
 
 from prsm.security.privacy_budget_persistence import (
+    FilesystemPrivacyBudgetStore,
     GENESIS_PREV_HASH,
     InMemoryPrivacyBudgetStore,
     JournalCorruptionError,
@@ -26,6 +27,7 @@ from prsm.security.privacy_budget_persistence import (
     hash_entry_payload,
     sign_entry,
 )
+import json
 from prsm.node.identity import NodeIdentity, generate_node_identity
 
 
@@ -351,3 +353,340 @@ class TestRoundTrip:
         # The exact contract Task 5 needs: append → replay → verify_chain
         # all the way through.
         assert store.verify_chain(identity.public_key_b64) is True
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# FilesystemPrivacyBudgetStore — construction
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def fs_store(tmp_path, identity):
+    return FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+
+
+class TestFilesystemConstruction:
+    def test_missing_root_raises(self, tmp_path, identity):
+        bogus = tmp_path / "does-not-exist"
+        with pytest.raises(FileNotFoundError):
+            FilesystemPrivacyBudgetStore(bogus, identity.public_key_b64)
+
+    def test_root_is_file_raises(self, tmp_path, identity):
+        f = tmp_path / "im-a-file"
+        f.write_text("not a dir")
+        with pytest.raises(NotADirectoryError):
+            FilesystemPrivacyBudgetStore(f, identity.public_key_b64)
+
+    def test_accepts_str_path(self, tmp_path, identity):
+        store = FilesystemPrivacyBudgetStore(str(tmp_path), identity.public_key_b64)
+        assert len(store) == 0
+
+    def test_first_construction_writes_pubkey_sidecar(
+        self, tmp_path, identity
+    ):
+        FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        sidecar = tmp_path / "node.pubkey"
+        assert sidecar.exists()
+        assert sidecar.read_text().strip() == identity.public_key_b64
+        assert (tmp_path / "entries").is_dir()
+
+    def test_second_construction_validates_pubkey(
+        self, tmp_path, identity, other_identity
+    ):
+        # Same root, same pubkey → succeeds.
+        FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        # Same root, DIFFERENT pubkey → JournalCorruptionError.
+        with pytest.raises(JournalCorruptionError, match="doesn't match"):
+            FilesystemPrivacyBudgetStore(
+                tmp_path, other_identity.public_key_b64
+            )
+
+    def test_missing_pubkey_with_existing_entries_raises(
+        self, tmp_path, identity
+    ):
+        # Bootstrap a journal with entries, then delete the sidecar.
+        # Reopening must refuse.
+        store = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        chain = _build_signed_chain(identity, 1)
+        store.append(chain[0])
+        (tmp_path / "node.pubkey").unlink()
+        with pytest.raises(JournalCorruptionError, match="non-empty.*pubkey is missing"):
+            FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+
+    def test_corrupt_latest_json_raises(self, tmp_path, identity):
+        # Empty journal — no latest.json yet, but creating one with
+        # garbage should be caught.
+        FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        (tmp_path / "latest.json").write_text("{not valid json}")
+        with pytest.raises(JournalCorruptionError, match="latest.json"):
+            FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+
+    def test_latest_json_missing_field_raises(self, tmp_path, identity):
+        FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        (tmp_path / "latest.json").write_text(json.dumps({"sequence_number": 0}))
+        with pytest.raises(JournalCorruptionError, match="latest.json"):
+            FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+
+    def test_latest_json_wrong_hash_length_raises(self, tmp_path, identity):
+        FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        (tmp_path / "latest.json").write_text(
+            json.dumps({"sequence_number": 0, "entry_hash": "ab"})
+        )
+        with pytest.raises(JournalCorruptionError, match="32 bytes"):
+            FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Filesystem append/read parity with InMemoryPrivacyBudgetStore
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestFilesystemAppendRead:
+    def test_basic_append_writes_files(
+        self, fs_store, identity, tmp_path
+    ):
+        chain = _build_signed_chain(identity, 1)
+        fs_store.append(chain[0])
+        assert (tmp_path / "entries" / "000000.json").exists()
+        assert (tmp_path / "latest.json").exists()
+
+    def test_chain_of_three_persisted(
+        self, fs_store, identity, tmp_path
+    ):
+        chain = _build_signed_chain(identity, 3)
+        for e in chain:
+            fs_store.append(e)
+        for i in range(3):
+            assert (tmp_path / "entries" / f"{i:06d}.json").exists()
+        assert len(fs_store) == 3
+
+    def test_latest_json_canonical_format(
+        self, fs_store, identity, tmp_path
+    ):
+        chain = _build_signed_chain(identity, 2)
+        for e in chain:
+            fs_store.append(e)
+        latest = json.loads((tmp_path / "latest.json").read_text())
+        assert latest["sequence_number"] == 1  # 0-indexed
+        assert latest["entry_hash"] == hash_entry_payload(chain[1]).hex()
+
+    def test_replay_byte_equal_to_appended(
+        self, fs_store, identity
+    ):
+        chain = _build_signed_chain(identity, 4)
+        for e in chain:
+            fs_store.append(e)
+        replayed = list(fs_store.replay())
+        for original, returned in zip(chain, replayed):
+            assert original == returned
+
+    def test_sequence_gap_rejected(self, fs_store, identity):
+        chain = _build_signed_chain(identity, 3)
+        fs_store.append(chain[0])
+        with pytest.raises(OutOfOrderAppendError, match="sequence number gap"):
+            fs_store.append(chain[2])
+
+    def test_wrong_prev_hash_rejected(self, fs_store, identity):
+        chain = _build_signed_chain(identity, 1)
+        fs_store.append(chain[0])
+        bad_next = sign_entry(
+            _build_entry(1, prev_entry_hash=hashlib.sha256(b"wrong").digest()),
+            identity,
+        )
+        with pytest.raises(OutOfOrderAppendError, match="prev_entry_hash"):
+            fs_store.append(bad_next)
+
+    def test_failed_append_does_not_advance_state(
+        self, fs_store, identity, tmp_path
+    ):
+        chain = _build_signed_chain(identity, 1)
+        fs_store.append(chain[0])
+        assert len(fs_store) == 1
+        bad_next = sign_entry(
+            _build_entry(2, prev_entry_hash=hash_entry_payload(chain[0])),
+            identity,
+        )
+        with pytest.raises(OutOfOrderAppendError):
+            fs_store.append(bad_next)
+        assert len(fs_store) == 1
+        # No 000002.json on disk
+        assert not (tmp_path / "entries" / "000002.json").exists()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Restart simulation — the whole point of persistence
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestFilesystemRestartSimulation:
+    def test_writes_visible_to_fresh_instance(
+        self, tmp_path, identity
+    ):
+        a = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        chain = _build_signed_chain(identity, 3)
+        for e in chain:
+            a.append(e)
+        # Fresh instance — simulates a process restart
+        b = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        assert len(b) == 3
+        assert b.latest_hash() == hash_entry_payload(chain[-1])
+        replayed = list(b.replay())
+        assert [e.sequence_number for e in replayed] == [0, 1, 2]
+
+    def test_chain_verifies_across_instances(self, tmp_path, identity):
+        a = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        for e in _build_signed_chain(identity, 4):
+            a.append(e)
+        b = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        assert b.verify_chain(identity.public_key_b64) is True
+
+    def test_append_continues_seamlessly_across_instances(
+        self, tmp_path, identity
+    ):
+        # Open A, append 2, close. Open B, append 2 more, all chained.
+        a = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        first_two = _build_signed_chain(identity, 2)
+        for e in first_two:
+            a.append(e)
+
+        b = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        # B's latest_hash must be the hash of A's last entry
+        assert b.latest_hash() == hash_entry_payload(first_two[-1])
+        # Build entries 2 and 3 chained from B's view
+        prev_hash = b.latest_hash()
+        for i in range(2, 4):
+            entry = _build_entry(i, prev_hash)
+            signed = sign_entry(entry, identity)
+            b.append(signed)
+            prev_hash = hash_entry_payload(signed)
+
+        # Reopen as C; full chain (4 entries) verifies
+        c = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        assert len(c) == 4
+        assert c.verify_chain(identity.public_key_b64) is True
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Disk-corruption detection
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestFilesystemCorruption:
+    def test_corrupt_entry_json_detected_on_replay(
+        self, fs_store, identity, tmp_path
+    ):
+        chain = _build_signed_chain(identity, 2)
+        for e in chain:
+            fs_store.append(e)
+        # Corrupt entries/000001.json
+        (tmp_path / "entries" / "000001.json").write_text("{corrupt")
+        b = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        with pytest.raises(JournalCorruptionError):
+            list(b.replay())
+
+    def test_missing_entry_file_detected_on_replay(
+        self, fs_store, identity, tmp_path
+    ):
+        chain = _build_signed_chain(identity, 2)
+        for e in chain:
+            fs_store.append(e)
+        # Delete entries/000001.json — latest.json says sequence=1
+        (tmp_path / "entries" / "000001.json").unlink()
+        b = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        with pytest.raises(JournalCorruptionError, match="missing"):
+            list(b.replay())
+
+    def test_post_write_signature_tamper_caught_by_verify_chain(
+        self, fs_store, identity, tmp_path
+    ):
+        chain = _build_signed_chain(identity, 2)
+        for e in chain:
+            fs_store.append(e)
+        # Corrupt the signature in the on-disk entry
+        entry_path = tmp_path / "entries" / "000001.json"
+        data = json.loads(entry_path.read_text())
+        sig = data["signature"]
+        flipped = f"{int(sig[:2], 16) ^ 0xFF:02x}" + sig[2:]
+        data["signature"] = flipped
+        entry_path.write_text(json.dumps(data, sort_keys=True, indent=2))
+
+        b = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        assert b.verify_chain(identity.public_key_b64) is False
+
+    def test_post_write_field_tamper_caught_by_verify_chain(
+        self, fs_store, identity, tmp_path
+    ):
+        chain = _build_signed_chain(identity, 2)
+        for e in chain:
+            fs_store.append(e)
+        # Reduce the recorded ε on disk → operator dodges budget. Must
+        # be caught at verify_chain.
+        entry_path = tmp_path / "entries" / "000001.json"
+        data = json.loads(entry_path.read_text())
+        data["epsilon"] = data["epsilon"] / 2
+        entry_path.write_text(json.dumps(data, sort_keys=True, indent=2))
+
+        b = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        assert b.verify_chain(identity.public_key_b64) is False
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Sequence-number overflow (documented limitation)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestFilesystemSequenceOverflow:
+    def test_sequence_at_limit_rejected(self, tmp_path, identity):
+        # Manually set up a journal at sequence_number=999999 to test
+        # the overflow guard without actually appending 1M entries.
+        store = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        # Bypass the public API to stub the next-expected-sequence
+        store._count = 1_000_000  # 10**_ENTRY_DIGITS
+        from prsm.security.privacy_budget_persistence.models import GENESIS_PREV_HASH
+        store._latest_hash = GENESIS_PREV_HASH
+
+        oversized = sign_entry(
+            _build_entry(1_000_000, GENESIS_PREV_HASH),
+            identity,
+        )
+        with pytest.raises(ValueError, match="exceeds"):
+            store.append(oversized)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Cross-store parity — same interface tests against both impls
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestStoreParity:
+    """Same interface tests pass against both InMemoryPrivacyBudgetStore
+    and FilesystemPrivacyBudgetStore. Confirms the ABC contract is real."""
+
+    @pytest.fixture(params=["memory", "filesystem"])
+    def parametrized_store(self, request, tmp_path, identity):
+        if request.param == "memory":
+            return InMemoryPrivacyBudgetStore()
+        return FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+
+    def test_empty_replay_yields_nothing(self, parametrized_store):
+        assert list(parametrized_store.replay()) == []
+
+    def test_empty_latest_hash_is_genesis(self, parametrized_store):
+        assert parametrized_store.latest_hash() == GENESIS_PREV_HASH
+
+    def test_append_then_replay_round_trip(
+        self, parametrized_store, identity
+    ):
+        for e in _build_signed_chain(identity, 3):
+            parametrized_store.append(e)
+        replayed = list(parametrized_store.replay())
+        assert len(replayed) == 3
+        assert [e.sequence_number for e in replayed] == [0, 1, 2]
+
+    def test_verify_chain_after_clean_appends(
+        self, parametrized_store, identity
+    ):
+        for e in _build_signed_chain(identity, 3):
+            parametrized_store.append(e)
+        assert parametrized_store.verify_chain(identity.public_key_b64) is True
