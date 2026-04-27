@@ -713,9 +713,27 @@ class FilesystemModelRegistry(ModelRegistry):
         manifest_json = json.dumps(
             manifest.to_dict(), sort_keys=True, indent=2
         )
-        self._atomic_write_text(
-            model_dir / _MANIFEST_FILENAME, manifest_json
-        )
+        manifest_path = model_dir / _MANIFEST_FILENAME
+        self._atomic_write_text(manifest_path, manifest_json)
+
+        # Announce the cached manifest so this node can now serve it
+        # to peers. Without this step the DHT server's local_index
+        # doesn't know about the cached manifest, and a peer asking
+        # "who has model X?" won't see this node — even though we have
+        # the bytes on disk. Best-effort, matching register() semantics:
+        # cache success + announce failure is still a win for the local
+        # caller (they got the manifest), and downgrades to
+        # publisher-only DHT visibility for peers.
+        try:
+            self._dht.announce(model_id, manifest_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FilesystemModelRegistry._fetch_manifest_via_dht: "
+                "post-cache DHT announce for %r failed: %s — local cache "
+                "is intact, but this node won't serve the model to peers",
+                model_id, exc,
+            )
+
         return manifest
 
     def _load_publisher_key_or_raise(self, model_id: str) -> str:
