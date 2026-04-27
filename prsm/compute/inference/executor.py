@@ -324,7 +324,11 @@ class TensorParallelInferenceExecutor(InferenceExecutor):
         # Resolve allow_software_tee_for_privacy in this precedence order:
         #   1. explicit constructor arg (highest)
         #   2. PRSM_ALLOW_SOFTWARE_TEE_FOR_PRIVACY env var
-        #   3. default True (Phase 3.x.1 dev-friendly default)
+        #   3. default False (Phase 3.x.1 caveat #1 closed 2026-04-27 —
+        #      flipped from True/dev-friendly to False/safe-fail as part
+        #      of pre-mainnet hardening; operators serving Tier B/C
+        #      confidential workloads on software-only nodes must
+        #      explicitly opt in via env or kwarg).
         # When the resolved value is True AND the runtime is software,
         # emit an operator-facing warning so accidental production runs
         # don't ship Tier B/C confidential workloads on a software TEE.
@@ -352,7 +356,8 @@ class TensorParallelInferenceExecutor(InferenceExecutor):
         env_value = os.environ.get(SOFTWARE_TEE_PRIVACY_ENV)
         if env_value is not None:
             return env_value.strip().lower() not in {"0", "false", "no", "off", ""}
-        return True  # Phase 3.x.1 dev-friendly default
+        return False  # safe-fail default; software TEE rejects non-NONE
+                       # privacy tiers unless explicitly opted-in
 
     @property
     def tee_runtime(self):

@@ -84,7 +84,14 @@ def registry(model):
 
 @pytest.fixture
 def executor(registry):
-    return TensorParallelInferenceExecutor(model_registry=registry)
+    # Phase 3.x.1 caveat #1 closed 2026-04-27 — default flipped to
+    # safe-fail. Happy-path tests still want to exercise non-NONE
+    # privacy tiers on the test's software TEE, so opt in here.
+    # Production nodes serving Tier B/C confidential workloads on
+    # hardware TEE don't need this kwarg.
+    return TensorParallelInferenceExecutor(
+        model_registry=registry, allow_software_tee_for_privacy=True
+    )
 
 
 def _make_request(
@@ -421,20 +428,26 @@ class TestSoftwareTEEPrivacyResolution:
                 f"env={value!r} should enable"
             )
 
-    def test_default_is_true_when_neither_arg_nor_env_set(self, registry, monkeypatch):
+    def test_default_is_false_when_neither_arg_nor_env_set(self, registry, monkeypatch):
+        # Phase 3.x.1 caveat #1 closed 2026-04-27 — default flipped from
+        # True (dev-friendly) to False (safe-fail) as part of pre-mainnet
+        # hardening. Operators serving Tier B/C confidential workloads
+        # on software-only nodes must explicitly opt in via env or kwarg.
         monkeypatch.delenv(SOFTWARE_TEE_PRIVACY_ENV, raising=False)
         ex = TensorParallelInferenceExecutor(model_registry=registry)
-        assert ex._allow_software_tee_for_privacy is True
+        assert ex._allow_software_tee_for_privacy is False
 
-    def test_constructor_warns_when_software_tee_accepts_privacy(
+    def test_constructor_warns_when_explicit_opt_in_on_software_tee(
         self, registry, monkeypatch, caplog
     ):
+        # Operator who explicitly opts in to non-NONE privacy on a
+        # software TEE gets a warning so the dev-vs-prod tradeoff is
+        # surfaced in logs. Triggered by env=on (or arg=True); not the
+        # safe-fail default.
         import logging
-        monkeypatch.delenv(SOFTWARE_TEE_PRIVACY_ENV, raising=False)
+        monkeypatch.setenv(SOFTWARE_TEE_PRIVACY_ENV, "1")
         caplog.set_level(logging.WARNING, logger="prsm.compute.inference.executor")
         TensorParallelInferenceExecutor(model_registry=registry)
-        # The warning should mention the env var name so an operator
-        # who sees the log knows exactly what to set.
         warnings = [r for r in caplog.records if r.levelname == "WARNING"]
         assert any(
             SOFTWARE_TEE_PRIVACY_ENV in r.message
@@ -442,16 +455,29 @@ class TestSoftwareTEEPrivacyResolution:
             for r in warnings
         ), f"missing operator warning; got: {[r.message for r in warnings]}"
 
+    def test_no_warning_on_safe_fail_default(
+        self, registry, monkeypatch, caplog
+    ):
+        # The new safe-fail default is silent — no warning needed when
+        # the safe configuration is selected.
+        import logging
+        monkeypatch.delenv(SOFTWARE_TEE_PRIVACY_ENV, raising=False)
+        caplog.set_level(logging.WARNING, logger="prsm.compute.inference.executor")
+        TensorParallelInferenceExecutor(model_registry=registry)
+        assert not any(
+            "software TEE accepts" in r.message
+            for r in caplog.records
+        )
+
     def test_no_warning_when_software_tee_rejects_privacy(
         self, registry, monkeypatch, caplog
     ):
+        # Explicit False is also silent — same as the default.
         import logging
         caplog.set_level(logging.WARNING, logger="prsm.compute.inference.executor")
         TensorParallelInferenceExecutor(
             model_registry=registry, allow_software_tee_for_privacy=False
         )
-        # When the strict default is selected, no operator warning is
-        # needed — the strict configuration is the safe one.
         assert not any(
             "software TEE accepts" in r.message
             for r in caplog.records
@@ -507,7 +533,12 @@ class TestModelRegistryIntegration:
     async def test_happy_path_via_explicit_registry(
         self, in_memory_registry
     ):
-        ex = TensorParallelInferenceExecutor(model_registry=in_memory_registry)
+        # Test exercises STANDARD privacy on a software TEE — opt in
+        # explicitly per the post-caveat#1-close safe-fail default.
+        ex = TensorParallelInferenceExecutor(
+            model_registry=in_memory_registry,
+            allow_software_tee_for_privacy=True,
+        )
         result = await ex.execute(_make_request())
         assert result.success
         assert result.receipt is not None
