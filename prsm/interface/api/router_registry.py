@@ -52,6 +52,13 @@ def _include_core_routers(app: FastAPI) -> None:
         logger.warning(f"Auth router not available: {e}")
 
     try:
+        from prsm.interface.api.wallet_api import router as wallet_router
+        app.include_router(wallet_router)  # /api/v1/auth/wallet/* — Phase 4
+        logger.debug("Wallet router registered")
+    except ImportError as e:
+        logger.warning(f"Wallet router not available: {e}")
+
+    try:
         from prsm.interface.api.teams_api import router as teams_router
         app.include_router(teams_router, tags=["Teams"])
         logger.debug("Teams router registered")

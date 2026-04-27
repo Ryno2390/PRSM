@@ -241,6 +241,21 @@ export {
 // ============================================================================
 
 export { AuthManager, type AuthManagerConfig } from './auth';
+export {
+  WalletAuth,
+  WalletAuthError,
+  WalletAuthTransportError,
+  buildSiweMessage,
+  type WalletAuthOptions,
+  type EthereumProvider,
+  type ConnectCoinbaseWalletOptions,
+  type ConnectCoinbaseWalletResult,
+  type NonceResponse as WalletNonceResponse,
+  type SiweVerifyResponse,
+  type WalletBindRequestBody,
+  type WalletBindResponse,
+  type BalanceResponse as WalletBalanceResponse,
+} from './wallet-auth';
 export { FTNSManager, type FTNSManagerConfig } from './ftns';
 export { MarketplaceManager, type MarketplaceManagerConfig } from './marketplace';
 export { ToolsManager, type ToolsManagerConfig } from './tools';
