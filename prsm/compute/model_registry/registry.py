@@ -400,7 +400,27 @@ class FilesystemModelRegistry(ModelRegistry):
         safe but visible to readers as a pseudo-corruption.
     """
 
-    def __init__(self, root: Union[str, Path]) -> None:
+    def __init__(
+        self,
+        root: Union[str, Path],
+        *,
+        anchor=None,
+    ) -> None:
+        """
+        Args:
+            root: Filesystem root for the registry.
+            anchor: Optional ``PublisherKeyAnchorClient`` (or any object
+                with ``lookup(node_id) → Optional[str]``). When supplied,
+                ``get()`` resolves the publisher's pubkey via
+                ``anchor.lookup`` instead of trusting the on-disk
+                ``publisher.pubkey`` sidecar — closes the cross-node
+                trust-boundary caveat from Phase 3.x.2 per Phase 3.x.3
+                design plan §1.4. The sidecar is still written at
+                register time as offline-verifier metadata.
+
+                When ``anchor`` is None, behavior is unchanged from
+                Phase 3.x.2 (sidecar-only trust).
+        """
         self._root = Path(root)
         if not self._root.exists():
             raise FileNotFoundError(
@@ -411,6 +431,7 @@ class FilesystemModelRegistry(ModelRegistry):
             raise NotADirectoryError(
                 f"FilesystemModelRegistry root {self._root} is not a directory"
             )
+        self._anchor = anchor
 
     # -- write path --
 
@@ -472,7 +493,22 @@ class FilesystemModelRegistry(ModelRegistry):
     def get(self, model_id: str) -> ShardedModel:
         _validate_fs_id("model_id", model_id)
         manifest = self._load_manifest_or_raise(model_id)
-        public_key_b64 = self._load_publisher_key_or_raise(model_id)
+
+        # Resolve publisher pubkey: anchor takes precedence over
+        # sidecar when configured (Phase 3.x.3 trust upgrade). With no
+        # anchor, falls back to the sidecar at the journal root —
+        # Phase 3.x.2 behavior preserved unchanged.
+        if self._anchor is not None:
+            public_key_b64 = self._anchor.lookup(manifest.publisher_node_id)
+            if public_key_b64 is None:
+                raise ManifestVerificationError(
+                    f"publisher {manifest.publisher_node_id!r} not registered "
+                    f"on the configured anchor; cannot verify {model_id!r}. "
+                    f"Either register the publisher on-chain or remove the "
+                    f"anchor= kwarg to fall back to sidecar trust."
+                )
+        else:
+            public_key_b64 = self._load_publisher_key_or_raise(model_id)
 
         # Step 1: signature
         if not verify_manifest(manifest, public_key_b64=public_key_b64):

@@ -276,7 +276,27 @@ class FilesystemPrivacyBudgetStore(PrivacyBudgetStore):
         self,
         root: Union[str, Path],
         public_key_b64: str,
+        *,
+        anchor=None,
     ) -> None:
+        """
+        Args:
+            root: Filesystem root for the journal.
+            public_key_b64: Publisher's public key. Validated against
+                the on-disk ``node.pubkey`` sidecar (write-once-per-
+                journal binding).
+            anchor: Optional ``PublisherKeyAnchorClient`` (or any object
+                with ``lookup(node_id) → Optional[str]``). When supplied,
+                ``verify_chain`` resolves each entry's signing key via
+                ``anchor.lookup(entry.node_id)`` instead of trusting the
+                sidecar — closes the cross-node trust-boundary caveat
+                from Phase 3.x.4 per Phase 3.x.3 design plan §1.4.
+                Sidecar is still maintained at the journal root as
+                offline-verifier metadata + write-time signer-binding.
+
+                When ``anchor`` is None, behavior is unchanged from
+                Phase 3.x.4 (sidecar-only trust).
+        """
         self._root = Path(root)
         if not self._root.exists():
             raise FileNotFoundError(
@@ -287,6 +307,7 @@ class FilesystemPrivacyBudgetStore(PrivacyBudgetStore):
             raise NotADirectoryError(
                 f"FilesystemPrivacyBudgetStore root {self._root} is not a directory"
             )
+        self._anchor = anchor
 
         # Pubkey sidecar handling: write-on-first-construction;
         # validate-on-subsequent. This pins one journal to one signer
@@ -405,6 +426,47 @@ class FilesystemPrivacyBudgetStore(PrivacyBudgetStore):
 
     def __len__(self) -> int:
         return self._count
+
+    def verify_chain(self, public_key_b64: str) -> bool:
+        """Walk the chain end-to-end; True iff signatures + chain hold.
+
+        When ``self._anchor`` is configured (Phase 3.x.3 trust upgrade),
+        the supplied ``public_key_b64`` is IGNORED. Each entry's
+        ``node_id`` is resolved via ``anchor.lookup`` per-entry, and the
+        signature must verify under the anchored key. This catches both
+        sidecar-tamper (anchor takes precedence) AND any entry signed
+        by a different identity than the anchored one (which would
+        otherwise pass under sidecar-only trust if all entries shared a
+        compromised local sidecar key).
+
+        Without anchor, behavior is unchanged from the ABC default —
+        Phase 3.x.4 sidecar trust.
+
+        Anchor lookup returning None for any entry's ``node_id``
+        produces False (mirrors the verify_X_with_anchor wrapper
+        contract). Anchor RPC failures propagate as ``AnchorRPCError``.
+        """
+        if self._anchor is None:
+            return super().verify_chain(public_key_b64)
+
+        # Anchor-routed verification.
+        from prsm.security.privacy_budget_persistence.signing import verify_entry
+
+        prev_hash = GENESIS_PREV_HASH
+        expected_seq = 0
+        for entry in self.replay():
+            if entry.sequence_number != expected_seq:
+                return False
+            if entry.prev_entry_hash != prev_hash:
+                return False
+            anchored_key = self._anchor.lookup(entry.node_id)
+            if anchored_key is None:
+                return False
+            if not verify_entry(entry, public_key_b64=anchored_key):
+                return False
+            prev_hash = hash_entry_payload(entry)
+            expected_seq += 1
+        return True
 
     # -- internals --
 

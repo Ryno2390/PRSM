@@ -710,6 +710,96 @@ class TestFilesystemRegistryRestartSimulation:
             b.register(model, identity=identity)
 
 
+class TestFilesystemRegistryAnchorIntegration:
+    """Phase 3.x.3 Task 5 — anchor= kwarg routes signature-verify
+    through the on-chain anchor instead of the local sidecar.
+    Closes the cross-node trust-boundary caveat from Phase 3.x.2.
+    """
+
+    @pytest.fixture
+    def fake_anchor(self, identity):
+        """Mock anchor returning identity.public_key_b64 for the
+        registered publisher's node_id; None for unregistered."""
+        from unittest.mock import MagicMock
+        anchor = MagicMock()
+
+        def _lookup(node_id):
+            if node_id == identity.node_id:
+                return identity.public_key_b64
+            return None
+
+        anchor.lookup = MagicMock(side_effect=_lookup)
+        return anchor
+
+    def test_anchor_path_verifies_after_sidecar_tamper(
+        self, tmp_path, identity, fake_anchor, model
+    ):
+        # Register without anchor; tamper the sidecar; reopen WITH
+        # anchor — verification should still succeed because anchor
+        # takes precedence over the sidecar.
+        FilesystemModelRegistry(tmp_path).register(model, identity=identity)
+        # Tamper sidecar with a bogus key — would fail sidecar-only verify
+        (tmp_path / model.model_id / "publisher.pubkey").write_text(
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        )
+
+        anchor_reg = FilesystemModelRegistry(tmp_path, anchor=fake_anchor)
+        out = anchor_reg.get(model.model_id)
+        assert out.model_id == model.model_id
+        # Anchor was consulted with the manifest's publisher_node_id
+        fake_anchor.lookup.assert_called_with(identity.node_id)
+
+    def test_no_anchor_uses_sidecar_unchanged(
+        self, tmp_path, identity, model
+    ):
+        # Phase 3.x.2 back-compat: anchor=None is the default.
+        # Sidecar-tampered registry MUST fail without anchor.
+        FilesystemModelRegistry(tmp_path).register(model, identity=identity)
+        (tmp_path / model.model_id / "publisher.pubkey").write_text(
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        )
+        reg = FilesystemModelRegistry(tmp_path)
+        with pytest.raises(ManifestVerificationError):
+            reg.get(model.model_id)
+
+    def test_unregistered_publisher_raises(
+        self, tmp_path, identity, model
+    ):
+        from unittest.mock import MagicMock
+        # Anchor that always returns None (publisher not registered)
+        empty_anchor = MagicMock()
+        empty_anchor.lookup = MagicMock(return_value=None)
+
+        FilesystemModelRegistry(tmp_path).register(model, identity=identity)
+        reg = FilesystemModelRegistry(tmp_path, anchor=empty_anchor)
+        with pytest.raises(ManifestVerificationError, match="not registered"):
+            reg.get(model.model_id)
+
+    def test_anchor_returning_wrong_key_fails(
+        self, tmp_path, identity, other_identity, model
+    ):
+        # Anchor returns the WRONG key for the publisher.
+        # verify_manifest must fail under that key → ManifestVerificationError.
+        from unittest.mock import MagicMock
+        wrong_anchor = MagicMock()
+        wrong_anchor.lookup = MagicMock(return_value=other_identity.public_key_b64)
+
+        FilesystemModelRegistry(tmp_path).register(model, identity=identity)
+        reg = FilesystemModelRegistry(tmp_path, anchor=wrong_anchor)
+        with pytest.raises(ManifestVerificationError, match="signature"):
+            reg.get(model.model_id)
+
+    def test_anchor_does_not_affect_register(
+        self, tmp_path, identity, fake_anchor, model
+    ):
+        # Anchor only affects read paths. register() still writes the
+        # sidecar (offline-verifier metadata).
+        reg = FilesystemModelRegistry(tmp_path, anchor=fake_anchor)
+        reg.register(model, identity=identity)
+        sidecar = (tmp_path / model.model_id / "publisher.pubkey").read_text().strip()
+        assert sidecar == identity.public_key_b64
+
+
 class TestFilesystemRegistryParity:
     """Same interface tests must pass against FilesystemModelRegistry as
     against InMemoryModelRegistry. Acceptance per design plan §4 Task 4."""
