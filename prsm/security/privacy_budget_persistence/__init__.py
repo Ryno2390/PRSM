@@ -43,6 +43,9 @@ from prsm.security.privacy_budget_persistence.store import (
     PrivacyBudgetStoreError,
     hash_entry_payload,
 )
+from prsm.security.privacy_budget_persistence.tracker import (
+    PersistentPrivacyBudgetTracker,
+)
 
 __all__ = [
     # Models (Task 1)
@@ -64,4 +67,6 @@ __all__ = [
     "PrivacyBudgetStoreError",
     "OutOfOrderAppendError",
     "JournalCorruptionError",
+    # Tracker (Task 5)
+    "PersistentPrivacyBudgetTracker",
 ]
