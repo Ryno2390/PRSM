@@ -31,6 +31,8 @@ import prsm.network.manifest_dht as dht_pkg
 EXPECTED_PUBLIC_NAMES = frozenset({
     # Protocol constants (Task 1)
     "DHT_PROTOCOL_VERSION",
+    "MAX_MESSAGE_BYTES",
+    "MAX_PROVIDERS_PER_RESPONSE",
     "MESSAGE_TYPE_REGISTRY",
     # Enums
     "ErrorCode",

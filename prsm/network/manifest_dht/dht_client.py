@@ -341,6 +341,9 @@ class ManifestDHTClient:
         # Late import to avoid a circular dep with the publisher_key_anchor
         # package (its verifiers.py imports model_registry; this module is
         # below model_registry). Cheap; runs once per get_manifest.
+        from prsm.security.publisher_key_anchor.exceptions import (
+            AnchorRPCError,
+        )
         from prsm.security.publisher_key_anchor.verifiers import (
             verify_manifest_with_anchor,
         )
@@ -365,7 +368,46 @@ class ManifestDHTClient:
                 )
                 continue
 
-            if not verify_manifest_with_anchor(manifest, self._anchor):
+            # Substitution defense (HIGH-2 from Phase 3.x.5 round 1
+            # review): a malicious provider can return a *validly-signed*
+            # manifest under a DIFFERENT model_id than what we asked for.
+            # Anchor verification passes (the signature is genuine), but
+            # the bytes do not describe the model the caller wanted.
+            # Reject the substitution and try the next provider.
+            if manifest.model_id != model_id:
+                logger.warning(
+                    "get_manifest: provider %s returned manifest with "
+                    "model_id=%r, expected %r — rejecting substitution "
+                    "attempt",
+                    provider.node_id, manifest.model_id, model_id,
+                )
+                last_error = ManifestNotFoundError(
+                    f"provider {provider.node_id} returned mismatched "
+                    f"model_id (got {manifest.model_id!r}, "
+                    f"expected {model_id!r})"
+                )
+                continue
+
+            try:
+                verified = verify_manifest_with_anchor(
+                    manifest, self._anchor
+                )
+            except AnchorRPCError as exc:
+                # HIGH-3: anchor RPC failure during one provider's
+                # verify must not abort the whole get_manifest. Treat
+                # as transient; continue to the next provider. If every
+                # provider hits the same anchor RPC failure, we surface
+                # ManifestNotFoundError below — which is the correct
+                # caller-facing error (the model could not be obtained).
+                logger.warning(
+                    "get_manifest: anchor RPC error verifying provider "
+                    "%s: %s — treating as transient, trying next provider",
+                    provider.node_id, exc,
+                )
+                last_error = exc
+                continue
+
+            if not verified:
                 logger.debug(
                     "get_manifest: provider %s returned manifest that failed "
                     "anchor verification — trying next provider",

@@ -187,13 +187,31 @@ class TestPersistence:
         assert data == {"alpha": "alpha/manifest.json"}
 
     def test_unregister_persists(self, empty_root):
+        import shutil
         idx_a = LocalManifestIndex(empty_root)
         m = _seed_model_dir(empty_root, "alpha")
         idx_a.register("alpha", m)
         assert idx_a.unregister("alpha") is True
-        # Fresh instance sees the deletion
+        # To persistently unregister, the on-disk model dir must also
+        # be removed — otherwise orphan reconciliation re-adds the
+        # entry at next construction (Phase 3.x.5 round 1 review
+        # MEDIUM-2).
+        shutil.rmtree(empty_root / "alpha")
         idx_b = LocalManifestIndex(empty_root)
         assert "alpha" not in idx_b
+
+    def test_unregister_in_process_works(self, empty_root):
+        # In-process unregister() removes the entry. Calling lookup()
+        # immediately afterward returns None. Reconciliation only fires
+        # at construction, so within a single instance the unregister
+        # is durable.
+        idx = LocalManifestIndex(empty_root)
+        m = _seed_model_dir(empty_root, "alpha")
+        idx.register("alpha", m)
+        assert idx.lookup("alpha") is not None
+        assert idx.unregister("alpha") is True
+        assert idx.lookup("alpha") is None
+        assert "alpha" not in idx
 
     def test_unregister_returns_false_for_missing(self, empty_root):
         idx = LocalManifestIndex(empty_root)
@@ -339,3 +357,77 @@ class TestAtomicWrite:
         idx_a.rebuild()
         bytes_b = (empty_root / "dht_index.json").read_bytes()
         assert bytes_a == bytes_b
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Round 1 review — MEDIUM-2 — orphan reconciliation
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestOrphanReconciliation:
+    """MEDIUM-2 from Phase 3.x.5 round 1 review: when a writer (e.g.,
+    FilesystemModelRegistry._fetch_manifest_via_dht) writes a manifest
+    to disk and then has its dht.announce() fail, the cache exists on
+    disk but the index doesn't know about it. Without reconciliation
+    this divergence persists across process restarts and the node
+    silently stops serving the cached model to peers. Construction
+    must auto-detect and recover.
+    """
+
+    def test_orphan_manifest_picked_up_on_construction(self, empty_root):
+        # First instance: register one model, persist index.
+        idx_a = LocalManifestIndex(empty_root)
+        m_a = _seed_model_dir(empty_root, "alpha")
+        idx_a.register("alpha", m_a)
+
+        # Now simulate the divergence: manifest.json on disk for "beta"
+        # but no corresponding entry in dht_index.json (this is what
+        # happens when the registry caches via DHT and the announce
+        # step fails after the file is written).
+        _seed_model_dir(empty_root, "beta")
+
+        # Second instance loads the JSON (which only knows alpha) but
+        # must auto-detect beta and recover.
+        idx_b = LocalManifestIndex(empty_root)
+        assert "alpha" in idx_b
+        assert "beta" in idx_b
+        assert idx_b.lookup("beta") is not None
+
+    def test_orphan_recovery_persists(self, empty_root):
+        # After reconciliation, the recovered entry must be persisted
+        # so subsequent constructions don't repeatedly walk and
+        # re-warn — they take the fast-path JSON load.
+        idx_a = LocalManifestIndex(empty_root)
+        m_a = _seed_model_dir(empty_root, "alpha")
+        idx_a.register("alpha", m_a)
+        _seed_model_dir(empty_root, "beta")
+
+        # First reconciliation
+        idx_b = LocalManifestIndex(empty_root)
+        assert "beta" in idx_b
+
+        # Confirm the persisted JSON now contains beta.
+        import json as _json
+        on_disk = _json.loads((empty_root / "dht_index.json").read_text())
+        assert "beta" in on_disk
+
+    def test_no_orphans_no_writes(self, empty_root):
+        # Steady state: no orphans on disk → reconciliation is a no-op
+        # and shouldn't trigger an unnecessary persist.
+        idx_a = LocalManifestIndex(empty_root)
+        m = _seed_model_dir(empty_root, "alpha")
+        idx_a.register("alpha", m)
+
+        # Snapshot the index file's mtime / contents
+        index_path = empty_root / "dht_index.json"
+        mtime_before = index_path.stat().st_mtime_ns
+        bytes_before = index_path.read_bytes()
+
+        # Sleep a tiny amount so any rewrite would change mtime; then
+        # reconstruct.
+        import time as _time
+        _time.sleep(0.01)
+        idx_b = LocalManifestIndex(empty_root)
+        assert "alpha" in idx_b
+        # Index file unchanged — no spurious rewrite.
+        assert index_path.read_bytes() == bytes_before

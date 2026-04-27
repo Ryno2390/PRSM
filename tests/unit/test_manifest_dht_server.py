@@ -547,6 +547,84 @@ class TestConcurrentSafety:
 # ──────────────────────────────────────────────────────────────────────────
 
 
+class TestNeverRaisesUnderHandlerFailure:
+    """HIGH-1 from Phase 3.x.5 round 1 review: the dispatch must wrap
+    handler calls so a future regression in handler internals can't
+    escape ``handle()``. We inject a broken LocalManifestIndex whose
+    ``lookup`` raises and confirm handle() returns INTERNAL_ERROR
+    rather than letting the exception propagate."""
+
+    def test_handle_recovers_from_lookup_raising(self, tmp_path):
+        class ExplodingIndex:
+            def lookup(self, model_id):
+                raise RuntimeError("index corrupt")
+
+        server = ManifestDHTServer(
+            local_index=ExplodingIndex(),
+            routing_table=FakeRoutingTable([]),
+            my_node_id="self",
+            my_address="self:0",
+        )
+        request = FindProvidersRequest(
+            model_id="alpha", request_id="rid-x"
+        )
+        # Must NOT raise — must encode an INTERNAL_ERROR response.
+        response = _decode(server.handle(encode_message(request)))
+        assert isinstance(response, ErrorResponse)
+        assert response.code == ErrorCode.INTERNAL_ERROR.value
+        assert response.request_id == "rid-x"
+
+    def test_handle_recovers_from_unicode_error_on_manifest_read(
+        self, empty_index, tmp_path
+    ):
+        # Operator drops a binary file at manifest.json; read_text
+        # raises UnicodeDecodeError. Must surface as INTERNAL_ERROR
+        # (handled via the explicit catch added in HIGH-1 fix), NOT
+        # propagate.
+        model_dir = tmp_path / "alpha"
+        model_dir.mkdir()
+        manifest_path = model_dir / "manifest.json"
+        # Invalid UTF-8 byte sequence
+        manifest_path.write_bytes(b"\xff\xfe\xfd binary garbage")
+        empty_index.register("alpha", manifest_path)
+
+        server = _new_server(empty_index)
+        request = FetchManifestRequest(model_id="alpha", request_id="frid")
+        response = _decode(server.handle(encode_message(request)))
+        assert isinstance(response, ErrorResponse)
+        assert response.code == ErrorCode.INTERNAL_ERROR.value
+
+
+class TestSizeCaps:
+    """MEDIUM-1 from Phase 3.x.5 round 1 review: oversized payloads
+    must be rejected at parse time before json.loads allocates."""
+
+    def test_oversized_payload_rejected(self, empty_index):
+        from prsm.network.manifest_dht.protocol import MAX_MESSAGE_BYTES
+
+        server = _new_server(empty_index)
+        # Build a payload one byte over the cap.
+        oversized = b"a" * (MAX_MESSAGE_BYTES + 1)
+        response = _decode(server.handle(oversized))
+        assert isinstance(response, ErrorResponse)
+        assert response.code == ErrorCode.MALFORMED_REQUEST.value
+
+    def test_at_cap_payload_processed_normally(self, empty_index):
+        # A payload exactly at the cap must NOT be rejected by the
+        # size guard (off-by-one would block legitimate large
+        # manifests). It will still fail JSON parsing since "a"*N
+        # isn't valid JSON, but that's the parse path, not the cap.
+        from prsm.network.manifest_dht.protocol import MAX_MESSAGE_BYTES
+
+        server = _new_server(empty_index)
+        at_cap = b"a" * MAX_MESSAGE_BYTES
+        response = _decode(server.handle(at_cap))
+        assert isinstance(response, ErrorResponse)
+        # Code is MALFORMED_REQUEST either way; the discriminating
+        # message confirms which gate fired.
+        assert "MAX_MESSAGE_BYTES" not in response.message
+
+
 class TestRequestIdCorrelation:
     def test_find_providers_correlation(self, empty_index):
         server = _new_server(empty_index)

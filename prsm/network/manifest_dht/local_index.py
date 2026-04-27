@@ -160,6 +160,12 @@ class LocalManifestIndex:
         Does NOT touch the underlying manifest.json on disk — the
         registry owns those files. Use this only when the index has
         drifted from the registry (e.g., manual cleanup).
+
+        Note: orphan reconciliation at construction (Phase 3.x.5
+        round 1 review MEDIUM-2) will RE-ADD this model_id on next
+        instance construction if the on-disk ``manifest.json`` still
+        exists. To persistently unregister, also delete the model
+        directory at ``<root>/<model_id>/``.
         """
         if model_id in self._entries:
             del self._entries[model_id]
@@ -245,6 +251,51 @@ class LocalManifestIndex:
                 )
                 continue
             self._entries[model_id] = rel_path
+
+        # MEDIUM-2 from Phase 3.x.5 round 1 review: reconcile orphans.
+        # If a manifest.json exists on disk under a valid model_id
+        # directory but isn't represented in the JSON-loaded index,
+        # auto-add it. This recovers from the divergence that occurs
+        # when a writer (e.g., FilesystemModelRegistry._fetch_manifest_via_dht)
+        # writes the manifest to disk and then has its
+        # subsequent dht.announce() fail — the cache is on disk but
+        # the index doesn't know about it. Without reconciliation the
+        # node stops serving the cached model to peers indefinitely.
+        # Persist the recovered index if any orphan was found.
+        orphans_added = self._reconcile_orphans()
+        if orphans_added:
+            self._persist()
+
+    def _reconcile_orphans(self) -> int:
+        """Scan the root for manifest.json files not represented in
+        ``self._entries`` and add them. Returns the number of orphans
+        recovered. Called after a JSON-based load to catch divergence
+        between on-disk caches and the persisted index."""
+        added = 0
+        if not self._root.exists():
+            return 0
+        for child in self._root.iterdir():
+            if not child.is_dir():
+                continue
+            if (
+                not _SAFE_MODEL_ID.fullmatch(child.name)
+                or child.name in _RESERVED_NAMES
+            ):
+                continue
+            if child.name in self._entries:
+                continue
+            manifest = child / _MANIFEST_FILENAME
+            if not manifest.exists():
+                continue
+            rel = manifest.relative_to(self._root)
+            logger.warning(
+                "dht_index.json: reconciling orphan model_id %r "
+                "(manifest on disk but not indexed) → %s",
+                child.name, rel,
+            )
+            self._entries[child.name] = str(rel)
+            added += 1
+        return added
 
     def _rebuild_from_walk(self) -> None:
         """Walk the root for directories containing manifest.json and

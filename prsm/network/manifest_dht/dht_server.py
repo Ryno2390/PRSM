@@ -14,10 +14,16 @@ initiates a request — it only responds. ``ProvidersResponse`` /
 ``ManifestResponse`` / ``ErrorResponse`` arriving at this entry point
 are misuse and yield ``MALFORMED_REQUEST``.
 
-Concurrency: no shared mutable state. ``LocalManifestIndex.lookup``
-and ``RoutingTable.find_closest_peers`` are both read-only from the
-server's perspective. Multiple ``handle()`` calls in flight don't
-need locks.
+Concurrency: the server itself holds no mutable state. It reads
+through ``LocalManifestIndex.lookup`` and ``RoutingTable.find_closest_peers``,
+both of which are concurrent-read safe under the project-wide
+single-writer-per-node invariant (Phase 3.x.2 / 3.x.4 / 3.x.5
+share this). The registry's ``_fetch_manifest_via_dht`` is a writer
+to the same ``LocalManifestIndex`` — concurrent server reads against
+that writer rely on the single-writer assumption holding at the
+operator level (no parallel registries or DHT-fetch loops sharing one
+index). Multiple ``handle()`` calls in flight against a quiescent
+index don't need locks.
 """
 
 from __future__ import annotations
@@ -126,21 +132,41 @@ class ManifestDHTServer:
                 "internal error during parse",
             )
 
-        if isinstance(request, FindProvidersRequest):
-            return self._handle_find_providers(request)
-        if isinstance(request, FetchManifestRequest):
-            return self._handle_fetch_manifest(request)
-
-        # Response-type messages (ProvidersResponse, ManifestResponse,
-        # ErrorResponse) shouldn't arrive at the server entry point.
-        # Treat as malformed-misuse.
+        # HIGH-1 (Phase 3.x.5 round 1 review): the dispatch must honor
+        # the never-raises invariant from the docstring. The handler
+        # methods catch their declared failure paths, but we still wrap
+        # the dispatch in an outer try/except so a future regression
+        # (a new uncaught exception in either handler, or in
+        # `encode_message` itself when the on-disk manifest contains a
+        # non-serializable value) cannot escape `handle()`.
         request_id = getattr(request, "request_id", "") or UNKNOWN_REQUEST_ID
-        return self._error(
-            request_id,
-            ErrorCode.MALFORMED_REQUEST,
-            f"server received non-request message type: "
-            f"{type(request).__name__}",
-        )
+        try:
+            if isinstance(request, FindProvidersRequest):
+                return self._handle_find_providers(request)
+            if isinstance(request, FetchManifestRequest):
+                return self._handle_fetch_manifest(request)
+
+            # Response-type messages (ProvidersResponse, ManifestResponse,
+            # ErrorResponse) shouldn't arrive at the server entry point.
+            # Treat as malformed-misuse.
+            return self._error(
+                request_id,
+                ErrorCode.MALFORMED_REQUEST,
+                f"server received non-request message type: "
+                f"{type(request).__name__}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "ManifestDHTServer.handle: unexpected dispatch failure "
+                "for request_id=%r",
+                request_id,
+            )
+            return self._error(
+                request_id,
+                ErrorCode.INTERNAL_ERROR,
+                f"internal error during dispatch: "
+                f"{exc.__class__.__name__}",
+            )
 
     # -- handlers ----------------------------------------------------------
 
@@ -224,7 +250,10 @@ class ManifestDHTServer:
 
         try:
             data = json.loads(manifest_path.read_text())
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            # UnicodeDecodeError catches the case where the on-disk
+            # manifest is not valid UTF-8 (binary content, partial
+            # write, or operator dropped a non-text file at the path).
             logger.warning(
                 "fetch_manifest: local manifest at %s unreadable: %s",
                 manifest_path, exc,

@@ -40,6 +40,8 @@ from prsm.network.manifest_dht.protocol import (
     IncompatibleProtocolVersionError,
     MalformedMessageError,
     ManifestResponse,
+    MAX_MESSAGE_BYTES,
+    MAX_PROVIDERS_PER_RESPONSE,
     MESSAGE_TYPE_REGISTRY,
     MessageType,
     ProtocolError,
@@ -53,6 +55,8 @@ from prsm.network.manifest_dht.protocol import (
 __all__ = [
     # Protocol constants (Task 1)
     "DHT_PROTOCOL_VERSION",
+    "MAX_MESSAGE_BYTES",
+    "MAX_PROVIDERS_PER_RESPONSE",
     "MESSAGE_TYPE_REGISTRY",
     # Enums
     "ErrorCode",

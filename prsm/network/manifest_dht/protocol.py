@@ -40,6 +40,19 @@ from typing import Any, Dict, Tuple
 # other at parse time — see ``parse_message``.
 DHT_PROTOCOL_VERSION = 1
 
+# Hard cap on incoming wire-message size. Manifests in practice are
+# 1–10 KB (one entry per shard, ~150 bytes each); 256 KB gives ~25×
+# headroom over the 10 KB p95 and ~16× over a hypothetical 16K-shard
+# manifest. Anything larger is rejected at parse time before json.loads
+# allocates — closes the OOM-via-huge-payload DoS surface (Phase 3.x.5
+# round 1 review MEDIUM-1).
+MAX_MESSAGE_BYTES = 256 * 1024
+
+# Per-list cap on ProvidersResponse.providers. Bounds the
+# response-side amplification — a hostile peer cannot return a
+# million-entry list to exhaust caller memory parsing it.
+MAX_PROVIDERS_PER_RESPONSE = 1024
+
 
 # Tag strings used as the ``type`` field on every wire message.
 # Public so callers can build ad-hoc messages without importing the
@@ -231,6 +244,11 @@ class ProvidersResponse:
             raise MalformedMessageError(
                 f"providers must be a list, got {type(providers_raw).__name__}"
             )
+        if len(providers_raw) > MAX_PROVIDERS_PER_RESPONSE:
+            raise MalformedMessageError(
+                f"providers list exceeds MAX_PROVIDERS_PER_RESPONSE "
+                f"({len(providers_raw)} > {MAX_PROVIDERS_PER_RESPONSE})"
+            )
         return cls(
             request_id=_required_str(data, "request_id"),
             providers=tuple(
@@ -363,6 +381,11 @@ def parse_message(payload: bytes) -> Any:
     if not isinstance(payload, (bytes, bytearray)):
         raise MalformedMessageError(
             f"payload must be bytes, got {type(payload).__name__}"
+        )
+    if len(payload) > MAX_MESSAGE_BYTES:
+        raise MalformedMessageError(
+            f"payload exceeds MAX_MESSAGE_BYTES "
+            f"({len(payload)} > {MAX_MESSAGE_BYTES})"
         )
     try:
         data = json.loads(payload)

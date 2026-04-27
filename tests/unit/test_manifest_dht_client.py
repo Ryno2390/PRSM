@@ -675,3 +675,213 @@ class TestGetManifest:
 
         with pytest.raises(ManifestNotFoundError):
             client.get_manifest("llama-3-8b")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Round 1 review remediations — HIGH-2 / HIGH-3
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestSubstitutionDefense:
+    """HIGH-2 from Phase 3.x.5 round 1 review: a malicious provider
+    can return a *validly-anchor-signed* manifest under a DIFFERENT
+    model_id than what the caller asked for. Anchor verify alone
+    accepts it (signature is genuine). The DHT client must reject
+    the substitution.
+    """
+
+    def test_validly_signed_wrong_model_id_rejected(
+        self, network, anchor, empty_index, alice
+    ):
+        # Alice signs a manifest for "evil-model" with her real key.
+        # A malicious provider serves these bytes in response to a
+        # request for "target-model". The signature is genuine, but
+        # the model_id mismatch must trigger rejection.
+        evil_signed = _build_signed_manifest(alice, model_id="evil-model")
+        peer = FakePeer(node_id="bob", address="bob:1")
+
+        def h(request_bytes):
+            request = parse_message(request_bytes)
+            if isinstance(request, FindProvidersRequest):
+                resp = ProvidersResponse(
+                    request_id=request.request_id,
+                    providers=(ProviderInfo(node_id="bob", address="bob:1"),),
+                )
+            else:
+                # Server returns evil-model bytes to a target-model request
+                resp = ManifestResponse(
+                    request_id=request.request_id,
+                    manifest=evil_signed.to_dict(),
+                )
+            return encode_message(resp)
+
+        network.register_handler("bob:1", h)
+        client = _new_client(network, anchor, empty_index, peers=[peer])
+
+        with pytest.raises(ManifestNotFoundError, match="mismatched model_id"):
+            client.get_manifest("target-model")
+
+    def test_substitution_rejected_then_clean_provider_succeeds(
+        self, network, anchor, empty_index, alice
+    ):
+        # Two providers: one substitutes, one serves correctly.
+        # Client must reject the substitution and try the next, ending
+        # with the legitimate manifest.
+        target_signed = _build_signed_manifest(alice, model_id="target")
+        evil_signed = _build_signed_manifest(alice, model_id="evil")
+
+        peer_evil = FakePeer(node_id="evil-peer", address="evil:1")
+        peer_clean = FakePeer(node_id="clean-peer", address="clean:1")
+
+        def make_handler(node_id, address, payload):
+            def h(request_bytes):
+                request = parse_message(request_bytes)
+                if isinstance(request, FindProvidersRequest):
+                    resp = ProvidersResponse(
+                        request_id=request.request_id,
+                        providers=(ProviderInfo(node_id=node_id, address=address),),
+                    )
+                else:
+                    resp = ManifestResponse(
+                        request_id=request.request_id,
+                        manifest=payload.to_dict(),
+                    )
+                return encode_message(resp)
+            return h
+
+        network.register_handler(
+            "evil:1", make_handler("evil-peer", "evil:1", evil_signed)
+        )
+        network.register_handler(
+            "clean:1", make_handler("clean-peer", "clean:1", target_signed)
+        )
+        client = _new_client(
+            network, anchor, empty_index,
+            peers=[peer_evil, peer_clean],
+        )
+
+        out = client.get_manifest("target")
+        assert out.model_id == "target"
+
+
+class TestAnchorRPCErrorHandling:
+    """HIGH-3 from Phase 3.x.5 round 1 review: AnchorRPCError raised
+    by the verifier during one provider's check must not abort the
+    whole get_manifest. Treat as transient; continue to next provider.
+    """
+
+    def test_transient_anchor_rpc_failure_continues_to_next_provider(
+        self, network, empty_index, alice, monkeypatch
+    ):
+        from prsm.security.publisher_key_anchor.exceptions import (
+            AnchorRPCError,
+        )
+        from prsm.network.manifest_dht import dht_client as _dc
+
+        signed = _build_signed_manifest(alice, model_id="theta")
+
+        peer_flaky = FakePeer(node_id="flaky", address="flaky:1")
+        peer_good = FakePeer(node_id="good", address="good:1")
+
+        def make_handler(node_id, address):
+            def h(request_bytes):
+                request = parse_message(request_bytes)
+                if isinstance(request, FindProvidersRequest):
+                    resp = ProvidersResponse(
+                        request_id=request.request_id,
+                        providers=(ProviderInfo(node_id=node_id, address=address),),
+                    )
+                else:
+                    resp = ManifestResponse(
+                        request_id=request.request_id,
+                        manifest=signed.to_dict(),
+                    )
+                return encode_message(resp)
+            return h
+
+        network.register_handler(
+            "flaky:1", make_handler("flaky", "flaky:1")
+        )
+        network.register_handler(
+            "good:1", make_handler("good", "good:1")
+        )
+
+        # Patch the verifier so the FIRST call raises AnchorRPCError
+        # (simulating a transient anchor RPC blip during flaky's
+        # verify) and subsequent calls succeed.
+        call_count = {"n": 0}
+        from prsm.security.publisher_key_anchor import verifiers as _ver
+
+        def fake_verify(manifest, anchor):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise AnchorRPCError("transient blip")
+            return True
+
+        monkeypatch.setattr(
+            _ver, "verify_manifest_with_anchor", fake_verify
+        )
+
+        anchor = type("A", (), {"lookup": staticmethod(lambda nid: "x")})()
+        client = ManifestDHTClient(
+            local_index=empty_index,
+            routing_table=FakeRoutingTable([peer_flaky, peer_good]),
+            send_message=network.send,
+            anchor=anchor,
+            my_node_id="self",
+            my_address="self:0",
+        )
+
+        out = client.get_manifest("theta")
+        assert out.model_id == "theta"
+        # Confirms we tried both providers' verifiers
+        assert call_count["n"] == 2
+
+    def test_all_providers_anchor_rpc_failures_yields_not_found(
+        self, network, empty_index, alice, monkeypatch
+    ):
+        from prsm.security.publisher_key_anchor.exceptions import (
+            AnchorRPCError,
+        )
+        from prsm.security.publisher_key_anchor import verifiers as _ver
+
+        signed = _build_signed_manifest(alice, model_id="iota")
+
+        peer = FakePeer(node_id="p", address="p:1")
+
+        def h(request_bytes):
+            request = parse_message(request_bytes)
+            if isinstance(request, FindProvidersRequest):
+                resp = ProvidersResponse(
+                    request_id=request.request_id,
+                    providers=(ProviderInfo(node_id="p", address="p:1"),),
+                )
+            else:
+                resp = ManifestResponse(
+                    request_id=request.request_id,
+                    manifest=signed.to_dict(),
+                )
+            return encode_message(resp)
+
+        network.register_handler("p:1", h)
+
+        # Every verify raises — no provider verifies; not-found.
+        def always_raises(*args, **kwargs):
+            raise AnchorRPCError("anchor down")
+
+        monkeypatch.setattr(
+            _ver, "verify_manifest_with_anchor", always_raises
+        )
+
+        anchor = type("A", (), {"lookup": staticmethod(lambda nid: "x")})()
+        client = ManifestDHTClient(
+            local_index=empty_index,
+            routing_table=FakeRoutingTable([peer]),
+            send_message=network.send,
+            anchor=anchor,
+            my_node_id="self",
+            my_address="self:0",
+        )
+
+        with pytest.raises(ManifestNotFoundError):
+            client.get_manifest("iota")
