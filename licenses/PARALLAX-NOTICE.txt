@@ -1,0 +1,108 @@
+Parallax — derivative attribution notice
+========================================
+
+This NOTICE file documents the Apache License 2.0 attribution for code
+vendored from the GradientHQ/parallax project into the PRSM repository.
+
+Upstream project
+----------------
+Name:        Parallax
+Repository:  https://github.com/GradientHQ/parallax
+Paper:       Tong, C., Jiang, Y., Chen, G., Zhao, T., Lu, S., Qu, W.,
+             Yang, E., Ai, L., & Yuan, B. (2025).
+             Parallax: Efficient LLM Inference Service over
+             Decentralized Environment. arXiv:2509.26182v1.
+License:     Apache License, Version 2.0 (see PARALLAX-APACHE-2.0.txt)
+Copyright:   Copyright (c) 2025 Gradient and contributors
+
+Vendored at
+-----------
+Pinned commit:  c8c8ebdaaf2924b6d25e2d1caff61e27374cce0b
+Pin date:       2026-04-12 (upstream main HEAD as of 2026-04-27 vendor)
+Vendor date:    2026-04-27
+
+Files vendored under prsm/compute/parallax_scheduling/
+------------------------------------------------------
+The following files were copied from src/scheduling/ in the upstream
+repository at the pinned commit:
+
+    __init__.py
+    layer_allocation.py
+    model_info.py
+    node.py
+    node_management.py
+    request_routing.py
+    scheduler.py
+
+A supporting module, _vendored_utils.py, was authored by Prismatica, Inc.
+to satisfy the upstream files' imports without taking a runtime dependency
+on the upstream `parallax_utils` package. It ports a minimal set of helpers
+(`get_logger`, `bytes_per_element`, `compute_max_batch_size`) directly from
+src/parallax_utils/utils.py at the same pinned commit; the porting style
+matches Apache 2.0 §4 derivative-work conventions (header attribution +
+this NOTICE entry).
+
+Modifications by Prismatica, Inc.
+---------------------------------
+Per Apache License 2.0 §4(b), this NOTICE records that the vendored files
+have been modified by Prismatica, Inc. starting 2026-04-27. The
+substantive modifications applied across Phase 3.x.6 Tasks 1–6 include:
+
+  Task 1 (vendor + import-path adjustment, NO algorithmic changes):
+    - Per-file 6-line attribution header added at top of every vendored
+      Python module.
+    - Imports rewritten from `parallax_utils.*` and `scheduling.*` to
+      the equivalent paths under `prsm.compute.parallax_scheduling.*`.
+    - Apple-Silicon-specific code paths in `_vendored_utils.py` raise
+      NotImplementedError pending Tasks 2/3 adaptation; CUDA + CPU
+      paths are functional.
+
+  Tasks 2–6 (algorithmic adaptation, planned):
+    - Adapted to PRSM's `ParallaxGPU` data class (region, stake, tier
+      attestation fields).
+    - Profile DHT replaced with PRSM-native implementation on Phase 6
+      transport (no Lattica dependency).
+    - Trust adapters (anchor verify, tier gate, stake-weighted profile
+      trust, consensus-mismatch hook) wrap the scheduler before any
+      route is committed.
+    - InferenceExecutor Protocol implementation bridging the scheduler
+      to PRSM's `TensorParallelExecutor` runtime.
+
+The full per-file diff is preserved in PRSM's git history starting at the
+commit that lands Task 1.
+
+Files NOT vendored
+------------------
+The following upstream directories were intentionally not vendored:
+
+    src/parallax/             — runtime; PRSM uses TensorParallelExecutor
+    src/backend/              — GPU runtime; out of scope
+    src/frontend/             — chat UI; PRSM has its own SDK
+    src/parallax_extensions/  — out of scope
+    src/parallax_utils/       — only minimal helpers ported into
+                                _vendored_utils.py; full module not vendored
+    src/router/               — out of scope (not consumed by scheduling/)
+
+The upstream `lattica` Python package, which Parallax declares as a
+runtime dependency, is NOT pulled into PRSM. The new (τ, ρ) profile
+DHT introduced by Phase 3.x.6 Task 4 runs over PRSM's existing Phase 6
+transport (TCP / SOCKS adapters with EIP-4361 wallet binding).
+
+Trademarks
+----------
+"Parallax" is a name used by GradientHQ for their project. PRSM does
+not claim or imply any endorsement, sponsorship, or trademark rights
+over the upstream project. Where the name appears in PRSM identifiers
+(e.g., `prsm.compute.parallax_scheduling`), it is used solely as a
+factual reference to the source of the algorithm being implemented,
+consistent with Apache License 2.0 §6.
+
+Updates to this notice
+----------------------
+This file MUST be updated whenever:
+  - Additional files are vendored from the upstream project.
+  - The pinned upstream commit is moved forward.
+  - Substantive algorithmic modifications land in any vendored file.
+
+The PRSM auditor scope reference in
+docs/2026-04-27-cumulative-audit-prep.md must also be kept in sync.
