@@ -29,6 +29,11 @@ from prsm.security.privacy_budget_persistence.models import (
     PrivacyBudgetEntry,
     PrivacyBudgetEntryType,
 )
+from prsm.security.privacy_budget_persistence.signing import (
+    is_signed,
+    sign_entry,
+    verify_entry,
+)
 
 __all__ = [
     # Models (Task 1)
@@ -37,4 +42,8 @@ __all__ = [
     "GENESIS_PREV_HASH",
     "PrivacyBudgetEntry",
     "PrivacyBudgetEntryType",
+    # Signing (Task 2)
+    "is_signed",
+    "sign_entry",
+    "verify_entry",
 ]
