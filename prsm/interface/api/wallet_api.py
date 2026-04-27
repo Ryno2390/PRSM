@@ -65,6 +65,8 @@ from prsm.interface.onboarding.siwe import (
     SiweNonceError,
     SiweNotYetValidError,
     SiweSignatureError,
+)
+from prsm.interface.onboarding.siwe import (
     verify as siwe_verify,
 )
 from prsm.interface.onboarding.wallet_binding import (
@@ -75,7 +77,6 @@ from prsm.interface.onboarding.wallet_binding import (
     WalletBindingService,
     build_binding_message,
 )
-
 
 # ──────────────────────────────────────────────────────────────────────────
 # Settings + service container
@@ -109,7 +110,10 @@ class _ZeroBalanceLookup:
     """Default lookup — returns 0. Safe placeholder until operators
     wire a real source. Logs nothing; returning 0 is documented behavior."""
 
-    def get_ftns_balance(self, wallet_address: str) -> Decimal:
+    def get_ftns_balance(self, wallet_address: str) -> Decimal:  # noqa: ARG002
+        # Placeholder ignores wallet_address by design — the Protocol
+        # signature requires it, but the zero-balance default doesn't
+        # vary by caller. Operators wire a real lookup in production.
         return Decimal("0")
 
 
@@ -133,7 +137,7 @@ class WalletApiServices:
         *,
         expected_domain: str,
         expected_chain_id: int = 8453,
-    ) -> "WalletApiServices":
+    ) -> WalletApiServices:
         """In-memory defaults — DEV / TEST ONLY.
 
         Returns services backed by ``InMemoryNonceStore`` +
@@ -521,7 +525,7 @@ def get_balance(
         ftns_amount, services.price_source, mode=mode
     )
 
-    if mode == "usd":
+    if mode == "usd":  # noqa: SIM108  (keep block; the comment is load-bearing)
         # Route through ftns_to_usd so the quantization (ROUND_HALF_EVEN
         # to cents) matches what format_balance computed — keeps the
         # `usd` field byte-equal to the cent value embedded in
