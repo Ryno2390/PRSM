@@ -1,0 +1,22 @@
+{
+  "_comment": "Central registry of PRSM contract addresses by network. Updated by operators after a successful deploy + verification. Loaded by Python clients (e.g., PublisherKeyAnchorClient in Phase 3.x.3 Task 3).",
+  "_schema_version": 1,
+  "hardhat": {
+    "_comment": "Local dev; addresses are ephemeral. Filled by `npx hardhat run scripts/deploy-publisher-key-anchor.js --network hardhat` for sanity checking.",
+    "publisher_key_anchor": null
+  },
+  "sepolia": {
+    "_comment": "Sepolia testnet. Updated post-deploy per scripts/deploy-publisher-key-anchor.js. Required env at deploy time: ANCHOR_ADMIN_ADDRESS (designated dev multisig).",
+    "publisher_key_anchor": null,
+    "publisher_key_anchor_admin": null,
+    "publisher_key_anchor_deployed_at": null
+  },
+  "base-sepolia": {
+    "_comment": "Base Sepolia. Used for cross-network testing matching FTNS layout.",
+    "publisher_key_anchor": null
+  },
+  "base": {
+    "_comment": "Base mainnet. DO NOT populate until Phase 3.x.3 audit clears AND admin is set to the production Foundation multisig per design plan §1.2.",
+    "publisher_key_anchor": null
+  }
+}
