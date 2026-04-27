@@ -122,6 +122,22 @@ class ProfileSource(Protocol):
 
     The Protocol is shaped so the router never needs to know which
     backend is in play.
+
+    Reserved name: ``is_eligible(node_id) -> bool``
+      Implementations MAY define an ``is_eligible`` method, in which
+      case ``TrustStack.filter_pool`` will call it as a pre-Phase-1
+      pool-admission gate. Currently used by
+      ``StakeWeightedTrustAdapter`` to enforce a minimum-stake
+      participation threshold; the upstream router's roofline
+      fallback would otherwise route to a zero-stake liar based on
+      advertised hardware specs alone.
+
+      If you implement ``is_eligible`` on a custom ``ProfileSource``,
+      use the same semantics: True means "this node is admissible to
+      the allocation pool"; False means "exclude before Phase-1".
+      Any other semantic will silently shift filter_pool's behavior.
+      Implementations that don't define ``is_eligible`` pass through
+      unchanged (anchor-only filtering).
     """
 
     def get_snapshot(self, node_id: str) -> Optional[ProfileSnapshot]:

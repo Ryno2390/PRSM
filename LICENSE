@@ -19,3 +19,24 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+THIRD-PARTY COMPONENTS
+
+PRSM's `prsm/compute/parallax_scheduling/` module vendors and modifies
+source from GradientHQ/parallax (https://github.com/GradientHQ/parallax),
+licensed under the Apache License 2.0. See:
+
+  - licenses/PARALLAX-APACHE-2.0.txt — verbatim upstream LICENSE
+  - licenses/PARALLAX-NOTICE.txt    — derivative-works disclosure with
+                                      pinned upstream commit SHA and
+                                      modification log
+  - Per-file 6-line attribution headers on every vendored module under
+    prsm/compute/parallax_scheduling/
+
+The PRSM-original delta (the four trust adapters in trust_adapter.py,
+the PRSM-native data layer in prsm_types.py, the Phase-2 router in
+prsm_request_router.py, the profile DHT in profile_dht.py, and the
+ParallaxScheduledExecutor in prsm/compute/inference/parallax_executor.py)
+is licensed under the MIT terms above.

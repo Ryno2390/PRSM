@@ -311,4 +311,21 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
-**License:** MIT | **Website:** [prsm-network.com](https://www.prsm-network.com) | **PyPI:** [prsm-network](https://pypi.org/project/prsm-network/)
+## Third-Party Components
+
+PRSM's `prsm/compute/parallax_scheduling/` module vendors and modifies
+the scheduler from [GradientHQ/parallax](https://github.com/GradientHQ/parallax)
+(Apache License 2.0, upstream commit `c8c8ebdaaf2924b6d25e2d1caff61e27374cce0b`).
+The PRSM-original delta is the four trust adapters layered on top
+(anchor verification, tier gating, stake-weighted profile trust,
+consensus-mismatch challenges). See:
+
+- `licenses/PARALLAX-APACHE-2.0.txt` — verbatim upstream LICENSE
+- `licenses/PARALLAX-NOTICE.txt` — derivative-works disclosure +
+  pinned commit + modification log
+- Per-file 6-line attribution headers on every vendored module under
+  `prsm/compute/parallax_scheduling/`
+
+---
+
+**License:** MIT (PRSM-original code) + Apache-2.0 (vendored Parallax components — see above) | **Website:** [prsm-network.com](https://www.prsm-network.com) | **PyPI:** [prsm-network](https://pypi.org/project/prsm-network/)

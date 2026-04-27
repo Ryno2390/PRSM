@@ -235,6 +235,82 @@ The 2026-04-22 bundle's engagement plan stands. This refresh ADDS:
 
 ---
 
+## 7.1 Third-party-derived components (Phase 3.x.6 only)
+
+Phase 3.x.6 introduces the project's first vendored third-party code
+path. Auditors should treat the vendor boundary as a distinct trust
+seam.
+
+**Vendor scope.** `prsm/compute/parallax_scheduling/` contains source
+copied + modified from [GradientHQ/parallax](https://github.com/GradientHQ/parallax)
+at upstream commit `c8c8ebdaaf2924b6d25e2d1caff61e27374cce0b`,
+licensed under Apache 2.0. The eight vendored Python modules
+(`__init__.py`, `_vendored_utils.py`, `layer_allocation.py`,
+`model_info.py`, `node.py`, `node_management.py`, `request_routing.py`,
+`scheduler.py`) carry a 6-line attribution header at the top.
+
+**Verbatim vs. modified.** Verbatim: `model_info.py`, `node.py`,
+`node_management.py`, `scheduler.py`, `request_routing.py`,
+`layer_allocation.py`. Modified: `_vendored_utils.py` is a minimal
+port of upstream `parallax_utils` helpers (Apple-Silicon path
+stubbed). Import paths in every vendored module rewritten from
+`src.scheduling.*` → `prsm.compute.parallax_scheduling.*`. See
+`licenses/PARALLAX-NOTICE.txt` modification log for the authoritative
+diff.
+
+**PRSM-original delta** (the load-bearing trust contribution; auditor
+focus should be here, not the vendored algorithm):
+- `prsm_types.py` — PRSM-native data layer (`ParallaxGPU`,
+  `AllocationResult`, `RegionPipeline`, `allocate_across_regions`,
+  `partition_by_region`, `to_parallax_node`).
+- `prsm_request_router.py` — Phase-2 router (`RouteRequest`,
+  `GPUChain`, `RequestRouter`, `ProfileSource` Protocol).
+- `profile_dht.py` — Ed25519-signed profile DHT mirroring the
+  Phase 3.x.5 manifest DHT pattern (~700 LoC); MUST be reviewed
+  alongside §3.2 cross-language byte-equality concerns.
+- `trust_adapter.py` — the four adapters: `AnchorVerifyAdapter`
+  (Phase-1 input filter, anchor=PublisherKeyAnchor.sol),
+  `TierGateAdapter` (Phase-2 pre-route filter, hardware-TEE
+  attestation), `StakeWeightedTrustAdapter` (rescales profile
+  latency by 1/confidence; closes pool-level admission via
+  `is_eligible`), `ConsensusMismatchHook` (post-route, sample-
+  rate'd redundant chain → Phase 7.1 challenge on output mismatch).
+- `prsm/compute/inference/parallax_executor.py` —
+  `ParallaxScheduledExecutor` implements the existing
+  `InferenceExecutor` Protocol; drop-in replacement for
+  `TensorParallelInferenceExecutor`.
+
+**License compliance.** `LICENSE` (root) carries a "Third-party
+components" footer pointing to `licenses/PARALLAX-APACHE-2.0.txt`
+(verbatim upstream LICENSE) and `licenses/PARALLAX-NOTICE.txt`
+(derivative-works notice with pinned commit SHA + modification
+log). `README.md` carries a corresponding "Third-Party Components"
+section.
+
+**Test coverage at the tag.** 180 tests green:
+- `tests/unit/test_parallax_layer_allocation.py` (27)
+- `tests/unit/test_parallax_request_routing.py` (16)
+- `tests/unit/test_parallax_profile_dht.py` (51)
+- `tests/unit/test_parallax_trust_adapter.py` (51)
+- `tests/unit/test_parallax_executor.py` (29)
+- `tests/integration/test_parallax_e2e.py` (7) — three simulated
+  nodes, exercises happy path + region preference + anchor
+  enforcement + tier gate + stake weighting + consensus mismatch
+  + membership churn
+
+**Auditor prompts:** review `trust_adapter.py` line-by-line; verify
+`signing_payload` canonicalization in `profile_dht.SignedProfileEntry`
+matches `manifest_dht.ManifestEntry` shape (sort_keys=True; sorted
+RTT-to-peers map); verify the "never raises" invariant on
+`ProfileDHTServer.handle()`; verify anchor-verify-on-read in
+`SignedProfileEntry.verify_with_anchor` (pubkey resolved via
+`anchor.lookup(node_id)` at verify time, not from any embedded
+field); check that `TrustStack.filter_pool` correctly composes
+anchor + stake-eligibility (Phase 3.x.6 Task 7 E2E surfaced and
+remediated a hole here pre-tag).
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
@@ -250,3 +326,4 @@ When the Foundation signs the auditor contract:
 ## 9. Changelog
 
 - **0.1 (2026-04-27)** — initial cumulative refresh covering 3.x.2/3/4/5 + Phase 4 Task 3. Tag pending at commit `107fb150`.
+- **0.2 (2026-04-27)** — added §7.1 "Third-party-derived components" covering Phase 3.x.6 vendor scope (Parallax decentralized inference scheduler, Apache 2.0). Vendor boundary documented; PRSM-original delta (four trust adapters + executor) called out for auditor focus.

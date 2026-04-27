@@ -660,6 +660,32 @@ class ProfileDHTServer:
             return None
         return entry
 
+    def cache_local(self, entry: SignedProfileEntry) -> bool:
+        """In-process latest-wins cache write. Returns True if the
+        cache was updated (entry is newer than any existing entry for
+        this node_id), False otherwise.
+
+        Used by ``ProfileDHT.publish_self`` (no network round-trip
+        required for self-publish) and ``ProfileDHT.fetch_peer`` to
+        warm the local cache after a successful network fetch. Holds
+        the same lock as ``handle()`` so the in-process and on-the-
+        wire publish paths share state atomically.
+
+        This method does NOT verify the entry against the anchor; it's
+        the caller's responsibility (network publish goes through
+        ``handle()`` which DOES verify; in-process self-publish skips
+        the anchor RPC because the publishing node already trusts its
+        own identity)."""
+        with self._lock:
+            existing = self._cache.get(entry.node_id)
+            if (
+                existing is not None
+                and existing.timestamp_unix >= entry.timestamp_unix
+            ):
+                return False
+            self._cache[entry.node_id] = entry
+            return True
+
     def evict_stale(self) -> int:
         """Drop all entries past TTL. Returns count evicted. Operators
         may call this from a background thread; it's also called
@@ -823,8 +849,10 @@ class ProfileDHT:
             timestamp_unix=self._clock(),
         )
         # Self-cache so local fetches see own latest immediately.
-        with self.server._lock:  # noqa: SLF001
-            self.server._cache[entry.node_id] = entry  # noqa: SLF001
+        # Skip the anchor RPC — the publishing node trusts its own
+        # identity. cache_local() is the public encapsulation of the
+        # latest-wins write under the same lock as handle().
+        self.server.cache_local(entry)
 
         accepted = 0
         request = PublishProfileRequest(
@@ -897,13 +925,9 @@ class ProfileDHT:
                 )
                 continue
             # Cache locally so subsequent get_snapshot hits the cache.
-            with self.server._lock:  # noqa: SLF001
-                existing = self.server._cache.get(node_id)  # noqa: SLF001
-                if (
-                    existing is None
-                    or existing.timestamp_unix < response.entry.timestamp_unix
-                ):
-                    self.server._cache[node_id] = response.entry  # noqa: SLF001
+            # cache_local handles the latest-wins comparison + lock
+            # semantics so we don't reach into server private state.
+            self.server.cache_local(response.entry)
             return response.entry
         return None
 

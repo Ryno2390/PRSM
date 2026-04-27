@@ -48,6 +48,12 @@ from prsm.compute.inference.content_tier_gate import (
     open_tier_b,
     open_tier_c,
 )
+from prsm.compute.inference.parallax_executor import (
+    ChainExecutionResult,
+    ChainExecutor,
+    GpuPoolProvider,
+    ParallaxScheduledExecutor,
+)
 
 __all__ = [
     # Models
@@ -60,6 +66,11 @@ __all__ = [
     "MockInferenceExecutor",
     "TensorParallelInferenceExecutor",
     "default_mock_executor",
+    # Phase 3.x.6 — Parallax-scheduled distributed executor
+    "ParallaxScheduledExecutor",
+    "ChainExecutor",
+    "ChainExecutionResult",
+    "GpuPoolProvider",
     # Receipt signing (Task 2)
     "sign_receipt",
     "verify_receipt",

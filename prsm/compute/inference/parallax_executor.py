@@ -387,13 +387,20 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         pool: Sequence[ParallaxGPU],
         model_info: ModelInfo,
     ) -> AllocationResult:
-        """Cache hit when the cached stage-set is a subset of the
-        current trust-filtered pool. Otherwise rebuild."""
+        """Cache hit when the cached stage-set is non-empty AND a
+        subset of the current trust-filtered pool. Otherwise rebuild.
+
+        The non-empty guard guards against cache poisoning under
+        ``allow_partial_regions=True``: an allocation with zero
+        pipelines (every region failed) has stage_set == ∅, which
+        is trivially a subset of any pool, so a naive issubset check
+        would re-use the empty allocation forever and route() would
+        fail every subsequent request even after the pool recovers."""
         pool_ids = frozenset(g.node_id for g in pool)
         cached = self._alloc_cache.get(model_id)
         if cached is not None:
             cached_alloc, cached_stage_set = cached
-            if cached_stage_set.issubset(pool_ids):
+            if cached_stage_set and cached_stage_set.issubset(pool_ids):
                 return cached_alloc
         # Rebuild.
         return self._rebuild_allocation(
@@ -418,8 +425,14 @@ class ParallaxScheduledExecutor(InferenceExecutor):
             for pipeline in pipelines
             for node_id in pipeline.stages
         )
-        self._alloc_cache[model_id] = (allocation, stage_set)
         self._phase1_recompute_count += 1
+        if not stage_set:
+            # Don't poison the cache with an empty allocation (only
+            # reachable under allow_partial_regions=True when every
+            # region failed). Force the next request to retry against
+            # a possibly-recovered pool.
+            return allocation
+        self._alloc_cache[model_id] = (allocation, stage_set)
         return allocation
 
     def _route_with_retry(
