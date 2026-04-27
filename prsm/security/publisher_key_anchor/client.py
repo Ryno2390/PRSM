@@ -388,7 +388,13 @@ class PublisherKeyAnchorClient:
         )
         signed = self._account.sign_transaction(tx)
         # web3.py 7.x renamed rawTransaction → raw_transaction; support both.
-        raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+        # Explicit hasattr/None checks (not `or`) — `b""` is falsy but is a
+        # legitimate value to surface as an empty-bytes signing failure
+        # rather than masking with a fallback to the deprecated attribute.
+        if hasattr(signed, "raw_transaction") and signed.raw_transaction is not None:
+            raw = signed.raw_transaction
+        else:
+            raw = signed.rawTransaction  # web3.py 7.x deprecated path
         tx_hash = self._web3.eth.send_raw_transaction(raw)
         receipt = self._web3.eth.wait_for_transaction_receipt(tx_hash)
         if receipt.status != 1:

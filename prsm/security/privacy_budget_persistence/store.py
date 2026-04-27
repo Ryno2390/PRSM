@@ -431,13 +431,16 @@ class FilesystemPrivacyBudgetStore(PrivacyBudgetStore):
         """Walk the chain end-to-end; True iff signatures + chain hold.
 
         When ``self._anchor`` is configured (Phase 3.x.3 trust upgrade),
-        the supplied ``public_key_b64`` is IGNORED. Each entry's
-        ``node_id`` is resolved via ``anchor.lookup`` per-entry, and the
-        signature must verify under the anchored key. This catches both
-        sidecar-tamper (anchor takes precedence) AND any entry signed
-        by a different identity than the anchored one (which would
-        otherwise pass under sidecar-only trust if all entries shared a
-        compromised local sidecar key).
+        the supplied ``public_key_b64`` is IGNORED — a one-time
+        ``UserWarning`` is emitted on the first call to alert callers
+        passing a real key under anchor mode that the key is not being
+        used for verification. Each entry's ``node_id`` is resolved via
+        ``anchor.lookup`` per-entry, and the signature must verify
+        under the anchored key. This catches both sidecar-tamper
+        (anchor takes precedence) AND any entry signed by a different
+        identity than the anchored one (which would otherwise pass
+        under sidecar-only trust if all entries shared a compromised
+        local sidecar key).
 
         Without anchor, behavior is unchanged from the ABC default —
         Phase 3.x.4 sidecar trust.
@@ -448,6 +451,25 @@ class FilesystemPrivacyBudgetStore(PrivacyBudgetStore):
         """
         if self._anchor is None:
             return super().verify_chain(public_key_b64)
+
+        # Anchor mode: warn callers passing a non-trivial public_key_b64
+        # that the arg is being ignored. Idempotent per store instance
+        # (we suppress after the first emission to avoid log spam).
+        if (
+            public_key_b64
+            and public_key_b64 != "ignored"
+            and not getattr(self, "_anchor_arg_warned", False)
+        ):
+            import warnings
+            warnings.warn(
+                "FilesystemPrivacyBudgetStore.verify_chain ignores the "
+                "public_key_b64 arg when anchor= is configured (Phase 3.x.3 "
+                "trust upgrade). Pass an empty string or 'ignored' to silence "
+                "this warning, or remove anchor= to fall back to sidecar trust.",
+                UserWarning,
+                stacklevel=2,
+            )
+            self._anchor_arg_warned = True
 
         # Anchor-routed verification.
         from prsm.security.privacy_budget_persistence.signing import verify_entry

@@ -54,6 +54,16 @@ def verify_manifest_with_anchor(
     Returns False on any of: unregistered publisher, signature mismatch,
     tampered manifest field. Anchor RPC failures propagate as
     ``AnchorRPCError``.
+
+    .. warning::
+        **Anchor key rotation invalidates pre-rotation signatures.**
+        If the publisher's key is rotated via ``adminOverride`` (Phase
+        3.x.3 emergency revocation path), every manifest signed under
+        the OLD key will fail verification against the NEW anchored
+        key. This is by design — that's the whole point of revocation
+        — but downstream callers caching "verified manifest" results
+        MUST invalidate those caches after a known anchor rotation.
+        Use ``anchor.invalidate(node_id)`` to evict the lookup cache.
     """
     pubkey = anchor.lookup(manifest.publisher_node_id)
     if pubkey is None:
@@ -71,8 +81,20 @@ def verify_entry_with_anchor(
     tampered entry field, broken chain link (the entry's signing
     payload includes ``prev_entry_hash``). Anchor RPC failures
     propagate as ``AnchorRPCError``.
+
+    .. warning::
+        **Anchor key rotation invalidates pre-rotation signatures.**
+        Same caveat as ``verify_manifest_with_anchor`` — see that
+        wrapper's docstring for the cache-invalidation guidance.
     """
-    pubkey = anchor.lookup(entry.node_id)
+    # Defense in depth: PrivacyBudgetEntry.node_id is bare hex by
+    # construction (no 0x prefix), but a future refactor might change
+    # that. Strip explicitly so the wrapper stays robust against the
+    # normalization that PublisherKeyAnchorClient.lookup also applies.
+    node_id = entry.node_id
+    if isinstance(node_id, str) and node_id.startswith("0x"):
+        node_id = node_id[2:]
+    pubkey = anchor.lookup(node_id)
     if pubkey is None:
         return False
     return verify_entry(entry, public_key_b64=pubkey)
@@ -92,6 +114,11 @@ def verify_receipt_with_anchor(
     (``settler_node_id``), not the model publisher. Both must be
     independently anchored if cross-node verification is needed for
     both artifact types.
+
+    .. warning::
+        **Anchor key rotation invalidates pre-rotation signatures.**
+        Same caveat as ``verify_manifest_with_anchor`` — see that
+        wrapper's docstring for the cache-invalidation guidance.
     """
     pubkey = anchor.lookup(receipt.settler_node_id)
     if pubkey is None:

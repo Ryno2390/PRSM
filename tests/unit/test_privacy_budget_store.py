@@ -768,6 +768,50 @@ class TestFilesystemStoreAnchorIntegration:
         # Old behavior: needs the right public_key_b64 explicitly.
         assert store_b.verify_chain(identity.public_key_b64) is True
 
+    def test_anchor_mode_warns_when_pubkey_arg_passed(
+        self, tmp_path, identity, fake_anchor
+    ):
+        # Phase 3.x.3 Task 8 review M3: when anchor= is configured,
+        # passing a real-looking public_key_b64 to verify_chain emits
+        # a one-time UserWarning (the arg is being silently ignored).
+        # Empty string and the literal "ignored" suppress the warning.
+        import warnings
+
+        store = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        for entry in _build_signed_chain(identity, 1):
+            store.append(entry)
+        store_anchored = FilesystemPrivacyBudgetStore(
+            tmp_path, identity.public_key_b64, anchor=fake_anchor
+        )
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always")
+            store_anchored.verify_chain(identity.public_key_b64)
+        assert any(
+            issubclass(w.category, UserWarning)
+            and "ignores the public_key_b64 arg" in str(w.message)
+            for w in captured
+        ), f"expected UserWarning; got {[(w.category, str(w.message)) for w in captured]}"
+
+    def test_anchor_mode_silent_when_arg_is_ignored_sentinel(
+        self, tmp_path, identity, fake_anchor
+    ):
+        # No warning when caller passes the documented sentinel values.
+        import warnings
+
+        store = FilesystemPrivacyBudgetStore(tmp_path, identity.public_key_b64)
+        for entry in _build_signed_chain(identity, 1):
+            store.append(entry)
+        store_anchored = FilesystemPrivacyBudgetStore(
+            tmp_path, identity.public_key_b64, anchor=fake_anchor
+        )
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always")
+            store_anchored.verify_chain("ignored")
+            store_anchored.verify_chain("")
+        assert not any(
+            issubclass(w.category, UserWarning) for w in captured
+        ), f"expected no warnings; got {[str(w.message) for w in captured]}"
+
     def test_anchor_consulted_per_entry(
         self, tmp_path, identity, fake_anchor
     ):
