@@ -820,11 +820,40 @@ class PRSMNode:
         # ── Security Hardening (Ring 10) ──────────────────────────────
         try:
             from prsm.security import IntegrityVerifier, PrivacyBudgetTracker, PipelineAuditLog
+            from prsm.security.privacy_budget_persistence import (
+                FilesystemPrivacyBudgetStore,
+                PersistentPrivacyBudgetTracker,
+            )
 
             self.integrity_verifier = IntegrityVerifier()
-            self.privacy_budget = PrivacyBudgetTracker(max_epsilon=100.0)
+
+            # Persistent privacy-budget tracker (Phase 3.x.4): wraps
+            # the in-memory PrivacyBudgetTracker in a signed, append-only
+            # journal at <data_dir>/privacy_budget/. Restart-survival +
+            # tamper-evidence; verify_chain on construction refuses to
+            # silently reconstitute possibly-wrong cumulative ε state.
+            #
+            # JournalCorruptionError propagates out of the try block —
+            # it indicates an existing journal is broken, which an
+            # operator must investigate (vs. silently falling back to
+            # in-memory and losing the audit trail).
+            budget_dir = Path(self.config.data_dir) / "privacy_budget"
+            budget_dir.mkdir(parents=True, exist_ok=True)
+            budget_store = FilesystemPrivacyBudgetStore(
+                budget_dir, self.identity.public_key_b64
+            )
+            self.privacy_budget = PersistentPrivacyBudgetTracker(
+                max_epsilon=100.0,
+                store=budget_store,
+                identity=self.identity,
+            )
+
             self.pipeline_audit_log = PipelineAuditLog()
-            logger.info("Security hardening (Ring 10) initialized")
+            logger.info(
+                "Security hardening (Ring 10) initialized; privacy-budget "
+                "journal at %s",
+                budget_dir,
+            )
         except ImportError:
             self.integrity_verifier = None
             self.privacy_budget = None
