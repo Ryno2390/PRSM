@@ -24,6 +24,7 @@ custody requires the on-chain anchor planned for Phase 3.x.3.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Optional
 
@@ -132,6 +133,18 @@ class PersistentPrivacyBudgetTracker(PrivacyBudgetTracker):
     def record_spend(
         self, epsilon: float, operation: str, model_id: str = ""
     ) -> bool:
+        # Same finite + positive ε guard as parent's record_spend, run
+        # BEFORE journal write so a malformed spend doesn't pollute the
+        # chain. Negative ε would credit the budget back; non-finite
+        # would propagate NaN through every downstream sum. Both
+        # rejected here.
+        if not math.isfinite(epsilon) or epsilon <= 0.0:
+            logger.warning(
+                f"Privacy spend rejected: epsilon must be finite and "
+                f"positive, got {epsilon!r}"
+            )
+            return False
+
         # Pre-flight: same behavior as parent. Rejection here means no
         # journal write — failed spends don't pollute the chain.
         if not self.can_spend(epsilon):

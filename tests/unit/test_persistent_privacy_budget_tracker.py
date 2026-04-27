@@ -175,6 +175,42 @@ class TestPersistentRecordSpend:
         assert len(memory_store) == 3
         assert memory_store.verify_chain(identity.public_key_b64) is True
 
+    def test_negative_epsilon_rejected_no_journal_write(
+        self, memory_store, identity
+    ):
+        # Phase 3.x.4 round-1 review LOW: a negative ε would CREDIT the
+        # budget back. record_spend(-5.0, ...) must reject and write
+        # nothing to the journal.
+        t = PersistentPrivacyBudgetTracker(
+            max_epsilon=100.0, store=memory_store, identity=identity
+        )
+        t.record_spend(8.0, "ok")
+        assert len(memory_store) == 1
+        assert t.record_spend(-5.0, "credit-attack") is False
+        assert len(memory_store) == 1
+        assert t.total_spent == 8.0
+
+    def test_non_finite_epsilon_rejected_no_journal_write(
+        self, memory_store, identity
+    ):
+        t = PersistentPrivacyBudgetTracker(
+            max_epsilon=100.0, store=memory_store, identity=identity
+        )
+        for bad in [float("nan"), float("inf"), float("-inf")]:
+            assert t.record_spend(bad, "x") is False
+        assert len(memory_store) == 0
+        assert t.total_spent == 0.0
+
+    def test_zero_epsilon_rejected_no_journal_write(
+        self, memory_store, identity
+    ):
+        # Zero ε is also non-positive; rejected.
+        t = PersistentPrivacyBudgetTracker(
+            max_epsilon=100.0, store=memory_store, identity=identity
+        )
+        assert t.record_spend(0.0, "x") is False
+        assert len(memory_store) == 0
+
     def test_pre_flight_refusal_does_not_write_journal(
         self, memory_store, identity
     ):

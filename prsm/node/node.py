@@ -57,6 +57,34 @@ from prsm.node.bittorrent_requester import BitTorrentRequester, BitTorrentReques
 logger = logging.getLogger(__name__)
 
 
+def build_persistent_privacy_budget(data_dir, identity, max_epsilon: float = 100.0):
+    """Construct a PersistentPrivacyBudgetTracker rooted at <data_dir>/privacy_budget/.
+
+    Phase 3.x.4 wiring factory. Imported by Node.__init__ AND by the
+    integration test ``tests/integration/test_node_privacy_budget_persistence.py``
+    so any drift between production wiring and the test harness is a
+    compile-time error rather than a silent integration gap.
+
+    Raises ``JournalCorruptionError`` (from prsm.security.privacy_budget_persistence)
+    if the existing journal at the configured path fails verify_chain
+    on construction. Caller MUST let this propagate — silently falling
+    back to in-memory loses the audit trail.
+    """
+    from pathlib import Path
+
+    from prsm.security.privacy_budget_persistence import (
+        FilesystemPrivacyBudgetStore,
+        PersistentPrivacyBudgetTracker,
+    )
+
+    budget_dir = Path(data_dir) / "privacy_budget"
+    budget_dir.mkdir(parents=True, exist_ok=True)
+    store = FilesystemPrivacyBudgetStore(budget_dir, identity.public_key_b64)
+    return PersistentPrivacyBudgetTracker(
+        max_epsilon=max_epsilon, store=store, identity=identity
+    )
+
+
 def _is_valid_eth_address(addr: Optional[str]) -> bool:
     """Cheap format check for 0x-prefixed 20-byte Ethereum address."""
     if not isinstance(addr, str):
@@ -820,10 +848,6 @@ class PRSMNode:
         # ── Security Hardening (Ring 10) ──────────────────────────────
         try:
             from prsm.security import IntegrityVerifier, PrivacyBudgetTracker, PipelineAuditLog
-            from prsm.security.privacy_budget_persistence import (
-                FilesystemPrivacyBudgetStore,
-                PersistentPrivacyBudgetTracker,
-            )
 
             self.integrity_verifier = IntegrityVerifier()
 
@@ -837,22 +861,15 @@ class PRSMNode:
             # it indicates an existing journal is broken, which an
             # operator must investigate (vs. silently falling back to
             # in-memory and losing the audit trail).
-            budget_dir = Path(self.config.data_dir) / "privacy_budget"
-            budget_dir.mkdir(parents=True, exist_ok=True)
-            budget_store = FilesystemPrivacyBudgetStore(
-                budget_dir, self.identity.public_key_b64
-            )
-            self.privacy_budget = PersistentPrivacyBudgetTracker(
-                max_epsilon=100.0,
-                store=budget_store,
-                identity=self.identity,
+            self.privacy_budget = build_persistent_privacy_budget(
+                self.config.data_dir, self.identity
             )
 
             self.pipeline_audit_log = PipelineAuditLog()
             logger.info(
                 "Security hardening (Ring 10) initialized; privacy-budget "
-                "journal at %s",
-                budget_dir,
+                "journal at %s/privacy_budget",
+                self.config.data_dir,
             )
         except ImportError:
             self.integrity_verifier = None

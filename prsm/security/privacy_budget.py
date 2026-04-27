@@ -7,6 +7,7 @@ across inference sessions.
 """
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
@@ -42,7 +43,20 @@ class PrivacyBudgetTracker:
         return self.total_spent + epsilon <= self.max_epsilon
 
     def record_spend(self, epsilon: float, operation: str, model_id: str = "") -> bool:
-        """Record a privacy spend. Returns False if would exceed budget."""
+        """Record a privacy spend. Returns False if would exceed budget.
+
+        Rejects non-finite (NaN / +inf / -inf) and non-positive ε before
+        the budget check. The non-positive guard is load-bearing: a
+        negative ε would CREDIT the budget back, letting an operator
+        write `record_spend(-50.0, ...)` to dodge a future ceiling.
+        Caught by the Phase 3.x.4 round-1 review.
+        """
+        if not math.isfinite(epsilon) or epsilon <= 0.0:
+            logger.warning(
+                f"Privacy spend rejected: epsilon must be finite and "
+                f"positive, got {epsilon!r}"
+            )
+            return False
         if not self.can_spend(epsilon):
             logger.warning(
                 f"Privacy budget exceeded: {self.total_spent + epsilon:.1f} > {self.max_epsilon}"

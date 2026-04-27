@@ -24,33 +24,15 @@ from prsm.node.identity import (
     load_node_identity,
     save_node_identity,
 )
+# Phase 3.x.4 round-1 review: import the production wiring factory
+# directly rather than re-implementing it in the test. Drift between
+# production and test now becomes a compile-time error.
+from prsm.node.node import build_persistent_privacy_budget as _wire_privacy_budget
 from prsm.security.privacy_budget import PrivacyBudgetTracker
 from prsm.security.privacy_budget_persistence import (
-    FilesystemPrivacyBudgetStore,
     JournalCorruptionError,
     PersistentPrivacyBudgetTracker,
 )
-
-
-# ──────────────────────────────────────────────────────────────────────────
-# Helpers — replicate the relevant slice of Node.__init__ wiring
-# ──────────────────────────────────────────────────────────────────────────
-
-
-def _wire_privacy_budget(
-    data_dir: Path, identity: NodeIdentity
-) -> PersistentPrivacyBudgetTracker:
-    """Mirrors the prsm/node/node.py:825 wiring block exactly.
-
-    Kept in sync with the production code so any drift in node.py
-    breaks this test rather than silently shipping an integration gap.
-    """
-    budget_dir = Path(data_dir) / "privacy_budget"
-    budget_dir.mkdir(parents=True, exist_ok=True)
-    store = FilesystemPrivacyBudgetStore(budget_dir, identity.public_key_b64)
-    return PersistentPrivacyBudgetTracker(
-        max_epsilon=100.0, store=store, identity=identity
-    )
 
 
 def _saved_identity(data_dir: Path) -> NodeIdentity:

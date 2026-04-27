@@ -179,6 +179,27 @@ class TestConstruction:
                 signature="not bytes",  # type: ignore[arg-type]
             )
 
+    def test_pipe_in_node_id_rejected(self):
+        # Phase 3.x.4 round-1 review LOW: the canonical signing payload
+        # uses '|' as a field separator with no escaping. A pipe in a
+        # user-controlled string field could ambiguate field boundaries.
+        with pytest.raises(ValueError, match="reserved character"):
+            _spend_entry(node_id="alice|bob")
+
+    def test_pipe_in_operation_rejected(self):
+        with pytest.raises(ValueError, match="reserved character"):
+            _spend_entry(operation="x|y")
+
+    def test_pipe_in_model_id_rejected(self):
+        with pytest.raises(ValueError, match="reserved character"):
+            _spend_entry(model_id="model|other")
+
+    def test_newline_in_string_fields_rejected(self):
+        # Newline would also break a hypothetical line-split parser.
+        for kwarg in ["node_id", "operation", "model_id"]:
+            with pytest.raises(ValueError, match="reserved character"):
+                _spend_entry(**{kwarg: "x\ny"})
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Signing payload — canonical, deterministic, schema-bound

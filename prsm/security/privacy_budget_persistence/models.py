@@ -125,6 +125,25 @@ class PrivacyBudgetEntry:
                 f"sequence_number must be >= 0, got {self.sequence_number}"
             )
 
+        # Defense-in-depth: the canonical signing payload uses '|' as
+        # a field separator with no escaping. Reject the separator and
+        # newline in user-controlled string fields so a malicious
+        # caller can't construct two distinct entries that produce
+        # identical signing payload bytes (Phase 3.x.4 round-1 review
+        # LOW). Future schema bump can switch to length-prefixing or
+        # an explicit escape rule pinned by ENTRY_SCHEMA_VERSION.
+        for field_name, field_value in [
+            ("node_id", self.node_id),
+            ("operation", self.operation),
+            ("model_id", self.model_id),
+        ]:
+            if "|" in field_value or "\n" in field_value:
+                raise ValueError(
+                    f"{field_name}={field_value!r} contains a reserved "
+                    f"character ('|' or newline) — these would corrupt "
+                    f"the canonical signing payload's field boundaries"
+                )
+
     def signing_payload(self) -> bytes:
         """Canonical bytes used for ``signature`` generation/verification.
 
