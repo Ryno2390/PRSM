@@ -14,6 +14,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -836,3 +837,177 @@ class TestFilesystemRegistryParity:
         data[0] ^= 0xFF
         shard_path.write_bytes(bytes(data))
         assert fs_reg.verify(model.model_id) is False
+
+
+class TestFilesystemRegistryDHTIntegration:
+    """Phase 3.x.5 Task 5 — dht= kwarg.
+
+    Hooks the registry into a manifest DHT so:
+      - register() also announces on the DHT (best-effort; failures
+        are logged but don't fail the registration).
+      - get_manifest() / get() fall back to dht.get_manifest() when
+        the local manifest is missing. The fetched manifest is
+        anchor-verified by the DHT layer; cached locally so subsequent
+        reads are fast.
+    """
+
+    @pytest.fixture
+    def fake_anchor(self, identity):
+        from unittest.mock import MagicMock
+        anchor = MagicMock()
+        anchor.lookup = MagicMock(
+            side_effect=lambda nid: identity.public_key_b64
+            if nid == identity.node_id else None
+        )
+        return anchor
+
+    @pytest.fixture
+    def fake_dht(self):
+        """Mock DHT client exposing announce + get_manifest."""
+        from unittest.mock import MagicMock
+        return MagicMock()
+
+    def test_dht_requires_anchor(self, tmp_path, fake_dht):
+        with pytest.raises(RuntimeError, match="dht= requires anchor="):
+            FilesystemModelRegistry(tmp_path, dht=fake_dht)
+
+    def test_register_announces_on_dht(
+        self, tmp_path, identity, fake_anchor, fake_dht, model
+    ):
+        reg = FilesystemModelRegistry(
+            tmp_path, anchor=fake_anchor, dht=fake_dht
+        )
+        reg.register(model, identity=identity)
+
+        # announce called with (model_id, manifest_path)
+        assert fake_dht.announce.call_count == 1
+        call_args = fake_dht.announce.call_args
+        assert call_args.args[0] == model.model_id
+        assert call_args.args[1] == (
+            tmp_path / model.model_id / "manifest.json"
+        )
+
+    def test_register_succeeds_when_dht_announce_raises(
+        self, tmp_path, identity, fake_anchor, fake_dht, model
+    ):
+        # DHT announce blowing up MUST NOT fail the registration —
+        # the local registry is the write authority.
+        fake_dht.announce = MagicMock(
+            side_effect=RuntimeError("network down")
+        )
+
+        reg = FilesystemModelRegistry(
+            tmp_path, anchor=fake_anchor, dht=fake_dht
+        )
+        signed = reg.register(model, identity=identity)
+        assert signed.model_id == model.model_id
+        # Local manifest is durable
+        assert (tmp_path / model.model_id / "manifest.json").exists()
+
+    def test_get_manifest_falls_back_to_dht(
+        self, tmp_path, identity, fake_anchor, fake_dht, model
+    ):
+        # Build a real signed manifest "on another node" — since the
+        # DHT layer guarantees anchor verification, our fake_dht just
+        # returns the pre-built manifest as if the network had served it.
+        unsigned = manifest_from_model(
+            model, publisher_node_id=identity.node_id
+        )
+        signed = sign_manifest(unsigned, identity)
+        fake_dht.get_manifest = MagicMock(return_value=signed)
+
+        # Empty registry — no local manifest for this model_id.
+        reg = FilesystemModelRegistry(
+            tmp_path, anchor=fake_anchor, dht=fake_dht
+        )
+
+        out = reg.get_manifest(model.model_id)
+        assert out.model_id == model.model_id
+        fake_dht.get_manifest.assert_called_once_with(model.model_id)
+
+        # Manifest is cached locally — second call doesn't re-fetch.
+        cached_path = tmp_path / model.model_id / "manifest.json"
+        assert cached_path.exists()
+
+        fake_dht.get_manifest.reset_mock()
+        out2 = reg.get_manifest(model.model_id)
+        assert out2.model_id == model.model_id
+        fake_dht.get_manifest.assert_not_called()
+
+    def test_dht_lookup_failure_yields_model_not_found(
+        self, tmp_path, fake_anchor, fake_dht
+    ):
+        from prsm.network.manifest_dht import ManifestNotFoundError
+        fake_dht.get_manifest = MagicMock(
+            side_effect=ManifestNotFoundError("no providers")
+        )
+
+        reg = FilesystemModelRegistry(
+            tmp_path, anchor=fake_anchor, dht=fake_dht
+        )
+        with pytest.raises(ModelNotFoundError, match="DHT lookup"):
+            reg.get_manifest("absent-model")
+
+    def test_no_dht_no_fallback(self, tmp_path, fake_anchor):
+        # Without dht=, behavior is unchanged from Phase 3.x.3 —
+        # missing manifest → ModelNotFoundError, no network call.
+        reg = FilesystemModelRegistry(tmp_path, anchor=fake_anchor)
+        with pytest.raises(ModelNotFoundError):
+            reg.get_manifest("absent-model")
+
+    def test_get_falls_back_then_fails_at_shards(
+        self, tmp_path, identity, fake_anchor, fake_dht, model
+    ):
+        # get() goes through _load_manifest_or_raise → DHT fallback
+        # populates the manifest, but the shards aren't on disk
+        # (DHT distributes manifests only, not shards). The downstream
+        # shard-existence check raises ManifestVerificationError —
+        # operator's signal that the model is announced but bytes
+        # need to be obtained out-of-band.
+        unsigned = manifest_from_model(
+            model, publisher_node_id=identity.node_id
+        )
+        signed = sign_manifest(unsigned, identity)
+        fake_dht.get_manifest = MagicMock(return_value=signed)
+
+        reg = FilesystemModelRegistry(
+            tmp_path, anchor=fake_anchor, dht=fake_dht
+        )
+        with pytest.raises(ManifestVerificationError, match="shard file missing"):
+            reg.get(model.model_id)
+
+    def test_dht_cached_manifest_reverifies_via_anchor(
+        self, tmp_path, identity, fake_anchor, fake_dht, model
+    ):
+        # After caching a DHT-fetched manifest, a subsequent
+        # get_manifest() reads the cached bytes and (when get() runs)
+        # re-verifies them via the anchor. Since the registry's
+        # anchor matches the DHT's anchor, this should succeed —
+        # no sidecar is needed.
+        unsigned = manifest_from_model(
+            model, publisher_node_id=identity.node_id
+        )
+        signed = sign_manifest(unsigned, identity)
+        fake_dht.get_manifest = MagicMock(return_value=signed)
+
+        reg = FilesystemModelRegistry(
+            tmp_path, anchor=fake_anchor, dht=fake_dht
+        )
+        # Trigger fallback + cache.
+        reg.get_manifest(model.model_id)
+        # Sidecar was NOT written — DHT-fetched manifest doesn't have one.
+        sidecar = tmp_path / model.model_id / "publisher.pubkey"
+        assert not sidecar.exists()
+        # But anchor-based reads still work.
+        out = reg.get_manifest(model.model_id)
+        assert out.model_id == model.model_id
+
+    def test_register_without_dht_unchanged(
+        self, tmp_path, identity, fake_anchor, model
+    ):
+        # Sanity: anchor-only construction (no dht=) doesn't try to
+        # announce. Phase 3.x.3 behavior is preserved.
+        reg = FilesystemModelRegistry(tmp_path, anchor=fake_anchor)
+        reg.register(model, identity=identity)
+        # No announce attempted — there's no dht to announce on.
+        assert (tmp_path / model.model_id / "manifest.json").exists()

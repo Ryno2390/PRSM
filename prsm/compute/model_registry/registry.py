@@ -26,11 +26,12 @@ from __future__ import annotations
 import abc
 import hashlib
 import json
+import logging
 import os
 import re
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from prsm.compute.model_registry.models import (
     ManifestShardEntry,
@@ -39,6 +40,9 @@ from prsm.compute.model_registry.models import (
 from prsm.compute.model_registry.signing import sign_manifest, verify_manifest
 from prsm.compute.model_sharding.models import ModelShard, ShardedModel
 from prsm.node.identity import NodeIdentity
+
+
+logger = logging.getLogger(__name__)
 
 
 # Strict allowlist for filesystem-mapped identifiers. Rejects path
@@ -405,6 +409,7 @@ class FilesystemModelRegistry(ModelRegistry):
         root: Union[str, Path],
         *,
         anchor=None,
+        dht: Any = None,
     ) -> None:
         """
         Args:
@@ -420,6 +425,21 @@ class FilesystemModelRegistry(ModelRegistry):
 
                 When ``anchor`` is None, behavior is unchanged from
                 Phase 3.x.2 (sidecar-only trust).
+            dht: Optional ``ManifestDHTClient`` (or any object exposing
+                ``announce(model_id, manifest_path)`` +
+                ``get_manifest(model_id) → ModelManifest``). When
+                supplied, ``register()`` ALSO announces the model on
+                the DHT after the local manifest is durable, and
+                ``get()`` / ``get_manifest()`` fall back to a DHT fetch
+                when the local manifest is missing. DHT-fetched
+                manifests are anchor-verified by the DHT client itself
+                (Phase 3.x.5 invariant — no trust-the-network mode), so
+                ``dht=`` requires ``anchor=`` for read-side consistency
+                with how cached manifests will be re-verified on
+                subsequent reads.
+
+                When ``dht`` is None, behavior is unchanged from
+                Phase 3.x.3.
         """
         self._root = Path(root)
         if not self._root.exists():
@@ -431,7 +451,21 @@ class FilesystemModelRegistry(ModelRegistry):
             raise NotADirectoryError(
                 f"FilesystemModelRegistry root {self._root} is not a directory"
             )
+        if dht is not None and anchor is None:
+            # The DHT client itself anchor-verifies on fetch. But once we
+            # cache the fetched manifest to disk, subsequent reads route
+            # through the registry's own verify path — which without an
+            # anchor would fall back to the publisher.pubkey sidecar,
+            # which DHT-fetched manifests don't have. Require both so
+            # the cache is verifiable on re-read.
+            raise RuntimeError(
+                "FilesystemModelRegistry: dht= requires anchor=. "
+                "DHT-fetched manifests are anchor-verified at fetch time; "
+                "the registry needs the same anchor to re-verify the "
+                "cached copy on subsequent reads."
+            )
         self._anchor = anchor
+        self._dht = dht
 
     # -- write path --
 
@@ -482,9 +516,26 @@ class FilesystemModelRegistry(ModelRegistry):
 
         # Manifest LAST — its presence means "everything else is on disk."
         manifest_json = json.dumps(signed.to_dict(), sort_keys=True, indent=2)
-        self._atomic_write_text(
-            model_dir / _MANIFEST_FILENAME, manifest_json
-        )
+        manifest_path = model_dir / _MANIFEST_FILENAME
+        self._atomic_write_text(manifest_path, manifest_json)
+
+        # DHT announce — best-effort. The local registry is the write
+        # authority; if the network is partitioned or the DHT layer
+        # raises, we keep the local registration and surface the
+        # availability degradation in logs. Catching `Exception` here
+        # is intentional (the DHT layer may raise transport, protocol,
+        # or local-index errors — none of which should regress the
+        # local register() contract).
+        if self._dht is not None:
+            try:
+                self._dht.announce(model.model_id, manifest_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "FilesystemModelRegistry.register: DHT announce for "
+                    "%r failed: %s — registration succeeded locally, "
+                    "network availability degraded",
+                    model.model_id, exc,
+                )
 
         return signed
 
@@ -604,6 +655,14 @@ class FilesystemModelRegistry(ModelRegistry):
     def _load_manifest_or_raise(self, model_id: str) -> ModelManifest:
         manifest_path = self._model_dir(model_id) / _MANIFEST_FILENAME
         if not manifest_path.exists():
+            # DHT fallback: when configured, ask the network. The DHT
+            # client is responsible for anchor-verifying every fetched
+            # manifest — we don't re-verify here. We DO cache the bytes
+            # to disk so subsequent reads are local; the cached manifest
+            # gets re-verified through the registry's normal anchor
+            # path on next get().
+            if self._dht is not None:
+                return self._fetch_manifest_via_dht(model_id)
             raise ModelNotFoundError(f"no model registered for {model_id!r}")
         try:
             data = json.loads(manifest_path.read_text())
@@ -617,6 +676,47 @@ class FilesystemModelRegistry(ModelRegistry):
             raise ManifestVerificationError(
                 f"manifest.json for {model_id!r} schema error: {exc}"
             ) from exc
+
+    def _fetch_manifest_via_dht(self, model_id: str) -> ModelManifest:
+        """Pull a manifest from the DHT and cache it locally. Called
+        only when the local manifest.json is missing AND a DHT is
+        configured. The DHT client anchor-verifies the fetched bytes
+        before returning; bytes that fail verification are dropped at
+        the DHT layer (caller-side raises ManifestNotFoundError when
+        no provider serves verifying bytes), which we surface here as
+        ``ModelNotFoundError`` since the local registry has no path
+        to serve the model.
+
+        Caches successful fetches as ``manifest.json`` under the
+        model directory so subsequent reads short-circuit. Does NOT
+        cache a publisher.pubkey sidecar — DHT-fetched manifests are
+        only re-verifiable via the anchor (which is required at
+        construction when ``dht=`` is set).
+        """
+        # Late import — avoid pulling the network module into import
+        # graphs that don't use DHT.
+        from prsm.network.manifest_dht import ManifestNotFoundError
+
+        try:
+            manifest = self._dht.get_manifest(model_id)
+        except ManifestNotFoundError as exc:
+            raise ModelNotFoundError(
+                f"no local manifest for {model_id!r}; DHT lookup also "
+                f"failed: {exc}"
+            ) from exc
+
+        # Cache to disk so subsequent reads bypass the network. The
+        # model directory may not exist yet (first time we've heard of
+        # this model_id on this node).
+        model_dir = self._model_dir(model_id)
+        model_dir.mkdir(parents=True, exist_ok=True)
+        manifest_json = json.dumps(
+            manifest.to_dict(), sort_keys=True, indent=2
+        )
+        self._atomic_write_text(
+            model_dir / _MANIFEST_FILENAME, manifest_json
+        )
+        return manifest
 
     def _load_publisher_key_or_raise(self, model_id: str) -> str:
         key_path = self._model_dir(model_id) / _PUBLISHER_KEY_FILENAME
