@@ -17,6 +17,15 @@ publisher key reject the bytes and try the next provider.
 See ``docs/2026-04-27-phase3.x.5-manifest-dht-design-plan.md``.
 """
 
+from prsm.network.manifest_dht.dht_client import (
+    DEFAULT_K,
+    DHTClientError,
+    ManifestDHTClient,
+    ManifestNotFoundError,
+    RoutingTable,
+    SendMessageFn,
+    TransportFailureError,
+)
 from prsm.network.manifest_dht.local_index import LocalManifestIndex
 from prsm.network.manifest_dht.protocol import (
     DHT_PROTOCOL_VERSION,
@@ -61,4 +70,12 @@ __all__ = [
     "IncompatibleProtocolVersionError",
     # Local index (Task 2)
     "LocalManifestIndex",
+    # DHT client (Task 3)
+    "ManifestDHTClient",
+    "RoutingTable",
+    "SendMessageFn",
+    "DEFAULT_K",
+    "DHTClientError",
+    "ManifestNotFoundError",
+    "TransportFailureError",
 ]
