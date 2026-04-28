@@ -87,7 +87,7 @@ class _FakeModel:
     def generate(
         self,
         *,
-        input_ids: List[int],
+        input_ids: Any,
         streamer: Any,
         max_new_tokens: int,
         temperature: float,
@@ -96,6 +96,18 @@ class _FakeModel:
         top_p: float,
         eos_token_id: Optional[int],
     ) -> List[int]:
+        # The runner now wraps List[int] → torch.Tensor for real-HF
+        # compat; this fake accepts both shapes via duck-typed
+        # ``.tolist()`` unwrap.
+        if hasattr(input_ids, "tolist"):
+            as_list = input_ids.tolist()
+            if (
+                isinstance(as_list, list)
+                and as_list
+                and isinstance(as_list[0], list)
+            ):
+                as_list = as_list[0]
+            input_ids = as_list
         self.last_call = dict(
             input_ids=list(input_ids),
             max_new_tokens=max_new_tokens,

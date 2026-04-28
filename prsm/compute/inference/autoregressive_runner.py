@@ -50,6 +50,17 @@ import numpy as np
 from prsm.compute.inference.streaming_runner import StreamingChunk
 from prsm.compute.tee.models import PrivacyLevel, TEEType
 
+# torch is an optional dependency at the runner boundary. Real-HF
+# ``model.generate`` requires ``input_ids`` as a 2-d ``torch.Tensor``;
+# tokenizer.encode returns ``List[int]``. The wrap step happens
+# in-runner so production callers get HF-compat without each
+# operator wiring it themselves. When torch isn't installed (test
+# envs with mocked models), input_ids passes through untouched.
+try:  # pragma: no cover — exercised by both branches in CI
+    import torch as _torch
+except ImportError:  # pragma: no cover
+    _torch = None  # type: ignore[assignment]
+
 
 __all__ = [
     "AutoregressiveStreamingRunner",
@@ -375,6 +386,16 @@ class AutoregressiveStreamingRunner:
             layer_range, activation, privacy_tier,
         )
         input_ids = self._tokenizer.encode(prompt)
+        # Real-HF ``model.generate`` requires a 2-d ``[batch=1, seq_len]``
+        # ``torch.Tensor``; tokenizer.encode returns ``List[int]``. Wrap
+        # only when torch is available AND we got a list (already-tensor
+        # shapes pass through). Test fakes that pass ``List[int]`` to a
+        # mock generate() will get a tensor here too — the mock handles
+        # it via duck-typed ``.tolist()``.
+        if _torch is not None and isinstance(input_ids, list):
+            input_ids = _torch.tensor(
+                [input_ids], dtype=_torch.long,
+            )
 
         # Sampling resolution.
         max_new_tokens = (
