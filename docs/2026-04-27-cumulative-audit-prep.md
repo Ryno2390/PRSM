@@ -667,6 +667,134 @@ find a "we said X but did Y" gap.
 
 ---
 
+## 7.5 Streaming HTTP Endpoint (Phase 3.x.8.1)
+
+Phase 3.x.8.1 closes the "dormant scaffolding" gap left by Phase
+3.x.8 by adding a Server-Sent-Events sibling to the existing
+``POST /compute/inference`` endpoint. The streaming wire path +
+executor generator API + MCP adapter from 3.x.8 are now wired
+end-to-end through the production HTTP surface — ``prsm_inference``
+MCP tool's chat-style UX is real, not theoretical.
+
+**Tag:** `phase3.x.8.1-merge-ready-20260428` at commit `67fe8863`.
+
+**Headline guarantees.**
+
+  - ``POST /compute/inference/stream`` emits W3C-compliant SSE
+    frames: ``event: token`` (per StreamToken) → ``event: result``
+    (signed receipt with ``streamed_output=True``) OR
+    ``event: error`` (refund + structured error).
+  - End-to-end signed-receipt verification: the wire receipt
+    verifies under the settler identity AND tampering
+    ``streamed_output`` (downgrade attack) flips signature to
+    invalid — Phase 3.x.8 Task 4 invariant proven through the
+    HTTP boundary in ``test_signed_receipt_verifies_under_settler_identity``.
+  - Design plan §3.4 settle-on-tokens-emitted billing policy
+    (round-1 M1 remediation): pre-execute failure (zero tokens)
+    → refund; mid-stream failure AFTER tokens hit the wire →
+    settle. Closes a real billing griefing vector caught at
+    review.
+  - Back-compat: existing ``/compute/inference`` unary endpoint
+    UNCHANGED on a node also serving ``/stream``.
+
+**v1 honest scope (carried from 3.x.8).**
+
+  - ``SyntheticStreamingRunner`` is still a placeholder. Real
+    autoregressive runner is Phase 3.x.10.
+  - Cancellation = clean cleanup only (Python ``GeneratorExit``
+    semantics). HTTP-layer cancel via ``connection.close()``
+    propagates correctly through Starlette → executor → server
+    via the Phase 3.x.8 Task 6 cleanup mechanism.
+  - Streaming + chunked-input composition still rejected at v1.
+
+**Trust seams added by 3.x.8.1.**
+
+  1. ``_resolve_post_token_billing`` (api.py:228-275) — design
+     plan §3.4 enforcement. Branches on ``tokens_emitted``: > 0
+     → release escrow at full estimate; == 0 → refund. ALL FOUR
+     post-token-loop refund branches in ``_event_generator``
+     route through this helper. Closes the griefing vector
+     where a malicious node could emit N tokens then crash and
+     pay nothing despite forcing real compute on responding
+     nodes.
+
+  2. ``_result_to_dict(*, identity)`` (api.py:144-185) — wire-
+     side receipt re-sign on ``job_id`` rebind. The executor
+     uses an internal ``parallax-stream-job-*`` id; the API is
+     authoritative and rebinds to ``infer-stream-*`` for billing
+     correlation. Since ``job_id`` is part of the signed
+     payload, the rebound receipt MUST be re-signed under
+     ``node.identity``. Caught + fixed at Task 5 by the E2E
+     test surfaced through ``verify_receipt`` actually
+     exercising the cryptographic invariant. Mocked unit tests
+     would have missed this — it's why the deep-stack E2E
+     coverage is load-bearing.
+
+  3. SSE framing conformance (api.py:101-119, mcp_server.py:570-
+     654) — ``_sse_event`` produces W3C-compliant frames;
+     ``_parse_sse`` handles chunk-boundary splits, multi-line
+     data, comments, CRLF, default ``event: message``,
+     forward-compat with unknown event types (silently
+     ignored). Defensive flush of unterminated final frame.
+     Tested with programmable ``_FakeResponse._chunks`` for
+     chunk-boundary control.
+
+  4. Operator-misconfig surfaces structurally as 503 (api.py:632-
+     652) — no executor wired: 503 "not initialized"; executor
+     lacks ``execute_streaming``: 503 "does not support
+     streaming". Doesn't crash with ``AttributeError``.
+
+  5. ``InferenceError`` exception (mcp_server.py:551-566) —
+     structured error from a streaming dispatch. ``.code``
+     carries server-side machine-readable code; ``.message``
+     human-readable. Handler maps to clean "Inference rejected:
+     <reason>" surface, no traceback exposed.
+
+  6. Privacy budget gating fires at REQUEST time
+     (api.py:1107-1142) via ``can_spend(expected_epsilon)``,
+     BEFORE the executor runs. The post-token failure path
+     correctly skips ``record_spend`` because nothing was
+     actually billed against the budget yet (the executor
+     never returned a complete receipt). Documented inline in
+     ``_settle_streaming_escrow``.
+
+**Test coverage at the tag.** 794 tests green across Phase
+3.x.6+7+7.1+8 + 8.1 surfaces. Includes:
+- 10 ParallaxScheduledExecutor streaming tests.
+- 18 SSE endpoint unit tests.
+- 18 MCP streaming-client tests (10 parser + 8 client behavior).
+- 8 E2E FastAPI TestClient scenarios (4 happy path + 1 pre-execute
+  refund + 1 §3.4 post-token settle + 2 back-compat).
+
+**Round-1 → round-2 surface:**
+- Round-1: NEEDS-REMEDIATION-PRE-TAG with M1 (settle-on-tokens-
+  emitted policy violation), M2 (test coverage gap), L1 (dead-
+  code redundant re-sign). L2+L3 deferred.
+- M1 + M2 + L1 remediated pre-tag at commit `67fe8863`.
+- Round-2: APPROVED-FOR-TAG.
+
+**Round-1 LOW follow-ups (deferred to Phase 3.x.8.1.x):**
+- L2: ``aiohttp.ClientTimeout(sock_read=120)`` may be too
+  generous; consider 30s after production telemetry shows
+  inter-token p99 latency.
+- L3: defensive ``_parse_sse`` partial-garbage explicit
+  JSON-decode test (current behavior correct — raises
+  ``InferenceError(MALFORMED_RESPONSE)`` — just lacks the
+  test).
+
+**Auditor prompts:** start with ``test_signed_receipt_verifies_under_settler_identity``
+in ``test_compute_inference_stream_e2e.py``. It's the cryptographic
+invariant the whole point release exists to preserve through the
+HTTP boundary. Then read ``_resolve_post_token_billing`` +
+``test_mid_stream_failure_after_tokens_settles_not_refunds`` for
+the §3.4 billing policy. The SSE framing is vanilla W3C — the
+parser handles the edge cases that matter (chunk boundaries,
+CRLF, comments, forward-compat). The Task 5 receipt-rebind bug
+(invisible to mocks, caught by E2E) is the lesson on why deep-
+stack integration tests matter.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
@@ -686,3 +814,4 @@ When the Foundation signs the auditor contract:
 - **0.3 (2026-04-28)** — added §7.2 "Cross-Host ChainExecutor" covering Phase 3.x.7 PRSM-original cross-host inference path (RpcChainExecutor + LayerStageServer + multi-stage TEE attestation envelope). 6 trust seams called out for auditor focus including the H2 substitution-rejection invariant remediated pre-tag.
 - **0.4 (2026-04-28)** — added §7.3 "Chunked Activation Streaming" covering Phase 3.x.7.1 v2 wire-format extension. 6 trust seams including pre-consumption envelope gate, full-envelope response signing payload, v1↔v2 byte-equivalent inline encoding, and bounded chunk iterators (client + server). Round-1 H1+H2+M3+L1 + round-2 I1 closed pre-tag. Phase 3.x.7.1 tag: phase3.x.7.1-merge-ready-20260428 at 339957ee.
 - **0.5 (2026-04-28)** — added §7.4 "Streaming-Token Output" covering Phase 3.x.8 chat-style incremental output path. 6 trust seams including conditional `streaming` flag encoding (byte-identity preservation), three-layer joined-text invariant enforcement, downgrade-resistant `streamed_output` receipt flag, server-side validation gates BEFORE runner dispatch, M1 round-1 sole-error-frame ordering remediation, and cancellation cleanup propagation. v1 honest-scope notes (SyntheticStreamingRunner placeholder + Python GeneratorExit cancellation limit) explicitly documented for auditor focus. Round-1 M1 closed pre-tag; 3 LOWs deferred. Phase 3.x.8 tag: phase3.x.8-merge-ready-20260428 at 391b92b0.
+- **0.6 (2026-04-28)** — added §7.5 "Streaming HTTP Endpoint" covering Phase 3.x.8.1 SSE-framed POST /compute/inference/stream. 6 trust seams including design plan §3.4 settle-on-tokens-emitted billing policy (closes a real griefing vector caught at round-1 review), wire-side receipt re-sign on job_id rebind (Task 5 caught + fixed bug invisible to mocked tests), W3C-compliant SSE framing with chunk-boundary buffering, operator-misconfig 503s, InferenceError structured error surface, request-time privacy-budget gating. Round-1 M1+M2+L1 closed pre-tag; 2 LOWs deferred. Phase 3.x.8.1 tag: phase3.x.8.1-merge-ready-20260428 at 67fe8863.
