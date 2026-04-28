@@ -412,6 +412,107 @@ adversarial scenarios end-to-end.
 
 ---
 
+## 7.3 Chunked Activation Streaming (Phase 3.x.7.1)
+
+Phase 3.x.7.1 layered a v2 chunked-streaming wire path on top of
+3.x.7 to unblock production-scale LLM hidden-state activations
+(2048-token × 4096-dim float16 already approaches the 64 MiB inline
+cap; bigger models exceed it). Activations exceeding the threshold
+(default 10 MiB) ride out-of-band as `ActivationChunk` frames over
+a streaming transport; smaller activations stay on the inline path
+with v1↔v2 byte-equivalent canonical-JSON encoding for rolling-
+deploy forward-compat.
+
+**Tag:** `phase3.x.7.1-merge-ready-20260428` at commit `339957ee`.
+
+**Headline guarantee.** 16 MiB float32 activation routed through 16
+chunks of 1 MiB each is bit-identical to the single-host reference
+computation (`numpy.testing.assert_array_equal`), verified end-to-
+end across two simulated stages.
+
+**Trust seams added by 3.x.7.1.**
+
+  1. `_validate_streamed_envelope` (server.py:744-803) fires BEFORE
+     any chunk is consumed from the iterator. Rejects manifests
+     claiming `payload_bytes ≠ shape × dtype.itemsize`,
+     `payload_bytes > max_streamed_payload_bytes` (default 1 GiB),
+     or `total_chunks` inconsistent with
+     `ceil(payload_bytes/chunk_bytes)`. Defense against network-
+     level adversaries inflating the envelope to coerce server
+     memory exhaustion during reassembly.
+
+  2. `_reassemble_inbound_chunks` bounded by `expected_total_chunks`
+     (server.py:825-844). Excess frames raise
+     `ActivationCodecError("excess chunks")` rather than growing
+     unbounded — defense bound by the validated envelope, not by
+     the iterator's source.
+
+  3. Response signing payload commits to the full envelope
+     (`protocol.py:806-816`). The conditional
+     `activation_manifest_envelope` dict commits the stage to ALL
+     FIVE manifest fields (shard_id, payload_sha256, payload_bytes,
+     total_chunks, chunk_bytes), not just the payload hash.
+     Tampering any field invalidates the Ed25519 signature. Closes
+     the H2 round-1 finding where a relay could inflate
+     payload_bytes / total_chunks while leaving payload_sha256
+     intact.
+
+  4. Client-side defense-in-depth
+     (`client.py:_validate_streamed_response_envelope`). Mirrors
+     the server's envelope validation; fires AFTER signature verify
+     but BEFORE response chunk consumption + bounded
+     `_iter_response_chunks`. Caps configurable via
+     `max_streamed_payload_bytes=` constructor arg.
+
+  5. v1↔v2 inline byte equivalence preserved. The conditional
+     manifest-envelope encoding omits the key entirely when manifest
+     is None — v2 nodes signing inline produce byte-identical
+     canonical JSON to v1 nodes, so v1 callers can verify v2
+     inline-mode signatures during rolling deploys.
+     `SUPPORTED_PROTOCOL_VERSIONS = frozenset({1, 2})`.
+
+  6. `ActivationChunk.request_id` relay-defense binding. Chunks
+     splice-defended: a chunk frame must carry the parent request's
+     id, blocking a relay from reusing chunks across concurrent
+     streams.
+
+**Test coverage at the tag.** 243 chain_rpc-surface tests; 512
+across Phase 3.x.6+7+7.1 regression. Includes 16 round-1-remediation
+tests (envelope tampering, excess chunks, version-negotiation
+mapping) + Response-side M3 test added in round-2 I1.
+
+**Round-1 → round-2 surface (closed pre-tag):**
+- H1 (server-side unbounded chunk reassembly) — pre-consumption
+  envelope-validation gate + bounded reassembly.
+- H2 (response signing payload didn't commit to envelope shape
+  fields) — full envelope dict in signing payload + client-side
+  mirror validation.
+- M3 (inline-XOR-streamed both-empty case) — Request + Response
+  `__post_init__` reject the structurally-meaningless empty-blob-
+  empty-manifest case.
+- L1 (parse_message version handling) — missing/non-int version
+  surfaces as `ChainRpcVersionMismatchError` (mapped to
+  `UNSUPPORTED_VERSION`), not `MalformedError`.
+
+**Round-2 INFO-level follow-ups (non-blocking):**
+- I2: commit-message test count overstated (cosmetic).
+- I3: zero-byte payload corner case is dead code under current
+  shape validation; document or explicitly reject.
+- I4: `1 GiB` literal duplicated client+server; could share a
+  named constant.
+
+**Auditor prompts:** the 3.x.7.1 attack surface is small —
+streaming is just a wire-format option that defers chunked
+delivery. Read `_validate_streamed_envelope` (server) +
+`_validate_streamed_response_envelope` (client) side-by-side; both
+must enforce the same shape×dtype + cap + total_chunks gates.
+Then the conditional encoding in `signing_payload` — verify that
+omitting `activation_manifest_envelope` is byte-equivalent to a
+v1 inline payload. Then the 16 MiB E2E assertion which is the
+golden integration test.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
@@ -429,3 +530,4 @@ When the Foundation signs the auditor contract:
 - **0.1 (2026-04-27)** — initial cumulative refresh covering 3.x.2/3/4/5 + Phase 4 Task 3. Tag pending at commit `107fb150`.
 - **0.2 (2026-04-27)** — added §7.1 "Third-party-derived components" covering Phase 3.x.6 vendor scope (Parallax decentralized inference scheduler, Apache 2.0). Vendor boundary documented; PRSM-original delta (four trust adapters + executor) called out for auditor focus.
 - **0.3 (2026-04-28)** — added §7.2 "Cross-Host ChainExecutor" covering Phase 3.x.7 PRSM-original cross-host inference path (RpcChainExecutor + LayerStageServer + multi-stage TEE attestation envelope). 6 trust seams called out for auditor focus including the H2 substitution-rejection invariant remediated pre-tag.
+- **0.4 (2026-04-28)** — added §7.3 "Chunked Activation Streaming" covering Phase 3.x.7.1 v2 wire-format extension. 6 trust seams including pre-consumption envelope gate, full-envelope response signing payload, v1↔v2 byte-equivalent inline encoding, and bounded chunk iterators (client + server). Round-1 H1+H2+M3+L1 + round-2 I1 closed pre-tag. Phase 3.x.7.1 tag: phase3.x.7.1-merge-ready-20260428 at 339957ee.
