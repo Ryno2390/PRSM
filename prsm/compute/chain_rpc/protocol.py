@@ -50,6 +50,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from prsm.compute.inference.models import ContentTier
 from prsm.compute.tee.models import PrivacyLevel, TEEType
 from prsm.node.identity import NodeIdentity, verify_signature
+from prsm.node.shard_streaming import ShardManifest
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -57,8 +58,20 @@ from prsm.node.identity import NodeIdentity, verify_signature
 # ──────────────────────────────────────────────────────────────────────────
 
 
-CHAIN_RPC_PROTOCOL_VERSION = 1
-"""Wire-format version. Bump when any wire dataclass changes shape."""
+CHAIN_RPC_PROTOCOL_VERSION = 2
+"""Local wire-format version. Bumped to 2 in Phase 3.x.7.1 to add the
+optional ``activation_manifest`` field on ``RunLayerSliceRequest`` /
+``Response`` for the chunked-streaming path. v1 inline messages
+remain byte-identical for the signing payload (the new field is
+omitted from the payload when ``activation_manifest is None``), so
+inline interop with v1 peers is preserved."""
+
+SUPPORTED_PROTOCOL_VERSIONS: frozenset = frozenset({1, 2})
+"""Protocol versions the parser accepts. v2 nodes accept both v1 and
+v2 messages from peers (servers are backward-compat). v1 nodes
+accept only v1; a v2 client sending a v2-formatted message to a v1
+server gets rejected at the v1 parser. Production rolling-deploy
+flows handle this by upgrading servers before clients."""
 
 MAX_HANDSHAKE_BYTES = 64 * 1024 * 1024
 """Hard cap on a JSON-encoded chain-RPC message.
@@ -92,6 +105,7 @@ class ChainRpcMessageType(str, Enum):
     RUN_LAYER_SLICE_REQUEST = "run_layer_slice_request"
     RUN_LAYER_SLICE_RESPONSE = "run_layer_slice_response"
     STAGE_ERROR = "stage_error"
+    ACTIVATION_CHUNK = "activation_chunk"  # v2: streamed-path chunk frame
 
 
 class StageErrorCode(str, Enum):
@@ -311,8 +325,143 @@ class HandoffToken:
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# ShardManifest serialization helpers
+# (Phase 6 ShardManifest is owned by node/shard_streaming; we serialize
+# it inline here to keep the wire format self-contained.)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _shard_manifest_to_dict(m: ShardManifest) -> Dict[str, Any]:
+    return {
+        "shard_id": m.shard_id,
+        "payload_sha256": m.payload_sha256,
+        "payload_bytes": m.payload_bytes,
+        "total_chunks": m.total_chunks,
+        "chunk_bytes": m.chunk_bytes,
+    }
+
+
+def _shard_manifest_from_dict(data: Dict[str, Any]) -> ShardManifest:
+    if not isinstance(data, dict):
+        raise ChainRpcMalformedError(
+            f"shard_manifest must be dict, got {type(data).__name__}"
+        )
+    return ShardManifest(
+        shard_id=_required_str(data, "shard_id"),
+        payload_sha256=_required_str(data, "payload_sha256"),
+        payload_bytes=_required_int(data, "payload_bytes"),
+        total_chunks=_required_int(data, "total_chunks"),
+        chunk_bytes=_required_int(data, "chunk_bytes"),
+    )
+
+
+def _validate_shard_manifest(m: ShardManifest, *, field: str) -> None:
+    """Structural sanity checks on a manifest before signing /
+    verification. Stricter than ShardManifest's own validation;
+    catches obvious malformations a peer might inject."""
+    if not isinstance(m, ShardManifest):
+        raise ChainRpcMalformedError(
+            f"{field} must be ShardManifest, got {type(m).__name__}"
+        )
+    if m.payload_bytes < 0:
+        raise ChainRpcMalformedError(
+            f"{field}.payload_bytes must be non-negative, got {m.payload_bytes}"
+        )
+    if m.total_chunks < 0:
+        raise ChainRpcMalformedError(
+            f"{field}.total_chunks must be non-negative, got {m.total_chunks}"
+        )
+    if m.chunk_bytes <= 0:
+        raise ChainRpcMalformedError(
+            f"{field}.chunk_bytes must be positive, got {m.chunk_bytes}"
+        )
+    if not m.shard_id:
+        raise ChainRpcMalformedError(
+            f"{field}.shard_id must be non-empty"
+        )
+    # payload_sha256 must look like a sha256 hex string.
+    if (
+        not isinstance(m.payload_sha256, str)
+        or len(m.payload_sha256) != 64
+        or any(c not in "0123456789abcdef" for c in m.payload_sha256)
+    ):
+        raise ChainRpcMalformedError(
+            f"{field}.payload_sha256 must be 64-char lowercase hex, "
+            f"got {m.payload_sha256!r}"
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Wire messages
 # ──────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class ActivationChunk:
+    """Per-chunk frame for the v2 streaming path.
+
+    Wraps a single Phase 6 ``ShardChunk`` for cross-host transport.
+    Bound to its parent ``RunLayerSliceRequest`` / ``Response`` via
+    ``request_id`` so a relay can't splice chunks from one stream
+    into another.
+
+    Chunks are small (≤1 MiB by default — well under
+    ``MAX_HANDSHAKE_BYTES``). The streaming transport sends them as
+    individual frames over a bidi gRPC stream; the wire format here
+    just describes the on-the-wire encoding of one frame.
+    """
+
+    request_id: str
+    sequence: int  # 0-indexed; matches ShardChunk.sequence
+    data: bytes
+    chunk_sha256: str  # hex digest of `data`
+    protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = ChainRpcMessageType.ACTIVATION_CHUNK.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        _validate_str_field("chunk_sha256", self.chunk_sha256)
+        _validate_version(self.protocol_version)
+        if (
+            not isinstance(self.sequence, int)
+            or isinstance(self.sequence, bool)
+            or self.sequence < 0
+        ):
+            raise ChainRpcMalformedError(
+                f"sequence must be non-negative int, got {self.sequence!r}"
+            )
+        if not isinstance(self.data, (bytes, bytearray)):
+            raise ChainRpcMalformedError(
+                f"data must be bytes, got {type(self.data).__name__}"
+            )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+            "sequence": self.sequence,
+            "data_hex": bytes(self.data).hex(),
+            "chunk_sha256": self.chunk_sha256,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ActivationChunk":
+        _expect_type(data, ChainRpcMessageType.ACTIVATION_CHUNK)
+        try:
+            data_bytes = bytes.fromhex(_required_str(data, "data_hex"))
+        except ValueError as exc:
+            raise ChainRpcMalformedError(
+                f"data_hex is not valid hex: {exc}"
+            ) from exc
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            sequence=_required_int(data, "sequence"),
+            data=data_bytes,
+            chunk_sha256=_required_str(data, "chunk_sha256"),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
 
 
 @dataclass(frozen=True)
@@ -330,6 +479,14 @@ class RunLayerSliceRequest:
     activation_dtype: str
     upstream_token: HandoffToken
     deadline_unix: float
+    # v2 streaming: when present, ``activation_blob`` MUST be empty
+    # (b"") and the bytes ride out-of-band as ``ActivationChunk``
+    # frames over the streaming transport. ``activation_shape`` +
+    # ``activation_dtype`` still describe the post-assembly tensor
+    # so the server can decode without an extra round-trip. The
+    # manifest's ``payload_sha256`` is the cryptographic commitment
+    # to the to-be-assembled bytes.
+    activation_manifest: Optional[ShardManifest] = None
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value
@@ -399,11 +556,23 @@ class RunLayerSliceRequest:
                 f"deadline_unix must be numeric, got "
                 f"{type(self.deadline_unix).__name__}"
             )
+        # v2 inline-XOR-streamed integrity check.
+        if self.activation_manifest is not None:
+            _validate_shard_manifest(
+                self.activation_manifest, field="activation_manifest"
+            )
+            if self.activation_blob:
+                raise ChainRpcMalformedError(
+                    "streamed mode: activation_blob must be empty when "
+                    "activation_manifest is present (chunks ride out-"
+                    "of-band)"
+                )
 
     def to_dict(self) -> Dict[str, Any]:
-        # activation_blob → hex for JSON-safety. Large blobs ride the
-        # Phase 6 chunker out-of-band; this codec is the inline path.
-        return {
+        # activation_blob → hex for JSON-safety. For streamed (v2)
+        # requests, activation_blob is empty bytes and the manifest
+        # describes the chunked payload.
+        out: Dict[str, Any] = {
             "type": self.MESSAGE_TYPE,
             "protocol_version": self.protocol_version,
             "request_id": self.request_id,
@@ -417,6 +586,11 @@ class RunLayerSliceRequest:
             "upstream_token": self.upstream_token.to_dict(),
             "deadline_unix": self.deadline_unix,
         }
+        if self.activation_manifest is not None:
+            out["activation_manifest"] = _shard_manifest_to_dict(
+                self.activation_manifest
+            )
+        return out
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RunLayerSliceRequest":
@@ -436,7 +610,13 @@ class RunLayerSliceRequest:
             raise ChainRpcMalformedError(
                 f"activation_shape must be list, got {type(shape_raw).__name__}"
             )
-        blob_hex = _required_str(data, "activation_blob_hex")
+        # activation_blob_hex is REQUIRED but MAY be empty (streamed
+        # mode carries the bytes out-of-band as ActivationChunk frames).
+        blob_hex = data.get("activation_blob_hex")
+        if not isinstance(blob_hex, str):
+            raise ChainRpcMalformedError(
+                "activation_blob_hex must be string"
+            )
         try:
             blob_bytes = bytes.fromhex(blob_hex)
         except ValueError as exc:
@@ -455,6 +635,10 @@ class RunLayerSliceRequest:
             raise ChainRpcMalformedError(
                 f"content_tier invalid: {exc}"
             ) from exc
+        manifest_raw = data.get("activation_manifest")
+        manifest: Optional[ShardManifest] = None
+        if manifest_raw is not None:
+            manifest = _shard_manifest_from_dict(manifest_raw)
         return cls(
             request_id=_required_str(data, "request_id"),
             model_id=_required_str(data, "model_id"),
@@ -466,6 +650,7 @@ class RunLayerSliceRequest:
             activation_dtype=_required_str(data, "activation_dtype"),
             upstream_token=HandoffToken.from_dict(token_raw),
             deadline_unix=_required_number(data, "deadline_unix"),
+            activation_manifest=manifest,
             protocol_version=_required_int(data, "protocol_version"),
         )
 
@@ -484,6 +669,9 @@ class RunLayerSliceResponse:
     epsilon_spent: float
     stage_signature_b64: str
     stage_node_id: str
+    # v2 streaming: when present, ``activation_blob`` MUST be empty
+    # and the bytes ride out-of-band as ActivationChunk frames.
+    activation_manifest: Optional[ShardManifest] = None
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_RESPONSE.value
@@ -530,6 +718,16 @@ class RunLayerSliceResponse:
                 f"epsilon_spent must be numeric, got "
                 f"{type(self.epsilon_spent).__name__}"
             )
+        # v2 inline-XOR-streamed integrity check.
+        if self.activation_manifest is not None:
+            _validate_shard_manifest(
+                self.activation_manifest, field="activation_manifest"
+            )
+            if self.activation_blob:
+                raise ChainRpcMalformedError(
+                    "streamed mode: activation_blob must be empty when "
+                    "activation_manifest is present"
+                )
 
     @staticmethod
     def signing_payload(
@@ -542,6 +740,7 @@ class RunLayerSliceResponse:
         tee_type: TEEType,
         epsilon_spent: float,
         stage_node_id: str,
+        activation_manifest: Optional[ShardManifest] = None,
     ) -> bytes:
         """Canonical bytes the stage signs over the response.
 
@@ -551,6 +750,14 @@ class RunLayerSliceResponse:
         invalidate the signature; the executor catches this at
         anchor-verify time and surfaces it as Phase 7.1 challenge
         material.
+
+        v1↔v2 byte-equivalence for inline messages: when
+        ``activation_manifest`` is None, the field is OMITTED from the
+        canonical JSON entirely — so a v2 caller signing inline gets
+        the same payload bytes a v1 caller would. Only streamed
+        responses carry the additional ``activation_manifest_sha`` key
+        in the payload, which commits the stage to the to-be-assembled
+        bytes via the manifest's payload_sha256.
         """
         payload = {
             "request_id": request_id,
@@ -563,6 +770,11 @@ class RunLayerSliceResponse:
             "epsilon_spent": float(epsilon_spent),
             "stage_node_id": stage_node_id,
         }
+        # Conditional manifest_sha encoding: omitted entirely when the
+        # response is inline (so v1↔v2 inline messages produce
+        # byte-identical canonical JSON).
+        if activation_manifest is not None:
+            payload["activation_manifest_sha"] = activation_manifest.payload_sha256
         return json.dumps(payload, sort_keys=True).encode("utf-8")
 
     @classmethod
@@ -577,8 +789,14 @@ class RunLayerSliceResponse:
         tee_attestation: bytes,
         tee_type: TEEType,
         epsilon_spent: float,
+        activation_manifest: Optional[ShardManifest] = None,
     ) -> "RunLayerSliceResponse":
-        """Construct + sign a fresh response under the stage ``identity``."""
+        """Construct + sign a fresh response under the stage ``identity``.
+
+        For streamed responses, pass ``activation_manifest=manifest`` and
+        ``activation_blob=b""``. The manifest's ``payload_sha256``
+        commits the stage to the to-be-assembled bytes via the
+        signing payload."""
         payload = cls.signing_payload(
             request_id,
             activation_blob,
@@ -589,6 +807,7 @@ class RunLayerSliceResponse:
             tee_type,
             epsilon_spent,
             identity.node_id,
+            activation_manifest=activation_manifest,
         )
         sig = identity.sign(payload)
         return cls(
@@ -602,6 +821,7 @@ class RunLayerSliceResponse:
             epsilon_spent=float(epsilon_spent),
             stage_signature_b64=sig,
             stage_node_id=identity.node_id,
+            activation_manifest=activation_manifest,
         )
 
     def verify_with_anchor(
@@ -658,13 +878,14 @@ class RunLayerSliceResponse:
             self.tee_type,
             self.epsilon_spent,
             self.stage_node_id,
+            activation_manifest=self.activation_manifest,
         )
         return verify_signature(
             stage_pubkey_b64, payload, self.stage_signature_b64
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "type": self.MESSAGE_TYPE,
             "protocol_version": self.protocol_version,
             "request_id": self.request_id,
@@ -678,6 +899,11 @@ class RunLayerSliceResponse:
             "stage_signature_b64": self.stage_signature_b64,
             "stage_node_id": self.stage_node_id,
         }
+        if self.activation_manifest is not None:
+            out["activation_manifest"] = _shard_manifest_to_dict(
+                self.activation_manifest
+            )
+        return out
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RunLayerSliceResponse":
@@ -687,8 +913,15 @@ class RunLayerSliceResponse:
             raise ChainRpcMalformedError(
                 f"activation_shape must be list, got {type(shape_raw).__name__}"
             )
+        # activation_blob_hex is REQUIRED but MAY be empty (streamed
+        # mode carries the bytes out-of-band).
+        blob_hex_raw = data.get("activation_blob_hex")
+        if not isinstance(blob_hex_raw, str):
+            raise ChainRpcMalformedError(
+                "activation_blob_hex must be string"
+            )
         try:
-            blob_bytes = bytes.fromhex(_required_str(data, "activation_blob_hex"))
+            blob_bytes = bytes.fromhex(blob_hex_raw)
             attest_bytes = bytes.fromhex(
                 _required_str(data, "tee_attestation_hex")
             )
@@ -698,6 +931,10 @@ class RunLayerSliceResponse:
             tee_type = TEEType(_required_str(data, "tee_type"))
         except ValueError as exc:
             raise ChainRpcMalformedError(f"tee_type invalid: {exc}") from exc
+        manifest_raw = data.get("activation_manifest")
+        manifest: Optional[ShardManifest] = None
+        if manifest_raw is not None:
+            manifest = _shard_manifest_from_dict(manifest_raw)
         return cls(
             request_id=_required_str(data, "request_id"),
             activation_blob=blob_bytes,
@@ -709,6 +946,7 @@ class RunLayerSliceResponse:
             epsilon_spent=_required_number(data, "epsilon_spent"),
             stage_signature_b64=_required_str(data, "stage_signature_b64"),
             stage_node_id=_required_str(data, "stage_node_id"),
+            activation_manifest=manifest,
             protocol_version=_required_int(data, "protocol_version"),
         )
 
@@ -764,6 +1002,7 @@ _MESSAGE_TYPE_REGISTRY: Dict[str, Callable[[Dict[str, Any]], Any]] = {
     ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value: RunLayerSliceRequest.from_dict,
     ChainRpcMessageType.RUN_LAYER_SLICE_RESPONSE.value: RunLayerSliceResponse.from_dict,
     ChainRpcMessageType.STAGE_ERROR.value: StageError.from_dict,
+    ChainRpcMessageType.ACTIVATION_CHUNK.value: ActivationChunk.from_dict,
 }
 
 
@@ -804,10 +1043,19 @@ def parse_message(payload: bytes) -> Any:
             f"known: {sorted(_MESSAGE_TYPE_REGISTRY)}"
         )
     version = data.get("protocol_version")
-    if isinstance(version, int) and version != CHAIN_RPC_PROTOCOL_VERSION:
+    # v2 nodes accept v1 + v2 (forward-compat for rolling deploys);
+    # v1 nodes still reject anything other than 1 because they only
+    # know about CHAIN_RPC_PROTOCOL_VERSION = 1. bool rejection
+    # preserved (M1 round-1 fix from Phase 3.x.7 Task 8).
+    if (
+        isinstance(version, int)
+        and not isinstance(version, bool)
+        and version not in SUPPORTED_PROTOCOL_VERSIONS
+    ):
         raise ChainRpcVersionMismatchError(
             f"peer protocol_version={version}; "
-            f"local CHAIN_RPC_PROTOCOL_VERSION={CHAIN_RPC_PROTOCOL_VERSION}"
+            f"local SUPPORTED_PROTOCOL_VERSIONS="
+            f"{sorted(SUPPORTED_PROTOCOL_VERSIONS)}"
         )
     return constructor(data)
 

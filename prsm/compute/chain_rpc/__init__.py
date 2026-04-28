@@ -41,6 +41,8 @@ from prsm.compute.chain_rpc.activation_codec import (
 from prsm.compute.chain_rpc.protocol import (
     CHAIN_RPC_PROTOCOL_VERSION,
     MAX_HANDSHAKE_BYTES,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    ActivationChunk,
     ChainRpcMalformedError,
     ChainRpcMessageType,
     ChainRpcProtocolError,
@@ -80,6 +82,8 @@ __all__ = [
     # Protocol
     "CHAIN_RPC_PROTOCOL_VERSION",
     "MAX_HANDSHAKE_BYTES",
+    "SUPPORTED_PROTOCOL_VERSIONS",
+    "ActivationChunk",
     "ChainRpcMalformedError",
     "ChainRpcMessageType",
     "ChainRpcProtocolError",
