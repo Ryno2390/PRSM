@@ -120,17 +120,40 @@ def _token_event_to_dict(event: Any) -> Dict[str, Any]:
     }
 
 
-def _result_to_dict(result: Any, *, job_id: str) -> Dict[str, Any]:
+def _result_to_dict(
+    result: Any,
+    *,
+    job_id: str,
+    identity: Optional[Any] = None,
+) -> Dict[str, Any]:
     """Encode an ``InferenceResult`` into the SSE ``data`` payload
     shape. Mirrors the unary endpoint's success response with the
     job_id rebound to the API-side id (executor uses an internal
     parallax-stream-job-* id; the API is authoritative for billing
-    correlation)."""
+    correlation).
+
+    When ``identity`` is provided, the rebound receipt is re-signed
+    under that identity. The ``job_id`` is part of the signed
+    payload — rebinding without re-signing would invalidate the
+    settler signature. Identity-less callers (tests / dry-run
+    encoding helpers) get a receipt with a stale signature; callers
+    receiving over the wire MUST pass identity to preserve the
+    cryptographic invariant.
+    """
     import dataclasses
 
     receipt = result.receipt
     if receipt is not None:
         receipt = dataclasses.replace(receipt, job_id=job_id)
+        if identity is not None:
+            try:
+                from prsm.compute.inference import sign_receipt
+                receipt = sign_receipt(receipt, identity)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    f"Streaming result receipt re-sign failed for "
+                    f"job_id={job_id}: {e}"
+                )
     return {
         "success": result.success,
         "job_id": job_id,
@@ -1132,7 +1155,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                             )
                             yield _sse_event(
                                 "result",
-                                _result_to_dict(item, job_id=job_id),
+                                _result_to_dict(
+                                    item,
+                                    job_id=job_id,
+                                    identity=node.identity,
+                                ),
                             )
                         else:
                             await _refund_streaming_escrow(
