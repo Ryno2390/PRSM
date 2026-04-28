@@ -311,6 +311,107 @@ remediated a hole here pre-tag).
 
 ---
 
+## 7.2 Cross-Host ChainExecutor (Phase 3.x.7 only)
+
+Phase 3.x.7 closes the "brain has no hands" gap left by Phase
+3.x.6's scheduler: the production `ChainExecutor` implementation
+that takes a `GPUChain` (3.x.6 router output) + `InferenceRequest`
+and runs inference across the chain stages on real network nodes.
+
+**Module scope.** `prsm/compute/chain_rpc/` — wire protocol
+(`protocol.py`), per-node server (`server.py`), client orchestrator
+(`client.py`), activation codec (`activation_codec.py`), production-
+wiring factories (`factories.py`). Plus
+`prsm/compute/inference/multi_stage_attestation.py` for the per-
+stage TEE attestation envelope embedded in `InferenceReceipt`.
+
+**No vendored components.** All Phase 3.x.7 code is PRSM-original;
+no Apache 2.0 attribution required. The activation codec wraps
+the existing Phase 6 Task 6b `ShardChunker` for >10 MiB activations
+(codec ready; transport-side wiring deferred to Phase 3.x.7.x).
+
+**Trust seams auditors should focus on:**
+
+  1. `HandoffToken` settler-signing → server anchor-verify
+     (`protocol.py:240-310`). Token binds (request_id, settler_node_id,
+     chain_stage_index, chain_total_stages, deadline_unix). Forging
+     requires forging an Ed25519 signature against an anchor-
+     registered identity. Note: chain_stage_index is informational
+     server-side; the actual binding to a node identity is enforced
+     at the executor's response-verification layer (`client.py`),
+     not at the server. Documented limitation; relay-swap detection
+     is a Phase 3.x.7.x research item.
+
+  2. `RunLayerSliceResponse.verify_with_anchor` requires
+     `expected_stage_node_id` as a keyword-only parameter
+     (`protocol.py:607-664`). Lookup uses the EXPECTED identity
+     (caller-supplied), not the response's self-claim. This closes
+     the substitution hole where any anchor-registered peer could
+     impersonate any other anchor-registered peer. See Phase 3.x.7
+     Task 8 round-1 H2 finding for the rationale.
+
+  3. `LayerStageServer.handle()` 8-step validation order
+     (`server.py:295-460`). Order matters: token verify BEFORE
+     deadline check BEFORE registry lookup BEFORE shard coverage
+     BEFORE tier gate BEFORE decode/run/encode. Out-of-order would
+     leak information (e.g., model existence revealed before token
+     check).
+
+  4. `MAX_HANDSHAKE_BYTES = 64 MiB` on `parse_message`
+     (`protocol.py:63`). DoS guard fires before `json.loads`
+     allocates. 64 MiB chosen to fit typical LLM activations
+     (2048-token × 4096-dim float16 ≈ 16 MiB raw → ≈ 33 MiB
+     hex+JSON inline). Mitigated by Phase 6 conn-level rate
+     limiting + anchor + stake gating per upstream_token. Stages
+     can wrap with stricter caps per the docstring contract.
+
+  5. Multi-stage attestation envelope
+     (`multi_stage_attestation.py:198-272`). Magic prefix
+     `b"PRSM-MS-ATT-V1:"`. `decode_multi_stage_attestation`
+     enforces: stage_index 0..N-1 contiguous (no gaps), no
+     duplicates, optional `expected_stage_count` for callers that
+     know the chain length. Defends against settler omitting a
+     SOFTWARE stage to upgrade apparent worst-case TEE type seen
+     by a verifier. Receipt's settler signature commits to the
+     full envelope bytes via `signing_payload()` hex-encoding.
+
+  6. Worst-case TEE policy (`multi_stage_attestation.py:245-276`).
+     SOFTWARE drags hardware down — one software stage in an SGX
+     chain → receipt records SOFTWARE. Conservative; auditors
+     wanting per-stage trust can iterate `decode_multi_stage_attestation`
+     explicitly. Hardware types tied at rank 1 (no SGX-vs-TDX-vs-SEV
+     differentiation in v1).
+
+**Test coverage at the tag.** 473 tests green across:
+- `tests/unit/test_chain_rpc_protocol.py` (66)
+- `tests/unit/test_chain_rpc_server.py` (40)
+- `tests/unit/test_chain_rpc_activation_codec.py` (37)
+- `tests/unit/test_chain_rpc_client.py` (40)
+- `tests/unit/test_chain_rpc_factories.py` (13)
+- `tests/unit/test_multi_stage_attestation.py` (53)
+- `tests/integration/test_chain_rpc_e2e.py` (12) — three simulated
+  PRSM nodes running a real toy 4-layer model end-to-end with output
+  bit-identical to single-host reference. Covers all 7 design-plan
+  §4 Task 7 acceptance scenarios: happy path, deadline propagation,
+  forged token, shard missing, tier gate, signature tampering, mid-
+  chain disconnect.
+
+**Round-1 review surface (closed pre-tag):** H1 (cap raise), H2
+(verify_with_anchor substitution-rejection), M1 (bool-as-int
+hygiene), M2 (envelope contiguity + dedup), L6 (factory tokenizer
+warning), L7 (placeholder flag), L8 (init docstring). 12 new
+regression tests added covering each remediated invariant.
+
+**Auditor prompts:** start at `client.py` line-by-line — the
+RpcChainExecutor orchestrates the whole pipeline; verify the cross-
+field consistency checks (request_id echo, expected_stage_node_id)
+fire correctly. Then `server.py` for the 8-step validation order +
+"never raises" invariant. Then `multi_stage_attestation.py` for the
+envelope contiguity logic. The E2E integration test exercises real
+adversarial scenarios end-to-end.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
@@ -327,3 +428,4 @@ When the Foundation signs the auditor contract:
 
 - **0.1 (2026-04-27)** — initial cumulative refresh covering 3.x.2/3/4/5 + Phase 4 Task 3. Tag pending at commit `107fb150`.
 - **0.2 (2026-04-27)** — added §7.1 "Third-party-derived components" covering Phase 3.x.6 vendor scope (Parallax decentralized inference scheduler, Apache 2.0). Vendor boundary documented; PRSM-original delta (four trust adapters + executor) called out for auditor focus.
+- **0.3 (2026-04-28)** — added §7.2 "Cross-Host ChainExecutor" covering Phase 3.x.7 PRSM-original cross-host inference path (RpcChainExecutor + LayerStageServer + multi-stage TEE attestation envelope). 6 trust seams called out for auditor focus including the H2 substitution-rejection invariant remediated pre-tag.
