@@ -1104,6 +1104,28 @@ class TestStreamedResponseSigning:
             anchor, expected_stage_node_id=stage.node_id
         ) is False
 
+    def test_response_rejects_neither_blob_nor_manifest(self):
+        """M3 round-1 (3.x.7.1): response __post_init__ rejects the
+        case where the inline blob is empty AND the manifest is
+        absent. Mirror of the Request-side check."""
+        with pytest.raises(
+            ChainRpcMalformedError,
+            match="exactly one payload path",
+        ):
+            RunLayerSliceResponse(
+                request_id="r",
+                activation_blob=b"",  # empty
+                activation_shape=(1,),
+                activation_dtype="float32",
+                duration_seconds=0.05,
+                tee_attestation=b"\x01" * 32,
+                tee_type=TEEType.SOFTWARE,
+                epsilon_spent=0.0,
+                stage_signature_b64="sig",
+                stage_node_id="alice",
+                activation_manifest=None,  # also absent
+            )
+
     def test_streamed_response_round_trips(self):
         stage = generate_node_identity("alice")
         manifest = _make_manifest()
