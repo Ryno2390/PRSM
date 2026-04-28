@@ -68,6 +68,44 @@ from prsm.compute.inference.parallax_executor import (
     ParallaxScheduledExecutor,
 )
 
+# Phase 3.x.7 — cross-host ChainExecutor implementation is re-exported
+# at the inference package surface so production callers get one-call
+# wiring: `from prsm.compute.inference import make_rpc_chain_executor`.
+#
+# Lazy via PEP 562 ``__getattr__`` because ``prsm.compute.chain_rpc``
+# imports from ``prsm.compute.inference.models`` — eager re-export
+# would create a circular import. The lazy path triggers the
+# chain_rpc import only when one of these names is accessed.
+_LAZY_CHAIN_RPC_NAMES = frozenset({
+    "ChainRpcError",
+    "LayerStageServer",
+    "RpcChainExecutor",
+    "make_layer_stage_server",
+    "make_rpc_chain_executor",
+})
+
+
+def __getattr__(name: str):
+    if name in _LAZY_CHAIN_RPC_NAMES:
+        from prsm.compute.chain_rpc import (
+            ChainExecutionError,
+            LayerStageServer,
+            RpcChainExecutor,
+            make_layer_stage_server,
+            make_rpc_chain_executor,
+        )
+        attrs = {
+            "ChainRpcError": ChainExecutionError,
+            "LayerStageServer": LayerStageServer,
+            "RpcChainExecutor": RpcChainExecutor,
+            "make_layer_stage_server": make_layer_stage_server,
+            "make_rpc_chain_executor": make_rpc_chain_executor,
+        }
+        return attrs[name]
+    raise AttributeError(
+        f"module 'prsm.compute.inference' has no attribute {name!r}"
+    )
+
 __all__ = [
     # Models
     "ContentTier",
@@ -84,6 +122,12 @@ __all__ = [
     "ChainExecutor",
     "ChainExecutionResult",
     "GpuPoolProvider",
+    # Phase 3.x.7 — cross-host ChainExecutor implementation
+    "RpcChainExecutor",
+    "LayerStageServer",
+    "ChainRpcError",
+    "make_rpc_chain_executor",
+    "make_layer_stage_server",
     # Receipt signing (Task 2)
     "sign_receipt",
     "verify_receipt",

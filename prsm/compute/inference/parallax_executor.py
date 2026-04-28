@@ -146,7 +146,13 @@ class ParallaxScheduledExecutor(InferenceExecutor):
       trust_stack            Composed ``TrustStack`` (Phase 3.x.6 Task 5).
       model_catalog          Mapping ``model_id → ModelInfo`` for any
                              model this executor advertises.
-      chain_executor         Concrete chain-dispatch adapter.
+      chain_executor         Concrete chain-dispatch adapter. Production
+                             callers use ``make_rpc_chain_executor(...)``
+                             from ``prsm.compute.chain_rpc`` (Phase
+                             3.x.7) which wires the cross-host RPC
+                             path. Tests + dev paths inject a fake
+                             that satisfies the ``ChainExecutor``
+                             Protocol.
       node_identity          ``NodeIdentity`` used to sign receipts
                              (this node = the settling/serving node).
       cost_per_layer         Base FTNS price per model layer for the

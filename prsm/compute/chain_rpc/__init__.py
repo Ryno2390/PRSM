@@ -48,6 +48,12 @@ from prsm.compute.chain_rpc.client import (
     SendMessage,
     StageOutcome,
 )
+from prsm.compute.chain_rpc.factories import (
+    make_layer_stage_server,
+    make_rpc_chain_executor,
+    utf8_output_decoder,
+    utf8_prompt_encoder,
+)
 from prsm.compute.chain_rpc.server import (
     LayerSliceResult,
     LayerSliceRunner,
@@ -95,4 +101,9 @@ __all__ = [
     "RpcChainExecutor",
     "SendMessage",
     "StageOutcome",
+    # Factories (production-wiring entry points)
+    "make_layer_stage_server",
+    "make_rpc_chain_executor",
+    "utf8_output_decoder",
+    "utf8_prompt_encoder",
 ]
