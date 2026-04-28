@@ -872,3 +872,146 @@ class TestSamplingAndStopConditions:
         # Actually with cap=16 and only 2 emit_ids, generate()
         # returns having NOT triggered EOS — finish_reason maps to
         # "max_tokens" per impl (not-EOS branch).
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.10 Task 4 — Tail-only contract enforcement
+#
+# Sharded autoregressive decode is deferred to Phase 3.x.11. The
+# v1 runner enforces tail-only by yielding exactly one terminal
+# error chunk on non-tail dispatch, without calling model.generate
+# or prompt_provider. The server maps this finish_reason="error"
+# chunk to ``StageErrorCode.INTERNAL_ERROR`` via the existing
+# Phase 3.x.8 Task 2 token-stream handler.
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _SpyPromptProvider:
+    """Records every call so tests can assert non-tail dispatch
+    short-circuits BEFORE prompt resolution."""
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def __call__(
+        self,
+        layer_range: Tuple[int, int],
+        activation: np.ndarray,
+        privacy_tier: PrivacyLevel,
+    ) -> str:
+        self.call_count += 1
+        return "spy-prompt"
+
+
+def _make_runner_with_spy(
+    *,
+    spy: _SpyPromptProvider,
+    emit_ids: Optional[List[int]] = None,
+) -> Tuple[AutoregressiveStreamingRunner, _FakeModel]:
+    tok = _FakeTokenizer(
+        id_to_piece={1: "a", 2: "b", 3: "c"}, prompt_ids=[100, 101],
+    )
+    mdl = _FakeModel(emit_ids=emit_ids or [1, 2, 3])
+    runner = AutoregressiveStreamingRunner(
+        model=mdl,
+        tokenizer=tok,
+        tee_attestation=b"\x02" * 32,
+        tee_type=TEEType.SOFTWARE,
+        sampling_defaults=SamplingDefaults(max_tokens=8),
+        prompt_provider=spy,
+    )
+    return runner, mdl
+
+
+class TestTailOnlyContract:
+    def test_non_tail_yields_exactly_one_chunk(self):
+        spy = _SpyPromptProvider()
+        runner, _ = _make_runner_with_spy(spy=spy)
+        chunks = _drive(runner, is_final_stage=False)
+        assert len(chunks) == 1
+
+    def test_non_tail_terminal_chunk_is_error_with_empty_text(self):
+        spy = _SpyPromptProvider()
+        runner, _ = _make_runner_with_spy(spy=spy)
+        chunks = _drive(runner, is_final_stage=False)
+        only = chunks[0]
+        assert only.finish_reason == "error"
+        assert only.text_delta == ""
+        assert only.full_output_text == ""
+        assert only.token_id is None
+        # Sequence index of a terminal-only chunk is 0.
+        assert only.sequence_index == 0
+
+    def test_non_tail_yields_no_preceding_non_error_chunks(self):
+        # Defensive against a future bug where a partial decode
+        # leaks before the error chunk: assert NO chunk before the
+        # terminal one carries non-error finish_reason or non-empty
+        # text_delta.
+        spy = _SpyPromptProvider()
+        runner, _ = _make_runner_with_spy(spy=spy)
+        chunks = _drive(runner, is_final_stage=False)
+        for c in chunks[:-1]:
+            assert c.finish_reason in (None, "error")
+            assert c.text_delta == ""
+
+    def test_non_tail_does_not_call_model_generate(self):
+        spy = _SpyPromptProvider()
+        runner, mdl = _make_runner_with_spy(spy=spy)
+        _drive(runner, is_final_stage=False)
+        # last_call empty — generate() never invoked.
+        assert mdl.last_call == {}
+
+    def test_non_tail_does_not_call_prompt_provider(self):
+        # The prompt_provider may be expensive (DB lookup, MCP
+        # roundtrip). Non-tail dispatch MUST short-circuit before
+        # invoking it.
+        spy = _SpyPromptProvider()
+        runner, _ = _make_runner_with_spy(spy=spy)
+        _drive(runner, is_final_stage=False)
+        assert spy.call_count == 0
+
+    def test_non_tail_chunk_carries_runner_attestation(self):
+        # The terminal error chunk MUST still carry the runner's
+        # tee_attestation + tee_type so the server's
+        # handle_token_stream can build the StageError frame
+        # without falling back to a default-attestation path.
+        spy = _SpyPromptProvider()
+        runner, _ = _make_runner_with_spy(spy=spy)
+        chunks = _drive(runner, is_final_stage=False)
+        only = chunks[0]
+        assert only.tee_attestation == b"\x02" * 32
+        assert only.tee_type == TEEType.SOFTWARE
+        assert only.epsilon_spent == 0.0
+
+    def test_tail_dispatch_unchanged_after_non_tail_check(self):
+        # Same runner, two dispatches in sequence: non-tail first
+        # (must error cleanly), tail second (must produce real
+        # output). Verifies the non-tail short-circuit doesn't
+        # corrupt runner state or the spy's reusability.
+        spy = _SpyPromptProvider()
+        runner, mdl = _make_runner_with_spy(
+            spy=spy, emit_ids=[1, 2, 3],
+        )
+        non_tail = _drive(runner, is_final_stage=False)
+        assert len(non_tail) == 1 and non_tail[0].finish_reason == "error"
+        assert mdl.last_call == {}
+        tail = _drive(runner, is_final_stage=True)
+        # Tail dispatch produces real chunks, with prompt_provider
+        # called exactly once during the tail run (NOT during the
+        # non-tail run).
+        assert len(tail) == 3
+        assert spy.call_count == 1
+        assert mdl.last_call != {}
+        # Joined output reconstructs full text.
+        joined = "".join(c.text_delta for c in tail)
+        assert joined == "abc"
+
+    def test_docstring_documents_phase_3_x_11_deferral(self):
+        # Acceptance criterion from the design plan: "Sharded
+        # autoregressive deferred to Phase 3.x.11 is documented in
+        # the runner's docstring." Encode that as a real assertion
+        # so future doc edits can't silently drop the deferral note.
+        cls_doc = (AutoregressiveStreamingRunner.__doc__ or "").lower()
+        assert "phase 3.x.11" in cls_doc
+        # Tail-only contract is also a stated invariant.
+        assert "tail-only" in cls_doc
