@@ -726,6 +726,22 @@ class RpcChainExecutor:
         joined_parts: List[str] = []
         final_frame: Optional[StreamFinalFrame] = None
 
+        # Phase 3.x.8 Task 6 — cancellation cleanup. The outer
+        # try/finally ensures the upstream frame_iter is .close()'d
+        # on EVERY exit path: caller GeneratorExit (stops iterating
+        # this executor generator), ChainExecutionError, or normal
+        # completion. Without this, a caller closing the executor's
+        # generator could leave the upstream stream alive until the
+        # next gc cycle — undesirable for production transports
+        # holding network sockets / KV cache state.
+        #
+        # v1 honest scope: cancellation = clean upstream cleanup,
+        # NOT delivery of a partial-output ChainExecutionResult.
+        # Python's GeneratorExit semantics forbid yielding additional
+        # values after .close(); a partial-receipt-on-cancel pathway
+        # would require either an in-band cancel-sentinel via
+        # .send() or a side-channel inspection API — both deferred
+        # to a Phase 3.x.8.x follow-up.
         try:
             for raw_frame in frame_iter:
                 msg = self._parse_stream_frame(
@@ -830,6 +846,29 @@ class RpcChainExecutor:
                     f"{exc.__class__.__name__}: {exc}"
                 ),
             ) from exc
+        finally:
+            # Explicit close on every exit path. Mirrors the
+            # server-side _dispatch_token_stream cleanup. Generator
+            # iterators support .close() natively; non-generator
+            # iterators that implement the protocol get the call
+            # forwarded; iterators without .close() are silently
+            # skipped via getattr.
+            close = getattr(frame_iter, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:  # noqa: BLE001
+                    # Cleanup-time exceptions are swallowed —
+                    # never propagate through GeneratorExit. By
+                    # the time this fires the caller has already
+                    # decided to stop iterating; a close-time
+                    # exception is non-actionable.
+                    logger.debug(
+                        "RpcChainExecutor: token-stream frame_iter "
+                        "close() raised during cleanup "
+                        "(stage_node_id=%r); swallowed",
+                        stage_node_id,
+                    )
 
         if final_frame is None:
             raise ChainExecutionError(

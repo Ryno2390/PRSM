@@ -871,6 +871,21 @@ class LayerStageServer:
         terminal_seen = False
         expected_seq = 0
 
+        # Phase 3.x.8 Task 6 — cancellation cleanup. The outer
+        # try/finally ensures the runner's generator is .close()'d
+        # on EVERY exit path (caller GeneratorExit, normal return,
+        # or unhandled exception). Without this, a caller closing
+        # the executor's generator could leave the runner generator
+        # alive until the next gc cycle — undesirable for runners
+        # holding accelerator state (KV cache pinned memory etc.).
+        #
+        # v1 honest scope: cancellation = clean cleanup, NOT
+        # delivery of a partial-output StreamFinalFrame. Python's
+        # GeneratorExit semantics forbid yielding additional values
+        # after .close(); a partial-receipt-on-cancel pathway
+        # requires either an in-band cancel-sentinel via .send()
+        # or a side-channel inspection API — both deferred to a
+        # Phase 3.x.8.x follow-up.
         try:
             for chunk in chunk_iter:
                 if not isinstance(chunk, _StreamingChunk):
@@ -968,6 +983,29 @@ class LayerStageServer:
                 f"{exc.__class__.__name__}",
             )
             return
+        finally:
+            # Explicit close on every exit path. ``close()`` on a
+            # generator triggers GeneratorExit at its current yield
+            # point; close() on a non-generator iterator that
+            # implements the .close() protocol is also forwarded.
+            # Iterators without .close() (plain lists, etc.) are a
+            # no-op — getattr keeps us safe.
+            close = getattr(chunk_iter, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:  # noqa: BLE001
+                    # Cleanup-time exceptions are swallowed —
+                    # never propagate through GeneratorExit. The
+                    # runner has already produced its output (or
+                    # the caller cancelled); a close-time exception
+                    # is non-actionable at the wire boundary.
+                    logger.debug(
+                        "LayerStageServer: streaming_runner.close() "
+                        "raised during cleanup (request_id=%r); "
+                        "swallowed",
+                        request.request_id,
+                    )
 
         # Iterator exhausted without ever emitting a terminal chunk
         # (a runner that returns mid-stream silently). Surface as

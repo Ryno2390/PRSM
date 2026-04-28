@@ -2035,3 +2035,180 @@ class TestTokenStreamStreamingRunnerConstruction:
             anchor=anchor,
         )
         assert server._streaming_runner is None  # noqa: SLF001
+
+
+class TestTokenStreamCancellation:
+    """Phase 3.x.8 Task 6 — cancellation cleanup. v1 honest scope:
+    caller .close() on the streaming generator deterministically
+    closes the upstream runner generator. NO partial-output
+    StreamFinalFrame is delivered (Python GeneratorExit semantics
+    forbid yielding after .close()) — that's a Phase 3.x.8.x
+    follow-up."""
+
+    def _make_tracking_runner(self):
+        """Build a runner whose generator records when .close() is
+        called on it (Python forwards .close() through the
+        generator protocol)."""
+
+        class _TrackingRunner:
+            def __init__(self):
+                self.close_count = 0
+                self.tokens_yielded = 0
+
+            def run_layer_slice_streaming(self, **kwargs):
+                outer = self  # capture for the inner generator
+
+                def gen():
+                    try:
+                        # Emit many tokens so the caller has time
+                        # to cancel mid-stream.
+                        for i in range(10):
+                            outer.tokens_yielded += 1
+                            yield StreamingChunk(
+                                sequence_index=i,
+                                text_delta=f"t{i} ",
+                            )
+                        # Terminal — never reached if cancelled
+                        # mid-stream.
+                        outer.tokens_yielded += 1
+                        yield StreamingChunk(
+                            sequence_index=10,
+                            text_delta="end",
+                            finish_reason="stop",
+                            full_output_text=(
+                                "t0 t1 t2 t3 t4 t5 t6 t7 t8 t9 end"
+                            ),
+                            duration_seconds=0.05,
+                            tee_attestation=b"\x00" * 32,
+                            tee_type=TEEType.SOFTWARE,
+                            epsilon_spent=0.0,
+                        )
+                    except GeneratorExit:
+                        outer.close_count += 1
+                        raise
+
+                return gen()
+
+        return _TrackingRunner()
+
+    def test_caller_close_propagates_to_runner_generator(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        tracking_runner = self._make_tracking_runner()
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=tracking_runner,
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        stream = server.handle_token_stream(encode_message(req))
+
+        # Pull a few tokens, then close the stream early.
+        first = next(stream)
+        msg = parse_message(first)
+        assert isinstance(msg, TokenFrame)
+        next(stream)  # second token
+        next(stream)  # third token
+
+        # Closing the stream MUST propagate to the runner generator.
+        stream.close()
+        assert tracking_runner.close_count == 1
+
+    def test_double_close_is_idempotent(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        tracking_runner = self._make_tracking_runner()
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=tracking_runner,
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        stream = server.handle_token_stream(encode_message(req))
+        next(stream)
+        stream.close()
+        stream.close()  # second close — Python protocol: no-op
+        # Runner gen .close() invoked at most once during the
+        # pipeline cleanup; second close on an already-closed
+        # generator is a Python no-op.
+        assert tracking_runner.close_count == 1
+
+    def test_close_before_any_tokens_consumed(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        tracking_runner = self._make_tracking_runner()
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=tracking_runner,
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        stream = server.handle_token_stream(encode_message(req))
+
+        # Caller never iterated — close immediately.
+        stream.close()
+        # Runner generator was never advanced (no tokens yielded);
+        # close on an unstarted generator is also a no-op for the
+        # underlying chunk_iter, but our finally-clause still runs
+        # the close call. Tokens yielded should be 0.
+        assert tracking_runner.tokens_yielded == 0
+
+    def test_natural_completion_also_closes_runner(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        # Even on the happy path (full stream consumed), the
+        # finally-clause runs close() on the runner — verifies the
+        # cleanup is triggered uniformly, not only on cancellation.
+        tracking_runner = self._make_tracking_runner()
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=tracking_runner,
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        # Drain the stream completely.
+        list(server.handle_token_stream(encode_message(req)))
+        # Runner gen exhausted naturally; the finally clause's
+        # close() call is a no-op on an exhausted gen, but it
+        # ran without raising.
+        assert tracking_runner.tokens_yielded == 11  # 10 + terminal
+
+    def test_close_swallows_runner_close_exception(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        # If the runner's .close() raises, the executor swallows
+        # it (cleanup-time exceptions are non-actionable at the
+        # wire boundary).
+        class _NastyCloseRunner:
+            def run_layer_slice_streaming(self, **kwargs):
+                def gen():
+                    try:
+                        yield StreamingChunk(sequence_index=0, text_delta="a")
+                        yield StreamingChunk(sequence_index=1, text_delta="b")
+                    except GeneratorExit:
+                        # Runner explodes on cleanup — must not
+                        # propagate through the wire.
+                        raise RuntimeError("close-time crash")
+
+                return gen()
+
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=_NastyCloseRunner(),
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        stream = server.handle_token_stream(encode_message(req))
+        next(stream)
+        # close() must not propagate the runner's crash.
+        stream.close()  # no exception

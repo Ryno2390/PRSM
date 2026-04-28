@@ -2047,3 +2047,227 @@ class TestStreamingNonStreamingCoexistence:
         assert result.output == "hello"
         # Streaming transport NOT touched.
         assert token_stream_transport.delivery_log == []
+
+
+class TestStreamingCancellation:
+    """Phase 3.x.8 Task 6 — caller .close() on the executor's
+    streaming generator deterministically closes the upstream
+    transport's frame iterator. v1 honest scope: clean cleanup only,
+    NOT delivery of a partial-output ChainExecutionResult."""
+
+    def _make_tracking_token_sim(self, identity, token_count: int = 10):
+        """A TokenStreamSim whose underlying generator records
+        when its .close() is called (via GeneratorExit)."""
+
+        class _TrackingSim:
+            def __init__(self, ident):
+                self.identity = ident
+                self.close_count = 0
+                self.frames_yielded = 0
+                self.tee_attestation = b"\x01" * 32
+                self.tee_type = TEEType.SOFTWARE
+                self.epsilon = 0.0
+                self.duration = 0.05
+                self.calls: List[bytes] = []
+
+            def stream(self, request_bytes):
+                outer = self
+                outer.calls.append(request_bytes)
+                request = parse_message(request_bytes)
+                assert isinstance(request, RunLayerSliceRequest)
+
+                def gen():
+                    try:
+                        # Emit many TokenFrames so the caller can
+                        # cancel mid-stream.
+                        for i in range(token_count):
+                            outer.frames_yielded += 1
+                            yield encode_message(TokenFrame(
+                                request_id=request.request_id,
+                                sequence_index=i,
+                                text_delta=f"t{i} ",
+                            ))
+                        # Terminal — never reached if cancelled.
+                        joined_bytes = (
+                            "".join(f"t{i} " for i in range(token_count))
+                        ).encode("utf-8")
+                        response = RunLayerSliceResponse.sign(
+                            identity=outer.identity,
+                            request_id=request.request_id,
+                            activation_blob=joined_bytes,
+                            activation_shape=(len(joined_bytes),),
+                            activation_dtype="uint8",
+                            duration_seconds=outer.duration,
+                            tee_attestation=outer.tee_attestation,
+                            tee_type=outer.tee_type,
+                            epsilon_spent=outer.epsilon,
+                        )
+                        outer.frames_yielded += 1
+                        yield encode_message(StreamFinalFrame(response=response))
+                    except GeneratorExit:
+                        outer.close_count += 1
+                        raise
+
+                return gen()
+
+        return _TrackingSim(identity)
+
+    def test_caller_close_propagates_to_upstream_iterator(
+        self, settler, anchor, alice, transport,
+    ):
+        sim = self._make_tracking_token_sim(alice)
+        bad_transport = TokenStreamFakeTransport({alice.node_id: sim})
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            token_stream_send_message=bad_transport.send_token_stream,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder,
+            output_decoder=_output_decoder,
+        )
+        chain = _make_chain([alice.node_id])
+        gen = executor.execute_chain_streaming(
+            request=_make_request("p"), chain=chain,
+        )
+
+        # Pull a few StreamTokens, then close the generator.
+        for _ in range(3):
+            item = next(gen)
+            assert isinstance(item, StreamToken)
+
+        gen.close()
+        # The upstream sim's generator MUST have received
+        # GeneratorExit via .close() forwarded through the
+        # executor's finally clause.
+        assert sim.close_count == 1
+
+    def test_double_close_idempotent_executor(
+        self, settler, anchor, alice, transport,
+    ):
+        sim = self._make_tracking_token_sim(alice)
+        bad_transport = TokenStreamFakeTransport({alice.node_id: sim})
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            token_stream_send_message=bad_transport.send_token_stream,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder,
+            output_decoder=_output_decoder,
+        )
+        chain = _make_chain([alice.node_id])
+        gen = executor.execute_chain_streaming(
+            request=_make_request("p"), chain=chain,
+        )
+        next(gen)
+        gen.close()
+        gen.close()  # second close — Python no-op
+        assert sim.close_count == 1
+
+    def test_close_before_any_token_consumed(
+        self, settler, anchor, alice, transport,
+    ):
+        sim = self._make_tracking_token_sim(alice)
+        bad_transport = TokenStreamFakeTransport({alice.node_id: sim})
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            token_stream_send_message=bad_transport.send_token_stream,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder,
+            output_decoder=_output_decoder,
+        )
+        chain = _make_chain([alice.node_id])
+        gen = executor.execute_chain_streaming(
+            request=_make_request("p"), chain=chain,
+        )
+        # Caller never iterated — close immediately. Generator
+        # body hasn't even started; the finally clause never runs.
+        gen.close()
+        # Sim wasn't touched; close_count remains 0.
+        assert sim.frames_yielded == 0
+        assert sim.close_count == 0
+
+    def test_natural_completion_does_not_count_as_cancellation(
+        self, settler, anchor, alice, transport,
+    ):
+        # Drain the stream fully; the finally-clause's close()
+        # forwards to the (already exhausted) upstream gen which
+        # is a no-op — close_count stays 0 because GeneratorExit
+        # only fires on caller-side .close() before the upstream
+        # iterator naturally returns.
+        sim = self._make_tracking_token_sim(alice, token_count=3)
+        bad_transport = TokenStreamFakeTransport({alice.node_id: sim})
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            token_stream_send_message=bad_transport.send_token_stream,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder,
+            output_decoder=_output_decoder,
+        )
+        chain = _make_chain([alice.node_id])
+        items = list(executor.execute_chain_streaming(
+            request=_make_request("p"), chain=chain,
+        ))
+        # Consumed ALL frames + got a ChainExecutionResult.
+        assert sim.frames_yielded == 4  # 3 tokens + StreamFinalFrame
+        assert sim.close_count == 0
+        # Result is the terminal yield.
+        assert items[-1].output == "t0 t1 t2 "
+
+    def test_close_swallows_upstream_close_exception(
+        self, settler, anchor, alice, transport,
+    ):
+        # Upstream sim explodes on close — the executor must NOT
+        # propagate the cleanup-time exception through
+        # GeneratorExit.
+        class _NastyCloseSim:
+            def __init__(self, ident):
+                self.identity = ident
+                self.tee_attestation = b"\x01" * 32
+                self.tee_type = TEEType.SOFTWARE
+                self.epsilon = 0.0
+                self.duration = 0.05
+                self.calls: List[bytes] = []
+
+            def stream(self, request_bytes):
+                self.calls.append(request_bytes)
+                request = parse_message(request_bytes)
+
+                def gen():
+                    try:
+                        yield encode_message(TokenFrame(
+                            request_id=request.request_id,
+                            sequence_index=0,
+                            text_delta="a",
+                        ))
+                        yield encode_message(TokenFrame(
+                            request_id=request.request_id,
+                            sequence_index=1,
+                            text_delta="b",
+                        ))
+                    except GeneratorExit:
+                        # Cleanup explodes — must be swallowed by
+                        # the executor's finally-clause exception
+                        # handler.
+                        raise RuntimeError("upstream close-time crash")
+
+                return gen()
+
+        sim = _NastyCloseSim(alice)
+        bad_transport = TokenStreamFakeTransport({alice.node_id: sim})
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            token_stream_send_message=bad_transport.send_token_stream,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder,
+            output_decoder=_output_decoder,
+        )
+        chain = _make_chain([alice.node_id])
+        gen = executor.execute_chain_streaming(
+            request=_make_request("p"), chain=chain,
+        )
+        next(gen)
+        # Must NOT raise — cleanup-time exception swallowed.
+        gen.close()
