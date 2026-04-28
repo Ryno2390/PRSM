@@ -500,6 +500,19 @@ class RunLayerSliceRequest:
     # from the canonical JSON entirely (mirroring the
     # activation_manifest conditional encoding pattern).
     streaming: bool = False
+    # Phase 3.x.10.x — streaming-tail sampling overrides. When set,
+    # the server passes them through to the streaming runner via
+    # the ``request=`` parameter so user-specified
+    # ``InferenceRequest.max_tokens`` / ``.temperature`` reach the
+    # runner instead of dead-lettering at the wire boundary. Both
+    # default to None and are OMITTED from the canonical signing
+    # payload when None — pre-3.x.10.x messages with both unset
+    # produce byte-identical signed bytes (mirroring the
+    # ``activation_manifest`` + ``streaming`` conditional-encoding
+    # pattern). Both fields are streaming-only metadata in v1; the
+    # unary path ignores them at the server side.
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value
@@ -600,6 +613,35 @@ class RunLayerSliceRequest:
             raise ChainRpcMalformedError(
                 f"streaming must be bool, got {type(self.streaming).__name__}"
             )
+        # Phase 3.x.10.x — sampling-override fields. None passes
+        # through (server falls back to runner's SamplingDefaults);
+        # set values are validated tightly so a malformed peer can't
+        # smuggle e.g. negative caps or out-of-range temps.
+        if self.max_tokens is not None:
+            if isinstance(self.max_tokens, bool) or not isinstance(
+                self.max_tokens, int
+            ):
+                raise ChainRpcMalformedError(
+                    f"max_tokens must be int, got "
+                    f"{type(self.max_tokens).__name__}"
+                )
+            if self.max_tokens <= 0:
+                raise ChainRpcMalformedError(
+                    f"max_tokens must be positive, got {self.max_tokens}"
+                )
+        if self.temperature is not None:
+            if isinstance(self.temperature, bool) or not isinstance(
+                self.temperature, (int, float)
+            ):
+                raise ChainRpcMalformedError(
+                    f"temperature must be number, got "
+                    f"{type(self.temperature).__name__}"
+                )
+            if not (0.0 <= float(self.temperature) <= 2.0):
+                raise ChainRpcMalformedError(
+                    f"temperature must satisfy 0.0 <= t <= 2.0, "
+                    f"got {self.temperature}"
+                )
 
     def to_dict(self) -> Dict[str, Any]:
         # activation_blob → hex for JSON-safety. For streamed (v2)
@@ -629,6 +671,12 @@ class RunLayerSliceRequest:
         # adds the key.
         if self.streaming:
             out["streaming"] = True
+        # Phase 3.x.10.x — sampling overrides. Omit-when-None
+        # preserves byte-equivalence with pre-3.x.10.x signed bytes.
+        if self.max_tokens is not None:
+            out["max_tokens"] = int(self.max_tokens)
+        if self.temperature is not None:
+            out["temperature"] = float(self.temperature)
         return out
 
     @classmethod
@@ -688,6 +736,30 @@ class RunLayerSliceRequest:
                 f"streaming must be bool, got "
                 f"{type(streaming_raw).__name__}"
             )
+        # Phase 3.x.10.x — sampling overrides. Default None when
+        # absent (preserves byte-equivalence with pre-3.x.10.x
+        # messages). Type-checked tightly here so a hostile peer
+        # can't smuggle bool-as-int or string-as-number through.
+        # Range/positivity validation runs in __post_init__.
+        max_tokens_raw = data.get("max_tokens")
+        if max_tokens_raw is not None:
+            if isinstance(max_tokens_raw, bool) or not isinstance(
+                max_tokens_raw, int
+            ):
+                raise ChainRpcMalformedError(
+                    f"max_tokens must be int, got "
+                    f"{type(max_tokens_raw).__name__}"
+                )
+        temperature_raw = data.get("temperature")
+        if temperature_raw is not None:
+            if isinstance(temperature_raw, bool) or not isinstance(
+                temperature_raw, (int, float)
+            ):
+                raise ChainRpcMalformedError(
+                    f"temperature must be number, got "
+                    f"{type(temperature_raw).__name__}"
+                )
+            temperature_raw = float(temperature_raw)
         return cls(
             request_id=_required_str(data, "request_id"),
             model_id=_required_str(data, "model_id"),
@@ -701,6 +773,8 @@ class RunLayerSliceRequest:
             deadline_unix=_required_number(data, "deadline_unix"),
             activation_manifest=manifest,
             streaming=streaming_raw,
+            max_tokens=max_tokens_raw,
+            temperature=temperature_raw,
             protocol_version=_required_int(data, "protocol_version"),
         )
 

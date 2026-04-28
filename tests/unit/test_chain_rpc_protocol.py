@@ -1676,3 +1676,266 @@ class TestStreamingMessageTypeRouting:
         from prsm.compute.chain_rpc.protocol import _MESSAGE_TYPE_REGISTRY
         assert ChainRpcMessageType.TOKEN_FRAME.value in _MESSAGE_TYPE_REGISTRY
         assert ChainRpcMessageType.STREAM_FINAL_FRAME.value in _MESSAGE_TYPE_REGISTRY
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.10.x — RunLayerSliceRequest sampling overrides
+# (max_tokens + temperature on the wire)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestSamplingOverridesByteEquivalence:
+    """The headline invariant: a request with both fields None
+    produces the same canonical wire bytes as a pre-3.x.10.x
+    request — no signed-bytes regression for older callers /
+    older signed traffic."""
+
+    def test_unset_omitted_byte_equivalent_to_pre_3_10_x(self):
+        # Build a request without specifying max_tokens / temperature.
+        # to_dict() must NOT include the keys (omit-when-None).
+        identity = generate_node_identity("settler")
+        req = _valid_request(identity=identity)
+        wire = req.to_dict()
+        assert "max_tokens" not in wire
+        assert "temperature" not in wire
+
+    def test_unset_canonical_bytes_unchanged(self):
+        # Stronger: encoded bytes are byte-identical to a request
+        # built before the new fields existed (mirrors the
+        # streaming-flag byte-equivalence pattern).
+        identity = generate_node_identity("settler")
+        req_a = _valid_request(identity=identity)
+        # Manually construct a request with both fields explicitly
+        # None — must produce identical bytes to the no-kwarg form.
+        req_b = RunLayerSliceRequest(
+            request_id=req_a.request_id,
+            model_id=req_a.model_id,
+            layer_range=req_a.layer_range,
+            privacy_tier=req_a.privacy_tier,
+            content_tier=req_a.content_tier,
+            activation_blob=req_a.activation_blob,
+            activation_shape=req_a.activation_shape,
+            activation_dtype=req_a.activation_dtype,
+            upstream_token=req_a.upstream_token,
+            deadline_unix=req_a.deadline_unix,
+            max_tokens=None,
+            temperature=None,
+        )
+        assert encode_message(req_a) == encode_message(req_b)
+
+    def test_set_fields_appear_in_wire_dict(self):
+        identity = generate_node_identity("settler")
+        req = RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="m",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"x",
+            activation_shape=(1,),
+            activation_dtype="f32",
+            upstream_token=_valid_token(identity),
+            deadline_unix=1000.0,
+            max_tokens=8,
+            temperature=0.7,
+        )
+        wire = req.to_dict()
+        assert wire["max_tokens"] == 8
+        assert wire["temperature"] == 0.7
+
+    def test_set_fields_change_canonical_bytes(self):
+        # Setting the fields MUST change the encoded bytes — otherwise
+        # the conditional encoding would silently drop the override.
+        identity = generate_node_identity("settler")
+        unset = _valid_request(identity=identity)
+        with_fields = RunLayerSliceRequest(
+            request_id=unset.request_id,
+            model_id=unset.model_id,
+            layer_range=unset.layer_range,
+            privacy_tier=unset.privacy_tier,
+            content_tier=unset.content_tier,
+            activation_blob=unset.activation_blob,
+            activation_shape=unset.activation_shape,
+            activation_dtype=unset.activation_dtype,
+            upstream_token=unset.upstream_token,
+            deadline_unix=unset.deadline_unix,
+            max_tokens=4,
+            temperature=0.0,
+        )
+        assert encode_message(unset) != encode_message(with_fields)
+
+
+class TestSamplingOverridesValidation:
+    def _base_kwargs(self, identity):
+        return dict(
+            request_id="req-1",
+            model_id="m",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"x",
+            activation_shape=(1,),
+            activation_dtype="f32",
+            upstream_token=_valid_token(identity),
+            deadline_unix=1000.0,
+        )
+
+    def test_max_tokens_zero_rejected(self):
+        identity = generate_node_identity("s")
+        with pytest.raises(ChainRpcMalformedError, match="max_tokens"):
+            RunLayerSliceRequest(
+                **self._base_kwargs(identity), max_tokens=0,
+            )
+
+    def test_max_tokens_negative_rejected(self):
+        identity = generate_node_identity("s")
+        with pytest.raises(ChainRpcMalformedError, match="max_tokens"):
+            RunLayerSliceRequest(
+                **self._base_kwargs(identity), max_tokens=-5,
+            )
+
+    def test_max_tokens_bool_rejected(self):
+        # bool is a subclass of int in Python; explicit guard.
+        identity = generate_node_identity("s")
+        with pytest.raises(ChainRpcMalformedError, match="max_tokens"):
+            RunLayerSliceRequest(
+                **self._base_kwargs(identity),
+                max_tokens=True,  # type: ignore[arg-type]
+            )
+
+    def test_temperature_below_range_rejected(self):
+        identity = generate_node_identity("s")
+        with pytest.raises(ChainRpcMalformedError, match="temperature"):
+            RunLayerSliceRequest(
+                **self._base_kwargs(identity), temperature=-0.5,
+            )
+
+    def test_temperature_above_range_rejected(self):
+        identity = generate_node_identity("s")
+        with pytest.raises(ChainRpcMalformedError, match="temperature"):
+            RunLayerSliceRequest(
+                **self._base_kwargs(identity), temperature=2.1,
+            )
+
+    def test_temperature_zero_accepted_for_greedy(self):
+        # 0.0 is the runner's greedy-decode signal; MUST be valid.
+        identity = generate_node_identity("s")
+        req = RunLayerSliceRequest(
+            **self._base_kwargs(identity), temperature=0.0,
+        )
+        assert req.temperature == 0.0
+
+    def test_temperature_two_accepted_at_boundary(self):
+        identity = generate_node_identity("s")
+        req = RunLayerSliceRequest(
+            **self._base_kwargs(identity), temperature=2.0,
+        )
+        assert req.temperature == 2.0
+
+    def test_temperature_bool_rejected(self):
+        identity = generate_node_identity("s")
+        with pytest.raises(ChainRpcMalformedError, match="temperature"):
+            RunLayerSliceRequest(
+                **self._base_kwargs(identity),
+                temperature=False,  # type: ignore[arg-type]
+            )
+
+    def test_temperature_string_rejected(self):
+        identity = generate_node_identity("s")
+        with pytest.raises(ChainRpcMalformedError, match="temperature"):
+            RunLayerSliceRequest(
+                **self._base_kwargs(identity),
+                temperature="0.5",  # type: ignore[arg-type]
+            )
+
+
+class TestSamplingOverridesRoundTrip:
+    def test_round_trip_with_both_fields_set(self):
+        identity = generate_node_identity("settler")
+        original = RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="m",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"x",
+            activation_shape=(1,),
+            activation_dtype="f32",
+            upstream_token=_valid_token(identity),
+            deadline_unix=1000.0,
+            max_tokens=16,
+            temperature=0.7,
+        )
+        recovered = parse_message(encode_message(original))
+        assert isinstance(recovered, RunLayerSliceRequest)
+        assert recovered.max_tokens == 16
+        assert recovered.temperature == 0.7
+
+    def test_round_trip_with_neither_field(self):
+        identity = generate_node_identity("settler")
+        original = _valid_request(identity=identity)
+        recovered = parse_message(encode_message(original))
+        assert isinstance(recovered, RunLayerSliceRequest)
+        assert recovered.max_tokens is None
+        assert recovered.temperature is None
+
+    def test_round_trip_with_only_max_tokens(self):
+        identity = generate_node_identity("settler")
+        original = RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="m",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"x",
+            activation_shape=(1,),
+            activation_dtype="f32",
+            upstream_token=_valid_token(identity),
+            deadline_unix=1000.0,
+            max_tokens=4,
+        )
+        recovered = parse_message(encode_message(original))
+        assert recovered.max_tokens == 4
+        assert recovered.temperature is None
+
+    def test_from_dict_rejects_bool_max_tokens(self):
+        identity = generate_node_identity("settler")
+        token = _valid_token(identity)
+        wire = {
+            "type": ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value,
+            "protocol_version": CHAIN_RPC_PROTOCOL_VERSION,
+            "request_id": "req-1",
+            "model_id": "m",
+            "layer_range": [0, 4],
+            "privacy_tier": PrivacyLevel.NONE.value,
+            "content_tier": ContentTier.A.value,
+            "activation_blob_hex": b"x".hex(),
+            "activation_shape": [1],
+            "activation_dtype": "f32",
+            "upstream_token": token.to_dict(),
+            "deadline_unix": 1000.0,
+            "max_tokens": True,  # bool, not int
+        }
+        with pytest.raises(ChainRpcMalformedError, match="max_tokens"):
+            RunLayerSliceRequest.from_dict(wire)
+
+    def test_from_dict_rejects_string_temperature(self):
+        identity = generate_node_identity("settler")
+        token = _valid_token(identity)
+        wire = {
+            "type": ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value,
+            "protocol_version": CHAIN_RPC_PROTOCOL_VERSION,
+            "request_id": "req-1",
+            "model_id": "m",
+            "layer_range": [0, 4],
+            "privacy_tier": PrivacyLevel.NONE.value,
+            "content_tier": ContentTier.A.value,
+            "activation_blob_hex": b"x".hex(),
+            "activation_shape": [1],
+            "activation_dtype": "f32",
+            "upstream_token": token.to_dict(),
+            "deadline_unix": 1000.0,
+            "temperature": "0.5",
+        }
+        with pytest.raises(ChainRpcMalformedError, match="temperature"):
+            RunLayerSliceRequest.from_dict(wire)
