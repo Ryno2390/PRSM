@@ -38,6 +38,16 @@ from prsm.compute.chain_rpc.protocol import (
     encode_message,
     parse_message,
 )
+from prsm.compute.chain_rpc.client import (
+    AddressResolver,
+    ChainExecutionError,
+    ExecutorErrorCode,
+    OutputDecoder,
+    PromptEncoder,
+    RpcChainExecutor,
+    SendMessage,
+    StageOutcome,
+)
 from prsm.compute.chain_rpc.server import (
     LayerSliceResult,
     LayerSliceRunner,
@@ -76,4 +86,13 @@ __all__ = [
     "LayerSliceResult",
     "LayerSliceRunner",
     "LayerStageServer",
+    # Client
+    "AddressResolver",
+    "ChainExecutionError",
+    "ExecutorErrorCode",
+    "OutputDecoder",
+    "PromptEncoder",
+    "RpcChainExecutor",
+    "SendMessage",
+    "StageOutcome",
 ]
