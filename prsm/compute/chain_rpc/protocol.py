@@ -1,0 +1,835 @@
+"""Phase 3.x.7 Task 1 — Cross-host ChainExecutor wire protocol.
+
+The wire layer for activation handoff between consecutive stages of
+a `GPUChain` (Phase 3.x.6). Mirrors the Phase 3.x.5 manifest DHT and
+Phase 3.x.6 profile DHT patterns:
+  - JSON-canonical-bytes wire format with version
+  - Bounded message size (handshake messages only — large activation
+    blobs ride the Phase 6 streaming chunker out-of-band)
+  - All wire dataclasses are immutable (`@dataclass(frozen=True)`)
+  - Anchor-verify-on-read for `HandoffToken`: pubkey resolved from the
+    Phase 3.x.3 anchor at verify time, never trusted from any embedded
+    field
+
+Three wire types:
+
+  RunLayerSliceRequest    Executor (or upstream stage) → stage. Carries
+                          model_id + layer_range + activation blob +
+                          signed `HandoffToken`. Stage validates the
+                          token against the anchor before executing.
+
+  RunLayerSliceResponse   Stage → executor on success. Carries downstream
+                          activation blob + per-stage TEE attestation +
+                          stage's signature over the response.
+
+  StageError              Stage → executor on any failure. Structured
+                          enum-coded error so the client can route to
+                          a structured InferenceResult.failure rather
+                          than parsing prose.
+
+Plus the load-bearing trust artifact:
+
+  HandoffToken            Settler-signed credential authorizing one
+                          specific stage to execute one specific
+                          (request, layer-range) at the settler's
+                          expense. Bound to chain_stage_index +
+                          request_id; not replayable across requests
+                          or stages.
+
+Activation tensor encoding sits in `activation_codec.py` (Task 3); the
+wire types here just carry the encoded bytes + shape + dtype string.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Callable, Dict, Optional, Tuple
+
+from prsm.compute.inference.models import ContentTier
+from prsm.compute.tee.models import PrivacyLevel, TEEType
+from prsm.node.identity import NodeIdentity, verify_signature
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Protocol constants
+# ──────────────────────────────────────────────────────────────────────────
+
+
+CHAIN_RPC_PROTOCOL_VERSION = 1
+"""Wire-format version. Bump when any wire dataclass changes shape."""
+
+MAX_HANDSHAKE_BYTES = 1 * 1024 * 1024
+"""Hard cap on a JSON-encoded chain-RPC message. Activation blobs are
+the bulk of any real `RunLayerSliceRequest`; for large activations
+(>10MB) the transport layer splits them via the Phase 6 streaming
+chunker and the wire payload here references the chunked stream
+metadata rather than carrying raw bytes inline. 1 MiB gives ample
+headroom for everything else (token, metadata, small activations
+inline) while keeping a hard ceiling on what `parse_message` will
+allocate before we bail out.
+
+Stages that need to enforce a different ceiling can wrap parse_message
+in their own size check; the wire protocol's contract is "messages
+larger than this are rejected at parse time," not "messages must fit
+this cap."
+"""
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Message types + error codes
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class ChainRpcMessageType(str, Enum):
+    RUN_LAYER_SLICE_REQUEST = "run_layer_slice_request"
+    RUN_LAYER_SLICE_RESPONSE = "run_layer_slice_response"
+    STAGE_ERROR = "stage_error"
+
+
+class StageErrorCode(str, Enum):
+    """Structured error codes for cross-host stage failures.
+
+    Values are stable strings (kept lowercase + dash-free) for forward
+    compatibility — adding new codes is non-breaking, but renaming an
+    existing code requires a protocol-version bump.
+    """
+
+    MALFORMED_REQUEST = "MALFORMED_REQUEST"
+    UNSUPPORTED_VERSION = "UNSUPPORTED_VERSION"
+    INVALID_TOKEN = "INVALID_TOKEN"
+    DEADLINE_EXCEEDED = "DEADLINE_EXCEEDED"
+    MODEL_NOT_FOUND = "MODEL_NOT_FOUND"
+    SHARD_MISSING = "SHARD_MISSING"
+    TIER_GATE = "TIER_GATE"
+    LAYER_RANGE_INVALID = "LAYER_RANGE_INVALID"
+    ACTIVATION_INVALID = "ACTIVATION_INVALID"
+    TIMEOUT = "TIMEOUT"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Exceptions
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class ChainRpcProtocolError(Exception):
+    """Base error for chain-RPC wire-format failures."""
+
+
+class ChainRpcMalformedError(ChainRpcProtocolError):
+    """Wire bytes did not parse as a valid chain-RPC message."""
+
+
+class ChainRpcUnknownTypeError(ChainRpcProtocolError):
+    """Message ``type`` field doesn't match a known ``ChainRpcMessageType``."""
+
+
+class ChainRpcVersionMismatchError(ChainRpcProtocolError):
+    """Peer's ``protocol_version`` doesn't match local."""
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# HandoffToken — the load-bearing trust artifact
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class HandoffToken:
+    """Settler-signed credential authorizing one stage to execute one
+    (request, layer-range) at the settler's expense.
+
+    The ``settler_node_id`` is the node that's paying for the chain —
+    typically the same node that signs the final ``InferenceReceipt``.
+    Stages verify the token's signature against the settler's pubkey
+    via the Phase 3.x.3 anchor before doing any work.
+
+    Bindings:
+      - ``request_id``: a stage cannot reuse a token across requests
+      - ``chain_stage_index``: a stage cannot reuse a token at a
+        different position in the chain
+      - ``deadline_unix``: stale tokens are rejected; bounds the
+        replay window even if a token leaks
+
+    Security model: forging a token requires forging an Ed25519
+    signature against an anchor-registered pubkey. A stage that
+    accepts a forged token has not been compromised — its pre-work
+    validation simply failed. We treat forged tokens as protocol
+    bugs rather than attestation failures (Phase 7.1 challenges fire
+    on output mismatch, not on token-validation failure).
+    """
+
+    request_id: str
+    settler_node_id: str
+    chain_stage_index: int
+    chain_total_stages: int
+    deadline_unix: float
+    signature_b64: str
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        _validate_str_field("settler_node_id", self.settler_node_id)
+        _validate_str_field("signature_b64", self.signature_b64)
+        if not isinstance(self.chain_stage_index, int) or self.chain_stage_index < 0:
+            raise ChainRpcMalformedError(
+                f"chain_stage_index must be non-negative int, got "
+                f"{self.chain_stage_index!r}"
+            )
+        if (
+            not isinstance(self.chain_total_stages, int)
+            or self.chain_total_stages <= 0
+        ):
+            raise ChainRpcMalformedError(
+                f"chain_total_stages must be positive int, got "
+                f"{self.chain_total_stages!r}"
+            )
+        if self.chain_stage_index >= self.chain_total_stages:
+            raise ChainRpcMalformedError(
+                f"chain_stage_index ({self.chain_stage_index}) must be < "
+                f"chain_total_stages ({self.chain_total_stages})"
+            )
+        if not isinstance(self.deadline_unix, (int, float)):
+            raise ChainRpcMalformedError(
+                f"deadline_unix must be numeric, got "
+                f"{type(self.deadline_unix).__name__}"
+            )
+
+    @staticmethod
+    def signing_payload(
+        request_id: str,
+        settler_node_id: str,
+        chain_stage_index: int,
+        chain_total_stages: int,
+        deadline_unix: float,
+    ) -> bytes:
+        """Canonical bytes signed by the settler. Both signer and
+        verifier MUST construct identical bytes from the same logical
+        token, so all numeric fields are coerced to their JSON-stable
+        types and `sort_keys=True` enforces deterministic key ordering."""
+        payload = {
+            "request_id": request_id,
+            "settler_node_id": settler_node_id,
+            "chain_stage_index": int(chain_stage_index),
+            "chain_total_stages": int(chain_total_stages),
+            "deadline_unix": float(deadline_unix),
+        }
+        return json.dumps(payload, sort_keys=True).encode("utf-8")
+
+    @classmethod
+    def sign(
+        cls,
+        identity: NodeIdentity,
+        request_id: str,
+        chain_stage_index: int,
+        chain_total_stages: int,
+        deadline_unix: float,
+    ) -> "HandoffToken":
+        """Mint + sign a fresh token under the settler ``identity``."""
+        payload = cls.signing_payload(
+            request_id,
+            identity.node_id,
+            chain_stage_index,
+            chain_total_stages,
+            deadline_unix,
+        )
+        sig = identity.sign(payload)
+        return cls(
+            request_id=request_id,
+            settler_node_id=identity.node_id,
+            chain_stage_index=int(chain_stage_index),
+            chain_total_stages=int(chain_total_stages),
+            deadline_unix=float(deadline_unix),
+            signature_b64=sig,
+        )
+
+    def verify_with_anchor(self, anchor: Any) -> bool:
+        """Verify this token's signature using the settler's pubkey
+        resolved from the on-chain anchor.
+
+        Returns False (not an exception) for any failure path so the
+        caller can simply route to ``StageError(INVALID_TOKEN)`` —
+        matches the Phase 3.x.5 / 3.x.6 anchor-verify pattern. Distinct
+        from anchor-RPC errors which raise (those are transient
+        infrastructure, not "this token is bad").
+
+        Anchor-verify-on-read invariant: the pubkey is resolved from
+        the anchor via ``settler_node_id``. The token does NOT carry
+        an embedded pubkey field; a malicious settler cannot include
+        their own pubkey + signature that "verifies" trivially.
+        """
+        if anchor is None or not hasattr(anchor, "lookup"):
+            return False
+        settler_pubkey_b64 = anchor.lookup(self.settler_node_id)
+        if not settler_pubkey_b64:
+            return False
+        payload = self.signing_payload(
+            self.request_id,
+            self.settler_node_id,
+            self.chain_stage_index,
+            self.chain_total_stages,
+            self.deadline_unix,
+        )
+        return verify_signature(
+            settler_pubkey_b64, payload, self.signature_b64
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "request_id": self.request_id,
+            "settler_node_id": self.settler_node_id,
+            "chain_stage_index": self.chain_stage_index,
+            "chain_total_stages": self.chain_total_stages,
+            "deadline_unix": self.deadline_unix,
+            "signature_b64": self.signature_b64,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "HandoffToken":
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            settler_node_id=_required_str(data, "settler_node_id"),
+            chain_stage_index=_required_int(data, "chain_stage_index"),
+            chain_total_stages=_required_int(data, "chain_total_stages"),
+            deadline_unix=_required_number(data, "deadline_unix"),
+            signature_b64=_required_str(data, "signature_b64"),
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Wire messages
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class RunLayerSliceRequest:
+    """Executor (or upstream stage) → stage: 'run layers
+    [layer_range[0], layer_range[1]) on this activation'."""
+
+    request_id: str
+    model_id: str
+    layer_range: Tuple[int, int]  # half-open [start, end)
+    privacy_tier: PrivacyLevel
+    content_tier: ContentTier
+    activation_blob: bytes
+    activation_shape: Tuple[int, ...]
+    activation_dtype: str
+    upstream_token: HandoffToken
+    deadline_unix: float
+    protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        _validate_str_field("model_id", self.model_id)
+        _validate_str_field("activation_dtype", self.activation_dtype)
+        _validate_version(self.protocol_version)
+        if not isinstance(self.layer_range, tuple) or len(self.layer_range) != 2:
+            raise ChainRpcMalformedError(
+                f"layer_range must be (start, end) tuple, got "
+                f"{self.layer_range!r}"
+            )
+        start, end = self.layer_range
+        if not isinstance(start, int) or not isinstance(end, int):
+            raise ChainRpcMalformedError(
+                f"layer_range entries must be int, got ({type(start).__name__}, "
+                f"{type(end).__name__})"
+            )
+        if start < 0 or end <= start:
+            raise ChainRpcMalformedError(
+                f"layer_range must satisfy 0 <= start < end, got "
+                f"({start}, {end})"
+            )
+        if not isinstance(self.activation_blob, (bytes, bytearray)):
+            raise ChainRpcMalformedError(
+                f"activation_blob must be bytes, got "
+                f"{type(self.activation_blob).__name__}"
+            )
+        if not isinstance(self.activation_shape, tuple):
+            raise ChainRpcMalformedError(
+                f"activation_shape must be tuple, got "
+                f"{type(self.activation_shape).__name__}"
+            )
+        for dim in self.activation_shape:
+            if not isinstance(dim, int) or dim <= 0:
+                raise ChainRpcMalformedError(
+                    f"activation_shape entries must be positive int, got "
+                    f"{dim!r}"
+                )
+        if not isinstance(self.privacy_tier, PrivacyLevel):
+            raise ChainRpcMalformedError(
+                f"privacy_tier must be PrivacyLevel, got "
+                f"{type(self.privacy_tier).__name__}"
+            )
+        if not isinstance(self.content_tier, ContentTier):
+            raise ChainRpcMalformedError(
+                f"content_tier must be ContentTier, got "
+                f"{type(self.content_tier).__name__}"
+            )
+        if not isinstance(self.upstream_token, HandoffToken):
+            raise ChainRpcMalformedError(
+                f"upstream_token must be HandoffToken, got "
+                f"{type(self.upstream_token).__name__}"
+            )
+        # Cross-field consistency: token's request_id must match the
+        # request's request_id. Forging this would require forging the
+        # token signature, but we still want a parse-time fast-fail.
+        if self.upstream_token.request_id != self.request_id:
+            raise ChainRpcMalformedError(
+                f"upstream_token.request_id ({self.upstream_token.request_id!r}) "
+                f"must match request.request_id ({self.request_id!r})"
+            )
+        if not isinstance(self.deadline_unix, (int, float)):
+            raise ChainRpcMalformedError(
+                f"deadline_unix must be numeric, got "
+                f"{type(self.deadline_unix).__name__}"
+            )
+
+    def to_dict(self) -> Dict[str, Any]:
+        # activation_blob → hex for JSON-safety. Large blobs ride the
+        # Phase 6 chunker out-of-band; this codec is the inline path.
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+            "model_id": self.model_id,
+            "layer_range": list(self.layer_range),
+            "privacy_tier": self.privacy_tier.value,
+            "content_tier": self.content_tier.value,
+            "activation_blob_hex": bytes(self.activation_blob).hex(),
+            "activation_shape": list(self.activation_shape),
+            "activation_dtype": self.activation_dtype,
+            "upstream_token": self.upstream_token.to_dict(),
+            "deadline_unix": self.deadline_unix,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RunLayerSliceRequest":
+        _expect_type(data, ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST)
+        token_raw = data.get("upstream_token")
+        if not isinstance(token_raw, dict):
+            raise ChainRpcMalformedError(
+                f"upstream_token must be dict, got {type(token_raw).__name__}"
+            )
+        layer_range_raw = data.get("layer_range")
+        if not isinstance(layer_range_raw, list) or len(layer_range_raw) != 2:
+            raise ChainRpcMalformedError(
+                f"layer_range must be [start, end] list, got {layer_range_raw!r}"
+            )
+        shape_raw = data.get("activation_shape")
+        if not isinstance(shape_raw, list):
+            raise ChainRpcMalformedError(
+                f"activation_shape must be list, got {type(shape_raw).__name__}"
+            )
+        blob_hex = _required_str(data, "activation_blob_hex")
+        try:
+            blob_bytes = bytes.fromhex(blob_hex)
+        except ValueError as exc:
+            raise ChainRpcMalformedError(
+                f"activation_blob_hex is not valid hex: {exc}"
+            ) from exc
+        try:
+            privacy = PrivacyLevel(_required_str(data, "privacy_tier"))
+        except ValueError as exc:
+            raise ChainRpcMalformedError(
+                f"privacy_tier invalid: {exc}"
+            ) from exc
+        try:
+            content = ContentTier(_required_str(data, "content_tier"))
+        except ValueError as exc:
+            raise ChainRpcMalformedError(
+                f"content_tier invalid: {exc}"
+            ) from exc
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            model_id=_required_str(data, "model_id"),
+            layer_range=(int(layer_range_raw[0]), int(layer_range_raw[1])),
+            privacy_tier=privacy,
+            content_tier=content,
+            activation_blob=blob_bytes,
+            activation_shape=tuple(int(d) for d in shape_raw),
+            activation_dtype=_required_str(data, "activation_dtype"),
+            upstream_token=HandoffToken.from_dict(token_raw),
+            deadline_unix=_required_number(data, "deadline_unix"),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+@dataclass(frozen=True)
+class RunLayerSliceResponse:
+    """Stage → executor on success."""
+
+    request_id: str
+    activation_blob: bytes
+    activation_shape: Tuple[int, ...]
+    activation_dtype: str
+    duration_seconds: float
+    tee_attestation: bytes
+    tee_type: TEEType
+    epsilon_spent: float
+    stage_signature_b64: str
+    stage_node_id: str
+    protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_RESPONSE.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        _validate_str_field("activation_dtype", self.activation_dtype)
+        _validate_str_field("stage_signature_b64", self.stage_signature_b64)
+        _validate_str_field("stage_node_id", self.stage_node_id)
+        _validate_version(self.protocol_version)
+        if not isinstance(self.activation_blob, (bytes, bytearray)):
+            raise ChainRpcMalformedError(
+                f"activation_blob must be bytes, got "
+                f"{type(self.activation_blob).__name__}"
+            )
+        if not isinstance(self.activation_shape, tuple):
+            raise ChainRpcMalformedError(
+                f"activation_shape must be tuple, got "
+                f"{type(self.activation_shape).__name__}"
+            )
+        for dim in self.activation_shape:
+            if not isinstance(dim, int) or dim <= 0:
+                raise ChainRpcMalformedError(
+                    f"activation_shape entries must be positive int, got "
+                    f"{dim!r}"
+                )
+        if not isinstance(self.duration_seconds, (int, float)) or self.duration_seconds < 0:
+            raise ChainRpcMalformedError(
+                f"duration_seconds must be non-negative numeric, got "
+                f"{self.duration_seconds!r}"
+            )
+        if not isinstance(self.tee_attestation, (bytes, bytearray)):
+            raise ChainRpcMalformedError(
+                f"tee_attestation must be bytes, got "
+                f"{type(self.tee_attestation).__name__}"
+            )
+        if not isinstance(self.tee_type, TEEType):
+            raise ChainRpcMalformedError(
+                f"tee_type must be TEEType, got "
+                f"{type(self.tee_type).__name__}"
+            )
+        if not isinstance(self.epsilon_spent, (int, float)):
+            raise ChainRpcMalformedError(
+                f"epsilon_spent must be numeric, got "
+                f"{type(self.epsilon_spent).__name__}"
+            )
+
+    @staticmethod
+    def signing_payload(
+        request_id: str,
+        activation_blob: bytes,
+        activation_shape: Tuple[int, ...],
+        activation_dtype: str,
+        duration_seconds: float,
+        tee_attestation: bytes,
+        tee_type: TEEType,
+        epsilon_spent: float,
+        stage_node_id: str,
+    ) -> bytes:
+        """Canonical bytes the stage signs over the response.
+
+        The signature commits the stage to its activation output bytes
+        + attestation + claimed timing. A malicious downstream that
+        tampered with the response (e.g. swapped attestation) would
+        invalidate the signature; the executor catches this at
+        anchor-verify time and surfaces it as Phase 7.1 challenge
+        material.
+        """
+        payload = {
+            "request_id": request_id,
+            "activation_blob_hex": bytes(activation_blob).hex(),
+            "activation_shape": list(activation_shape),
+            "activation_dtype": activation_dtype,
+            "duration_seconds": float(duration_seconds),
+            "tee_attestation_hex": bytes(tee_attestation).hex(),
+            "tee_type": tee_type.value,
+            "epsilon_spent": float(epsilon_spent),
+            "stage_node_id": stage_node_id,
+        }
+        return json.dumps(payload, sort_keys=True).encode("utf-8")
+
+    @classmethod
+    def sign(
+        cls,
+        identity: NodeIdentity,
+        request_id: str,
+        activation_blob: bytes,
+        activation_shape: Tuple[int, ...],
+        activation_dtype: str,
+        duration_seconds: float,
+        tee_attestation: bytes,
+        tee_type: TEEType,
+        epsilon_spent: float,
+    ) -> "RunLayerSliceResponse":
+        """Construct + sign a fresh response under the stage ``identity``."""
+        payload = cls.signing_payload(
+            request_id,
+            activation_blob,
+            activation_shape,
+            activation_dtype,
+            duration_seconds,
+            tee_attestation,
+            tee_type,
+            epsilon_spent,
+            identity.node_id,
+        )
+        sig = identity.sign(payload)
+        return cls(
+            request_id=request_id,
+            activation_blob=bytes(activation_blob),
+            activation_shape=tuple(activation_shape),
+            activation_dtype=activation_dtype,
+            duration_seconds=float(duration_seconds),
+            tee_attestation=bytes(tee_attestation),
+            tee_type=tee_type,
+            epsilon_spent=float(epsilon_spent),
+            stage_signature_b64=sig,
+            stage_node_id=identity.node_id,
+        )
+
+    def verify_with_anchor(self, anchor: Any) -> bool:
+        """Verify this response's stage signature using the stage's
+        pubkey resolved from the on-chain anchor.
+
+        Same anchor-verify-on-read pattern as ``HandoffToken``.
+        Returns False on any failure (no anchor, not registered,
+        signature mismatch); raises only on transient anchor-RPC
+        infrastructure errors.
+        """
+        if anchor is None or not hasattr(anchor, "lookup"):
+            return False
+        stage_pubkey_b64 = anchor.lookup(self.stage_node_id)
+        if not stage_pubkey_b64:
+            return False
+        payload = self.signing_payload(
+            self.request_id,
+            self.activation_blob,
+            self.activation_shape,
+            self.activation_dtype,
+            self.duration_seconds,
+            self.tee_attestation,
+            self.tee_type,
+            self.epsilon_spent,
+            self.stage_node_id,
+        )
+        return verify_signature(
+            stage_pubkey_b64, payload, self.stage_signature_b64
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+            "activation_blob_hex": bytes(self.activation_blob).hex(),
+            "activation_shape": list(self.activation_shape),
+            "activation_dtype": self.activation_dtype,
+            "duration_seconds": self.duration_seconds,
+            "tee_attestation_hex": bytes(self.tee_attestation).hex(),
+            "tee_type": self.tee_type.value,
+            "epsilon_spent": self.epsilon_spent,
+            "stage_signature_b64": self.stage_signature_b64,
+            "stage_node_id": self.stage_node_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RunLayerSliceResponse":
+        _expect_type(data, ChainRpcMessageType.RUN_LAYER_SLICE_RESPONSE)
+        shape_raw = data.get("activation_shape")
+        if not isinstance(shape_raw, list):
+            raise ChainRpcMalformedError(
+                f"activation_shape must be list, got {type(shape_raw).__name__}"
+            )
+        try:
+            blob_bytes = bytes.fromhex(_required_str(data, "activation_blob_hex"))
+            attest_bytes = bytes.fromhex(
+                _required_str(data, "tee_attestation_hex")
+            )
+        except ValueError as exc:
+            raise ChainRpcMalformedError(f"hex decode failed: {exc}") from exc
+        try:
+            tee_type = TEEType(_required_str(data, "tee_type"))
+        except ValueError as exc:
+            raise ChainRpcMalformedError(f"tee_type invalid: {exc}") from exc
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            activation_blob=blob_bytes,
+            activation_shape=tuple(int(d) for d in shape_raw),
+            activation_dtype=_required_str(data, "activation_dtype"),
+            duration_seconds=_required_number(data, "duration_seconds"),
+            tee_attestation=attest_bytes,
+            tee_type=tee_type,
+            epsilon_spent=_required_number(data, "epsilon_spent"),
+            stage_signature_b64=_required_str(data, "stage_signature_b64"),
+            stage_node_id=_required_str(data, "stage_node_id"),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+@dataclass(frozen=True)
+class StageError:
+    """Stage → executor on any failure. Structured enum-coded reason."""
+
+    request_id: str
+    code: str          # StageErrorCode value (str-Enum, stored as str
+                       # so unknown codes from a future protocol round-
+                       # trip cleanly without rejection)
+    message: str
+    protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = ChainRpcMessageType.STAGE_ERROR.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        _validate_str_field("code", self.code)
+        if not isinstance(self.message, str):
+            raise ChainRpcMalformedError(
+                f"message must be str, got {type(self.message).__name__}"
+            )
+        _validate_version(self.protocol_version)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+            "code": self.code,
+            "message": self.message,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "StageError":
+        _expect_type(data, ChainRpcMessageType.STAGE_ERROR)
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            code=_required_str(data, "code"),
+            message=data.get("message", "") if isinstance(data.get("message"), str) else "",
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Codec
+# ──────────────────────────────────────────────────────────────────────────
+
+
+_MESSAGE_TYPE_REGISTRY: Dict[str, Callable[[Dict[str, Any]], Any]] = {
+    ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value: RunLayerSliceRequest.from_dict,
+    ChainRpcMessageType.RUN_LAYER_SLICE_RESPONSE.value: RunLayerSliceResponse.from_dict,
+    ChainRpcMessageType.STAGE_ERROR.value: StageError.from_dict,
+}
+
+
+def parse_message(payload: bytes) -> Any:
+    """Decode wire-format bytes into the matching dataclass.
+
+    Mirrors the manifest-DHT and profile-DHT parsers. Size cap fires
+    BEFORE ``json.loads`` allocates; version mismatch raises a
+    dedicated exception so callers can distinguish from malformed
+    input.
+    """
+    if not isinstance(payload, (bytes, bytearray)):
+        raise ChainRpcMalformedError(
+            f"payload must be bytes, got {type(payload).__name__}"
+        )
+    if len(payload) > MAX_HANDSHAKE_BYTES:
+        raise ChainRpcMalformedError(
+            f"payload exceeds MAX_HANDSHAKE_BYTES "
+            f"({len(payload)} > {MAX_HANDSHAKE_BYTES})"
+        )
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ChainRpcMalformedError(f"JSON parse failed: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ChainRpcMalformedError(
+            f"top-level message must be dict, got {type(data).__name__}"
+        )
+    msg_type = data.get("type")
+    if not isinstance(msg_type, str):
+        raise ChainRpcMalformedError(
+            f"missing or non-string 'type' field; got {msg_type!r}"
+        )
+    constructor = _MESSAGE_TYPE_REGISTRY.get(msg_type)
+    if constructor is None:
+        raise ChainRpcUnknownTypeError(
+            f"unknown message type {msg_type!r}; "
+            f"known: {sorted(_MESSAGE_TYPE_REGISTRY)}"
+        )
+    version = data.get("protocol_version")
+    if isinstance(version, int) and version != CHAIN_RPC_PROTOCOL_VERSION:
+        raise ChainRpcVersionMismatchError(
+            f"peer protocol_version={version}; "
+            f"local CHAIN_RPC_PROTOCOL_VERSION={CHAIN_RPC_PROTOCOL_VERSION}"
+        )
+    return constructor(data)
+
+
+def encode_message(message: Any) -> bytes:
+    """Encode a wire-format dataclass to canonical JSON bytes."""
+    if not hasattr(message, "to_dict"):
+        raise ChainRpcMalformedError(
+            f"message must have to_dict(); got {type(message).__name__}"
+        )
+    return json.dumps(message.to_dict(), sort_keys=True).encode("utf-8")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Validation helpers (private)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _validate_str_field(name: str, value: Any) -> None:
+    if not isinstance(value, str):
+        raise ChainRpcMalformedError(
+            f"{name} must be str, got {type(value).__name__}"
+        )
+    if not value:
+        raise ChainRpcMalformedError(f"{name} must be non-empty")
+
+
+def _validate_version(version: Any) -> None:
+    if not isinstance(version, int):
+        raise ChainRpcMalformedError(
+            f"protocol_version must be int, got {type(version).__name__}"
+        )
+
+
+def _expect_type(
+    data: Dict[str, Any], expected: ChainRpcMessageType
+) -> None:
+    actual = data.get("type")
+    if actual != expected.value:
+        raise ChainRpcMalformedError(
+            f"expected type={expected.value!r}, got {actual!r}"
+        )
+
+
+def _required_str(data: Dict[str, Any], field_name: str) -> str:
+    value = data.get(field_name)
+    if not isinstance(value, str) or not value:
+        raise ChainRpcMalformedError(
+            f"{field_name} must be non-empty str"
+        )
+    return value
+
+
+def _required_int(data: Dict[str, Any], field_name: str) -> int:
+    value = data.get(field_name)
+    if not isinstance(value, int):
+        raise ChainRpcMalformedError(
+            f"{field_name} must be int, got {type(value).__name__}"
+        )
+    return value
+
+
+def _required_number(data: Dict[str, Any], field_name: str) -> float:
+    value = data.get(field_name)
+    if not isinstance(value, (int, float)):
+        raise ChainRpcMalformedError(
+            f"{field_name} must be numeric, got {type(value).__name__}"
+        )
+    return float(value)
