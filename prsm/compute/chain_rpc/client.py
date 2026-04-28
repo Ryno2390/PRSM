@@ -51,7 +51,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Optional, Protocol, Tuple
+from typing import Callable, Iterable, Iterator, List, Optional, Protocol, Tuple, Union
 
 import numpy as np
 
@@ -75,6 +75,8 @@ from prsm.compute.chain_rpc.protocol import (
     RunLayerSliceRequest,
     RunLayerSliceResponse,
     StageError,
+    StreamFinalFrame,
+    TokenFrame,
     encode_message,
     parse_message,
 )
@@ -124,6 +126,23 @@ May raise transport-level exceptions; the executor maps these to
 ``RpcChainExecutor`` falls back to ``ACTIVATION_TOO_LARGE`` when an
 activation exceeds the inline threshold but no streaming transport
 was wired."""
+
+TokenStreamSendMessage = Callable[[str, bytes], Iterable[bytes]]
+"""Server-streaming transport-layer callable for Phase 3.x.8 token
+output: ``(stage_address, request_bytes) → Iterable[response_frames]``.
+
+Production wires this to a Phase 6 gRPC SERVER-streaming RPC method
+(one request, many response frames). Each yielded ``bytes`` is a
+wire-encoded ``TokenFrame`` (incremental) or the terminal
+``StreamFinalFrame`` carrying the signed
+``RunLayerSliceResponse``. Tests inject a fake that drives
+``LayerStageServer.handle_token_stream`` in-process.
+
+May raise transport-level exceptions; the executor maps these to
+``ChainExecutionError(code='TRANSPORT_ERROR')``. Optional —
+``RpcChainExecutor.execute_chain_streaming`` raises
+``ExecutorErrorCode.STREAMING_NOT_WIRED`` when called without a
+streaming transport configured."""
 
 PromptEncoder = Callable[[str], np.ndarray]
 """Convert the user-facing prompt string into the chain head's input
@@ -223,6 +242,35 @@ class ExecutorErrorCode:
     # streamed transport was wired. Caller fix: pass
     # streamed_send_message= to make_rpc_chain_executor / RpcChainExecutor.
     ACTIVATION_TOO_LARGE = "ACTIVATION_TOO_LARGE"
+    # Phase 3.x.8: caller invoked execute_chain_streaming() but no
+    # token_stream_send_message= was wired. Caller fix: provide a
+    # streaming transport at executor construction time.
+    STREAMING_NOT_WIRED = "STREAMING_NOT_WIRED"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# StreamToken — caller-facing incremental output from execute_chain_streaming
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class StreamToken:
+    """Caller-facing incremental output yielded by
+    ``RpcChainExecutor.execute_chain_streaming``. Wraps a wire-format
+    ``TokenFrame`` minus the protocol-level fields (request_id +
+    protocol_version) — those are the executor's concern, not the
+    caller's.
+
+    Multiple ``StreamToken``s per stream, ordered strictly by
+    ``sequence_index``. ``finish_reason`` is non-None on the LAST
+    token; the executor follows the last token with a
+    ``ChainExecutionResult`` (the single non-StreamToken yield).
+    """
+
+    sequence_index: int
+    text_delta: str
+    token_id: Optional[int] = None
+    finish_reason: Optional[str] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -266,6 +314,7 @@ class RpcChainExecutor:
         output_decoder: OutputDecoder,
         address_resolver: Optional[AddressResolver] = None,
         streamed_send_message: Optional[StreamedSendMessage] = None,
+        token_stream_send_message: Optional[TokenStreamSendMessage] = None,
         chunk_threshold_bytes: int = CHUNK_THRESHOLD_BYTES,
         chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
         max_streamed_payload_bytes: int = 1 * 1024 * 1024 * 1024,
@@ -284,6 +333,13 @@ class RpcChainExecutor:
             raise RuntimeError(
                 "RpcChainExecutor: streamed_send_message must be callable "
                 "if provided"
+            )
+        if token_stream_send_message is not None and not callable(
+            token_stream_send_message
+        ):
+            raise RuntimeError(
+                "RpcChainExecutor: token_stream_send_message must be "
+                "callable if provided"
             )
         if anchor is None or not hasattr(anchor, "lookup"):
             raise RuntimeError(
@@ -320,6 +376,7 @@ class RpcChainExecutor:
         self._settler = settler_identity
         self._send = send_message
         self._streamed_send = streamed_send_message
+        self._token_stream_send = token_stream_send_message
         self._anchor = anchor
         self._prompt_encoder = prompt_encoder
         self._output_decoder = output_decoder
@@ -434,6 +491,476 @@ class RpcChainExecutor:
             tee_type=worst_case_tee_type(stage_attestations),
             epsilon_spent=sum(s.epsilon_spent for s in outcomes),
         )
+
+    # ── streaming-token API (Phase 3.x.8) ────────────────────────────
+
+    def execute_chain_streaming(
+        self,
+        *,
+        request: InferenceRequest,
+        chain: GPUChain,
+    ) -> Iterator[Union[StreamToken, ChainExecutionResult]]:
+        """Streaming counterpart to ``execute_chain``. Yields
+        ``StreamToken`` objects as the tail stage produces them; the
+        LAST yielded item is a ``ChainExecutionResult`` carrying the
+        signed multi-stage receipt over the joined output text.
+
+        Phases:
+          1. Prefill — non-tail stages run their existing one-shot
+             forward pass via ``_dispatch_stage`` (inline OR
+             3.x.7.1-streamed activations both supported on the way
+             through). Each yields a ``StageOutcome`` for the final
+             aggregation.
+          2. Decode — the tail stage is dispatched via
+             ``token_stream_send_message`` with ``streaming=True``;
+             each ``TokenFrame`` becomes a ``StreamToken`` yielded to
+             the caller; the terminal ``StreamFinalFrame`` carries
+             the signed ``RunLayerSliceResponse`` whose
+             ``activation_blob`` is the UTF-8-encoded joined output.
+             The H2 invariant is preserved: the tail's signature
+             must verify under the EXPECTED ``stage_node_id``
+             (caller-supplied), not the response self-claim.
+
+        Caller MUST exhaust the iterator (or call its ``.close()``)
+        otherwise the tail stage's stream leaks. Phase 3.x.8 Task 6
+        (cancellation propagation) wires the .close() → tail
+        cancellation signal end-to-end.
+
+        Failure modes (raised as ``ChainExecutionError`` to the
+        caller — same surface as ``execute_chain``):
+          - empty chain / shape mismatch → EMPTY_CHAIN /
+            SHAPE_MISMATCH
+          - prompt encode raises → PROMPT_ENCODE_ERROR
+          - no token_stream_send_message wired →
+            STREAMING_NOT_WIRED
+          - non-tail prefill stage failure → forwarded from
+            ``_dispatch_stage``
+          - transport failure on tail dispatch → TRANSPORT_ERROR
+          - garbage / wrong-type frame → MALFORMED_RESPONSE
+          - server-side StageError → forwarded with its code
+          - tail signature fails anchor verify →
+            INVALID_STAGE_SIGNATURE
+          - joined deltas don't match signed activation_blob →
+            MALFORMED_RESPONSE
+        """
+        if not chain.stages:
+            raise ChainExecutionError(
+                stage_index=-1,
+                stage_node_id="",
+                code=ExecutorErrorCode.EMPTY_CHAIN,
+                message="GPUChain has no stages — router produced an empty chain",
+            )
+        if len(chain.stages) != len(chain.layer_ranges):
+            raise ChainExecutionError(
+                stage_index=-1,
+                stage_node_id="",
+                code=ExecutorErrorCode.SHAPE_MISMATCH,
+                message=(
+                    f"chain stages count ({len(chain.stages)}) != "
+                    f"layer_ranges count ({len(chain.layer_ranges)})"
+                ),
+            )
+        if self._token_stream_send is None:
+            raise ChainExecutionError(
+                stage_index=-1,
+                stage_node_id="",
+                code=ExecutorErrorCode.STREAMING_NOT_WIRED,
+                message=(
+                    "execute_chain_streaming requires "
+                    "token_stream_send_message= at executor "
+                    "construction time"
+                ),
+            )
+
+        # Step 1: prompt → initial activation.
+        try:
+            activation = self._prompt_encoder(request.prompt)
+        except Exception as exc:  # noqa: BLE001
+            raise ChainExecutionError(
+                stage_index=-1,
+                stage_node_id="",
+                code=ExecutorErrorCode.PROMPT_ENCODE_ERROR,
+                message=f"prompt_encoder raised: {exc.__class__.__name__}: {exc}",
+            ) from exc
+
+        deadline_unix = self._clock() + self._default_deadline_seconds
+        chain_total = len(chain.stages)
+        outcomes: List[StageOutcome] = []
+
+        # Step 2: prefill non-tail stages via the existing unary path.
+        # This composes with 3.x.7.1 chunked-streaming on the prefill
+        # automatically (large activations between non-tail stages
+        # ride through _dispatch_stage's branch).
+        for stage_index in range(chain_total - 1):
+            stage_node_id = chain.stages[stage_index]
+            layer_range = tuple(chain.layer_ranges[stage_index])
+            response, activation = self._dispatch_stage(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                layer_range=layer_range,
+                activation=activation,
+                request=request,
+                chain_total=chain_total,
+                deadline_unix=deadline_unix,
+            )
+            outcomes.append(StageOutcome(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                duration_seconds=response.duration_seconds,
+                tee_attestation=response.tee_attestation,
+                tee_type=response.tee_type,
+                epsilon_spent=response.epsilon_spent,
+            ))
+
+        # Step 3: dispatch the tail stage with streaming=True. Yields
+        # StreamToken... StreamToken... ChainExecutionResult.
+        tail_index = chain_total - 1
+        tail_node_id = chain.stages[-1]
+        tail_layer_range = tuple(chain.layer_ranges[-1])
+        yield from self._dispatch_streaming_tail(
+            stage_index=tail_index,
+            stage_node_id=tail_node_id,
+            layer_range=tail_layer_range,
+            activation=activation,
+            request=request,
+            chain_total=chain_total,
+            deadline_unix=deadline_unix,
+            outcomes_so_far=outcomes,
+        )
+
+    # ── streaming tail dispatch (Phase 3.x.8) ────────────────────────
+
+    def _dispatch_streaming_tail(
+        self,
+        *,
+        stage_index: int,
+        stage_node_id: str,
+        layer_range: tuple,
+        activation: np.ndarray,
+        request: InferenceRequest,
+        chain_total: int,
+        deadline_unix: float,
+        outcomes_so_far: List[StageOutcome],
+    ) -> Iterator[Union[StreamToken, ChainExecutionResult]]:
+        """Tail-stage streaming dispatch. Encodes the activation
+        inline, mints a tail-bound token, sends a streaming request
+        via ``token_stream_send_message``, parses each response
+        frame, yields a ``StreamToken`` per ``TokenFrame`` and a
+        terminal ``ChainExecutionResult`` after anchor-verifying
+        the embedded response.
+
+        v1: inline activations only on the streaming-input side
+        (matches the server-side handle_token_stream contract). If
+        the activation exceeds the inline threshold, surfaces as
+        ``ACTIVATION_TOO_LARGE`` — chunked-input + streaming-output
+        composition is a Task 7 follow-up.
+        """
+        # Encode activation for the wire.
+        try:
+            blob, shape, dtype_str = encode_activation(activation)
+        except ActivationCodecError as exc:
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.ACTIVATION_INVALID,
+                message=f"tail-stage input encode failed: {exc}",
+            ) from exc
+
+        # v1: streaming + chunked-input composition not yet wired.
+        if should_chunk(blob, threshold=self._chunk_threshold_bytes):
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.ACTIVATION_TOO_LARGE,
+                message=(
+                    f"tail-stage activation {len(blob)} bytes exceeds "
+                    f"inline threshold {self._chunk_threshold_bytes}; "
+                    f"streaming + chunked-input composition is a "
+                    f"Phase 3.x.8 Task 7 follow-up"
+                ),
+            )
+
+        # Mint a token bound to the tail stage.
+        token = HandoffToken.sign(
+            identity=self._settler,
+            request_id=request.request_id,
+            chain_stage_index=stage_index,
+            chain_total_stages=chain_total,
+            deadline_unix=deadline_unix,
+        )
+
+        # Build the streaming RunLayerSliceRequest (streaming=True).
+        wire_request = RunLayerSliceRequest(
+            request_id=request.request_id,
+            model_id=request.model_id,
+            layer_range=layer_range,
+            privacy_tier=request.privacy_tier,
+            content_tier=request.content_tier,
+            activation_blob=blob,
+            activation_shape=shape,
+            activation_dtype=dtype_str,
+            upstream_token=token,
+            deadline_unix=deadline_unix,
+            streaming=True,
+        )
+        request_bytes = encode_message(wire_request)
+
+        # Send via the token-stream transport.
+        address = self._resolve_address(stage_node_id)
+        try:
+            frame_iter = self._token_stream_send(address, request_bytes)  # type: ignore[misc]
+        except Exception as exc:  # noqa: BLE001
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.TRANSPORT_ERROR,
+                message=(
+                    f"token-stream transport raised: "
+                    f"{exc.__class__.__name__}: {exc}"
+                ),
+            ) from exc
+
+        # Iterate response frames. Track sequence + joined text for
+        # the integrity check against the signed StreamFinalFrame.
+        expected_seq = 0
+        joined_parts: List[str] = []
+        final_frame: Optional[StreamFinalFrame] = None
+
+        try:
+            for raw_frame in frame_iter:
+                msg = self._parse_stream_frame(
+                    stage_index=stage_index,
+                    stage_node_id=stage_node_id,
+                    raw=raw_frame,
+                )
+
+                # Server-side error terminal — forward.
+                if isinstance(msg, StageError):
+                    raise ChainExecutionError(
+                        stage_index=stage_index,
+                        stage_node_id=stage_node_id,
+                        code=msg.code,
+                        message=msg.message,
+                    )
+
+                if isinstance(msg, TokenFrame):
+                    # Cross-field check: TokenFrame must carry the
+                    # parent request_id (relay defense — a network
+                    # relay can't splice frames from one stream into
+                    # another).
+                    if msg.request_id != request.request_id:
+                        raise ChainExecutionError(
+                            stage_index=stage_index,
+                            stage_node_id=stage_node_id,
+                            code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                            message=(
+                                f"TokenFrame.request_id "
+                                f"{msg.request_id!r} != sent "
+                                f"{request.request_id!r}"
+                            ),
+                        )
+                    # Sequence-index invariant: 0-indexed, strictly
+                    # increasing, no gaps.
+                    if msg.sequence_index != expected_seq:
+                        raise ChainExecutionError(
+                            stage_index=stage_index,
+                            stage_node_id=stage_node_id,
+                            code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                            message=(
+                                f"TokenFrame sequence_index="
+                                f"{msg.sequence_index} (expected "
+                                f"{expected_seq})"
+                            ),
+                        )
+                    expected_seq += 1
+                    joined_parts.append(msg.text_delta)
+                    yield StreamToken(
+                        sequence_index=msg.sequence_index,
+                        text_delta=msg.text_delta,
+                        token_id=msg.token_id,
+                        finish_reason=msg.finish_reason,
+                    )
+                    continue
+
+                if isinstance(msg, StreamFinalFrame):
+                    final_frame = msg
+                    # Don't break — defensive: continue iterating to
+                    # ensure the iterator is exhausted, but reject
+                    # any frames that arrive AFTER the terminal.
+                    # Actually: a well-behaved server emits exactly
+                    # one StreamFinalFrame and stops. Treat extra
+                    # frames as MALFORMED_RESPONSE.
+                    break
+
+                # Unreachable given parse_stream_frame's whitelist,
+                # but defense-in-depth.
+                raise ChainExecutionError(
+                    stage_index=stage_index,
+                    stage_node_id=stage_node_id,
+                    code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                    message=(
+                        f"unexpected wire type in token-stream: "
+                        f"{type(msg).__name__}"
+                    ),
+                )
+
+            # If frame_iter yields more after StreamFinalFrame, the
+            # server is sending stale frames — reject.
+            if final_frame is not None:
+                for stray in frame_iter:
+                    raise ChainExecutionError(
+                        stage_index=stage_index,
+                        stage_node_id=stage_node_id,
+                        code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                        message=(
+                            "frames received after StreamFinalFrame; "
+                            "server should terminate the stream at the "
+                            "terminal frame"
+                        ),
+                    )
+        except ChainExecutionError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.TRANSPORT_ERROR,
+                message=(
+                    f"token-stream iterator raised: "
+                    f"{exc.__class__.__name__}: {exc}"
+                ),
+            ) from exc
+
+        if final_frame is None:
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                message=(
+                    "token-stream ended without a StreamFinalFrame "
+                    "(no signed receipt material received)"
+                ),
+            )
+
+        # Cross-field check: response.request_id must echo our request.
+        response = final_frame.response
+        if response.request_id != request.request_id:
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                message=(
+                    f"StreamFinalFrame.response.request_id "
+                    f"{response.request_id!r} != sent "
+                    f"{request.request_id!r}"
+                ),
+            )
+
+        # H2 invariant — anchor-verify under the EXPECTED stage_node_id
+        # (caller-supplied), NOT the response's self-claim. Any
+        # anchor-registered peer impersonating another is rejected at
+        # verify_with_anchor's cross-field check.
+        if not response.verify_with_anchor(
+            self._anchor, expected_stage_node_id=stage_node_id
+        ):
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.INVALID_STAGE_SIGNATURE,
+                message=(
+                    f"tail-stage StreamFinalFrame.response signature "
+                    f"failed anchor verification (expected "
+                    f"stage_node_id={stage_node_id!r}, claimed="
+                    f"{response.stage_node_id!r})"
+                ),
+            )
+
+        # Joined-text invariant: the deltas we received MUST match
+        # what the stage signed in activation_blob. Defense-in-depth
+        # against a relay that tampers TokenFrame.text_delta — even
+        # though the server enforces this BEFORE signing, the
+        # consumer re-checks against the signed bytes.
+        joined = "".join(joined_parts)
+        if joined.encode("utf-8") != response.activation_blob:
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                message=(
+                    "joined TokenFrame text_deltas do not match "
+                    "StreamFinalFrame.response.activation_blob (a "
+                    "relay may have tampered an intermediate token "
+                    "frame)"
+                ),
+            )
+
+        # Build + yield the terminal ChainExecutionResult.
+        tail_outcome = StageOutcome(
+            stage_index=stage_index,
+            stage_node_id=stage_node_id,
+            duration_seconds=response.duration_seconds,
+            tee_attestation=response.tee_attestation,
+            tee_type=response.tee_type,
+            epsilon_spent=response.epsilon_spent,
+        )
+        all_outcomes = list(outcomes_so_far) + [tail_outcome]
+        stage_attestations = [
+            StageAttestation(
+                stage_index=outcome.stage_index,
+                stage_node_id=outcome.stage_node_id,
+                tee_type=outcome.tee_type,
+                attestation=outcome.tee_attestation,
+            )
+            for outcome in all_outcomes
+        ]
+        yield ChainExecutionResult(
+            output=joined,
+            duration_seconds=sum(s.duration_seconds for s in all_outcomes),
+            tee_attestation=encode_multi_stage_attestation(stage_attestations),
+            tee_type=worst_case_tee_type(stage_attestations),
+            epsilon_spent=sum(s.epsilon_spent for s in all_outcomes),
+        )
+
+    def _parse_stream_frame(
+        self,
+        *,
+        stage_index: int,
+        stage_node_id: str,
+        raw: bytes,
+    ) -> Union[TokenFrame, StreamFinalFrame, StageError]:
+        """Parse a single token-stream wire frame; map protocol-level
+        parse errors to ``ChainExecutionError``."""
+        try:
+            msg = parse_message(raw)
+        except ChainRpcVersionMismatchError as exc:
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.UNSUPPORTED_VERSION,
+                message=str(exc),
+            ) from exc
+        except (
+            ChainRpcMalformedError,
+            ChainRpcUnknownTypeError,
+            ChainRpcProtocolError,
+        ) as exc:
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                message=str(exc),
+            ) from exc
+        if not isinstance(msg, (TokenFrame, StreamFinalFrame, StageError)):
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                message=(
+                    f"unexpected wire type in token-stream: "
+                    f"{type(msg).__name__}"
+                ),
+            )
+        return msg
 
     # ── stage dispatch ────────────────────────────────────────────────
 

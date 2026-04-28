@@ -1396,3 +1396,654 @@ class TestInlinePathStillWorksAtV2:
         assert len(bob_sim.calls) == 1
         assert len(alice_streamed_sim.calls) == 0
         assert len(bob_streamed_sim.calls) == 0
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.8 — execute_chain_streaming tests
+# ──────────────────────────────────────────────────────────────────────────
+
+
+from prsm.compute.chain_rpc.client import StreamToken
+from prsm.compute.chain_rpc.protocol import (
+    StreamFinalFrame,
+    TokenFrame,
+)
+
+
+class TokenStreamSim:
+    """Per-stage tail-stream simulator. Receives a streaming
+    RunLayerSliceRequest, emits N TokenFrames + one StreamFinalFrame.
+
+    Hooks:
+      - ``set_text``: override the joined output text (default
+        decodes the input activation back to a prompt-like string).
+      - ``inject_request_id_mismatch``: corrupt one TokenFrame's
+        request_id (relay-defense test).
+      - ``inject_sequence_gap``: corrupt one TokenFrame's
+        sequence_index.
+      - ``inject_text_tamper``: tamper the joined-text invariant
+        between TokenFrames + signed StreamFinalFrame.
+      - ``inject_extra_frame_after_final``: emit one stray frame
+        after the StreamFinalFrame.
+      - ``omit_final_frame``: skip emitting the StreamFinalFrame.
+      - ``raise_on_call``: raise from the transport side.
+      - ``return_stage_error``: replace the entire stream with one
+        StageError frame.
+      - ``impersonate_with``: signer-impersonation test (wrong
+        identity signs the response).
+    """
+
+    def __init__(self, identity, *, tee_type: TEEType = TEEType.SOFTWARE):
+        self.identity = identity
+        self.tee_type = tee_type
+        self.tee_attestation = b"\x01" * 32
+        self.epsilon = 0.0
+        self.duration = 0.05
+        self._fixed_text: Optional[str] = None
+        self._inject_request_id_mismatch_at: Optional[int] = None
+        self._inject_sequence_gap_at: Optional[int] = None
+        self._inject_text_tamper: bool = False
+        self._inject_extra_frame: bool = False
+        self._omit_final: bool = False
+        self.raise_on_call: Optional[Exception] = None
+        self._stage_error: Optional[StageError] = None
+        self._signer_override = None
+        self.calls: List[bytes] = []
+
+    def set_text(self, text: str) -> None:
+        self._fixed_text = text
+
+    def inject_request_id_mismatch_at(self, idx: int) -> None:
+        self._inject_request_id_mismatch_at = idx
+
+    def inject_sequence_gap_at(self, idx: int) -> None:
+        self._inject_sequence_gap_at = idx
+
+    def inject_text_tamper(self) -> None:
+        self._inject_text_tamper = True
+
+    def inject_extra_frame_after_final(self) -> None:
+        self._inject_extra_frame = True
+
+    def omit_final_frame(self) -> None:
+        self._omit_final = True
+
+    def return_stage_error(self, code: StageErrorCode, message: str = "") -> None:
+        self._stage_error = StageError(
+            request_id="<set-on-call>",
+            code=code.value,
+            message=message,
+        )
+
+    def impersonate_with(self, signer_identity) -> None:
+        self._signer_override = signer_identity
+
+    def stream(self, request_bytes: bytes) -> Iterable[bytes]:
+        """Drive the streaming response. Generator function so the
+        caller's iteration is exposed to test scenarios that close
+        the iterator early or check frame ordering."""
+        self.calls.append(request_bytes)
+        if self.raise_on_call is not None:
+            raise self.raise_on_call
+
+        request = parse_message(request_bytes)
+        assert isinstance(request, RunLayerSliceRequest)
+        assert request.streaming is True
+
+        if self._stage_error is not None:
+            yield encode_message(StageError(
+                request_id=request.request_id,
+                code=self._stage_error.code,
+                message=self._stage_error.message,
+            ))
+            return
+
+        # Default text: decode the input activation back to a string
+        # using the executor's prompt-encoding scheme. Tests can
+        # override via set_text.
+        if self._fixed_text is not None:
+            text = self._fixed_text
+        else:
+            activation = decode_activation(
+                request.activation_blob,
+                request.activation_shape,
+                request.activation_dtype,
+            )
+            text = _output_decoder(activation)
+
+        # Split into deltas matching the synthetic-runner default.
+        from prsm.compute.inference.streaming_runner import (
+            split_text_into_deltas,
+        )
+        deltas = split_text_into_deltas(text)
+
+        last = len(deltas) - 1
+        for i, delta in enumerate(deltas):
+            req_id = request.request_id
+            seq = i
+            if self._inject_request_id_mismatch_at == i:
+                req_id = "WRONG-PARENT"
+            if self._inject_sequence_gap_at == i:
+                seq = i + 100
+            yield encode_message(TokenFrame(
+                request_id=req_id,
+                sequence_index=seq,
+                text_delta=delta,
+                finish_reason="stop" if i == last else None,
+            ))
+
+        if self._omit_final:
+            return
+
+        # Build the signed final frame. activation_blob = joined text
+        # (UTF-8) per the 3.x.8 contract. If text-tamper is injected,
+        # the consumer-side joined hash will diverge.
+        signed_text = (
+            text + "X" if self._inject_text_tamper else text
+        )
+        signed_bytes = signed_text.encode("utf-8")
+        signer = self._signer_override or self.identity
+        response = RunLayerSliceResponse.sign(
+            identity=signer,
+            request_id=request.request_id,
+            activation_blob=signed_bytes,
+            activation_shape=(len(signed_bytes),) if signed_bytes else (0,),
+            activation_dtype="uint8",
+            duration_seconds=self.duration,
+            tee_attestation=self.tee_attestation,
+            tee_type=self.tee_type,
+            epsilon_spent=self.epsilon,
+        )
+        yield encode_message(StreamFinalFrame(response=response))
+
+        if self._inject_extra_frame:
+            yield encode_message(TokenFrame(
+                request_id=request.request_id,
+                sequence_index=last + 1,
+                text_delta="EXTRA",
+            ))
+
+
+class TokenStreamFakeTransport:
+    """Sibling to FakeTransport for the v3 token-stream path."""
+
+    def __init__(self, sims: Dict[str, TokenStreamSim]):
+        self.sims = sims
+        self.transport_failure: Optional[Exception] = None
+        self.delivery_log: List[str] = []
+
+    def send_token_stream(
+        self, address: str, request_bytes: bytes
+    ) -> Iterable[bytes]:
+        self.delivery_log.append(address)
+        if self.transport_failure is not None:
+            raise self.transport_failure
+        sim = self.sims.get(address)
+        if sim is None:
+            raise ConnectionError(f"no token-stream stage at {address!r}")
+        return sim.stream(request_bytes)
+
+
+@pytest.fixture
+def alice_token_sim(alice):
+    return TokenStreamSim(alice)
+
+
+@pytest.fixture
+def bob_token_sim(bob):
+    return TokenStreamSim(bob)
+
+
+@pytest.fixture
+def token_stream_transport(alice, bob, alice_token_sim, bob_token_sim):
+    return TokenStreamFakeTransport({
+        alice.node_id: alice_token_sim,
+        bob.node_id: bob_token_sim,
+    })
+
+
+def _make_streaming_executor(
+    *,
+    settler,
+    anchor,
+    inline_transport,
+    token_stream_transport,
+) -> RpcChainExecutor:
+    return RpcChainExecutor(
+        settler_identity=settler,
+        send_message=inline_transport.send,
+        token_stream_send_message=token_stream_transport.send_token_stream,
+        anchor=anchor,
+        prompt_encoder=_prompt_encoder,
+        output_decoder=_output_decoder,
+    )
+
+
+class TestStreamingHappyPath:
+    def test_single_stage_chain_streams_then_finalizes(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("hello world from alice")
+        chain = _make_chain([alice.node_id])
+        items = list(executor.execute_chain_streaming(
+            request=_make_request("ignored"),
+            chain=chain,
+        ))
+        # Items: [StreamToken, StreamToken, ..., ChainExecutionResult]
+        tokens = [x for x in items if isinstance(x, StreamToken)]
+        finals = [x for x in items if not isinstance(x, StreamToken)]
+        assert len(finals) == 1
+        result = finals[0]
+        assert result.output == "hello world from alice"
+        # Joined invariant: caller can reconstruct the output by
+        # concatenating text_deltas — same as result.output.
+        assert "".join(t.text_delta for t in tokens) == result.output
+
+    def test_two_stage_chain_prefill_then_stream(
+        self, settler, anchor, alice, bob, transport,
+        token_stream_transport,
+        alice_sim, bob_token_sim,
+    ):
+        # alice runs prefill (unary, identity transform); bob runs
+        # the streaming tail.
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        bob_token_sim.set_text("two stage stream")
+        chain = _make_chain([alice.node_id, bob.node_id])
+        items = list(executor.execute_chain_streaming(
+            request=_make_request("anything"), chain=chain,
+        ))
+        result = items[-1]
+        assert isinstance(result, type(items[-1]))  # ChainExecutionResult
+        assert result.output == "two stage stream"
+        # alice was hit once via inline transport (prefill),
+        # bob via streaming transport (tail).
+        assert len(alice_sim.calls) == 1
+        assert len(bob_token_sim.calls) == 1
+        # Delivery order: inline transport routed alice; streaming
+        # transport routed bob.
+        assert transport.delivery_log == [alice.node_id]
+        assert token_stream_transport.delivery_log == [bob.node_id]
+
+    def test_terminal_token_has_finish_reason_stop(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("a b c")
+        chain = _make_chain([alice.node_id])
+        tokens = [
+            x for x in executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            )
+            if isinstance(x, StreamToken)
+        ]
+        assert tokens[-1].finish_reason == "stop"
+        for t in tokens[:-1]:
+            assert t.finish_reason is None
+
+    def test_sequence_indices_strictly_increasing(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("one two three four five")
+        chain = _make_chain([alice.node_id])
+        tokens = [
+            x for x in executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            )
+            if isinstance(x, StreamToken)
+        ]
+        assert [t.sequence_index for t in tokens] == list(range(len(tokens)))
+
+
+class TestStreamingValidation:
+    def test_empty_chain_rejected(
+        self, settler, anchor, transport, token_stream_transport,
+    ):
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        empty_chain = GPUChain(
+            request_id="req-1",
+            region="us-east",
+            stages=tuple(),
+            layer_ranges=tuple(),
+            total_latency_ms=0.0,
+            stale_profile_count=0,
+        )
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=empty_chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.EMPTY_CHAIN
+
+    def test_no_token_stream_send_wired_rejected(
+        self, settler, anchor, alice, transport,
+    ):
+        # Executor without token_stream_send_message — every
+        # streaming call surfaces STREAMING_NOT_WIRED.
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder,
+            output_decoder=_output_decoder,
+        )
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.STREAMING_NOT_WIRED
+
+    def test_prompt_encoder_failure_rejected(
+        self, settler, anchor, alice, transport, token_stream_transport,
+    ):
+        def bad_encoder(prompt: str) -> np.ndarray:
+            raise ValueError("encoder broke")
+
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            token_stream_send_message=token_stream_transport.send_token_stream,
+            anchor=anchor,
+            prompt_encoder=bad_encoder,
+            output_decoder=_output_decoder,
+        )
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.PROMPT_ENCODE_ERROR
+
+
+class TestStreamingFrameValidation:
+    """Per-frame consumer-side checks. Each adversarial scenario
+    raises ChainExecutionError with a specific code."""
+
+    def test_token_frame_request_id_mismatch_rejected(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("aa bb cc")
+        # Inject a request_id mismatch on the second TokenFrame.
+        alice_token_sim.inject_request_id_mismatch_at(1)
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.MALFORMED_RESPONSE
+        assert "TokenFrame.request_id" in exc_info.value.message
+
+    def test_sequence_gap_rejected(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("aa bb cc")
+        alice_token_sim.inject_sequence_gap_at(1)
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.MALFORMED_RESPONSE
+        assert "sequence_index" in exc_info.value.message
+
+    def test_text_tamper_invalidates_signature(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        # The simulator signs over a tampered joined-text — the
+        # client-side joined-bytes invariant catches the divergence
+        # AND the signature commits to the tampered bytes (not the
+        # received deltas), so `verify_with_anchor` would still
+        # succeed but the hash check fires first. The CODE returned
+        # is MALFORMED_RESPONSE (joined-text divergence detected
+        # client-side).
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("hello world")
+        alice_token_sim.inject_text_tamper()
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.MALFORMED_RESPONSE
+        assert "joined" in exc_info.value.message.lower()
+
+    def test_stream_ends_without_final_frame_rejected(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("ab cd")
+        alice_token_sim.omit_final_frame()
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.MALFORMED_RESPONSE
+        assert "StreamFinalFrame" in exc_info.value.message
+
+    def test_extra_frame_after_final_rejected(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("ab cd")
+        alice_token_sim.inject_extra_frame_after_final()
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.MALFORMED_RESPONSE
+
+
+class TestStreamingSignatureVerification:
+    def test_unregistered_signer_rejected(
+        self, settler, anchor, alice, bob, transport,
+        token_stream_transport,
+    ):
+        # alice's tail dispatch but a rogue signs the response.
+        rogue = generate_node_identity("rogue-tail")
+        alice_sim = TokenStreamSim(alice)
+        alice_sim.impersonate_with(rogue)
+        bad_transport = TokenStreamFakeTransport({
+            alice.node_id: alice_sim,
+        })
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            token_stream_send_message=bad_transport.send_token_stream,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder,
+            output_decoder=_output_decoder,
+        )
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        # H2 invariant: substitution rejected.
+        assert exc_info.value.code == ExecutorErrorCode.INVALID_STAGE_SIGNATURE
+
+    def test_anchor_registered_substitute_still_rejected(
+        self, settler, anchor, alice, bob, transport,
+        token_stream_transport,
+    ):
+        # bob is anchor-registered and signs the response, but the
+        # dispatched stage is alice. H2 expected_stage_node_id check
+        # rejects the substitution even though bob's signature
+        # verifies under bob's pubkey on the anchor.
+        alice_sim = TokenStreamSim(alice)
+        alice_sim.impersonate_with(bob)
+        bad_transport = TokenStreamFakeTransport({
+            alice.node_id: alice_sim,
+        })
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            token_stream_send_message=bad_transport.send_token_stream,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder,
+            output_decoder=_output_decoder,
+        )
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.INVALID_STAGE_SIGNATURE
+
+
+class TestStreamingTransportErrors:
+    def test_transport_raise_maps_to_transport_error(
+        self, settler, anchor, alice, transport, token_stream_transport,
+    ):
+        token_stream_transport.transport_failure = ConnectionError("net down")
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.TRANSPORT_ERROR
+
+    def test_simulator_raise_during_iteration_maps_to_transport_error(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        alice_token_sim.raise_on_call = RuntimeError("alice crashed")
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == ExecutorErrorCode.TRANSPORT_ERROR
+
+    def test_server_returns_stage_error_forwarded(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        alice_token_sim.return_stage_error(
+            StageErrorCode.MODEL_NOT_FOUND, "no such model"
+        )
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        chain = _make_chain([alice.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("p"), chain=chain,
+            ))
+        assert exc_info.value.code == StageErrorCode.MODEL_NOT_FOUND.value
+
+
+class TestStreamingConstruction:
+    def test_non_callable_token_stream_send_rejected(
+        self, settler, anchor, transport,
+    ):
+        with pytest.raises(RuntimeError, match="token_stream_send_message"):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=transport.send,
+                token_stream_send_message="not-callable",  # type: ignore[arg-type]
+                anchor=anchor,
+                prompt_encoder=_prompt_encoder,
+                output_decoder=_output_decoder,
+            )
+
+    def test_default_token_stream_send_is_none(
+        self, settler, anchor, transport,
+    ):
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder,
+            output_decoder=_output_decoder,
+        )
+        assert executor._token_stream_send is None  # noqa: SLF001
+
+
+class TestStreamingNonStreamingCoexistence:
+    """Default-constructed executor's execute_chain still works
+    after Task 3 changes; streaming + non-streaming are independent
+    code paths."""
+
+    def test_execute_chain_unchanged_with_streaming_transport_wired(
+        self, settler, anchor, alice, bob, transport,
+        token_stream_transport, alice_sim, bob_sim,
+    ):
+        # Streaming transport configured but caller uses
+        # execute_chain (non-streaming). Should work as in pre-3.x.8.
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        result = executor.execute_chain(
+            request=_make_request("hello"), chain=chain,
+        )
+        assert result.output == "hello"
+        # Streaming transport NOT touched.
+        assert token_stream_transport.delivery_log == []
