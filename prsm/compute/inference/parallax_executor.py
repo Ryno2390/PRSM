@@ -41,7 +41,17 @@ import time
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Callable, Mapping, Optional, Protocol, Sequence, Tuple
+from typing import (
+    AsyncIterator,
+    Callable,
+    Iterator,
+    Mapping,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from prsm.compute.inference.executor import (
     InferenceExecutor,
@@ -105,6 +115,55 @@ class ChainExecutionResult:
     tee_attestation: bytes
     tee_type: TEEType
     epsilon_spent: float
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.8.1 — streaming events
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class InferenceTokenEvent:
+    """Per-token event yielded by ``execute_streaming``. Mirrors the
+    chain-RPC layer's ``StreamToken`` user-visible fields without
+    exposing internal wire-protocol types — the SSE endpoint encodes
+    these directly into ``event: token`` frames.
+
+    The terminal token of a stream has ``finish_reason`` non-None;
+    the executor's streaming generator follows it with exactly one
+    ``InferenceResult`` (success or failure)."""
+
+    sequence_index: int
+    text_delta: str
+    token_id: Optional[int] = None
+    finish_reason: Optional[str] = None
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Pre-execute gate result — shared between execute() and execute_streaming
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _GateOutcome:
+    """Result of ``_pre_execute_gates``. Either ``failure`` is
+    populated (a gate rejected the request) or ``chain``/``cost``/
+    ``allocation``/``tier_filtered``/``model_info`` are populated
+    (request is ready to dispatch).
+
+    Phase 3.x.8.1 Task 1 — extracted from ``execute()`` so both the
+    unary and streaming paths share identical pre-execute semantics
+    without code duplication. Behavior of ``execute()`` is unchanged.
+    """
+
+    failure: Optional[InferenceResult] = None
+    # On success: the chain to dispatch + the gate-locked cost +
+    # the allocation/tier-filtered context for the consensus check.
+    chain: Optional[GPUChain] = None
+    cost: Optional[Decimal] = None
+    allocation: Optional[AllocationResult] = None
+    tier_filtered: Optional[Sequence[ParallaxGPU]] = None
+    model_info: Optional[ModelInfo] = None
 
 
 class ChainExecutor(Protocol):
@@ -247,103 +306,20 @@ class ParallaxScheduledExecutor(InferenceExecutor):
 
     async def execute(self, request: InferenceRequest) -> InferenceResult:
         """End-to-end: filter → allocate → route → execute → sign."""
-        # 1. Catalog lookup.
-        if request.model_id not in self._catalog:
-            return InferenceResult.failure(
-                request.request_id,
-                f"Unknown model_id: {request.model_id}",
-            )
-        model_info = self._catalog[request.model_id]
+        # Phase 3.x.8.1 Task 1 refactor: pre-execute gates 1-6
+        # extracted into ``_pre_execute_gates`` so the streaming path
+        # (``execute_streaming``) reuses them verbatim. Behavior of
+        # this method is unchanged.
+        gate_outcome = await self._pre_execute_gates(request)
+        if gate_outcome.failure is not None:
+            return gate_outcome.failure
+        chain = gate_outcome.chain
+        cost = gate_outcome.cost
+        allocation = gate_outcome.allocation
+        tier_filtered = gate_outcome.tier_filtered
+        model_info = gate_outcome.model_info
 
-        # 2. Budget gate.
-        cost = await self.estimate_cost(request)
-        if request.budget_ftns < cost:
-            return InferenceResult.failure(
-                request.request_id,
-                f"Insufficient budget: {request.budget_ftns} FTNS < "
-                f"required {cost} FTNS",
-            )
-
-        # 3. Pool gathering + Adapter A (anchor verify).
-        try:
-            raw_pool = list(self._pool_provider())
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "ParallaxScheduledExecutor: gpu_pool_provider raised"
-            )
-            return InferenceResult.failure(
-                request.request_id,
-                f"GPU pool provider failure: {exc}",
-            )
-        if not raw_pool:
-            return InferenceResult.failure(
-                request.request_id, "GPU pool is empty"
-            )
-        anchor_filtered = self._trust.filter_pool(raw_pool)
-        if not anchor_filtered:
-            return InferenceResult.failure(
-                request.request_id,
-                "no GPU passed anchor verification",
-            )
-
-        # 4. Adapter B — tier gate.
-        try:
-            tier_filtered = self._trust.filter_for_request(
-                anchor_filtered, request.privacy_tier
-            )
-        except TierGateRejected as exc:
-            return InferenceResult.failure(
-                request.request_id, f"tier gate refusal: {exc}"
-            )
-
-        if not tier_filtered:
-            # NONE-tier with empty pool — treated the same as no GPUs.
-            return InferenceResult.failure(
-                request.request_id, "no eligible GPU after tier gate"
-            )
-
-        # 5. Phase-1 allocation (cache or recompute).
-        try:
-            allocation = self._get_or_build_allocation(
-                request.model_id, tier_filtered, model_info
-            )
-        except EmptyPoolError as exc:
-            return InferenceResult.failure(
-                request.request_id, f"empty pool: {exc}"
-            )
-        except InsufficientCapacityError as exc:
-            return InferenceResult.failure(
-                request.request_id, f"insufficient capacity: {exc}"
-            )
-        except AllocationError as exc:
-            return InferenceResult.failure(
-                request.request_id, f"allocation failure: {exc}"
-            )
-
-        # 6. Build router; route. Retry once on NoCoverageError after
-        # forced Phase-1 recompute (paper §3.4).
-        try:
-            chain = self._route_with_retry(
-                allocation=allocation,
-                model_info=model_info,
-                tier_filtered=tier_filtered,
-                request=request,
-                model_id=request.model_id,
-            )
-        except (NoCoverageError, EmptyAllocationError) as exc:
-            return InferenceResult.failure(
-                request.request_id, f"routing coverage failure: {exc}"
-            )
-        except RegionNotFoundError as exc:
-            return InferenceResult.failure(
-                request.request_id, f"region not found: {exc}"
-            )
-        except BudgetExceededError as exc:
-            return InferenceResult.failure(
-                request.request_id, f"latency budget exceeded: {exc}"
-            )
-
-        # 7. Execute primary chain.
+        # 7. Execute primary chain (unary).
         try:
             primary_outcome = self._chain_executor.execute_chain(
                 request=request, chain=chain
@@ -371,12 +347,245 @@ class ParallaxScheduledExecutor(InferenceExecutor):
             request=request,
             cost=cost,
             outcome=primary_outcome,
+            streamed=False,
         )
         return InferenceResult(
             request_id=request.request_id,
             success=True,
             output=primary_outcome.output,
             receipt=receipt,
+        )
+
+    async def execute_streaming(
+        self, request: InferenceRequest,
+    ) -> AsyncIterator[Union[InferenceTokenEvent, InferenceResult]]:
+        """Streaming counterpart of ``execute``. Yields per-token
+        ``InferenceTokenEvent``s as the chain's tail stage emits them,
+        then exactly one terminal ``InferenceResult`` (success or
+        failure).
+
+        Pre-execute gate semantics match ``execute()`` exactly — both
+        paths share ``_pre_execute_gates``. On gate failure: yields a
+        single ``InferenceResult.failure(...)`` and terminates with
+        NO token events emitted (caller observed: empty stream + sole
+        terminal failure event).
+
+        On success: yields N token events followed by exactly one
+        ``InferenceResult.success(receipt)`` whose receipt has
+        ``streamed_output=True`` (Phase 3.x.8 Task 4 downgrade-
+        resistant signing-payload commit).
+
+        Mid-stream chain-executor exceptions surface as a terminal
+        ``InferenceResult.failure(...)`` — non-fatal at the wire
+        layer so the SSE endpoint can encode the error event +
+        refund the escrow.
+        """
+        gate_outcome = await self._pre_execute_gates(request)
+        if gate_outcome.failure is not None:
+            yield gate_outcome.failure
+            return
+        chain = gate_outcome.chain
+        cost = gate_outcome.cost
+
+        # Drive the chain executor's streaming generator. Each
+        # ``StreamToken`` becomes an ``InferenceTokenEvent``; the
+        # terminal ``ChainExecutionResult`` drives the signed receipt.
+        # Lazy import to avoid a hard dep on chain_rpc at module
+        # import time — keeps the executor module loadable for tests
+        # that don't exercise the streaming surface.
+        from prsm.compute.chain_rpc.client import StreamToken
+
+        outcome: Optional[ChainExecutionResult] = None
+        try:
+            for item in self._chain_executor.execute_chain_streaming(
+                request=request, chain=chain,
+            ):
+                if isinstance(item, StreamToken):
+                    yield InferenceTokenEvent(
+                        sequence_index=item.sequence_index,
+                        text_delta=item.text_delta,
+                        token_id=item.token_id,
+                        finish_reason=item.finish_reason,
+                    )
+                elif isinstance(item, ChainExecutionResult):
+                    outcome = item
+                    break
+                else:
+                    yield InferenceResult.failure(
+                        request.request_id,
+                        f"chain executor yielded unexpected type "
+                        f"{type(item).__name__}; expected StreamToken "
+                        f"or ChainExecutionResult",
+                    )
+                    return
+        except AttributeError as exc:
+            # Wrapped chain_executor doesn't implement
+            # execute_chain_streaming — operator misconfig. Surface
+            # as a structured failure rather than crashing.
+            logger.exception(
+                "ParallaxScheduledExecutor.execute_streaming: "
+                "chain_executor has no execute_chain_streaming"
+            )
+            yield InferenceResult.failure(
+                request.request_id,
+                f"chain executor does not support streaming: {exc}",
+            )
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "ParallaxScheduledExecutor.execute_streaming: "
+                "chain_executor.execute_chain_streaming raised"
+            )
+            yield InferenceResult.failure(
+                request.request_id, f"chain execution failure: {exc}"
+            )
+            return
+
+        if outcome is None:
+            yield InferenceResult.failure(
+                request.request_id,
+                "chain executor exhausted without yielding a terminal "
+                "ChainExecutionResult",
+            )
+            return
+
+        # Build + sign receipt with streamed_output=True (Phase 3.x.8
+        # Task 4 downgrade-resistant flag). Skips consensus check on
+        # the streaming path: redundant execution would require
+        # running TWO streaming chains in parallel, doubling
+        # bandwidth/latency for a sampled request — Phase 3.x.10
+        # revisit.
+        receipt = self._build_signed_receipt(
+            request=request,
+            cost=cost,
+            outcome=outcome,
+            streamed=True,
+        )
+        yield InferenceResult(
+            request_id=request.request_id,
+            success=True,
+            output=outcome.output,
+            receipt=receipt,
+        )
+
+    async def _pre_execute_gates(
+        self, request: InferenceRequest,
+    ) -> _GateOutcome:
+        """Steps 1-6 of execute() / execute_streaming(): catalog
+        lookup, budget gate, pool gathering, anchor filter, tier
+        filter, allocation, routing. Returns a ``_GateOutcome``
+        whose ``failure`` is set on ANY gate rejection (caller yields
+        it as the sole terminal event); on success carries the
+        ``chain`` + ``cost`` + ``allocation`` + ``tier_filtered`` +
+        ``model_info`` for downstream dispatch + consensus check.
+
+        Phase 3.x.8.1 Task 1 — extracted from ``execute()`` so the
+        streaming path reuses identical pre-execute semantics. No
+        behavior change to ``execute()``.
+        """
+        # 1. Catalog lookup.
+        if request.model_id not in self._catalog:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id,
+                f"Unknown model_id: {request.model_id}",
+            ))
+        model_info = self._catalog[request.model_id]
+
+        # 2. Budget gate.
+        cost = await self.estimate_cost(request)
+        if request.budget_ftns < cost:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id,
+                f"Insufficient budget: {request.budget_ftns} FTNS < "
+                f"required {cost} FTNS",
+            ))
+
+        # 3. Pool gathering + Adapter A (anchor verify).
+        try:
+            raw_pool = list(self._pool_provider())
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "ParallaxScheduledExecutor: gpu_pool_provider raised"
+            )
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id,
+                f"GPU pool provider failure: {exc}",
+            ))
+        if not raw_pool:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id, "GPU pool is empty"
+            ))
+        anchor_filtered = self._trust.filter_pool(raw_pool)
+        if not anchor_filtered:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id,
+                "no GPU passed anchor verification",
+            ))
+
+        # 4. Adapter B — tier gate.
+        try:
+            tier_filtered = self._trust.filter_for_request(
+                anchor_filtered, request.privacy_tier
+            )
+        except TierGateRejected as exc:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id, f"tier gate refusal: {exc}"
+            ))
+
+        if not tier_filtered:
+            # NONE-tier with empty pool — treated the same as no GPUs.
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id, "no eligible GPU after tier gate"
+            ))
+
+        # 5. Phase-1 allocation (cache or recompute).
+        try:
+            allocation = self._get_or_build_allocation(
+                request.model_id, tier_filtered, model_info
+            )
+        except EmptyPoolError as exc:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id, f"empty pool: {exc}"
+            ))
+        except InsufficientCapacityError as exc:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id, f"insufficient capacity: {exc}"
+            ))
+        except AllocationError as exc:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id, f"allocation failure: {exc}"
+            ))
+
+        # 6. Build router; route. Retry once on NoCoverageError after
+        # forced Phase-1 recompute (paper §3.4).
+        try:
+            chain = self._route_with_retry(
+                allocation=allocation,
+                model_info=model_info,
+                tier_filtered=tier_filtered,
+                request=request,
+                model_id=request.model_id,
+            )
+        except (NoCoverageError, EmptyAllocationError) as exc:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id, f"routing coverage failure: {exc}"
+            ))
+        except RegionNotFoundError as exc:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id, f"region not found: {exc}"
+            ))
+        except BudgetExceededError as exc:
+            return _GateOutcome(failure=InferenceResult.failure(
+                request.request_id, f"latency budget exceeded: {exc}"
+            ))
+
+        # All gates pass — return the dispatch context.
+        return _GateOutcome(
+            chain=chain,
+            cost=cost,
+            allocation=allocation,
+            tier_filtered=tier_filtered,
+            model_info=model_info,
         )
 
     # ── Allocation cache ──────────────────────────────────────────────
@@ -587,11 +796,27 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         request: InferenceRequest,
         cost: Decimal,
         outcome: ChainExecutionResult,
+        streamed: bool = False,
     ) -> InferenceReceipt:
-        """Assemble + Ed25519-sign the receipt under this node's identity."""
+        """Assemble + Ed25519-sign the receipt under this node's identity.
+
+        Phase 3.x.8.1 Task 1 — ``streamed`` parameter closes the
+        Phase 3.x.8 round-1 L3 follow-up: unary + streaming receipt-
+        build paths share this single helper. The flag is part of
+        the signed payload (Phase 3.x.8 Task 4 conditional encoding),
+        so a relay can't downgrade a streamed receipt to unary or
+        vice versa.
+
+        ``job_id`` prefix differs slightly so audit logs can filter
+        streamed-vs-unary jobs without parsing the full receipt:
+        ``parallax-job-<hex>`` for unary, ``parallax-stream-job-<hex>``
+        for streamed. Both prefixes are non-load-bearing — the flag
+        in the signed payload is authoritative.
+        """
         output_hash = hashlib.sha256(outcome.output.encode("utf-8")).digest()
+        prefix = "parallax-stream-job" if streamed else "parallax-job"
         unsigned = InferenceReceipt(
-            job_id=f"parallax-job-{uuid.uuid4().hex[:12]}",
+            job_id=f"{prefix}-{uuid.uuid4().hex[:12]}",
             request_id=request.request_id,
             model_id=request.model_id,
             content_tier=request.content_tier,
@@ -602,5 +827,6 @@ class ParallaxScheduledExecutor(InferenceExecutor):
             output_hash=output_hash,
             duration_seconds=outcome.duration_seconds,
             cost_ftns=cost,
+            streamed_output=streamed,
         )
         return sign_receipt(unsigned, self._identity)

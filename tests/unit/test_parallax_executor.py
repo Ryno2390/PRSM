@@ -689,3 +689,244 @@ class TestConsensusHookIntegration:
         assert result.success is True
         assert result.output == "primary-good"
         assert submitter.records == []
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.8.1 Task 1 — execute_streaming
+# ──────────────────────────────────────────────────────────────────────────
+
+
+from prsm.compute.chain_rpc.client import StreamToken
+from prsm.compute.inference.parallax_executor import InferenceTokenEvent
+from prsm.compute.inference.receipt import verify_receipt
+
+
+class StreamingChainExecutor:
+    """ChainExecutor with both execute_chain (unary) AND
+    execute_chain_streaming (Phase 3.x.8). Produces a deterministic
+    stream of StreamTokens followed by ChainExecutionResult."""
+
+    def __init__(
+        self,
+        *,
+        deltas: Optional[List[str]] = None,
+        finish_reason: str = "stop",
+        epsilon: float = 0.0,
+        tee_type: TEEType = TEEType.SOFTWARE,
+        tee_attestation: bytes = b"\x01" * 32,
+        raise_on_streaming: bool = False,
+        omit_terminal: bool = False,
+        no_streaming_method: bool = False,
+    ):
+        self.deltas = deltas if deltas is not None else ["hello", " ", "world"]
+        self.finish_reason = finish_reason
+        self.epsilon = epsilon
+        self.tee_type = tee_type
+        self.tee_attestation = tee_attestation
+        self.raise_on_streaming = raise_on_streaming
+        self.omit_terminal = omit_terminal
+        self.no_streaming_method = no_streaming_method
+        self.unary_calls: List[GPUChain] = []
+        self.streaming_calls: List[GPUChain] = []
+
+    def execute_chain(
+        self, *, request: InferenceRequest, chain: GPUChain,
+    ) -> ChainExecutionResult:
+        self.unary_calls.append(chain)
+        return ChainExecutionResult(
+            output="".join(self.deltas),
+            duration_seconds=0.05,
+            tee_attestation=self.tee_attestation,
+            tee_type=self.tee_type,
+            epsilon_spent=self.epsilon,
+        )
+
+    # When no_streaming_method=True, this attribute is deleted at
+    # construction so AttributeError fires inside execute_streaming —
+    # simulates an operator who wired a non-streaming chain executor.
+    def execute_chain_streaming(self, *, request, chain):
+        self.streaming_calls.append(chain)
+        if self.raise_on_streaming:
+            raise RuntimeError("streaming chain crashed")
+        last = len(self.deltas) - 1
+        for i, delta in enumerate(self.deltas):
+            yield StreamToken(
+                sequence_index=i,
+                text_delta=delta,
+                finish_reason=self.finish_reason if i == last else None,
+            )
+        if self.omit_terminal:
+            return
+        yield ChainExecutionResult(
+            output="".join(self.deltas),
+            duration_seconds=0.05,
+            tee_attestation=self.tee_attestation,
+            tee_type=self.tee_type,
+            epsilon_spent=self.epsilon,
+        )
+
+
+def _drain_streaming(coro_or_async_iter):
+    """Helper: drain an async generator into a list."""
+    async def _drain():
+        items = []
+        async for item in coro_or_async_iter:
+            items.append(item)
+        return items
+    return asyncio.new_event_loop().run_until_complete(_drain())
+
+
+class TestExecuteStreamingHappyPath:
+    def test_yields_token_events_then_terminal_success(self):
+        chain_exec = StreamingChainExecutor(
+            deltas=["hello", " ", "world"],
+        )
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")], chain_executor=chain_exec,
+        )
+        items = _drain_streaming(executor.execute_streaming(_request()))
+        # All non-terminal items are InferenceTokenEvents; LAST is the
+        # InferenceResult.
+        token_events = [x for x in items if isinstance(x, InferenceTokenEvent)]
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1
+        assert finals[0].success is True
+        assert len(token_events) == 3
+        assert token_events[0].text_delta == "hello"
+        assert token_events[1].text_delta == " "
+        assert token_events[2].text_delta == "world"
+        assert token_events[2].finish_reason == "stop"
+        # Joined deltas equal the final output.
+        joined = "".join(t.text_delta for t in token_events)
+        assert joined == finals[0].output == "hello world"
+
+    def test_streamed_receipt_marks_streamed_output_true(self):
+        chain_exec = StreamingChainExecutor(deltas=["x"])
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")], chain_executor=chain_exec,
+        )
+        items = _drain_streaming(executor.execute_streaming(_request()))
+        result = items[-1]
+        assert result.receipt.streamed_output is True
+        # Receipt verifies under the executor's identity (accessed
+        # directly off the instance — tests in this module follow
+        # the same pattern for other private fields).
+        assert verify_receipt(
+            result.receipt, identity=executor._identity,  # noqa: SLF001
+        )
+
+    def test_streamed_job_id_uses_stream_prefix(self):
+        chain_exec = StreamingChainExecutor(deltas=["y"])
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")], chain_executor=chain_exec,
+        )
+        items = _drain_streaming(executor.execute_streaming(_request()))
+        result = items[-1]
+        assert result.receipt.job_id.startswith("parallax-stream-job-")
+
+    def test_unary_path_unchanged_uses_legacy_job_prefix(self):
+        # Refactor invariant: execute() still emits "parallax-job-"
+        # prefix (no "stream"). Audit-log filtering relies on this.
+        chain_exec = StreamingChainExecutor(deltas=["z"])
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")], chain_executor=chain_exec,
+        )
+        result = _run(executor.execute(_request()))
+        assert result.success is True
+        assert result.receipt.job_id.startswith("parallax-job-")
+        assert not result.receipt.job_id.startswith("parallax-stream-job-")
+        assert result.receipt.streamed_output is False
+
+
+class TestExecuteStreamingPreExecuteFailures:
+    """Pre-execute gate failures yield a SOLE InferenceResult.failure
+    with NO token events emitted."""
+
+    def test_unknown_model_yields_sole_failure(self):
+        chain_exec = StreamingChainExecutor()
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a")], chain_executor=chain_exec,
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(model_id="unknown-model"),
+        ))
+        assert len(items) == 1
+        assert isinstance(items[0], InferenceResult)
+        assert items[0].success is False
+        assert "Unknown model_id" in items[0].error
+        # Streaming chain executor was NEVER invoked.
+        assert chain_exec.streaming_calls == []
+
+    def test_insufficient_budget_yields_sole_failure(self):
+        chain_exec = StreamingChainExecutor()
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a")], chain_executor=chain_exec,
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(budget=Decimal("0.0001")),
+        ))
+        assert len(items) == 1
+        assert items[0].success is False
+        assert "Insufficient budget" in items[0].error
+        assert chain_exec.streaming_calls == []
+
+    def test_empty_pool_yields_sole_failure(self):
+        chain_exec = StreamingChainExecutor()
+        executor, _, _ = _make_executor(
+            pool=[], chain_executor=chain_exec,
+        )
+        items = _drain_streaming(executor.execute_streaming(_request()))
+        assert len(items) == 1
+        assert items[0].success is False
+        # "GPU pool is empty" or routing failure depending on the
+        # gate that fires first.
+        assert chain_exec.streaming_calls == []
+
+
+class TestExecuteStreamingMidStreamErrors:
+    """Mid-stream chain-executor failures surface as a terminal
+    InferenceResult.failure — non-fatal at the wire layer."""
+
+    def test_streaming_runner_exception_surfaces_as_terminal_failure(self):
+        chain_exec = StreamingChainExecutor(raise_on_streaming=True)
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")], chain_executor=chain_exec,
+        )
+        items = _drain_streaming(executor.execute_streaming(_request()))
+        # Final yield is failure; preceding tokens depend on WHERE
+        # in the iteration the exception fired.
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1
+        assert finals[0].success is False
+        assert "chain execution failure" in finals[0].error
+
+    def test_chain_executor_without_streaming_method_yields_failure(self):
+        # Operator wired a unary-only chain executor to the streaming
+        # path. Surface as a structured failure.
+        class UnaryOnly:
+            def execute_chain(self, **kwargs):
+                raise NotImplementedError
+
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")], chain_executor=UnaryOnly(),
+        )
+        items = _drain_streaming(executor.execute_streaming(_request()))
+        assert len(items) == 1
+        assert items[0].success is False
+        assert (
+            "chain executor does not support streaming" in items[0].error
+        )
+
+    def test_omitted_terminal_chain_result_yields_failure(self):
+        # Chain executor's streaming generator exits without yielding
+        # a terminal ChainExecutionResult.
+        chain_exec = StreamingChainExecutor(omit_terminal=True)
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")], chain_executor=chain_exec,
+        )
+        items = _drain_streaming(executor.execute_streaming(_request()))
+        # Tokens may be emitted; final yield is failure.
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1
+        assert finals[0].success is False
+        assert "without yielding a terminal" in finals[0].error
