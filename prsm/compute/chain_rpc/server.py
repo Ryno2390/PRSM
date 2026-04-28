@@ -38,6 +38,11 @@ from typing import Any, Callable, Optional, Protocol, Tuple
 
 import numpy as np
 
+from prsm.compute.chain_rpc.activation_codec import (
+    ActivationCodecError,
+    decode_activation,
+    encode_activation,
+)
 from prsm.compute.chain_rpc.protocol import (
     ChainRpcMalformedError,
     ChainRpcProtocolError,
@@ -113,42 +118,6 @@ class LayerSliceRunner(Protocol):
         is_final_stage: bool,
     ) -> LayerSliceResult:
         ...
-
-
-# ──────────────────────────────────────────────────────────────────────────
-# Activation codec helpers (inline; Task 3 will extend into a module)
-# ──────────────────────────────────────────────────────────────────────────
-
-
-def _decode_activation(
-    blob: bytes,
-    shape: Tuple[int, ...],
-    dtype_str: str,
-) -> np.ndarray:
-    """Reconstruct a numpy array from raw bytes + shape + dtype.
-
-    Raises ``ValueError`` on unsupported dtype or shape/blob mismatch.
-    Server maps these to ``StageError(ACTIVATION_INVALID)``.
-    """
-    try:
-        dtype = np.dtype(dtype_str)
-    except TypeError as exc:
-        raise ValueError(f"unsupported dtype {dtype_str!r}: {exc}") from exc
-    expected_size = int(np.prod(shape)) * dtype.itemsize
-    if expected_size != len(blob):
-        raise ValueError(
-            f"activation blob size {len(blob)} does not match "
-            f"shape {shape} × dtype {dtype_str} (expected {expected_size} bytes)"
-        )
-    return np.frombuffer(blob, dtype=dtype).reshape(shape).copy()
-
-
-def _encode_activation(arr: np.ndarray) -> Tuple[bytes, Tuple[int, ...], str]:
-    """Inverse of ``_decode_activation``. Forces C-contiguous layout
-    so the output bytes are deterministic regardless of upstream
-    striding."""
-    contig = np.ascontiguousarray(arr)
-    return contig.tobytes(), tuple(int(d) for d in contig.shape), str(contig.dtype)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -421,12 +390,12 @@ class LayerStageServer:
 
         # Step 7: decode → run → encode.
         try:
-            activation = _decode_activation(
+            activation = decode_activation(
                 request.activation_blob,
                 request.activation_shape,
                 request.activation_dtype,
             )
-        except ValueError as exc:
+        except ActivationCodecError as exc:
             return self._error(
                 request.request_id,
                 StageErrorCode.ACTIVATION_INVALID,
@@ -460,8 +429,14 @@ class LayerStageServer:
             )
 
         try:
-            output_blob, output_shape, output_dtype = _encode_activation(
+            output_blob, output_shape, output_dtype = encode_activation(
                 result.output
+            )
+        except ActivationCodecError as exc:
+            return self._error(
+                request.request_id,
+                StageErrorCode.ACTIVATION_INVALID,
+                f"output encode failure: {exc}",
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(

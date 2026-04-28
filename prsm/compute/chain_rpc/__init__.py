@@ -9,6 +9,19 @@ Task 1 ships the wire protocol only — server and client land in Tasks
 __init__ currently re-exports the protocol-layer types.
 """
 
+from prsm.compute.chain_rpc.activation_codec import (
+    ALLOWED_DTYPES,
+    CHUNK_THRESHOLD_BYTES,
+    DEFAULT_CHUNK_BYTES_ACTIVATION,
+    ActivationCodecError,
+    ChunkedActivation,
+    chunk_activation,
+    decode_activation,
+    encode_activation,
+    encode_for_wire,
+    reassemble_chunked,
+    should_chunk,
+)
 from prsm.compute.chain_rpc.protocol import (
     CHAIN_RPC_PROTOCOL_VERSION,
     MAX_HANDSHAKE_BYTES,
@@ -25,8 +38,14 @@ from prsm.compute.chain_rpc.protocol import (
     encode_message,
     parse_message,
 )
+from prsm.compute.chain_rpc.server import (
+    LayerSliceResult,
+    LayerSliceRunner,
+    LayerStageServer,
+)
 
 __all__ = [
+    # Protocol
     "CHAIN_RPC_PROTOCOL_VERSION",
     "MAX_HANDSHAKE_BYTES",
     "ChainRpcMalformedError",
@@ -41,4 +60,20 @@ __all__ = [
     "StageErrorCode",
     "encode_message",
     "parse_message",
+    # Activation codec
+    "ALLOWED_DTYPES",
+    "CHUNK_THRESHOLD_BYTES",
+    "DEFAULT_CHUNK_BYTES_ACTIVATION",
+    "ActivationCodecError",
+    "ChunkedActivation",
+    "chunk_activation",
+    "decode_activation",
+    "encode_activation",
+    "encode_for_wire",
+    "reassemble_chunked",
+    "should_chunk",
+    # Server
+    "LayerSliceResult",
+    "LayerSliceRunner",
+    "LayerStageServer",
 ]
