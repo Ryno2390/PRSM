@@ -139,6 +139,14 @@ class InferenceReceipt:
     cost_ftns: Decimal
     settler_signature: bytes = b""
     settler_node_id: str = ""
+    # Phase 3.x.8: True iff the inference output was streamed
+    # token-by-token (``RpcChainExecutor.execute_chain_streaming``)
+    # rather than returned in one shot. The flag is part of the
+    # signed payload (downgrade-resistant — a relay can't claim a
+    # streamed receipt was non-streamed or vice versa). Default
+    # False preserves byte-equivalence with pre-3.x.8 receipts so
+    # existing callers + verifiers keep working unchanged.
+    streamed_output: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -155,6 +163,7 @@ class InferenceReceipt:
             "cost_ftns": str(self.cost_ftns),
             "settler_signature": self.settler_signature.hex(),
             "settler_node_id": self.settler_node_id,
+            "streamed_output": self.streamed_output,
         }
 
     @classmethod
@@ -174,6 +183,22 @@ class InferenceReceipt:
             d["settler_signature"] = bytes.fromhex(d["settler_signature"])
         if "cost_ftns" in d and not isinstance(d["cost_ftns"], Decimal):
             d["cost_ftns"] = Decimal(str(d["cost_ftns"]))
+        # Phase 3.x.8 forward-compat: pre-3.x.8 serialized receipts
+        # (no ``streamed_output`` key) parse cleanly with the default
+        # False. A pre-3.x.8 verifier reading a 3.x.8 receipt still
+        # works as long as ``streamed_output`` is False (the signed
+        # bytes are byte-identical via the conditional-encoding rule
+        # in ``signing_payload``).
+        if "streamed_output" in d and not isinstance(
+            d["streamed_output"], bool
+        ):
+            # Hostile peer ships {"streamed_output": 1} — reject as
+            # malformed rather than silently coerce. Mirrors the M1
+            # bool-rejection invariant on the chain-RPC wire layer.
+            raise TypeError(
+                f"streamed_output must be bool, got "
+                f"{type(d['streamed_output']).__name__}"
+            )
         accepted = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in d.items() if k in accepted})
 
@@ -183,7 +208,15 @@ class InferenceReceipt:
         Excludes ``settler_signature`` itself (would be circular). Field order
         is fixed; do not reorder without bumping a receipt-schema version.
 
-        Implemented in this scaffold; consumed by Task 2 (Ed25519 signing).
+        Phase 3.x.8 conditional encoding: when ``streamed_output`` is
+        True, an extra trailing line ``streamed_output:true`` is
+        appended. When False (the default), the field is OMITTED
+        from the canonical bytes so a 3.x.8 receipt with
+        ``streamed_output=False`` produces byte-identical signing
+        bytes to a pre-3.x.8 receipt — preserving back-compat for
+        callers + verifiers that don't know about the field.
+        Tampering the flag (False↔True) flips the bytes →
+        signature fails. Downgrade-resistant.
         """
         parts = [
             self.job_id,
@@ -199,6 +232,8 @@ class InferenceReceipt:
             str(self.cost_ftns),
             self.settler_node_id,
         ]
+        if self.streamed_output:
+            parts.append("streamed_output:true")
         return "\n".join(parts).encode("utf-8")
 
 

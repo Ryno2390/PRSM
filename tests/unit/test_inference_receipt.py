@@ -371,3 +371,183 @@ class TestTask2Acceptance:
             tampered = dataclasses.replace(signed, **{field_name: new_value})
             assert not verify_receipt(tampered, identity=identity), \
                 f"Tampering with '{field_name}' was not caught"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.8 — streamed_output flag
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestStreamedOutputFlag:
+    """The Phase 3.x.8 ``streamed_output: bool`` field on
+    ``InferenceReceipt``. Conditional encoding preserves byte-
+    equivalence with pre-3.x.8 receipts so the existing back-compat
+    invariant for non-streamed receipts still holds."""
+
+    def test_default_streamed_output_is_false(self, unsigned_receipt):
+        # Pre-3.x.8 callers don't pass streamed_output; default False
+        # preserves their behavior.
+        assert unsigned_receipt.streamed_output is False
+
+    def test_signing_payload_byte_identical_when_flag_false(
+        self, unsigned_receipt,
+    ):
+        """Conditional encoding: streamed_output=False produces
+        signing bytes identical to the pre-3.x.8 layout. A pre-3.x.8
+        verifier reading a 3.x.8 non-streamed receipt MUST still
+        validate signatures correctly."""
+        # The pre-3.x.8 layout (from the existing signing_payload
+        # implementation) is the parts list joined with newlines.
+        # Reconstruct what those bytes look like and assert.
+        expected_parts = [
+            unsigned_receipt.job_id,
+            unsigned_receipt.request_id,
+            unsigned_receipt.model_id,
+            unsigned_receipt.content_tier.value,
+            unsigned_receipt.privacy_tier.value,
+            f"{unsigned_receipt.epsilon_spent:.10f}",
+            unsigned_receipt.tee_type.value,
+            unsigned_receipt.tee_attestation.hex(),
+            unsigned_receipt.output_hash.hex(),
+            f"{unsigned_receipt.duration_seconds:.6f}",
+            str(unsigned_receipt.cost_ftns),
+            unsigned_receipt.settler_node_id,
+        ]
+        expected_bytes = "\n".join(expected_parts).encode("utf-8")
+        assert unsigned_receipt.signing_payload() == expected_bytes
+        # And the marker text MUST NOT appear anywhere.
+        assert b"streamed_output" not in unsigned_receipt.signing_payload()
+
+    def test_signing_payload_includes_marker_when_flag_true(
+        self, unsigned_receipt,
+    ):
+        streamed = dataclasses.replace(
+            unsigned_receipt, streamed_output=True,
+        )
+        payload = streamed.signing_payload()
+        assert b"streamed_output:true" in payload
+        # Trailing line specifically — check it's at the END of the
+        # canonical bytes (after settler_node_id).
+        assert payload.endswith(b"streamed_output:true")
+
+    def test_signing_payload_differs_when_flag_flipped(
+        self, unsigned_receipt,
+    ):
+        non_streamed = unsigned_receipt
+        streamed = dataclasses.replace(
+            unsigned_receipt, streamed_output=True,
+        )
+        assert non_streamed.signing_payload() != streamed.signing_payload()
+
+    def test_round_trip_preserves_streamed_output_true(
+        self, unsigned_receipt, identity,
+    ):
+        streamed = dataclasses.replace(
+            unsigned_receipt, streamed_output=True,
+        )
+        signed = sign_receipt(streamed, identity)
+        as_dict = signed.to_dict()
+        assert as_dict["streamed_output"] is True
+        recovered = InferenceReceipt.from_dict(as_dict)
+        assert recovered.streamed_output is True
+        assert verify_receipt(recovered, identity=identity)
+
+    def test_round_trip_preserves_streamed_output_false(
+        self, unsigned_receipt, identity,
+    ):
+        signed = sign_receipt(unsigned_receipt, identity)
+        as_dict = signed.to_dict()
+        assert as_dict["streamed_output"] is False
+        recovered = InferenceReceipt.from_dict(as_dict)
+        assert recovered.streamed_output is False
+        assert verify_receipt(recovered, identity=identity)
+
+    def test_streamed_signed_receipt_verifies(
+        self, unsigned_receipt, identity,
+    ):
+        streamed = dataclasses.replace(
+            unsigned_receipt, streamed_output=True,
+        )
+        signed = sign_receipt(streamed, identity)
+        assert verify_receipt(signed, identity=identity) is True
+
+    def test_tampering_streamed_output_invalidates_signature(
+        self, unsigned_receipt, identity,
+    ):
+        """Downgrade-resistance: a relay that flips streamed_output
+        from True→False (or False→True) on a SIGNED receipt MUST be
+        caught by signature verification. The flag is part of the
+        signing payload via the conditional-marker rule."""
+        # Sign a streamed receipt.
+        streamed = dataclasses.replace(
+            unsigned_receipt, streamed_output=True,
+        )
+        signed_streamed = sign_receipt(streamed, identity)
+        assert verify_receipt(signed_streamed, identity=identity) is True
+
+        # Relay flips the flag (downgrade attempt).
+        downgraded = dataclasses.replace(
+            signed_streamed, streamed_output=False,
+        )
+        assert verify_receipt(downgraded, identity=identity) is False
+
+        # Inverse: a non-streamed receipt's flag flipped to True.
+        signed_nonstreamed = sign_receipt(unsigned_receipt, identity)
+        assert verify_receipt(signed_nonstreamed, identity=identity) is True
+        upgraded = dataclasses.replace(
+            signed_nonstreamed, streamed_output=True,
+        )
+        assert verify_receipt(upgraded, identity=identity) is False
+
+    def test_from_dict_defaults_to_false_when_key_absent(
+        self, identity,
+    ):
+        """Forward-compat: a pre-3.x.8 serialized receipt (no
+        ``streamed_output`` key) parses cleanly on a 3.x.8 reader
+        and signature still verifies (the signed bytes are byte-
+        identical via the omit-when-False rule)."""
+        # Build a pre-3.x.8 receipt as a plain dict (simulating an
+        # older serialization that doesn't include the new key).
+        receipt = InferenceReceipt(
+            job_id="legacy-job",
+            request_id="legacy-req",
+            model_id="legacy-model",
+            content_tier=ContentTier.A,
+            privacy_tier=PrivacyLevel.STANDARD,
+            epsilon_spent=8.0,
+            tee_type=TEEType.SOFTWARE,
+            tee_attestation=b"\x01\x02",
+            output_hash=b"\xaa" * 32,
+            duration_seconds=1.0,
+            cost_ftns=Decimal("0.5"),
+        )
+        signed = sign_receipt(receipt, identity)
+        legacy_dict = signed.to_dict()
+        # Strip the new field (simulate a pre-3.x.8 wire payload).
+        legacy_dict.pop("streamed_output")
+        recovered = InferenceReceipt.from_dict(legacy_dict)
+        assert recovered.streamed_output is False
+        assert verify_receipt(recovered, identity=identity) is True
+
+    def test_from_dict_rejects_int_streamed_output(self):
+        """M1-style coercion guard: a hostile peer ships
+        ``{"streamed_output": 1}`` — must reject as malformed
+        rather than silently coerce to True."""
+        bad = {
+            "job_id": "j",
+            "request_id": "r",
+            "model_id": "m",
+            "content_tier": ContentTier.A.value,
+            "privacy_tier": PrivacyLevel.STANDARD.value,
+            "epsilon_spent": 0.0,
+            "tee_type": TEEType.SOFTWARE.value,
+            "tee_attestation": "00",
+            "output_hash": "aa" * 32,
+            "duration_seconds": 1.0,
+            "cost_ftns": "0.5",
+            "settler_signature": "",
+            "settler_node_id": "",
+            "streamed_output": 1,  # int not bool
+        }
+        with pytest.raises(TypeError, match="streamed_output"):
+            InferenceReceipt.from_dict(bad)
