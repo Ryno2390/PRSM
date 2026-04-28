@@ -73,9 +73,14 @@ from prsm.compute.chain_rpc.protocol import (
     parse_message,
 )
 from prsm.compute.inference.models import InferenceRequest
+from prsm.compute.inference.multi_stage_attestation import (
+    StageAttestation,
+    encode_multi_stage_attestation,
+    worst_case_tee_type,
+)
 from prsm.compute.inference.parallax_executor import ChainExecutionResult
 from prsm.compute.parallax_scheduling.prsm_request_router import GPUChain
-from prsm.compute.tee.models import HARDWARE_TEE_TYPES, TEEType
+from prsm.compute.tee.models import TEEType
 from prsm.node.identity import NodeIdentity
 
 
@@ -361,12 +366,25 @@ class RpcChainExecutor:
             ) from exc
 
         # Step 5: aggregate per-stage signals into the Phase 3.x.6
-        # ChainExecutionResult Protocol shape.
+        # ChainExecutionResult Protocol shape. Per-stage TEE
+        # attestations ride inside the tee_attestation field via the
+        # Phase 3.x.7 Task 5 multi-stage envelope; the receipt
+        # signature commits to all per-stage attestations because
+        # signing_payload() hex-encodes the full bytes.
+        stage_attestations = [
+            StageAttestation(
+                stage_index=outcome.stage_index,
+                stage_node_id=outcome.stage_node_id,
+                tee_type=outcome.tee_type,
+                attestation=outcome.tee_attestation,
+            )
+            for outcome in outcomes
+        ]
         return ChainExecutionResult(
             output=output_text,
             duration_seconds=sum(s.duration_seconds for s in outcomes),
-            tee_attestation=_aggregate_attestations(outcomes),
-            tee_type=_worst_case_tee_type(outcomes),
+            tee_attestation=encode_multi_stage_attestation(stage_attestations),
+            tee_type=worst_case_tee_type(stage_attestations),
             epsilon_spent=sum(s.epsilon_spent for s in outcomes),
         )
 
@@ -529,52 +547,7 @@ class RpcChainExecutor:
         return response
 
 
-# ──────────────────────────────────────────────────────────────────────────
-# Aggregation helpers
-# ──────────────────────────────────────────────────────────────────────────
-
-
-# Worst-case TEE ordering: lower index = WORSE confidentiality. The
-# v1 receipt records the worst type across the chain. Hardware types
-# tied at "good"; the only meaningful distinction is software-or-not
-# vs hardware-or-not.
-_TEE_TYPE_RANK = {
-    TEEType.SOFTWARE: 0,
-    # All hardware TEE types tie at rank 1. ``HARDWARE_TEE_TYPES`` is
-    # the canonical list; iteration order doesn't matter because they
-    # all have the same rank.
-}
-
-
-def _worst_case_tee_type(stages: List[StageOutcome]) -> TEEType:
-    """Pick the worst TEE type across the chain. Software dominates
-    hardware (any software stage drags the whole chain down to
-    SOFTWARE). Among hardware types, defaults to the first stage's
-    type since they're all equally trusted at this granularity."""
-    if not stages:
-        return TEEType.SOFTWARE
-    worst = stages[0].tee_type
-    worst_rank = _TEE_TYPE_RANK.get(worst, 1)
-    for outcome in stages[1:]:
-        rank = _TEE_TYPE_RANK.get(outcome.tee_type, 1)
-        if rank < worst_rank:
-            worst = outcome.tee_type
-            worst_rank = rank
-    return worst
-
-
-def _aggregate_attestations(stages: List[StageOutcome]) -> bytes:
-    """v1 placeholder: concatenate per-stage attestations with a
-    length-prefixed framing so Task 5's per-stage list serialization
-    can decode them deterministically. Task 5 will swap this for the
-    JSON-encoded list on the ``InferenceReceipt`` side; this scheme
-    is internal to ``ChainExecutionResult.tee_attestation`` and
-    callers SHOULD NOT depend on the exact byte layout."""
-    if not stages:
-        return b""
-    parts: List[bytes] = []
-    for outcome in stages:
-        attest = bytes(outcome.tee_attestation)
-        parts.append(len(attest).to_bytes(4, "big"))
-        parts.append(attest)
-    return b"".join(parts)
+# Aggregation helpers (worst-case TEE selection + envelope encoding)
+# live in prsm.compute.inference.multi_stage_attestation per Phase 3.x.7
+# Task 5 — kept module-level so the receipt-side verification helper
+# can reuse the same encoding without depending on this client module.

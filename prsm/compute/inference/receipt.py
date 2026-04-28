@@ -113,3 +113,34 @@ def is_signed(receipt: InferenceReceipt) -> bool:
     cryptographically.
     """
     return bool(receipt.settler_signature) and bool(receipt.settler_node_id)
+
+
+def verify_stage_attestations(receipt: InferenceReceipt):
+    """Inspect the multi-stage attestation envelope on a receipt.
+
+    Convenience wrapper around
+    ``prsm.compute.inference.multi_stage_attestation.verify_stage_attestations``
+    that operates on an ``InferenceReceipt`` directly. Returns
+    ``(all_ok, results)``:
+
+      - Single-stage receipts (Phase 2 Ring 8 + 3.x.1 callers, no
+        multi-stage envelope present) return ``(True, [single
+        placeholder result])`` so callers have a uniform return shape
+        regardless of whether the receipt came from single-host or
+        cross-host inference.
+
+      - Multi-stage receipts (Phase 3.x.7 ``RpcChainExecutor`` output)
+        return one ``StageVerificationResult`` per stage.
+
+    v1 stops at structural validation. v2 will wire platform-vendor
+    attestation services (Intel ASP for SGX/TDX, AMD KDS for SEV)
+    behind the same interface — clients will see ``vendor_verified``
+    flip from ``None`` to ``True``/``False`` per stage at that point.
+
+    Lazy import: keep ``receipt.py`` free of multi-stage imports for
+    callers that don't need it.
+    """
+    from prsm.compute.inference.multi_stage_attestation import (
+        verify_stage_attestations as _verify_blob,
+    )
+    return _verify_blob(receipt.tee_attestation)

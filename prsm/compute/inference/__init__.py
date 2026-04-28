@@ -31,10 +31,23 @@ from prsm.compute.inference.executor import (
     UnsupportedModelError,
     default_mock_executor,
 )
+from prsm.compute.inference.multi_stage_attestation import (
+    MULTI_STAGE_ATTESTATION_VERSION,
+    MULTI_STAGE_MAGIC_PREFIX,
+    MultiStageAttestationError,
+    MultiStageMalformedError,
+    StageAttestation,
+    StageVerificationResult,
+    decode_multi_stage_attestation,
+    encode_multi_stage_attestation,
+    is_multi_stage_attestation,
+    worst_case_tee_type,
+)
 from prsm.compute.inference.receipt import (
     is_signed,
     sign_receipt,
     verify_receipt,
+    verify_stage_attestations,
 )
 from prsm.compute.inference.content_tier_gate import (
     ContentTierGateError,
@@ -75,6 +88,18 @@ __all__ = [
     "sign_receipt",
     "verify_receipt",
     "is_signed",
+    # Multi-stage TEE attestation (Phase 3.x.7 Task 5)
+    "MULTI_STAGE_ATTESTATION_VERSION",
+    "MULTI_STAGE_MAGIC_PREFIX",
+    "MultiStageAttestationError",
+    "MultiStageMalformedError",
+    "StageAttestation",
+    "StageVerificationResult",
+    "decode_multi_stage_attestation",
+    "encode_multi_stage_attestation",
+    "is_multi_stage_attestation",
+    "verify_stage_attestations",
+    "worst_case_tee_type",
     # Content tier gate (Task 3)
     "TEEContext",
     "TierBMaterial",
