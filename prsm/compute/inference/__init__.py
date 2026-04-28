@@ -67,6 +67,15 @@ from prsm.compute.inference.parallax_executor import (
     GpuPoolProvider,
     ParallaxScheduledExecutor,
 )
+from prsm.compute.inference.streaming_runner import (
+    StreamingChunk,
+    StreamingLayerRunner,
+    SyntheticStreamingRunner,
+)
+from prsm.compute.inference.autoregressive_runner import (
+    AutoregressiveStreamingRunner,
+    SamplingDefaults,
+)
 
 # Phase 3.x.7 — cross-host ChainExecutor implementation is re-exported
 # at the inference package surface so production callers get one-call
@@ -152,6 +161,13 @@ __all__ = [
     "open_tier_a",
     "open_tier_b",
     "open_tier_c",
+    # Phase 3.x.8 — Streaming token output Protocol + synthetic v1
+    "StreamingChunk",
+    "StreamingLayerRunner",
+    "SyntheticStreamingRunner",
+    # Phase 3.x.10 — Real autoregressive streaming runner
+    "AutoregressiveStreamingRunner",
+    "SamplingDefaults",
     # Exceptions
     "InferenceExecutorError",
     "InsufficientBudgetError",

@@ -795,6 +795,159 @@ stack integration tests matter.
 
 ---
 
+## 7.6 Real Autoregressive Streaming Runner (Phase 3.x.10)
+
+Phase 3.x.10 closes the SyntheticStreamingRunner placeholder
+caveat carried by every streaming phase since 3.x.8. The new
+``AutoregressiveStreamingRunner`` drives a real
+``transformers.AutoModelForCausalLM.generate(streamer=...)``,
+emits real per-token chunks, and is a drop-in for the synthetic
+predecessor — same ``StreamingLayerRunner`` Protocol, no
+public-surface change. The streaming UX served through
+``prsm_inference`` MCP tool now produces genuinely-distinct
+tokens from a real model rather than synthetic word splits.
+
+**Headline guarantees.**
+
+  - ``AutoregressiveStreamingRunner`` is structurally a
+    ``StreamingLayerRunner`` (Phase 3.x.8 Task 2 Protocol).
+    Drop-in replacement for ``SyntheticStreamingRunner`` —
+    ``LayerStageServer.handle_token_stream`` consumes either
+    runner identically.
+  - Tail-only contract enforced. ``is_final_stage=False`` →
+    exactly ONE terminal chunk with ``finish_reason="error"``,
+    no preceding non-error chunks, no ``model.generate`` call,
+    no ``prompt_provider`` call. Sharded autoregressive deferred
+    to Phase 3.x.11.
+  - UTF-8 multi-byte buffer-and-flush for byte-level BPE
+    tokenizers. The ``_HFStreamerAdapter`` cumulative-decode +
+    U+FFFD-suffix detection holds the buffer until a whole-
+    character boundary emerges, so ``"".join(text_deltas)``
+    ALWAYS forms valid UTF-8 even when emoji or CJK codepoints
+    span multiple BPE token boundaries. Tested across emoji,
+    CJK, ZWJ family sequences (👨‍👩‍👧), and mixed
+    interleavings.
+  - Sampling-params + stop-condition wiring: ``request.max_tokens``
+    + ``request.temperature`` override ``SamplingDefaults``
+    (max_tokens=512, temperature=1.0, top_k=50, top_p=0.95).
+    Greedy when temperature=0 (``do_sample=False``); else sampled.
+    Finish-reason mapping: EOS → ``"stop"``, cap → ``"max_tokens"``,
+    exception → ``"error"``.
+  - Mid-decode exception path is a single terminal error chunk
+    with the partial joined output preserved on
+    ``full_output_text`` so the receipt's ``output_hash`` commits
+    to whatever did make it to the wire.
+  - Tensor-wrap step in-runner: tokenizer.encode returns
+    ``List[int]``; HF.generate requires ``[1, seq_len]``
+    ``torch.Tensor``. The wrap happens in the runner so
+    production callers get HF compat without each operator
+    wiring it themselves. Test fakes pass through via duck-typed
+    ``.tolist()`` unwrap.
+
+**Trust seams added by 3.x.10.**
+
+  1. ``_HFStreamerAdapter`` (autoregressive_runner.py:88-184) —
+     bridges HF's synchronous ``streamer.put(token_ids_tensor)``
+     callback contract to the Protocol's ``Iterator[StreamingChunk]``
+     pull contract via a buffer-during-generate + yield-after
+     pattern. v1 trade-off: real-time delivery happens at the
+     SSE / MCP layer above the runner; the runner buffers within
+     a single ``.generate()`` call. Async-during-generate is a
+     Phase 3.x.10.x perf upgrade.
+
+  2. ``prompt_provider`` callable injected at construction —
+     decouples runner from prompt resolution. Production wires
+     this to a server-side registry keyed on ``request_id`` (the
+     executor stashes the prompt before calling
+     ``handle_token_stream``); tests inject deterministic fakes.
+     Non-tail dispatch short-circuits BEFORE invoking
+     ``prompt_provider`` — important because the prompt resolver
+     may be expensive (DB lookup, MCP roundtrip).
+
+  3. Tail-only contract is documented in the runner's class
+     docstring; ``test_docstring_documents_phase_3_x_11_deferral``
+     turns the "documented in docstring" acceptance gate into an
+     introspectable invariant — future doc edits can't silently
+     drop the deferral note.
+
+  4. Per-token timing side-channel acknowledged + scoped (Phase
+     3.x.10 Task 6 memo). The runner ships Tier-A + Tier-B-eligible
+     without padding; Tier C is gated off until Phase 3.x.10.x
+     lands constant-time padding (M1 fixed-rate cadence preferred,
+     M2 batched-trailing as toggle). See
+     ``docs/2026-04-28-phase3.x.10-timing-sidechannel-memo.md`` +
+     R3 §3.5 A5 + §10.4.
+
+**v1 honest scope (carried + new).**
+
+  - Sharded autoregressive (each stage running once per token)
+    deferred to Phase 3.x.11. The tail must host enough of the
+    model to generate locally.
+  - Stop sequences not implemented; only EOS + ``max_tokens`` in
+    v1.
+  - Constant-time padding for Tier C deferred to Phase 3.x.10.x.
+    Runner enforces NO content-tier check itself — the dispatch
+    layer (Phase 3.x.1 Task 3 content-tier gate) is the
+    structural enforcement point.
+  - HF generate buffering means the FIRST token reaches the wire
+    only after generate() returns — the runner is internally
+    blocking-during-generate. SSE-layer streaming UX is preserved
+    because the runner emits all tokens in one burst at function
+    return; from a user perspective, tokens still arrive
+    incrementally as the chain produces them. Async-during-
+    generate is Phase 3.x.10.x.
+
+**Test coverage at the tag.**
+- 51 unit tests in ``test_autoregressive_runner.py``:
+  - 10 helper tests (_coerce_token_ids + _last_token_id).
+  - 9 happy-path runner tests (N chunks, monotonic indices,
+    terminal aggregate fields, max_tokens cap, EOS → stop,
+    mid-generate exception, non-tail error chunk, generator
+    shape, immediate-EOS edge case, request override of defaults,
+    greedy on temperature=0, Protocol structural membership,
+    constructor validation × 4).
+  - 8 multi-byte UTF-8 tests (ASCII passthrough, emoji 2-token
+    + 3-token splits, CJK 2-token, mixed interleaving, end-of-
+    stream U+FFFD flush, direct adapter buffer-hold, ZWJ family
+    👨‍👩‍👧 across 6 codepoint-misaligned 3-byte chunks).
+  - 9 sampling + stop-condition tests (greedy determinism,
+    do_sample wiring, top_k/top_p, max_tokens cap, EOS stop,
+    cap reason, override default, eos_token_id wiring,
+    request=None default fallback, no-eos passthrough).
+  - 8 tail-only contract tests (exact one chunk, error shape,
+    no preceding leak, no model.generate call, no prompt_provider
+    call, attestation carries, post-non-tail tail dispatch
+    unchanged, docstring invariant).
+- 6 E2E integration tests in ``test_autoregressive_runner_e2e.py``
+  (marked ``@pytest.mark.slow``; opt-in via ``pytest -m slow``).
+  Uses real distilgpt2 via transformers + torch:
+  - test_real_decode_emits_streaming_chunks
+  - test_joined_deltas_form_valid_utf8
+  - test_greedy_decode_bit_identical_on_rerun
+  - test_finish_reason_correctly_set
+  - test_receipt_with_streamed_output_flag_verifies (signs +
+    verifies via identity AND via standalone public_key_b64;
+    the prod verification path)
+  - test_streamed_flag_tampering_invalidates_signature (Phase
+    3.x.8 Task 4 downgrade-resistance proven against the REAL
+    output path)
+
+**Auditor prompts:** start with the runner's class docstring in
+``prsm/compute/inference/autoregressive_runner.py:222-262`` for
+the contract scope. Then read the
+``_HFStreamerAdapter._maybe_flush`` U+FFFD branch
+(autoregressive_runner.py:164-179) — that's the multi-byte
+correctness invariant. The tail-only contract enforcement at
+line 361-372 is the Phase 3.x.11 deferral boundary. Receipt
+verification through the runner's TEE attestation is exercised
+by ``test_receipt_with_streamed_output_flag_verifies`` against
+real distilgpt2 output. The timing-side-channel memo
+(``docs/2026-04-28-phase3.x.10-timing-sidechannel-memo.md``) is
+the disclosed residual; Tier C is structurally blocked until
+Phase 3.x.10.x.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
