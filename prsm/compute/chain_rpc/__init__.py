@@ -65,6 +65,7 @@ from prsm.compute.chain_rpc.client import (
     RpcChainExecutor,
     SendMessage,
     StageOutcome,
+    StreamedSendMessage,
 )
 from prsm.compute.chain_rpc.factories import (
     make_layer_stage_server,
@@ -121,6 +122,7 @@ __all__ = [
     "RpcChainExecutor",
     "SendMessage",
     "StageOutcome",
+    "StreamedSendMessage",
     # Factories (production-wiring entry points)
     "make_layer_stage_server",
     "make_rpc_chain_executor",

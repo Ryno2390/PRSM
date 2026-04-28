@@ -899,3 +899,416 @@ class TestStageOutcome:
         )
         with pytest.raises(Exception):
             outcome.stage_index = 99  # type: ignore[misc]
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.7.1 v2 streaming dispatch
+# ──────────────────────────────────────────────────────────────────────────
+
+
+from typing import Iterable, Tuple as _Tuple
+
+from prsm.compute.chain_rpc import StreamedSendMessage
+from prsm.compute.chain_rpc.protocol import (
+    ActivationChunk as _ActivationChunk,
+    RunLayerSliceRequest as _Req,
+    RunLayerSliceResponse as _Resp,
+)
+from prsm.compute.chain_rpc.activation_codec import (
+    chunk_activation as _chunk_activation,
+    reassemble_chunked as _reassemble,
+)
+from prsm.node.shard_streaming import ShardChunk as _ShardChunk
+
+
+class StreamedStageSim:
+    """Per-stage simulator for the v2 streamed path. Receives a
+    manifest_bytes + chunk_bytes_iter; assembles the activation,
+    optionally transforms it, chunks the output, signs the response,
+    returns (response_manifest_bytes, response_chunk_bytes_iter)."""
+
+    def __init__(
+        self,
+        identity,
+        *,
+        tee_type: TEEType = TEEType.SOFTWARE,
+        chunk_bytes: int = 256,
+    ):
+        self.identity = identity
+        self.tee_type = tee_type
+        self.tee_attestation = b"\x01" * 32
+        self.epsilon = 0.0
+        self.duration = 0.05
+        self.chunk_bytes = chunk_bytes
+        self._transform = None
+        self.calls: List[bytes] = []
+        self.raise_on_call: Optional[Exception] = None
+
+    def set_transform(self, fn):
+        self._transform = fn
+
+    def handle(
+        self, manifest_bytes: bytes, chunk_iter: Iterable[bytes]
+    ) -> _Tuple[bytes, Iterable[bytes]]:
+        self.calls.append(manifest_bytes)
+        if self.raise_on_call is not None:
+            raise self.raise_on_call
+
+        request = parse_message(manifest_bytes)
+        assert isinstance(request, _Req)
+        assert request.activation_manifest is not None
+        # Reassemble inbound chunks via the codec helpers.
+        # ActivationChunk.request_id is the relay-defense binding;
+        # the assembler's shard_id check uses the manifest's shard_id.
+        shard_chunks: List[_ShardChunk] = []
+        for raw in chunk_iter:
+            msg = parse_message(raw)
+            assert isinstance(msg, _ActivationChunk)
+            shard_chunks.append(_ShardChunk(
+                shard_id=request.activation_manifest.shard_id,
+                sequence=msg.sequence,
+                data=msg.data,
+                chunk_sha256=msg.chunk_sha256,
+            ))
+        from prsm.compute.chain_rpc.activation_codec import ChunkedActivation as _CA
+        chunked_in = _CA(
+            manifest=request.activation_manifest,
+            chunks=shard_chunks,
+            shape=request.activation_shape,
+            dtype_str=request.activation_dtype,
+        )
+        activation = _reassemble(chunked_in, chunks=shard_chunks)
+
+        # Optionally transform the activation.
+        if self._transform is not None:
+            activation = self._transform(activation)
+
+        # Chunk the output via the same codec.
+        chunked_out = _chunk_activation(
+            activation,
+            activation_id=f"{request.request_id}::resp",
+            chunk_bytes=self.chunk_bytes,
+        )
+        # Build a streamed response signed by this stage. The
+        # signing payload commits to manifest.payload_sha256.
+        response = _Resp.sign(
+            identity=self.identity,
+            request_id=request.request_id,
+            activation_blob=b"",
+            activation_shape=chunked_out.shape,
+            activation_dtype=chunked_out.dtype_str,
+            duration_seconds=self.duration,
+            tee_attestation=self.tee_attestation,
+            tee_type=self.tee_type,
+            epsilon_spent=self.epsilon,
+            activation_manifest=chunked_out.manifest,
+        )
+        response_manifest_bytes = encode_message(response)
+        response_chunk_frames = [
+            encode_message(_ActivationChunk(
+                request_id=request.request_id,
+                sequence=c.sequence,
+                data=c.data,
+                chunk_sha256=c.chunk_sha256,
+            ))
+            for c in chunked_out.chunks
+        ]
+        return response_manifest_bytes, iter(response_chunk_frames)
+
+
+class StreamedFakeTransport:
+    """Sibling to FakeTransport for the v2 streamed path."""
+
+    def __init__(self, sims: Dict[str, StreamedStageSim]):
+        self.sims = sims
+        self.transport_failure: Optional[Exception] = None
+        self.delivery_log: List[str] = []
+
+    def send_streamed(
+        self,
+        address: str,
+        manifest_bytes: bytes,
+        chunk_iter: Iterable[bytes],
+    ) -> _Tuple[bytes, Iterable[bytes]]:
+        self.delivery_log.append(address)
+        if self.transport_failure is not None:
+            raise self.transport_failure
+        sim = self.sims.get(address)
+        if sim is None:
+            raise ConnectionError(f"no streamed stage at {address!r}")
+        return sim.handle(manifest_bytes, chunk_iter)
+
+
+@pytest.fixture
+def alice_streamed_sim(alice):
+    return StreamedStageSim(alice, chunk_bytes=128)
+
+
+@pytest.fixture
+def bob_streamed_sim(bob):
+    return StreamedStageSim(bob, chunk_bytes=128)
+
+
+@pytest.fixture
+def streamed_transport(alice, bob, alice_streamed_sim, bob_streamed_sim):
+    return StreamedFakeTransport({
+        alice.node_id: alice_streamed_sim,
+        bob.node_id: bob_streamed_sim,
+    })
+
+
+def _make_executor_with_streaming(
+    *,
+    settler,
+    anchor,
+    inline_transport,
+    streamed_transport,
+    threshold: int = 3,
+    chunk_bytes: int = 32,
+) -> RpcChainExecutor:
+    """Low threshold + small chunks force the streamed path on
+    typical-sized test activations. Threshold=3 means any prompt
+    encoded to >= 4 bytes (i.e., ≥ 1 int32) triggers streamed."""
+    return RpcChainExecutor(
+        settler_identity=settler,
+        send_message=inline_transport.send,
+        streamed_send_message=streamed_transport.send_streamed,
+        anchor=anchor,
+        prompt_encoder=_prompt_encoder,
+        output_decoder=_output_decoder,
+        chunk_threshold_bytes=threshold,
+        chunk_bytes=chunk_bytes,
+    )
+
+
+class TestStreamedDispatchHappyPath:
+    def test_streamed_two_stage_chain_round_trips(
+        self, settler, anchor, alice, bob, transport,
+        streamed_transport, alice_streamed_sim, bob_streamed_sim,
+    ):
+        executor = _make_executor_with_streaming(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            streamed_transport=streamed_transport,
+            threshold=3,  # force streamed for any activation > 16 bytes
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        result = executor.execute_chain(
+            request=_make_request("hello world long enough to chunk"),
+            chain=chain,
+        )
+        assert result.output == "hello world long enough to chunk"
+        # Streamed transport carried both stages.
+        assert streamed_transport.delivery_log == [alice.node_id, bob.node_id]
+        # Inline transport was NOT used (activation always exceeded
+        # threshold).
+        assert len(alice_streamed_sim.calls) == 1
+        assert len(bob_streamed_sim.calls) == 1
+
+    def test_streamed_threading_through_stages(
+        self, settler, anchor, alice, bob, transport,
+        streamed_transport, alice_streamed_sim, bob_streamed_sim,
+    ):
+        # alice doubles, bob adds 1.
+        alice_streamed_sim.set_transform(lambda a: a * 2)
+        bob_streamed_sim.set_transform(lambda a: a + 1)
+        executor = _make_executor_with_streaming(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            streamed_transport=streamed_transport,
+            threshold=3,
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        request = _make_request("AB")
+        result = executor.execute_chain(request=request, chain=chain)
+
+        encoded = _prompt_encoder("AB")
+        expected = (encoded * 2) + 1
+        assert result.output == _output_decoder(expected)
+
+
+class TestActivationTooLarge:
+    def test_activation_too_large_when_streamed_transport_missing(
+        self, settler, anchor, alice, bob, transport,
+    ):
+        """When activation exceeds inline threshold but no streamed
+        transport was wired, the executor surfaces a structured
+        ACTIVATION_TOO_LARGE error rather than truncating."""
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder,
+            output_decoder=_output_decoder,
+            chunk_threshold_bytes=4,  # absurdly low; any activation triggers
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            executor.execute_chain(
+                request=_make_request("hello"),
+                chain=chain,
+            )
+        assert exc_info.value.code == ExecutorErrorCode.ACTIVATION_TOO_LARGE
+        assert exc_info.value.stage_index == 0
+
+
+class TestStreamedSignatureVerification:
+    def test_streamed_signature_verifies_under_anchor(
+        self, settler, anchor, alice, bob, transport,
+        streamed_transport,
+    ):
+        """The streamed-path response signature must verify under
+        the dispatched stage's pubkey via the H2 expected_stage_node_id
+        invariant."""
+        executor = _make_executor_with_streaming(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            streamed_transport=streamed_transport,
+            threshold=3,
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        result = executor.execute_chain(
+            request=_make_request("streamed-sig-verify"),
+            chain=chain,
+        )
+        # Success implies signature verified at each stage.
+        assert result.output == "streamed-sig-verify"
+
+    def test_streamed_response_with_unregistered_signer_rejected(
+        self, settler, anchor, alice, bob, transport,
+    ):
+        """A streamed response signed by an unregistered identity must
+        fail verification."""
+        rogue = generate_node_identity("rogue-stage")
+        # Note: rogue NOT registered on anchor.
+        rogue_sim = StreamedStageSim(rogue, chunk_bytes=128)
+        # Bind rogue to the address alice was supposed to serve, so the
+        # client dispatches to alice.node_id but a rogue stage answers.
+        # The expected_stage_node_id check rejects the substitution.
+        rogue_sim.identity = rogue
+        bad_streamed = StreamedFakeTransport({alice.node_id: rogue_sim})
+
+        executor = _make_executor_with_streaming(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            streamed_transport=bad_streamed,
+            threshold=3,
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            executor.execute_chain(
+                request=_make_request("rogue-streamed"),
+                chain=chain,
+            )
+        assert exc_info.value.code == ExecutorErrorCode.INVALID_STAGE_SIGNATURE
+        assert exc_info.value.stage_index == 0
+
+
+class TestStreamedTransportErrors:
+    def test_streamed_transport_failure_maps_to_transport_error(
+        self, settler, anchor, alice, bob, transport,
+        streamed_transport,
+    ):
+        streamed_transport.transport_failure = ConnectionError("net down")
+        executor = _make_executor_with_streaming(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            streamed_transport=streamed_transport,
+            threshold=3,
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            executor.execute_chain(
+                request=_make_request("xyz"), chain=chain,
+            )
+        assert exc_info.value.code == ExecutorErrorCode.TRANSPORT_ERROR
+
+    def test_streamed_simulator_raise_maps_to_transport_error(
+        self, settler, anchor, alice, bob, transport,
+        streamed_transport, alice_streamed_sim,
+    ):
+        alice_streamed_sim.raise_on_call = RuntimeError("alice crashed")
+        executor = _make_executor_with_streaming(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            streamed_transport=streamed_transport,
+            threshold=3,
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            executor.execute_chain(
+                request=_make_request(), chain=chain,
+            )
+        assert exc_info.value.code == ExecutorErrorCode.TRANSPORT_ERROR
+        assert exc_info.value.stage_index == 0
+
+
+class TestStreamedConstructionValidation:
+    def test_non_callable_streamed_send_rejected(
+        self, settler, anchor, transport,
+    ):
+        with pytest.raises(RuntimeError, match="streamed_send_message"):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=transport.send,
+                streamed_send_message="not-callable",  # type: ignore[arg-type]
+                anchor=anchor,
+                prompt_encoder=_prompt_encoder,
+                output_decoder=_output_decoder,
+            )
+
+    def test_non_positive_threshold_rejected(
+        self, settler, anchor, transport,
+    ):
+        with pytest.raises(ValueError, match="chunk_threshold_bytes"):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=transport.send,
+                anchor=anchor,
+                prompt_encoder=_prompt_encoder,
+                output_decoder=_output_decoder,
+                chunk_threshold_bytes=0,
+            )
+
+    def test_non_positive_chunk_bytes_rejected(
+        self, settler, anchor, transport,
+    ):
+        with pytest.raises(ValueError, match="chunk_bytes"):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=transport.send,
+                anchor=anchor,
+                prompt_encoder=_prompt_encoder,
+                output_decoder=_output_decoder,
+                chunk_bytes=0,
+            )
+
+
+class TestInlinePathStillWorksAtV2:
+    """Default v2 executor with no streamed transport still drives
+    the inline path for small activations."""
+
+    def test_small_activation_uses_inline_path(
+        self, settler, anchor, alice, bob, transport,
+        streamed_transport, alice_sim, bob_sim,
+        alice_streamed_sim, bob_streamed_sim,
+    ):
+        # High threshold → small activations stay inline even though
+        # streaming transport is wired.
+        executor = _make_executor_with_streaming(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            streamed_transport=streamed_transport,
+            threshold=10_000_000,  # 10 MB — way above test activation size
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        result = executor.execute_chain(
+            request=_make_request("small"),
+            chain=chain,
+        )
+        assert result.output == "small"
+        # Inline transport was used; streamed transport was not.
+        assert len(alice_sim.calls) == 1
+        assert len(bob_sim.calls) == 1
+        assert len(alice_streamed_sim.calls) == 0
+        assert len(bob_streamed_sim.calls) == 0
