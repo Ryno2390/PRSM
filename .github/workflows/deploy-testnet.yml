@@ -112,7 +112,7 @@ jobs:
           npx hardhat run scripts/deploy.js --network ${{ inputs.network }}
       
       - name: Upload deployment artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deployment-${{ inputs.network }}-${{ github.run_id }}
           path: contracts/deployments/
