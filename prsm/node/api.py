@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from prsm.node.api_hardening import (
@@ -84,6 +85,136 @@ class ContentUploadRequest(BaseModel):
         description="CIDs of source material this content derives from",
     )
 
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Phase 3.x.8.1 — SSE helpers for /compute/inference/stream
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _sse_event(event_type: str, data: Any) -> bytes:
+    """Encode a single Server-Sent Events frame.
+
+    Per the W3C SSE spec: ``event:`` + ``data:`` lines, terminated by
+    a blank line. ``data`` is JSON-serialized; complex objects flow
+    through ``json.dumps`` with ``default=str`` as a fallback for any
+    Decimal / bytes / dataclass values that slip through the
+    pre-encoders.
+    """
+    import json as _json
+
+    if not isinstance(data, str):
+        data = _json.dumps(data, default=str)
+    return f"event: {event_type}\ndata: {data}\n\n".encode("utf-8")
+
+
+def _token_event_to_dict(event: Any) -> Dict[str, Any]:
+    """Encode an ``InferenceTokenEvent`` into the SSE ``data`` payload
+    shape. Optional fields (token_id / finish_reason) are emitted as
+    ``null`` when absent so consumer parsers see a stable schema."""
+    return {
+        "sequence_index": event.sequence_index,
+        "text_delta": event.text_delta,
+        "token_id": event.token_id,
+        "finish_reason": event.finish_reason,
+    }
+
+
+def _result_to_dict(result: Any, *, job_id: str) -> Dict[str, Any]:
+    """Encode an ``InferenceResult`` into the SSE ``data`` payload
+    shape. Mirrors the unary endpoint's success response with the
+    job_id rebound to the API-side id (executor uses an internal
+    parallax-stream-job-* id; the API is authoritative for billing
+    correlation)."""
+    import dataclasses
+
+    receipt = result.receipt
+    if receipt is not None:
+        receipt = dataclasses.replace(receipt, job_id=job_id)
+    return {
+        "success": result.success,
+        "job_id": job_id,
+        "request_id": result.request_id,
+        "output": result.output,
+        "receipt": receipt.to_dict() if receipt is not None else None,
+    }
+
+
+async def _settle_streaming_escrow(
+    node: Any,
+    job_id: str,
+    escrow_entry: Any,
+    request: Any,
+    result: Any,
+) -> None:
+    """Settle escrow for a successful streaming inference, plus
+    re-sign the receipt under the API node's identity (mirrors the
+    unary path's signing logic)."""
+    if not escrow_entry or not getattr(node, "_payment_escrow", None):
+        return
+    # Re-sign under the API-node identity (Phase 3.x.1 invariant —
+    # the API is authoritative even when the executor used a
+    # different identity). The receipt's streamed_output flag is
+    # preserved through the re-sign because dataclasses.replace
+    # in _build_signed_receipt established it.
+    if result.receipt is not None and node.identity:
+        from prsm.compute.inference import sign_receipt
+        try:
+            # _result_to_dict above already rebound job_id. Apply
+            # the same here for the signed receipt the privacy
+            # budget records against.
+            import dataclasses
+            rebound = dataclasses.replace(result.receipt, job_id=job_id)
+            sign_receipt(rebound, node.identity)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Streaming receipt re-sign failed for job_id={job_id}: {e}"
+            )
+
+    # Privacy budget tracking — same as unary path.
+    if (
+        hasattr(node, "privacy_budget")
+        and node.privacy_budget
+        and request.privacy_tier.value != "none"
+        and result.receipt is not None
+    ):
+        try:
+            node.privacy_budget.record_spend(
+                result.receipt.epsilon_spent, "inference", job_id,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Streaming privacy budget tracking failed for job_id={job_id}: {e}"
+            )
+
+    try:
+        await node._payment_escrow.release_escrow(
+            job_id=job_id,
+            provider_id=node.identity.node_id if node.identity else "self",
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"Streaming escrow release failed for job_id={job_id}: {e}"
+        )
+
+
+async def _refund_streaming_escrow(
+    node: Any,
+    job_id: str,
+    escrow_entry: Any,
+    reason: str,
+) -> None:
+    """Refund escrow for a streaming inference that ended without a
+    successful result. Swallows refund-time exceptions (logged) —
+    they're non-actionable at the wire boundary."""
+    if not escrow_entry or not getattr(node, "_payment_escrow", None):
+        return
+    try:
+        await node._payment_escrow.refund_escrow(job_id, reason)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"Streaming escrow refund failed for job_id={job_id}: {e}"
+        )
 
 
 def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
@@ -823,6 +954,255 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=500,
                 detail=f"Inference pipeline error: {str(e)}",
             )
+
+    @app.post("/compute/inference/stream")
+    async def compute_inference_stream(body: Dict[str, Any] = {}):
+        """SSE-streaming sibling of ``/compute/inference``.
+
+        Phase 3.x.8.1 Task 2 — wires
+        ``ParallaxScheduledExecutor.execute_streaming`` to a Server-
+        Sent-Events HTTP surface so the ``prsm_inference`` MCP tool
+        (and any other streaming-capable client) can render token-
+        by-token output as the chain produces it.
+
+        Wire format (text/event-stream):
+
+          event: token
+          data: {"sequence_index": N, "text_delta": "...",
+                 "token_id": null|int, "finish_reason": null|"stop"|...}
+
+          event: result
+          data: {"success": true, "request_id": "...", "output": "...",
+                 "receipt": {...}, "job_id": "..."}
+
+          event: error
+          data: {"error": "...", "code": "...", "job_id": "..."}
+
+        Same input schema as ``/compute/inference``. Same escrow lock
+        + refund/settle semantics: pre-execute failure refunds; ANY
+        token emitted = settle at full estimate (caller paid for
+        chain dispatch — see design plan §3.4 risk register).
+
+        ``event: result`` and ``event: error`` are terminal — server
+        closes the connection after them. ``event: token`` events
+        are NEVER terminal.
+        """
+        # Lazy imports — keep the inference module's dependencies out
+        # of the API import graph for nodes that don't run inference.
+        import dataclasses
+        from decimal import Decimal
+
+        from prsm.compute.inference import (
+            ContentTier,
+            InferenceRequest,
+            sign_receipt,
+        )
+        from prsm.compute.inference.parallax_executor import (
+            InferenceTokenEvent,
+        )
+        from prsm.compute.inference.models import InferenceResult
+        from prsm.compute.tee.models import PrivacyLevel
+
+        if not hasattr(node, 'inference_executor') or node.inference_executor is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Inference executor not initialized. "
+                    "This node does not currently serve inference requests."
+                ),
+            )
+        # Streaming requires execute_streaming on the wired executor.
+        # ParallaxScheduledExecutor (Phase 3.x.8.1) implements it; the
+        # Phase 3.x.1 TensorParallelInferenceExecutor does not. Surface
+        # as 503 — operator misconfig.
+        if not hasattr(node.inference_executor, "execute_streaming"):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Inference executor does not support streaming. "
+                    "Wire a ParallaxScheduledExecutor (Phase 3.x.8.1) to "
+                    "enable /compute/inference/stream."
+                ),
+            )
+
+        # Validate input identical to /compute/inference.
+        prompt = body.get("prompt", "")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Missing 'prompt' field")
+        model_id = body.get("model_id", "")
+        if not model_id:
+            raise HTTPException(status_code=400, detail="Missing 'model_id' field")
+        budget_ftns = float(body.get("budget_ftns", 1.0))
+        if budget_ftns <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "FTNS budget required for inference. "
+                    "Set budget_ftns to at least 0.01 FTNS."
+                ),
+            )
+        try:
+            request = InferenceRequest(
+                prompt=prompt,
+                model_id=model_id,
+                budget_ftns=Decimal(str(budget_ftns)),
+                privacy_tier=PrivacyLevel(body.get("privacy_tier", "standard")),
+                content_tier=ContentTier(body.get("content_tier", "A")),
+                max_tokens=body.get("max_tokens"),
+                temperature=body.get("temperature"),
+                requester_node_id=node.identity.node_id if node.identity else None,
+            )
+        except (ValueError, TypeError) as e:
+            raise HTTPException(status_code=400, detail=f"Invalid request: {e}")
+
+        job_id = "infer-stream-" + _uuid.uuid4().hex[:12]
+
+        # Lock escrow — same pre-pay billing pattern as the unary
+        # endpoint. Failure paths refund; success path settles after
+        # the terminal result event.
+        escrow_entry = None
+        if hasattr(node, '_payment_escrow') and node._payment_escrow:
+            try:
+                escrow_entry = await node._payment_escrow.create_escrow(
+                    job_id=job_id,
+                    amount=budget_ftns,
+                    requester_id=node.identity.node_id if node.identity else "unknown",
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Escrow creation failed (insufficient FTNS?): {e}",
+                )
+            if escrow_entry is None:
+                raise HTTPException(
+                    status_code=402,
+                    detail="Insufficient FTNS balance to lock escrow for inference",
+                )
+
+        # Privacy-budget pre-flight identical to /compute/inference.
+        if request.privacy_tier != PrivacyLevel.NONE:
+            expected_epsilon = PrivacyLevel.config_for_level(
+                request.privacy_tier
+            ).epsilon
+            if (
+                hasattr(node, 'privacy_budget')
+                and node.privacy_budget
+                and not node.privacy_budget.can_spend(expected_epsilon)
+            ):
+                if escrow_entry and node._payment_escrow:
+                    try:
+                        await node._payment_escrow.refund_escrow(
+                            job_id, "privacy budget exhausted"
+                        )
+                    except Exception as refund_exc:
+                        logger.warning(
+                            f"Escrow refund after privacy-budget rejection failed: "
+                            f"{refund_exc}"
+                        )
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        f"Privacy budget exhausted: ε={expected_epsilon} would "
+                        f"exceed remaining budget"
+                    ),
+                )
+
+        async def _event_generator():
+            """Drives the executor's streaming generator and frames
+            each yielded item as an SSE event. The terminal item
+            (success or failure) drives escrow settle/refund + the
+            terminal ``result`` or ``error`` event.
+
+            Raises NEVER cross the SSE boundary — any unhandled
+            exception encodes a final ``error`` event + refunds the
+            escrow defensively."""
+            tokens_emitted = 0
+            try:
+                async for item in node.inference_executor.execute_streaming(
+                    request,
+                ):
+                    if isinstance(item, InferenceTokenEvent):
+                        tokens_emitted += 1
+                        yield _sse_event("token", _token_event_to_dict(item))
+                    elif isinstance(item, InferenceResult):
+                        if item.success:
+                            await _settle_streaming_escrow(
+                                node, job_id, escrow_entry, request,
+                                item,
+                            )
+                            yield _sse_event(
+                                "result",
+                                _result_to_dict(item, job_id=job_id),
+                            )
+                        else:
+                            await _refund_streaming_escrow(
+                                node, job_id, escrow_entry,
+                                item.error or "inference failed",
+                            )
+                            yield _sse_event("error", {
+                                "error": item.error or "inference failed",
+                                "code": "EXECUTION_FAILURE",
+                                "job_id": job_id,
+                                "request_id": request.request_id,
+                            })
+                        return
+                    else:
+                        # Defensive — execute_streaming's contract is
+                        # InferenceTokenEvent | InferenceResult.
+                        await _refund_streaming_escrow(
+                            node, job_id, escrow_entry,
+                            f"unexpected event type {type(item).__name__}",
+                        )
+                        yield _sse_event("error", {
+                            "error": (
+                                f"executor yielded unexpected type "
+                                f"{type(item).__name__}"
+                            ),
+                            "code": "INTERNAL_ERROR",
+                            "job_id": job_id,
+                        })
+                        return
+                # Generator exhausted without a terminal — protocol
+                # violation by the executor. Refund + error.
+                await _refund_streaming_escrow(
+                    node, job_id, escrow_entry,
+                    "executor exhausted without terminal result",
+                )
+                yield _sse_event("error", {
+                    "error": (
+                        "executor exhausted without yielding a terminal "
+                        "InferenceResult"
+                    ),
+                    "code": "INTERNAL_ERROR",
+                    "job_id": job_id,
+                })
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Streaming inference pipeline error for job_id=%r",
+                    job_id,
+                )
+                await _refund_streaming_escrow(
+                    node, job_id, escrow_entry, str(exc),
+                )
+                yield _sse_event("error", {
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                    "code": "INTERNAL_ERROR",
+                    "job_id": job_id,
+                })
+
+        return StreamingResponse(
+            _event_generator(),
+            media_type="text/event-stream",
+            headers={
+                # Disable proxy buffering — critical for real-time
+                # token delivery through nginx / cloudflare /
+                # traefik / etc. SSE without these headers can be
+                # buffered into a single chunk.
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
 
     @app.get("/billing/{job_id}")
     async def get_billing_status(job_id: str) -> Dict[str, Any]:
