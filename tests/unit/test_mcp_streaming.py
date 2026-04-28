@@ -134,8 +134,13 @@ class TestBuildProgressEmitter:
 
 class TestPrsmInferenceStreaming:
     @pytest.mark.asyncio
-    async def test_emits_4_progress_steps_on_success(self):
-        """Streaming-aware inference emits 4 progress notifications."""
+    async def test_streaming_capable_client_routes_to_streaming_endpoint(self):
+        """Phase 3.x.8.1 Task 4 contract: streaming-capable MCP
+        clients (those with a non-None emit_progress) route to
+        ``_call_node_api_streaming("/compute/inference/stream", ...)``
+        instead of the unary ``_call_node_api`` path. Progress events
+        come from the SSE TokenFrames forwarded by the streaming
+        helper, NOT the legacy 4-stage milestones."""
         emitter = AsyncMock()
         mock_response = {
             "success": True,
@@ -151,24 +156,31 @@ class TestPrsmInferenceStreaming:
                 "duration_seconds": 1.0,
                 "settler_node_id": "node-x",
                 "settler_signature": "deadbeef",
+                "streamed_output": True,
             },
         }
-        with patch("prsm.mcp_server._call_node_api") as mock_call:
-            mock_call.return_value = mock_response
-            await handle_prsm_inference(
+        unary_mock = patch("prsm.mcp_server._call_node_api")
+        streaming_mock = patch(
+            "prsm.mcp_server._call_node_api_streaming",
+            new=AsyncMock(return_value=mock_response),
+        )
+        with unary_mock as call_unary, streaming_mock as call_streaming:
+            result = await handle_prsm_inference(
                 {"prompt": "hi", "model_id": "mock-llama-3-8b", "budget_ftns": 1.0},
                 emit_progress=emitter,
             )
-        # Building → Locking → Inference complete → Settling = 4 calls
-        assert emitter.await_count == 4
-        # Each call is awaited with (msg, progress, total)
-        call_args = [c.args for c in emitter.await_args_list]
-        # Progress is monotonically increasing toward total
-        progress_values = [args[1] for args in call_args]
-        assert progress_values == [1.0, 2.0, 3.0, 4.0]
-        # Total is consistent
-        total_values = [args[2] for args in call_args]
-        assert all(t == 4.0 for t in total_values)
+        # Streaming endpoint hit; unary endpoint NOT hit.
+        call_streaming.assert_awaited_once()
+        call_args = call_streaming.await_args
+        assert call_args[0][0] == "/compute/inference/stream"
+        # The emitter is passed THROUGH to _call_node_api_streaming
+        # (which forwards token events) — the handler itself doesn't
+        # emit additional milestones.
+        assert call_args[0][2] is emitter
+        call_unary.assert_not_called()
+        # Final response includes the formatted output + footer.
+        assert "PRSM Inference Result" in result
+        assert "Result text." in result
 
     @pytest.mark.asyncio
     async def test_no_emit_when_emitter_is_none(self):
@@ -208,17 +220,49 @@ class TestPrsmInferenceStreaming:
         emitter.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_emit_after_node_unreachable_stops_at_step_2(self):
-        """Network failure during dispatch yields only the first 2 progress steps."""
+    async def test_streaming_path_network_failure_returns_friendly_error(self):
+        """Phase 3.x.8.1 Task 4: when the streaming endpoint isn't
+        reachable, the handler catches the underlying exception and
+        returns a structured error message — no exception propagates
+        to the caller. Per-token progress events stop because the
+        streaming helper never gets to emit any."""
         emitter = AsyncMock()
-        with patch("prsm.mcp_server._call_node_api") as mock_call:
-            mock_call.side_effect = Exception("Connection refused")
-            await handle_prsm_inference(
+        streaming_mock = patch(
+            "prsm.mcp_server._call_node_api_streaming",
+            new=AsyncMock(side_effect=Exception("Connection refused")),
+        )
+        with streaming_mock:
+            result = await handle_prsm_inference(
                 {"prompt": "hi", "budget_ftns": 1.0},
                 emit_progress=emitter,
             )
-        # Building (step 1) + Locking/dispatching (step 2), then exception → no 3 or 4
-        assert emitter.await_count == 2
+        assert "PRSM streaming inference failed" in result
+        assert "Connection refused" in result
+        # No progress events emitted by the handler itself — the
+        # streaming helper never got far enough to forward any.
+        assert emitter.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_streaming_path_inference_error_surfaces_directly(self):
+        """Phase 3.x.8.1 Task 4: server-side InferenceError (e.g.
+        budget gate, model gate) is surfaced as a structured
+        rejection message — no traceback propagates."""
+        from prsm.mcp_server import InferenceError
+        emitter = AsyncMock()
+        streaming_mock = patch(
+            "prsm.mcp_server._call_node_api_streaming",
+            new=AsyncMock(side_effect=InferenceError(
+                "Insufficient budget: 0.001 < 0.04",
+                code="EXECUTION_FAILURE",
+            )),
+        )
+        with streaming_mock:
+            result = await handle_prsm_inference(
+                {"prompt": "hi", "budget_ftns": 1.0},
+                emit_progress=emitter,
+            )
+        assert "Inference rejected" in result
+        assert "Insufficient budget" in result
 
     @pytest.mark.asyncio
     async def test_signature_includes_emit_progress_kwarg_only(self):

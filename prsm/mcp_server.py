@@ -1353,17 +1353,22 @@ async def handle_prsm_inference(
 ) -> str:
     """Handle prsm_inference — TEE-attested model inference with verifiable receipt.
 
-    Builds an InferenceRequest, calls the node API at /compute/inference, and
-    formats the response with cost-reconciliation footer.
+    Builds an InferenceRequest, calls the node API, and formats the
+    response with cost-reconciliation footer.
 
-    Streaming-aware (Phase 3.x.1 Task 8): if the MCP client included a
-    progressToken, intermediate stages emit as progress notifications:
-      1. Building inference request
-      2. Locking escrow + dispatching to executor
-      3. Inference execution (TEE-attested)
-      4. Receipt signing + escrow settlement
+    Phase 3.x.8.1 Task 4 — routing: streaming-capable MCP clients
+    (those that supplied a ``progressToken``, surfaced as a non-None
+    ``emit_progress`` callback) hit the SSE
+    ``POST /compute/inference/stream`` endpoint and receive
+    incremental token output as MCP progress events. Non-streaming
+    clients hit the existing unary ``POST /compute/inference``
+    endpoint and see only the final formatted response.
 
-    Non-streaming clients see only the final formatted response.
+    Both paths produce the same final TextContent shape (output +
+    cost-reconciliation footer with model / privacy tier / content
+    tier / TEE backend / duration / settler / signature note). The
+    only caller-observable difference is the per-token progress
+    stream on the streaming path.
     """
     prompt = arguments.get("prompt", "")
     model_id = arguments.get("model_id", "mock-llama-3-8b")
@@ -1389,9 +1394,6 @@ async def handle_prsm_inference(
             f"Use prsm_quote to estimate the required budget."
         )
 
-    if emit_progress:
-        await emit_progress(f"Building inference request for model {model_id}...", 1.0, 4.0)
-
     request_payload: Dict[str, Any] = {
         "prompt": prompt,
         "model_id": model_id,
@@ -1404,32 +1406,61 @@ async def handle_prsm_inference(
     if temperature is not None:
         request_payload["temperature"] = float(temperature)
 
-    if emit_progress:
-        await emit_progress("Locking FTNS escrow and dispatching to TEE executor...", 2.0, 4.0)
+    # Branch on streaming-capable client. The streaming path emits
+    # one progress event per StreamToken (Phase 3.x.8.1 Task 3
+    # _call_node_api_streaming forwards). The unary path keeps the
+    # original Phase 3.x.1 Task 8 4-stage progress milestones.
+    if emit_progress is not None:
+        try:
+            result = await _call_node_api_streaming(
+                "/compute/inference/stream",
+                request_payload,
+                emit_progress,
+            )
+        except InferenceError as e:
+            # Server-side rejection (budget, model, tier, etc.) —
+            # surface the structured error directly.
+            return f"Inference rejected: {e.message}"
+        except Exception as e:  # noqa: BLE001
+            return (
+                f"PRSM streaming inference failed: {e}.\n"
+                f"Possible causes:\n"
+                f"  • PRSM node not running (start with: prsm node start)\n"
+                f"  • /compute/inference/stream endpoint not deployed "
+                f"(Phase 3.x.8.1 Task 2 — verify with `curl -N` against "
+                f"the node)\n"
+                f"  • Network connectivity issue between MCP server and "
+                f"node API"
+            )
+    else:
+        if emit_progress:  # pragma: no cover — defensive; emit_progress is None here
+            await emit_progress(
+                f"Building inference request for model {model_id}...",
+                1.0, 4.0,
+            )
+        try:
+            result = await _call_node_api(
+                "POST", "/compute/inference", request_payload,
+            )
+        except Exception as e:  # noqa: BLE001
+            return (
+                f"PRSM inference failed: {e}.\n"
+                f"Possible causes:\n"
+                f"  • PRSM node not running (start with: prsm node start)\n"
+                f"  • /compute/inference endpoint not yet deployed (Phase 3.x.1 Task 5 pending; "
+                f"see docs/2026-04-26-phase3.x.1-mcp-server-completion-design-plan.md)\n"
+                f"  • Network connectivity issue between MCP server and node API"
+            )
 
-    try:
-        result = await _call_node_api("POST", "/compute/inference", request_payload)
-    except Exception as e:
-        return (
-            f"PRSM inference failed: {e}.\n"
-            f"Possible causes:\n"
-            f"  • PRSM node not running (start with: prsm node start)\n"
-            f"  • /compute/inference endpoint not yet deployed (Phase 3.x.1 Task 5 pending; "
-            f"see docs/2026-04-26-phase3.x.1-mcp-server-completion-design-plan.md)\n"
-            f"  • Network connectivity issue between MCP server and node API"
-        )
-
-    # Surface API-level errors with helpful context
+    # Surface API-level errors with helpful context (only reachable
+    # on the unary path — the streaming path raises InferenceError
+    # for these cases, handled above).
     if isinstance(result, dict) and result.get("error"):
         return f"Inference rejected: {result['error']}"
     if not isinstance(result, dict) or not result.get("success"):
         return (
             f"Inference failed: {result.get('error') if isinstance(result, dict) else 'unknown error'}"
         )
-
-    if emit_progress:
-        await emit_progress("Inference complete; signing receipt...", 3.0, 4.0)
-        await emit_progress("Settling escrow and finalizing...", 4.0, 4.0)
 
     # Format successful response with cost reconciliation footer
     # (Phase 3.x.1 Task 7 — uses shared _format_cost_footer helper).
