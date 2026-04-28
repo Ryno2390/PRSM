@@ -690,6 +690,15 @@ class RpcChainExecutor:
         )
 
         # Build the streaming RunLayerSliceRequest (streaming=True).
+        # Phase 3.x.10.x: forward the originating
+        # InferenceRequest's sampling overrides on the wire so the
+        # downstream server's StreamingSamplingShim can hand them to
+        # the runner. None values pass through (omit-when-None
+        # canonical encoding preserves byte-equivalence with
+        # pre-3.x.10.x signed bytes for callers that don't override).
+        # Streaming-only: the unary RunLayerSliceRequest construction
+        # paths leave these fields unset because non-tail stages have
+        # no autoregressive decode to override.
         wire_request = RunLayerSliceRequest(
             request_id=request.request_id,
             model_id=request.model_id,
@@ -702,6 +711,8 @@ class RpcChainExecutor:
             upstream_token=token,
             deadline_unix=deadline_unix,
             streaming=True,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
         )
         request_bytes = encode_message(wire_request)
 

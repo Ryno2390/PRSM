@@ -1715,6 +1715,129 @@ class TestStreamingHappyPath:
         assert [t.sequence_index for t in tokens] == list(range(len(tokens)))
 
 
+class TestStreamingSamplingPropagation:
+    """Phase 3.x.10.x Task 3 — InferenceRequest.max_tokens +
+    .temperature MUST reach the dispatched RunLayerSliceRequest's
+    new wire fields. Pre-3.x.10.x they dead-lettered at the executor
+    boundary."""
+
+    def _request_with_sampling(
+        self, *, max_tokens=None, temperature=None,
+    ) -> InferenceRequest:
+        return InferenceRequest(
+            prompt="hello",
+            model_id="test-model",
+            budget_ftns=Decimal("10.0"),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            request_id="req-1",
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+    def _last_streaming_wire_request(
+        self, alice_token_sim,
+    ) -> RunLayerSliceRequest:
+        # The TokenStreamSim records every request_bytes. Parse the
+        # last one to assert the executor populated the new fields.
+        assert alice_token_sim.calls, "no streaming request was sent"
+        msg = parse_message(alice_token_sim.calls[-1])
+        assert isinstance(msg, RunLayerSliceRequest)
+        assert msg.streaming is True
+        return msg
+
+    def test_max_tokens_temperature_propagate_to_streaming_request(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("ok")
+        chain = _make_chain([alice.node_id])
+        list(executor.execute_chain_streaming(
+            request=self._request_with_sampling(
+                max_tokens=4, temperature=0.7,
+            ),
+            chain=chain,
+        ))
+        wire = self._last_streaming_wire_request(alice_token_sim)
+        assert wire.max_tokens == 4
+        assert wire.temperature == 0.7
+
+    def test_unset_inference_request_sends_none_on_wire(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        # Default InferenceRequest leaves both fields None. Wire
+        # request must reflect that — preserves byte-equivalence
+        # with pre-3.x.10.x signed bytes (Task 1 invariant).
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("ok")
+        chain = _make_chain([alice.node_id])
+        list(executor.execute_chain_streaming(
+            request=self._request_with_sampling(),
+            chain=chain,
+        ))
+        wire = self._last_streaming_wire_request(alice_token_sim)
+        assert wire.max_tokens is None
+        assert wire.temperature is None
+
+    def test_temperature_zero_propagates_for_greedy(
+        self, settler, anchor, alice, transport, token_stream_transport,
+        alice_token_sim,
+    ):
+        # 0.0 is a real value, not None. Must NOT collapse to None
+        # in the wire encoding (would silently disable greedy
+        # decode at the runner).
+        executor = _make_streaming_executor(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            token_stream_transport=token_stream_transport,
+        )
+        alice_token_sim.set_text("ok")
+        chain = _make_chain([alice.node_id])
+        list(executor.execute_chain_streaming(
+            request=self._request_with_sampling(temperature=0.0),
+            chain=chain,
+        ))
+        wire = self._last_streaming_wire_request(alice_token_sim)
+        assert wire.temperature == 0.0
+        assert wire.max_tokens is None
+
+    def test_unary_request_path_unchanged_no_sampling_fields(
+        self, executor, alice, bob, alice_sim, bob_sim,
+    ):
+        # Streaming-only invariant from design plan §4 Task 3:
+        # the unary path's RunLayerSliceRequest construction stays
+        # untouched (non-tail stages have no autoregressive decode
+        # to override). Drives a 2-stage UNARY chain even though
+        # the InferenceRequest sets sampling fields, then inspects
+        # the per-stage StageSim's recorded request bytes — sampling
+        # fields MUST be None on all unary requests.
+        chain = _make_chain([alice.node_id, bob.node_id])
+        executor.execute_chain(
+            request=self._request_with_sampling(
+                max_tokens=4, temperature=0.7,
+            ),
+            chain=chain,
+        )
+        for sim in (alice_sim, bob_sim):
+            assert sim.calls, "no unary request was sent to this sim"
+            for req_bytes in sim.calls:
+                msg = parse_message(req_bytes)
+                assert isinstance(msg, RunLayerSliceRequest)
+                assert msg.streaming is False
+                assert msg.max_tokens is None
+                assert msg.temperature is None
+
+
 class TestStreamingValidation:
     def test_empty_chain_rejected(
         self, settler, anchor, transport, token_stream_transport,
