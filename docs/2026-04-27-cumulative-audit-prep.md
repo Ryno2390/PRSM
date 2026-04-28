@@ -513,6 +513,160 @@ golden integration test.
 
 ---
 
+## 7.4 Streaming-Token Output (Phase 3.x.8)
+
+Phase 3.x.8 added chat-style incremental output to the cross-host
+inference path. Caller iterates the executor's
+``execute_chain_streaming(...)`` generator; each yield is a
+``StreamToken`` (text_delta + sequence_index + optional token_id +
+optional finish_reason); the LAST yield is a
+``ChainExecutionResult`` carrying the signed multi-stage receipt.
+Closes the "wait-for-full-chain-return" UX gap that blocked
+interactive use of ``prsm_inference``.
+
+**Tag:** `phase3.x.8-merge-ready-20260428` at commit `391b92b0`.
+
+**Headline guarantee.** 1/2/3-stage chains produce joined
+``StreamToken.text_delta`` bit-identical to the single-host
+reference output. Verified end-to-end across 6 E2E scenarios in
+``TestStreamingTokenOutput``.
+
+**v1 honest scope (documented in code + commits — auditors should
+not assume more).**
+
+  - ``SyntheticStreamingRunner`` is a PLACEHOLDER. It wraps the
+    one-shot ``LayerSliceRunner``, runs the full forward pass,
+    decodes activation→text, splits into synthetic deltas. Real
+    autoregressive decode plugs in later as a runner replacement
+    under the same ``StreamingLayerRunner`` Protocol — no
+    public-surface change. The wire path is the load-bearing
+    surface.
+  - **Cancellation = clean upstream cleanup only.** Python
+    ``GeneratorExit`` semantics forbid yielding additional values
+    after ``.close()``; a partial-output ``ChainExecutionResult``
+    cannot be delivered through the wire on caller cancellation.
+    Try/finally ``.close()`` propagation at server + executor
+    layers ensures resource cleanup; the partial-receipt-on-cancel
+    pathway (in-band cancel sentinel via ``.send()`` or
+    side-channel inspection API) is a Phase 3.x.8.x follow-up.
+
+**Trust seams added by 3.x.8.**
+
+  1. ``streaming: bool = False`` field on ``RunLayerSliceRequest``
+     with conditional encoding (omitted from canonical JSON when
+     False). Preserves byte-identity with v2-pre-3.x.8 messages
+     so the v1↔v2 forward-compat invariant from 3.x.7.1 still
+     holds for non-streamed traffic. M1-style bool-coercion guard
+     rejects int 0/1 on both ``__post_init__`` and ``from_dict``.
+
+  2. ``StreamFinalFrame.response.activation_blob`` is the UTF-8
+     joined output bytes. The stage's existing
+     ``signing_payload`` hex-encodes ``activation_blob`` — so a
+     relay tampering ANY ``TokenFrame.text_delta`` causes the
+     joined-bytes hash to diverge from what the stage signed,
+     invalidating the stream as a whole. No new signing-payload
+     field needed. Three layers enforce this: server pre-sign
+     (cannot sign inconsistent text), executor post-receive
+     (re-checks against signed bytes), MCP adapter (defense-in-
+     depth aggregate check).
+
+  3. ``InferenceReceipt.streamed_output: bool`` flag is part of
+     the SIGNED payload via conditional trailing line
+     ``streamed_output:true`` (omitted entirely when False —
+     byte-identical to pre-3.x.8 receipts). Tampering the flag
+     in EITHER direction (False→True OR True→False) on a signed
+     receipt invalidates the signature. Downgrade-resistant.
+     M1-style bool-coercion guard at ``from_dict``.
+
+  4. Server ``handle_token_stream`` validation gates fire BEFORE
+     runner dispatch: streaming=True required, no chunked-input
+     v1 (manifest must be None), runner configured (else
+     INTERNAL_ERROR), stage IS the chain tail per
+     ``_is_final_stage``. The existing 8-step gates (token,
+     deadline, registry, shard, tier) reused via
+     ``_run_validation_gates``. Sequence-index invariant
+     (0-indexed strictly increasing) AND joined-text invariant
+     (``"".join(text_deltas) == terminal_chunk.full_output_text``)
+     enforced server-side BEFORE signing — both fail with
+     INTERNAL_ERROR.
+
+  5. Round-1 M1 remediation (auditor-visible "sole error frame on
+     failure" invariant): server-side terminal-chunk integrity
+     validation reordered to fire BEFORE the terminal
+     ``TokenFrame`` is published on the wire. On failure: SOLE
+     ``StageError`` frame, no preceding terminal ``TokenFrame``.
+     Non-terminal ``TokenFrame``s may already be on the wire
+     when a terminal-chunk-side failure occurs — explicitly
+     documented in test ``test_runner_joined_text_diverges_from_full_output_text``.
+
+  6. Cancellation cleanup at both server (``_dispatch_token_stream``)
+     and executor (``_dispatch_streaming_tail``) layers via
+     try/finally that explicitly invokes ``.close()`` on the
+     upstream iterator. close-time exceptions swallowed at debug
+     log — never propagate through ``GeneratorExit``. Verified
+     by tracking-generator tests that record their own
+     close_count via ``except GeneratorExit:``.
+
+**Test coverage at the tag.** 386 streaming-relevant tests; 739
+across the full Phase 3.x.6+7+7.1+8 + MCP regression. Includes:
+- 26 protocol tests (TokenFrame + StreamFinalFrame round-trip +
+  streaming-flag conditional encoding + bool coercion).
+- 47 server tests (token-stream routing + validation gates +
+  runner-error handling + cancellation cleanup).
+- 23 client tests (streaming dispatch + frame validation +
+  signature verification + cancellation).
+- 22 streaming_runner tests.
+- 13 MCP-adapter tests (per-token progress + receipt downgrade
+  resistance).
+- 10 receipt extension tests.
+- 6 E2E scenarios.
+
+**Round-1 → round-2 surface:**
+- Round-1: APPROVED-FOR-TAG with M1 (terminal-chunk validation
+  ordering) + 3 LOWs (cosmetic — unused loop var, defensive
+  assertion, receipt-builder dedup).
+- M1 remediated pre-tag at commit `391b92b0`.
+- Round-2: APPROVED-FOR-TAG.
+
+**Round-2 LOW follow-ups (deferred to Phase 3.x.8.x):**
+- L1: unused loop variable in `_dispatch_streaming_tail`
+  cleanup path (cosmetic).
+- L2: defensive `assert chunk_iter is not None` for human
+  readability of finally clause.
+- L3: shared `_build_signed_receipt(*, streamed)` helper between
+  `ParallaxScheduledExecutor` + `mcp_streaming` to avoid drift.
+
+**Other Phase 3.x.8.x deferred items:**
+- Real autoregressive decoder replacement of
+  ``SyntheticStreamingRunner``. Future threat-model revision
+  needed for timing side-channels (token-arrival timing leaks
+  output length).
+- Streaming + chunked-input composition (currently rejected at
+  server with MALFORMED_REQUEST + at client with
+  ACTIVATION_TOO_LARGE).
+- Partial-output cancellation receipt via in-band `.send()`
+  sentinel or side-channel inspection API.
+- HTTP streaming surface — wire ``stream_inference_to_mcp`` to
+  ``mcp_server.handle_prsm_inference`` via SSE / chunked-transfer
+  endpoint.
+- Factory updates (``make_layer_stage_server(streaming_runner=...)``
+  + ``make_rpc_chain_executor(token_stream_send_message=...)``).
+
+**Auditor prompts:** the 3.x.8 attack surface is contained — the
+streaming-token wire path is additive on top of 3.x.7.1's
+chunked-streaming path. Read the conditional-encoding pattern in
+both ``RunLayerSliceRequest.streaming`` (wire layer) and
+``InferenceReceipt.streamed_output`` (receipt layer); they should
+be byte-identical to pre-3.x.8 when False. Read
+``_dispatch_token_stream`` lines 911-982 in server.py for the M1
+reorder + integrity gates. Read the 6 E2E scenarios in
+``TestStreamingTokenOutput`` — they exercise the full surface.
+Honest-scope notes (synthetic runner placeholder + cancellation
+v1) are documented inline + in commit messages — auditors won't
+find a "we said X but did Y" gap.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
@@ -531,3 +685,4 @@ When the Foundation signs the auditor contract:
 - **0.2 (2026-04-27)** — added §7.1 "Third-party-derived components" covering Phase 3.x.6 vendor scope (Parallax decentralized inference scheduler, Apache 2.0). Vendor boundary documented; PRSM-original delta (four trust adapters + executor) called out for auditor focus.
 - **0.3 (2026-04-28)** — added §7.2 "Cross-Host ChainExecutor" covering Phase 3.x.7 PRSM-original cross-host inference path (RpcChainExecutor + LayerStageServer + multi-stage TEE attestation envelope). 6 trust seams called out for auditor focus including the H2 substitution-rejection invariant remediated pre-tag.
 - **0.4 (2026-04-28)** — added §7.3 "Chunked Activation Streaming" covering Phase 3.x.7.1 v2 wire-format extension. 6 trust seams including pre-consumption envelope gate, full-envelope response signing payload, v1↔v2 byte-equivalent inline encoding, and bounded chunk iterators (client + server). Round-1 H1+H2+M3+L1 + round-2 I1 closed pre-tag. Phase 3.x.7.1 tag: phase3.x.7.1-merge-ready-20260428 at 339957ee.
+- **0.5 (2026-04-28)** — added §7.4 "Streaming-Token Output" covering Phase 3.x.8 chat-style incremental output path. 6 trust seams including conditional `streaming` flag encoding (byte-identity preservation), three-layer joined-text invariant enforcement, downgrade-resistant `streamed_output` receipt flag, server-side validation gates BEFORE runner dispatch, M1 round-1 sole-error-frame ordering remediation, and cancellation cleanup propagation. v1 honest-scope notes (SyntheticStreamingRunner placeholder + Python GeneratorExit cancellation limit) explicitly documented for auditor focus. Round-1 M1 closed pre-tag; 3 LOWs deferred. Phase 3.x.8 tag: phase3.x.8-merge-ready-20260428 at 391b92b0.
