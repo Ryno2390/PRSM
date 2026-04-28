@@ -41,9 +41,37 @@ from prsm.compute.tee.models import PrivacyLevel, TEEType
 __all__ = [
     "StreamingChunk",
     "StreamingLayerRunner",
+    "StreamingSamplingShim",
     "SyntheticStreamingRunner",
     "split_text_into_deltas",
 ]
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# StreamingSamplingShim — Phase 3.x.10.x server → runner plumbing
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class StreamingSamplingShim:
+    """Per-call sampling overrides forwarded from the wire to the
+    streaming runner. Built by ``LayerStageServer.handle_token_stream``
+    from the parsed ``RunLayerSliceRequest.max_tokens`` /
+    ``.temperature`` fields and passed as ``request=`` to the runner.
+
+    The runner uses ``getattr(request, "max_tokens", None)`` /
+    ``getattr(request, "temperature", None)`` to resolve overrides;
+    None falls back to the runner's construction-time
+    ``SamplingDefaults``. Mirrors ``InferenceRequest``'s shape on the
+    minimum surface the runner consumes — keeps the runner decoupled
+    from the chain_rpc protocol's full envelope.
+
+    Both fields default to None so a server can pass an empty shim
+    on every dispatch without forcing wire-level sampling overrides.
+    """
+
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -118,6 +146,7 @@ class StreamingLayerRunner(Protocol):
         activation: np.ndarray,
         privacy_tier: PrivacyLevel,
         is_final_stage: bool,
+        request: Any = None,
     ) -> Iterator[StreamingChunk]:
         ...
 
@@ -215,7 +244,14 @@ class SyntheticStreamingRunner:
         activation: np.ndarray,
         privacy_tier: PrivacyLevel,
         is_final_stage: bool,
+        request: Any = None,
     ) -> Iterator[StreamingChunk]:
+        # Phase 3.x.10.x: ``request=`` accepted for Protocol
+        # conformance; the synthetic runner has no sampling axis to
+        # honor (it splits a fixed decoded string into N synthetic
+        # chunks), so the override is ignored. Real sampling lives
+        # in ``AutoregressiveStreamingRunner``.
+        del request
         # Run the underlying one-shot forward pass + decode.
         result = self._runner.run_layer_range(
             model=model,

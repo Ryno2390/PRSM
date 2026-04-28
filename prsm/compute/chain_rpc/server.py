@@ -829,6 +829,24 @@ class LayerStageServer:
         # Step 7b: invoke the streaming runner. Each ``StreamingChunk``
         # becomes a TokenFrame; the terminal chunk also drives the
         # signed StreamFinalFrame.
+        # Phase 3.x.10.x: forward sampling overrides via the
+        # ``StreamingSamplingShim``. The wire request's
+        # ``max_tokens`` / ``temperature`` (None when the caller
+        # didn't override) reach the runner so user-specified
+        # ``InferenceRequest.max_tokens`` / ``.temperature`` no
+        # longer dead-letter. Empty shim (both None) means runner
+        # falls back to ``SamplingDefaults`` — same behavior as
+        # pre-3.x.10.x dispatches.
+        # Lazy import to keep the chain_rpc → inference dependency
+        # one-directional (matches the existing StreamingChunk
+        # lazy-import pattern at server.py:867).
+        from prsm.compute.inference.streaming_runner import (
+            StreamingSamplingShim as _StreamingSamplingShim,
+        )
+        sampling_shim = _StreamingSamplingShim(
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+        )
         chunk_iter = None
         try:
             chunk_iter = self._streaming_runner.run_layer_slice_streaming(
@@ -837,6 +855,7 @@ class LayerStageServer:
                 activation=activation,
                 privacy_tier=request.privacy_tier,
                 is_final_stage=True,
+                request=sampling_shim,
             )
         except TimeoutError as exc:
             yield self._error(

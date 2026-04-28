@@ -162,6 +162,9 @@ class _FakeModel:
         self.emit_ids = emit_ids
         self.raise_after = raise_after
         self.raise_exc = raise_exc
+        # Records last generate() call so Phase 3.x.10.x Task 2
+        # tests can assert sampling-shim plumbing reaches the model.
+        self.last_call: Dict[str, Any] = {}
 
     def generate(
         self, *, input_ids, streamer, max_new_tokens, temperature,
@@ -175,6 +178,14 @@ class _FakeModel:
             ):
                 as_list = as_list[0]
             input_ids = as_list
+        self.last_call = dict(
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            do_sample=do_sample,
+            top_k=top_k,
+            top_p=top_p,
+            eos_token_id=eos_token_id,
+        )
         emitted: List[int] = []
         for i, tid in enumerate(self.emit_ids):
             if i >= max_new_tokens:
@@ -238,6 +249,8 @@ def _build_server(
 
 def _make_streaming_request(
     *, settler_identity, deadline: float = 2000.0,
+    max_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
 ) -> RunLayerSliceRequest:
     activation = np.array([[1.0, 2.0, 3.0, 4.0]], dtype=np.float32)
     blob = activation.tobytes()
@@ -260,6 +273,8 @@ def _make_streaming_request(
         upstream_token=token,
         deadline_unix=deadline,
         streaming=True,
+        max_tokens=max_tokens,
+        temperature=temperature,
     )
 
 
@@ -395,3 +410,189 @@ class TestAutoregressiveRunnerThroughLayerStageServer:
         assert err is not None
         assert err.code == "INTERNAL_ERROR"
         assert final is None
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.10.x Task 2 — Sampling-shim wire-to-runner plumbing tests
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _last_call_for(server: LayerStageServer):
+    """Reach into the server's streaming runner's underlying mock
+    model to introspect the last `.generate()` call."""
+    return server._streaming_runner._model.last_call  # noqa: SLF001
+
+
+class TestSamplingShimPlumbing:
+    def test_max_tokens_on_wire_reaches_model_generate(self):
+        # Wire request specifies max_tokens=4; server constructs the
+        # shim and forwards via request= to the runner; runner's
+        # _effective_max_tokens resolves to 4 and calls
+        # model.generate(max_new_tokens=4). Without the plumbing,
+        # the runner would fall back to SamplingDefaults(max_tokens=16).
+        server, settler_identity, _ = _build_server(
+            emit_ids=[1, 2, 3, 4, 5, 6, 7, 8],
+            id_to_piece={i: f"t{i} " for i in range(1, 9)},
+        )
+        req = _make_streaming_request(
+            settler_identity=settler_identity, max_tokens=4,
+        )
+        tokens, final, err = _decode(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is None
+        assert final is not None
+        # The runner caps at the wire's max_tokens, not the
+        # construction default.
+        assert _last_call_for(server)["max_new_tokens"] == 4
+        # Exactly 4 token frames + 1 terminal carrying the cap.
+        assert len(tokens) == 4
+        assert tokens[-1].finish_reason == "max_tokens"
+
+    def test_temperature_zero_on_wire_triggers_greedy(self):
+        # temperature=0.0 → runner sets do_sample=False on
+        # model.generate. Pre-3.x.10.x this couldn't be exercised
+        # through the wire because the field didn't exist.
+        server, settler_identity, _ = _build_server(
+            emit_ids=[1, 2],
+            id_to_piece={1: "alpha ", 2: "beta"},
+        )
+        req = _make_streaming_request(
+            settler_identity=settler_identity, temperature=0.0,
+        )
+        _, _, err = _decode(server.handle_token_stream(encode_message(req)))
+        assert err is None
+        assert _last_call_for(server)["do_sample"] is False
+        assert _last_call_for(server)["temperature"] == 0.0
+
+    def test_both_fields_unset_falls_back_to_runner_defaults(self):
+        # Wire request omits both fields (None on both); the runner
+        # uses its construction-time SamplingDefaults. _build_server
+        # constructs the runner with SamplingDefaults(max_tokens=16);
+        # the test asserts that's what reaches model.generate.
+        server, settler_identity, _ = _build_server(
+            emit_ids=[1, 2, 3],
+            id_to_piece={1: "a ", 2: "b ", 3: "c"},
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        # Wire-side: no overrides set.
+        assert req.max_tokens is None
+        assert req.temperature is None
+        _, _, err = _decode(server.handle_token_stream(encode_message(req)))
+        assert err is None
+        # Runner falls back to construction default (16 from
+        # _build_server's SamplingDefaults).
+        assert _last_call_for(server)["max_new_tokens"] == 16
+        # Default temperature (1.0) means do_sample=True by the
+        # runner's resolver.
+        assert _last_call_for(server)["do_sample"] is True
+
+    def test_temperature_positive_propagates_with_top_k_top_p(self):
+        # temperature=0.5 → do_sample=True; SamplingDefaults' top_k
+        # + top_p still reach the model unchanged (the shim only
+        # carries max_tokens + temperature; sampling shape is
+        # operator-controlled at runner construction).
+        server, settler_identity, _ = _build_server(
+            emit_ids=[1, 2],
+            id_to_piece={1: "x", 2: "y"},
+        )
+        req = _make_streaming_request(
+            settler_identity=settler_identity, temperature=0.5,
+        )
+        _, _, err = _decode(server.handle_token_stream(encode_message(req)))
+        assert err is None
+        last = _last_call_for(server)
+        assert last["do_sample"] is True
+        assert last["temperature"] == 0.5
+        assert last["top_k"] == 50
+        assert last["top_p"] == 0.95
+
+    def test_only_max_tokens_set_temperature_falls_back(self):
+        # Wire sets max_tokens=2 only; temperature stays None and
+        # the runner falls back to SamplingDefaults.temperature=1.0.
+        # Tests that the two fields are independent on the shim.
+        server, settler_identity, _ = _build_server(
+            emit_ids=[1, 2, 3, 4, 5],
+            id_to_piece={i: f"t{i}" for i in range(1, 6)},
+        )
+        req = _make_streaming_request(
+            settler_identity=settler_identity, max_tokens=2,
+        )
+        _, _, err = _decode(server.handle_token_stream(encode_message(req)))
+        assert err is None
+        last = _last_call_for(server)
+        assert last["max_new_tokens"] == 2
+        assert last["temperature"] == 1.0  # runner default
+        assert last["do_sample"] is True   # 1.0 > 0 → sampled
+
+
+class TestSamplingShimBackCompatWithRunnerProtocol:
+    """Phase 3.x.10.x makes ``request: Any = None`` part of the
+    StreamingLayerRunner Protocol. SyntheticStreamingRunner accepts
+    + ignores it; AutoregressiveStreamingRunner uses it. A runner
+    that ignores ``request=`` MUST continue to work — no behavioral
+    change for existing synthetic-runner-backed deployments."""
+
+    def test_synthetic_runner_still_accepts_dispatch_with_request(self):
+        # Reuses Phase 3.x.8 Task 2's SyntheticStreamingRunner
+        # through the server with the new shim plumbing in place.
+        # Server passes `request=shim`; synthetic runner ignores it.
+        from prsm.compute.chain_rpc.server import (
+            LayerSliceResult,
+        )
+        from prsm.compute.inference.streaming_runner import (
+            SyntheticStreamingRunner,
+        )
+
+        class _PassthroughRunner:
+            def run_layer_range(
+                self, *, model, layer_range, activation, privacy_tier,
+                is_final_stage,
+            ) -> LayerSliceResult:
+                return LayerSliceResult(
+                    output=activation.copy(),
+                    duration_seconds=0.001,
+                    tee_attestation=b"\x09" * 32,
+                    tee_type=TEEType.SOFTWARE,
+                    epsilon_spent=0.0,
+                )
+
+        synthetic = SyntheticStreamingRunner(
+            runner=_PassthroughRunner(),
+            output_decoder=lambda act: "hello synthetic world",
+        )
+        # Build server with synthetic runner + reach into the
+        # _build_server helper for boilerplate.
+        stage_identity = generate_node_identity(display_name="stage")
+        settler_identity = generate_node_identity(display_name="settler")
+        anchor = _Anchor()
+        anchor.register(stage_identity)
+        anchor.register(settler_identity)
+        registry = _Registry()
+        registry.models["test-model"] = _Model.linear_chain("test-model")
+
+        server = LayerStageServer(
+            identity=stage_identity,
+            registry=registry,
+            runner=_UnaryRunner(),
+            tee_runtime=_TEERuntime(),
+            anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=synthetic,
+        )
+
+        # Issue a wire request WITH max_tokens set — shim populates,
+        # synthetic runner accepts + ignores.
+        req = _make_streaming_request(
+            settler_identity=settler_identity, max_tokens=4,
+        )
+        tokens, final, err = _decode(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is None
+        assert final is not None
+        # Synthetic runner produces its fixed text regardless of
+        # the shim — joined-text invariant still holds.
+        joined = "".join(t.text_delta for t in tokens)
+        assert joined == "hello synthetic world"
+        assert final.response.activation_blob == joined.encode("utf-8")
