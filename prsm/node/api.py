@@ -170,31 +170,29 @@ async def _settle_streaming_escrow(
     request: Any,
     result: Any,
 ) -> None:
-    """Settle escrow for a successful streaming inference, plus
-    re-sign the receipt under the API node's identity (mirrors the
-    unary path's signing logic)."""
+    """Settle escrow + record privacy-budget spend for a successful
+    streaming inference.
+
+    Phase 3.x.8.1 round-1 L1 remediation: the receipt re-sign
+    previously done here was dead code — the wire-side re-sign in
+    ``_result_to_dict(item, job_id=..., identity=node.identity)`` is
+    the authoritative path. Re-signing here computed a value that
+    was immediately discarded (the local ``rebound`` receipt object
+    wasn't propagated anywhere). Removed.
+
+    Privacy budget tracking still fires here on the success path —
+    it's the right layer to record DP epsilon spend (the executor
+    yielded a complete result with measured ``epsilon_spent``).
+    """
     if not escrow_entry or not getattr(node, "_payment_escrow", None):
         return
-    # Re-sign under the API-node identity (Phase 3.x.1 invariant —
-    # the API is authoritative even when the executor used a
-    # different identity). The receipt's streamed_output flag is
-    # preserved through the re-sign because dataclasses.replace
-    # in _build_signed_receipt established it.
-    if result.receipt is not None and node.identity:
-        from prsm.compute.inference import sign_receipt
-        try:
-            # _result_to_dict above already rebound job_id. Apply
-            # the same here for the signed receipt the privacy
-            # budget records against.
-            import dataclasses
-            rebound = dataclasses.replace(result.receipt, job_id=job_id)
-            sign_receipt(rebound, node.identity)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                f"Streaming receipt re-sign failed for job_id={job_id}: {e}"
-            )
 
-    # Privacy budget tracking — same as unary path.
+    # Privacy budget tracking — same as unary path. Only fires on
+    # the success path (a complete result with measured
+    # epsilon_spent). Mid-stream failures don't produce a receipt,
+    # so this code never sees them — they go through the
+    # _resolve_post_token_billing settle-without-privacy-budget
+    # path instead.
     if (
         hasattr(node, "privacy_budget")
         and node.privacy_budget
@@ -219,6 +217,52 @@ async def _settle_streaming_escrow(
         logger.warning(
             f"Streaming escrow release failed for job_id={job_id}: {e}"
         )
+
+
+async def _resolve_post_token_billing(
+    node: Any,
+    job_id: str,
+    escrow_entry: Any,
+    tokens_emitted: int,
+    reason: str,
+) -> None:
+    """Phase 3.x.8.1 round-1 M1 remediation: design plan §3.4
+    settle-on-tokens-emitted policy.
+
+    When the streaming pipeline fails AFTER one or more tokens have
+    been emitted on the wire, the requester has consumed the
+    network's compute work — the chain executors burned cycles on
+    those tokens. Refunding the requester would mean the network
+    eats the cost (billing griefing vector: a malicious node could
+    emit N tokens then crash, paying nothing despite forcing real
+    compute work).
+
+    Policy: tokens emitted > 0 → settle (release escrow at full
+    estimate, no privacy-budget recording — we don't have a
+    complete receipt with measured epsilon for a partial stream).
+    Tokens emitted == 0 → refund (pre-execute failure or
+    immediately-failing dispatch — caller paid nothing for nothing).
+    """
+    if not escrow_entry or not getattr(node, "_payment_escrow", None):
+        return
+    if tokens_emitted > 0:
+        try:
+            await node._payment_escrow.release_escrow(
+                job_id=job_id,
+                provider_id=node.identity.node_id if node.identity else "self",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Streaming post-token escrow release failed for "
+                f"job_id={job_id}: {e}"
+            )
+    else:
+        try:
+            await node._payment_escrow.refund_escrow(job_id, reason)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Streaming escrow refund failed for job_id={job_id}: {e}"
+            )
 
 
 async def _refund_streaming_escrow(
@@ -1162,8 +1206,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                 ),
                             )
                         else:
-                            await _refund_streaming_escrow(
+                            # Phase 3.x.8.1 round-1 M1: settle on
+                            # tokens emitted; refund on
+                            # zero-tokens-and-failure (pre-execute
+                            # gate trip).
+                            await _resolve_post_token_billing(
                                 node, job_id, escrow_entry,
+                                tokens_emitted,
                                 item.error or "inference failed",
                             )
                             yield _sse_event("error", {
@@ -1176,8 +1225,9 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     else:
                         # Defensive — execute_streaming's contract is
                         # InferenceTokenEvent | InferenceResult.
-                        await _refund_streaming_escrow(
+                        await _resolve_post_token_billing(
                             node, job_id, escrow_entry,
+                            tokens_emitted,
                             f"unexpected event type {type(item).__name__}",
                         )
                         yield _sse_event("error", {
@@ -1190,9 +1240,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                         })
                         return
                 # Generator exhausted without a terminal — protocol
-                # violation by the executor. Refund + error.
-                await _refund_streaming_escrow(
+                # violation by the executor.
+                await _resolve_post_token_billing(
                     node, job_id, escrow_entry,
+                    tokens_emitted,
                     "executor exhausted without terminal result",
                 )
                 yield _sse_event("error", {
@@ -1208,8 +1259,9 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "Streaming inference pipeline error for job_id=%r",
                     job_id,
                 )
-                await _refund_streaming_escrow(
-                    node, job_id, escrow_entry, str(exc),
+                await _resolve_post_token_billing(
+                    node, job_id, escrow_entry,
+                    tokens_emitted, str(exc),
                 )
                 yield _sse_event("error", {
                     "error": f"{exc.__class__.__name__}: {exc}",

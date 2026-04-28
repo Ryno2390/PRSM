@@ -91,6 +91,7 @@ class _SignedStreamingExecutor:
         token_deltas: Optional[List[str]] = None,
         terminal_failure_message: Optional[str] = None,
         cost_ftns: Decimal = Decimal("0.04"),
+        fail_after_n_tokens: Optional[int] = None,
     ):
         self._identity = identity
         self._token_deltas = (
@@ -99,6 +100,7 @@ class _SignedStreamingExecutor:
         )
         self._terminal_failure_message = terminal_failure_message
         self._cost = cost_ftns
+        self._fail_after_n_tokens = fail_after_n_tokens
         self.calls = 0
 
     async def execute_streaming(
@@ -112,6 +114,21 @@ class _SignedStreamingExecutor:
             return
         last = len(self._token_deltas) - 1
         for i, delta in enumerate(self._token_deltas):
+            # Phase 3.x.8.1 round-1 M2 test mode: emit N tokens
+            # then yield a terminal failure (simulates a mid-stream
+            # chain crash AFTER tokens have hit the wire). The
+            # endpoint MUST settle (not refund) per design plan
+            # §3.4 — caller paid for chain dispatch + the network
+            # already burned compute on those N tokens.
+            if (
+                self._fail_after_n_tokens is not None
+                and i == self._fail_after_n_tokens
+            ):
+                yield InferenceResult.failure(
+                    request.request_id,
+                    "simulated mid-stream crash after tokens emitted",
+                )
+                return
             yield InferenceTokenEvent(
                 sequence_index=i,
                 text_delta=delta,
@@ -369,6 +386,55 @@ class TestStreamingHttpHappyPath:
             },
         ) as response:
             list(response.iter_bytes())
+        assert escrow.create_count == 1
+        assert escrow.release_count == 1
+        assert escrow.refund_count == 0
+
+
+class TestStreamingHttpBillingPolicy:
+    """Phase 3.x.8.1 round-1 M1+M2 remediation: design plan §3.4
+    settle-on-tokens-emitted policy.
+
+    Pre-execute failure (zero tokens emitted) → refund. Mid-stream
+    failure AFTER tokens have hit the wire → settle (caller paid
+    for the work the network already did).
+    """
+
+    def test_mid_stream_failure_after_tokens_settles_not_refunds(
+        self, settler_identity, escrow,
+    ):
+        # Executor emits 2 tokens, then yields InferenceResult.failure
+        # — simulates a chain crash after partial output has reached
+        # the wire. Per §3.4: settle (release escrow), not refund.
+        failing_after_tokens = _SignedStreamingExecutor(
+            identity=settler_identity,
+            fail_after_n_tokens=2,
+        )
+        unary = _UnaryShimExecutor(identity=settler_identity)
+        dual = _DualExecutor(
+            identity=settler_identity,
+            streaming=failing_after_tokens, unary=unary,
+        )
+        node = _FakeNode(
+            identity=settler_identity, executor=dual, escrow=escrow,
+        )
+        app = create_api_app(node, enable_security=False)
+        client = TestClient(app)
+        with client.stream(
+            "POST", "/compute/inference/stream",
+            json={
+                "prompt": "x", "model_id": "mock-llama-3-8b",
+                "budget_ftns": 1.0,
+            },
+        ) as response:
+            body = b"".join(response.iter_bytes())
+        events = _parse_sse_events(body)
+
+        # 2 token events + 1 error event (no result event because
+        # the executor failed after the 2nd token).
+        assert [e[0] for e in events] == ["token", "token", "error"]
+        # Headline §3.4 invariant: escrow SETTLED (release_count=1),
+        # not refunded.
         assert escrow.create_count == 1
         assert escrow.release_count == 1
         assert escrow.refund_count == 0
