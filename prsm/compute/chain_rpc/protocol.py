@@ -556,7 +556,14 @@ class RunLayerSliceRequest:
                 f"deadline_unix must be numeric, got "
                 f"{type(self.deadline_unix).__name__}"
             )
-        # v2 inline-XOR-streamed integrity check.
+        # v2 inline-XOR-streamed integrity check. Exactly one of the
+        # two payload paths must be active: inline blob (non-empty) OR
+        # streamed manifest. Both-or-neither is malformed.
+        #   - manifest present + blob non-empty → ambiguous (M3 round-1)
+        #   - manifest absent  + blob empty     → no payload (M3 round-1)
+        # ``activation_shape`` entries are positive ints (>0), so any
+        # well-formed inline activation has at least dtype.itemsize
+        # bytes and an empty blob is structurally meaningless.
         if self.activation_manifest is not None:
             _validate_shard_manifest(
                 self.activation_manifest, field="activation_manifest"
@@ -567,6 +574,12 @@ class RunLayerSliceRequest:
                     "activation_manifest is present (chunks ride out-"
                     "of-band)"
                 )
+        elif not self.activation_blob:
+            raise ChainRpcMalformedError(
+                "request has neither inline activation_blob nor "
+                "activation_manifest — exactly one payload path is "
+                "required"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         # activation_blob → hex for JSON-safety. For streamed (v2)
@@ -718,7 +731,11 @@ class RunLayerSliceResponse:
                 f"epsilon_spent must be numeric, got "
                 f"{type(self.epsilon_spent).__name__}"
             )
-        # v2 inline-XOR-streamed integrity check.
+        # v2 inline-XOR-streamed integrity check (M3 round-1 mirror).
+        # Exactly one payload path active. ``activation_shape`` entries
+        # are positive ints, so any well-formed inline response carries
+        # at least dtype.itemsize bytes — empty + no manifest = no
+        # payload.
         if self.activation_manifest is not None:
             _validate_shard_manifest(
                 self.activation_manifest, field="activation_manifest"
@@ -728,6 +745,12 @@ class RunLayerSliceResponse:
                     "streamed mode: activation_blob must be empty when "
                     "activation_manifest is present"
                 )
+        elif not self.activation_blob:
+            raise ChainRpcMalformedError(
+                "response has neither inline activation_blob nor "
+                "activation_manifest — exactly one payload path is "
+                "required"
+            )
 
     @staticmethod
     def signing_payload(
@@ -755,9 +778,14 @@ class RunLayerSliceResponse:
         ``activation_manifest`` is None, the field is OMITTED from the
         canonical JSON entirely — so a v2 caller signing inline gets
         the same payload bytes a v1 caller would. Only streamed
-        responses carry the additional ``activation_manifest_sha`` key
-        in the payload, which commits the stage to the to-be-assembled
-        bytes via the manifest's payload_sha256.
+        responses carry the additional ``activation_manifest_envelope``
+        key, which commits the stage to ALL FIVE manifest fields
+        (shard_id + payload_sha256 + payload_bytes + total_chunks +
+        chunk_bytes). Without committing the envelope's shape fields,
+        a network-level relay could inflate ``payload_bytes`` /
+        ``total_chunks`` while leaving ``payload_sha256`` intact and
+        trigger a client-side memory DoS during reassembly — the
+        H2 round-1 finding from Phase 3.x.7.1 Task 6 review.
         """
         payload = {
             "request_id": request_id,
@@ -770,11 +798,19 @@ class RunLayerSliceResponse:
             "epsilon_spent": float(epsilon_spent),
             "stage_node_id": stage_node_id,
         }
-        # Conditional manifest_sha encoding: omitted entirely when the
-        # response is inline (so v1↔v2 inline messages produce
-        # byte-identical canonical JSON).
+        # Conditional manifest envelope encoding: omitted entirely when
+        # the response is inline (so v1↔v2 inline messages produce
+        # byte-identical canonical JSON). Streamed responses commit
+        # to ALL five manifest fields — tampering ANY of them
+        # invalidates the signature.
         if activation_manifest is not None:
-            payload["activation_manifest_sha"] = activation_manifest.payload_sha256
+            payload["activation_manifest_envelope"] = {
+                "shard_id": activation_manifest.shard_id,
+                "payload_sha256": activation_manifest.payload_sha256,
+                "payload_bytes": activation_manifest.payload_bytes,
+                "total_chunks": activation_manifest.total_chunks,
+                "chunk_bytes": activation_manifest.chunk_bytes,
+            }
         return json.dumps(payload, sort_keys=True).encode("utf-8")
 
     @classmethod
@@ -1042,16 +1078,31 @@ def parse_message(payload: bytes) -> Any:
             f"unknown message type {msg_type!r}; "
             f"known: {sorted(_MESSAGE_TYPE_REGISTRY)}"
         )
-    version = data.get("protocol_version")
     # v2 nodes accept v1 + v2 (forward-compat for rolling deploys);
     # v1 nodes still reject anything other than 1 because they only
     # know about CHAIN_RPC_PROTOCOL_VERSION = 1. bool rejection
     # preserved (M1 round-1 fix from Phase 3.x.7 Task 8).
-    if (
-        isinstance(version, int)
-        and not isinstance(version, bool)
-        and version not in SUPPORTED_PROTOCOL_VERSIONS
-    ):
+    #
+    # L1 round-1 (3.x.7.1): missing or non-int protocol_version is a
+    # version-negotiation failure, not a malformed-message failure —
+    # surface it as ``ChainRpcVersionMismatchError`` so the executor
+    # maps it to ``UNSUPPORTED_VERSION`` instead of
+    # ``MALFORMED_RESPONSE``.
+    if "protocol_version" not in data:
+        raise ChainRpcVersionMismatchError(
+            "peer message missing 'protocol_version'; "
+            f"local SUPPORTED_PROTOCOL_VERSIONS="
+            f"{sorted(SUPPORTED_PROTOCOL_VERSIONS)}"
+        )
+    version = data["protocol_version"]
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ChainRpcVersionMismatchError(
+            f"peer protocol_version must be int, got "
+            f"{type(version).__name__} ({version!r}); "
+            f"local SUPPORTED_PROTOCOL_VERSIONS="
+            f"{sorted(SUPPORTED_PROTOCOL_VERSIONS)}"
+        )
+    if version not in SUPPORTED_PROTOCOL_VERSIONS:
         raise ChainRpcVersionMismatchError(
             f"peer protocol_version={version}; "
             f"local SUPPORTED_PROTOCOL_VERSIONS="

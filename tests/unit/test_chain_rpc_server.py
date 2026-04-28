@@ -819,7 +819,10 @@ from prsm.compute.chain_rpc.activation_codec import (
     reassemble_chunked as _reassemble,
 )
 from prsm.compute.chain_rpc.protocol import ActivationChunk as _ActivationChunk
-from prsm.node.shard_streaming import ShardChunk as _ShardChunk
+from prsm.node.shard_streaming import (
+    ShardChunk as _ShardChunk,
+    ShardManifest,
+)
 
 
 def _make_streamed_request(
@@ -1221,3 +1224,188 @@ class TestStreamedConstructionValidation:
                 anchor=anchor,
                 chunk_bytes=0,
             )
+
+    def test_non_positive_max_streamed_payload_bytes_rejected(
+        self, stage_identity, registry, runner, tee_runtime, anchor
+    ):
+        with pytest.raises(ValueError, match="max_streamed_payload_bytes"):
+            LayerStageServer(
+                identity=stage_identity,
+                registry=registry,
+                runner=runner,
+                tee_runtime=tee_runtime,
+                anchor=anchor,
+                max_streamed_payload_bytes=0,
+            )
+
+
+class TestStreamedEnvelopeValidation:
+    """H1 + M1 round-1 (Phase 3.x.7.1 Task 6): pre-consumption envelope
+    sanity checks fire BEFORE any chunk consumption. Defense against
+    network-level adversaries that ship inflated manifest envelopes to
+    coerce server-side memory exhaustion during reassembly."""
+
+    def _decode_error(self, response_bytes: bytes) -> StageError:
+        msg = parse_message(response_bytes)
+        assert isinstance(msg, StageError)
+        return msg
+
+    def test_envelope_payload_bytes_lt_shape_dtype_rejected(
+        self, server, settler_identity
+    ):
+        """Manifest claims fewer bytes than shape × dtype implies."""
+        activation = np.arange(64, dtype=np.float32)
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+            activation=activation,
+            chunk_bytes=64,
+        )
+        # Re-construct manifest with an inflated payload_bytes.
+        original = parse_message(manifest_bytes)
+        assert isinstance(original, RunLayerSliceRequest)
+        bogus_manifest = ShardManifest(
+            shard_id=original.activation_manifest.shard_id,
+            payload_sha256=original.activation_manifest.payload_sha256,
+            payload_bytes=original.activation_manifest.payload_bytes + 8,
+            total_chunks=original.activation_manifest.total_chunks,
+            chunk_bytes=original.activation_manifest.chunk_bytes,
+        )
+        forged = RunLayerSliceRequest(
+            request_id=original.request_id,
+            model_id=original.model_id,
+            layer_range=original.layer_range,
+            privacy_tier=original.privacy_tier,
+            content_tier=original.content_tier,
+            activation_blob=b"",
+            activation_shape=original.activation_shape,
+            activation_dtype=original.activation_dtype,
+            upstream_token=original.upstream_token,
+            deadline_unix=original.deadline_unix,
+            activation_manifest=bogus_manifest,
+        )
+        manifest_resp, chunks = server.handle_streamed(
+            encode_message(forged), iter(chunk_frames)
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.ACTIVATION_INVALID.value
+        assert "payload_bytes" in err.message
+        assert list(chunks) == []
+
+    def test_envelope_total_chunks_inconsistent_rejected(
+        self, server, settler_identity
+    ):
+        """Manifest declares a total_chunks that doesn't match
+        ceil(payload_bytes / chunk_bytes)."""
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+            activation=np.arange(64, dtype=np.float32),
+            chunk_bytes=64,
+        )
+        original = parse_message(manifest_bytes)
+        bogus_manifest = ShardManifest(
+            shard_id=original.activation_manifest.shard_id,
+            payload_sha256=original.activation_manifest.payload_sha256,
+            payload_bytes=original.activation_manifest.payload_bytes,
+            total_chunks=original.activation_manifest.total_chunks + 5,
+            chunk_bytes=original.activation_manifest.chunk_bytes,
+        )
+        forged = RunLayerSliceRequest(
+            request_id=original.request_id,
+            model_id=original.model_id,
+            layer_range=original.layer_range,
+            privacy_tier=original.privacy_tier,
+            content_tier=original.content_tier,
+            activation_blob=b"",
+            activation_shape=original.activation_shape,
+            activation_dtype=original.activation_dtype,
+            upstream_token=original.upstream_token,
+            deadline_unix=original.deadline_unix,
+            activation_manifest=bogus_manifest,
+        )
+        manifest_resp, _ = server.handle_streamed(
+            encode_message(forged), iter(chunk_frames)
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.ACTIVATION_INVALID.value
+        assert "total_chunks" in err.message
+
+    def test_envelope_exceeds_max_streamed_payload_bytes_rejected(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        """payload_bytes above the operator's configured cap."""
+        # Configure server with a tight cap.
+        capped_server = LayerStageServer(
+            identity=stage_identity,
+            registry=registry,
+            runner=runner,
+            tee_runtime=tee_runtime,
+            anchor=anchor,
+            clock=lambda: 1000.0,
+            max_streamed_payload_bytes=100,
+        )
+        activation = np.arange(64, dtype=np.float32)  # 256 bytes > cap.
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+            activation=activation,
+            chunk_bytes=64,
+        )
+        manifest_resp, chunks = capped_server.handle_streamed(
+            manifest_bytes, iter(chunk_frames)
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.ACTIVATION_INVALID.value
+        assert "max_streamed_payload_bytes" in err.message
+        assert list(chunks) == []
+
+    def test_excess_chunks_after_envelope_rejected(
+        self, server, settler_identity
+    ):
+        """Peer ships more frames than envelope.total_chunks promises —
+        H1 round-1 fix bounds reassembly."""
+        manifest_bytes, chunk_frames, activation = _make_streamed_request(
+            settler_identity=settler_identity,
+            activation=np.arange(64, dtype=np.float32),
+            chunk_bytes=64,
+        )
+        # Append a duplicate frame so the iter yields one over the
+        # manifest's total_chunks.
+        chunk_frames.append(chunk_frames[-1])
+        manifest_resp, _ = server.handle_streamed(
+            manifest_bytes, iter(chunk_frames)
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.ACTIVATION_INVALID.value
+
+    def test_envelope_dtype_unrecognized_rejected(
+        self, server, settler_identity
+    ):
+        """A dtype string numpy can't parse — rejected at envelope
+        validation, not later."""
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+            chunk_bytes=64,
+        )
+        original = parse_message(manifest_bytes)
+        # Build a forged request with a bogus dtype. activation_dtype
+        # field validates only that it's a non-empty str — the dtype
+        # parse failure surfaces inside envelope validation.
+        forged = RunLayerSliceRequest(
+            request_id=original.request_id,
+            model_id=original.model_id,
+            layer_range=original.layer_range,
+            privacy_tier=original.privacy_tier,
+            content_tier=original.content_tier,
+            activation_blob=b"",
+            activation_shape=original.activation_shape,
+            activation_dtype="nope-not-a-dtype",
+            upstream_token=original.upstream_token,
+            deadline_unix=original.deadline_unix,
+            activation_manifest=original.activation_manifest,
+        )
+        manifest_resp, _ = server.handle_streamed(
+            encode_message(forged), iter(chunk_frames)
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.ACTIVATION_INVALID.value
+        assert "dtype" in err.message

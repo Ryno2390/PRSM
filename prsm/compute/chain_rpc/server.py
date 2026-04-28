@@ -70,6 +70,14 @@ logger = logging.getLogger(__name__)
 
 _UNKNOWN_REQUEST_ID = "<unknown>"
 
+# Phase 3.x.7.1 H1 round-1 remediation: hard cap on the assembled
+# activation payload size for the streamed path. Chosen at 1 GiB —
+# generous enough for batched LLM activations (e.g. batch=16 of 64 MiB
+# each = 1 GiB) but short of the kind of inflated values a hostile
+# peer could ship to exhaust server memory. Operators tuning this
+# down for stricter memory budgets pass it via the constructor.
+DEFAULT_MAX_STREAMED_PAYLOAD_BYTES = 1 * 1024 * 1024 * 1024
+
 
 @dataclass(frozen=True)
 class _GateResult:
@@ -229,6 +237,7 @@ class LayerStageServer:
         anchor: Any,
         clock: Callable[[], float] = time.time,
         chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
+        max_streamed_payload_bytes: int = DEFAULT_MAX_STREAMED_PAYLOAD_BYTES,
     ) -> None:
         if identity is None or not hasattr(identity, "node_id"):
             raise RuntimeError(
@@ -255,6 +264,11 @@ class LayerStageServer:
             raise ValueError(
                 f"chunk_bytes must be positive, got {chunk_bytes}"
             )
+        if max_streamed_payload_bytes <= 0:
+            raise ValueError(
+                f"max_streamed_payload_bytes must be positive, got "
+                f"{max_streamed_payload_bytes}"
+            )
 
         self._identity = identity
         self._registry = registry
@@ -263,6 +277,7 @@ class LayerStageServer:
         self._anchor = anchor
         self._clock = clock
         self._chunk_bytes = int(chunk_bytes)
+        self._max_streamed_payload_bytes = int(max_streamed_payload_bytes)
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -506,13 +521,28 @@ class LayerStageServer:
             )
         model = gate_result.model
 
+        # H1 + M1 round-1 remediation: validate the manifest envelope
+        # AGAINST the request's claimed shape/dtype + the operator's
+        # max_streamed_payload_bytes ceiling, BEFORE consuming any
+        # chunks. A hostile peer that ships an inflated payload_bytes
+        # would otherwise cause ShardAssembler to buffer arbitrary
+        # bytes during reassembly.
+        envelope_err = self._validate_streamed_envelope(request)
+        if envelope_err is not None:
+            return self._streamed_error(
+                request.request_id, envelope_err[0], envelope_err[1]
+            )
+
         # Step 7a-streamed: assemble chunks → decode activation. Both
         # ShardAssembler errors and decode errors map to ACTIVATION_INVALID.
+        # Bounded by manifest.total_chunks — _reassemble_inbound_chunks
+        # raises if the iterator yields excess frames.
         try:
             shard_chunks = self._reassemble_inbound_chunks(
                 chunk_iter,
                 expected_request_id=request.request_id,
                 manifest_shard_id=request.activation_manifest.shard_id,
+                expected_total_chunks=request.activation_manifest.total_chunks,
             )
         except ActivationCodecError as exc:
             return self._streamed_error(
@@ -711,21 +741,103 @@ class LayerStageServer:
                 f"layer-runner failure: {exc.__class__.__name__}",
             )
 
+    def _validate_streamed_envelope(
+        self, request: RunLayerSliceRequest
+    ) -> Optional[Tuple[StageErrorCode, str]]:
+        """H1 + M1 round-1 remediation: pre-consumption envelope sanity
+        check. Returns ``None`` if the manifest's claimed envelope is
+        consistent with the request's shape/dtype AND below the
+        operator's ``max_streamed_payload_bytes`` ceiling. Otherwise
+        returns a (code, message) error tuple.
+
+        This fires BEFORE any chunk consumption — defense against
+        hostile peers that inflate ``payload_bytes`` / ``total_chunks``
+        to exhaust server memory during reassembly. The H2 fix on the
+        signing side ensures that authentic stages can't lie about
+        these values without invalidating the upstream signature; this
+        gate handles the request-side path where chunks haven't yet
+        been signed by anyone.
+        """
+        m = request.activation_manifest
+        # Shape × dtype must equal payload_bytes. Anything else is a
+        # malformed manifest (or a relay attempting DoS).
+        try:
+            dtype = np.dtype(request.activation_dtype)
+        except TypeError:
+            return (
+                StageErrorCode.ACTIVATION_INVALID,
+                f"streamed: unrecognized activation_dtype "
+                f"{request.activation_dtype!r}",
+            )
+        expected_payload_bytes = (
+            int(np.prod(request.activation_shape)) * dtype.itemsize
+        )
+        if m.payload_bytes != expected_payload_bytes:
+            return (
+                StageErrorCode.ACTIVATION_INVALID,
+                f"streamed: manifest.payload_bytes ({m.payload_bytes}) "
+                f"does not match shape {request.activation_shape} × "
+                f"dtype {request.activation_dtype} "
+                f"({expected_payload_bytes})",
+            )
+        # Hard cap against memory DoS.
+        if m.payload_bytes > self._max_streamed_payload_bytes:
+            return (
+                StageErrorCode.ACTIVATION_INVALID,
+                f"streamed: manifest.payload_bytes ({m.payload_bytes}) "
+                f"exceeds max_streamed_payload_bytes "
+                f"({self._max_streamed_payload_bytes})",
+            )
+        # total_chunks consistency with chunk_bytes + payload_bytes.
+        # ShardAssembler will catch over-count via finalize(), but
+        # rejecting now skips the assembly cost entirely.
+        if m.total_chunks > 0:
+            expected_total_chunks = (
+                m.payload_bytes + m.chunk_bytes - 1
+            ) // m.chunk_bytes
+            if m.total_chunks != expected_total_chunks:
+                return (
+                    StageErrorCode.ACTIVATION_INVALID,
+                    f"streamed: manifest.total_chunks ({m.total_chunks}) "
+                    f"inconsistent with payload_bytes ({m.payload_bytes}) "
+                    f"/ chunk_bytes ({m.chunk_bytes}); expected "
+                    f"{expected_total_chunks}",
+                )
+        elif m.payload_bytes > 0:
+            return (
+                StageErrorCode.ACTIVATION_INVALID,
+                f"streamed: manifest.total_chunks == 0 but "
+                f"payload_bytes == {m.payload_bytes}",
+            )
+        return None
+
     @staticmethod
     def _reassemble_inbound_chunks(
         frame_iter: Iterable[bytes],
         *,
         expected_request_id: str,
         manifest_shard_id: str,
+        expected_total_chunks: int,
     ) -> List[ShardChunk]:
         """Decode incoming ActivationChunk frames back to Phase 6
         ``ShardChunk`` objects. Validates the relay-defense binding
         (chunk.request_id must match the parent request); rewraps the
         shard_id to match the inbound manifest so the assembler's
         per-chunk validation succeeds.
+
+        H1 round-1 remediation: bounded by ``expected_total_chunks``.
+        Stops reading after ``expected_total_chunks`` frames have been
+        accepted — a peer that keeps shipping bytes past that count
+        gets ``ActivationCodecError("excess chunks")`` rather than
+        unbounded memory growth.
         """
         out: List[ShardChunk] = []
         for raw in frame_iter:
+            if len(out) >= expected_total_chunks:
+                raise ActivationCodecError(
+                    f"streamed: peer shipped excess chunks "
+                    f"(expected_total_chunks={expected_total_chunks})"
+                )
             try:
                 msg = parse_message(raw)
             except (

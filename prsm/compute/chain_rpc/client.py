@@ -268,6 +268,7 @@ class RpcChainExecutor:
         streamed_send_message: Optional[StreamedSendMessage] = None,
         chunk_threshold_bytes: int = CHUNK_THRESHOLD_BYTES,
         chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
+        max_streamed_payload_bytes: int = 1 * 1024 * 1024 * 1024,
         default_deadline_seconds: float = 30.0,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -310,6 +311,11 @@ class RpcChainExecutor:
             raise ValueError(
                 f"chunk_bytes must be positive, got {chunk_bytes}"
             )
+        if max_streamed_payload_bytes <= 0:
+            raise ValueError(
+                f"max_streamed_payload_bytes must be positive, got "
+                f"{max_streamed_payload_bytes}"
+            )
 
         self._settler = settler_identity
         self._send = send_message
@@ -320,6 +326,7 @@ class RpcChainExecutor:
         self._resolve_address = address_resolver or (lambda nid: nid)
         self._chunk_threshold_bytes = int(chunk_threshold_bytes)
         self._chunk_bytes = int(chunk_bytes)
+        self._max_streamed_payload_bytes = int(max_streamed_payload_bytes)
         self._default_deadline_seconds = float(default_deadline_seconds)
         self._clock = clock
 
@@ -682,6 +689,22 @@ class RpcChainExecutor:
                 ),
             )
 
+        # H1 + H2 round-1 remediation: validate the response envelope
+        # BEFORE consuming any response chunk frames. Even though the
+        # response is anchor-verified above (so an authentic stage
+        # can't lie about envelope shape — that's the H2 server-side
+        # signing fix), defense-in-depth: a future weakness in either
+        # signing layer or a buggy stage shouldn't translate into the
+        # client allocating unbounded memory.
+        envelope_err = self._validate_streamed_response_envelope(response)
+        if envelope_err is not None:
+            raise ChainExecutionError(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                code=ExecutorErrorCode.ACTIVATION_INVALID,
+                message=envelope_err,
+            )
+
         # Reassemble the response chunks. ShardAssembler (Phase 6)
         # enforces strict in-order delivery + per-chunk + overall
         # sha256 — failures map to ACTIVATION_INVALID. ActivationChunk
@@ -694,6 +717,7 @@ class RpcChainExecutor:
                     response_chunk_frames,
                     expected_request_id=request.request_id,
                     manifest_shard_id=response.activation_manifest.shard_id,
+                    expected_total_chunks=response.activation_manifest.total_chunks,
                 )
             )
         except ChainExecutionError:
@@ -733,12 +757,71 @@ class RpcChainExecutor:
 
         return response, output_activation
 
+    def _validate_streamed_response_envelope(
+        self, response: RunLayerSliceResponse
+    ) -> Optional[str]:
+        """H1 + H2 round-1 remediation: client-side envelope sanity
+        check, mirrors ``LayerStageServer._validate_streamed_envelope``.
+        Returns ``None`` if the response manifest's envelope is
+        consistent with the response's shape/dtype AND below the
+        client's ``max_streamed_payload_bytes`` ceiling. Otherwise
+        returns an error message string.
+
+        Defense-in-depth against a peer (or future signing-layer
+        weakness) that ships an inflated envelope to coerce client-
+        side memory allocation during reassembly.
+        """
+        m = response.activation_manifest
+        if m is None:  # caller already checked, but be explicit.
+            return "streamed response missing activation_manifest"
+        try:
+            dtype = np.dtype(response.activation_dtype)
+        except TypeError:
+            return (
+                f"streamed response: unrecognized activation_dtype "
+                f"{response.activation_dtype!r}"
+            )
+        expected_payload_bytes = (
+            int(np.prod(response.activation_shape)) * dtype.itemsize
+        )
+        if m.payload_bytes != expected_payload_bytes:
+            return (
+                f"streamed response: manifest.payload_bytes "
+                f"({m.payload_bytes}) does not match shape "
+                f"{response.activation_shape} × dtype "
+                f"{response.activation_dtype} ({expected_payload_bytes})"
+            )
+        if m.payload_bytes > self._max_streamed_payload_bytes:
+            return (
+                f"streamed response: manifest.payload_bytes "
+                f"({m.payload_bytes}) exceeds max_streamed_payload_bytes "
+                f"({self._max_streamed_payload_bytes})"
+            )
+        if m.total_chunks > 0:
+            expected_total_chunks = (
+                m.payload_bytes + m.chunk_bytes - 1
+            ) // m.chunk_bytes
+            if m.total_chunks != expected_total_chunks:
+                return (
+                    f"streamed response: manifest.total_chunks "
+                    f"({m.total_chunks}) inconsistent with payload_bytes "
+                    f"({m.payload_bytes}) / chunk_bytes ({m.chunk_bytes}); "
+                    f"expected {expected_total_chunks}"
+                )
+        elif m.payload_bytes > 0:
+            return (
+                f"streamed response: manifest.total_chunks == 0 but "
+                f"payload_bytes == {m.payload_bytes}"
+            )
+        return None
+
     @staticmethod
     def _iter_response_chunks(
         frame_iter: Iterable[bytes],
         *,
         expected_request_id: str,
         manifest_shard_id: str,
+        expected_total_chunks: int,
     ) -> Iterable[ShardChunk]:
         """Decode each ActivationChunk wire frame back to a Phase 6
         ShardChunk.
@@ -750,8 +833,19 @@ class RpcChainExecutor:
           - The reconstructed ShardChunk.shard_id is set to the
             response manifest's shard_id so ShardAssembler's per-chunk
             validation can correlate manifest ↔ chunks.
+
+        H1 round-1 remediation: bounded by ``expected_total_chunks``.
+        A peer that keeps streaming frames past the manifest-promised
+        count gets ``ActivationCodecError("excess chunks")`` rather
+        than unbounded memory consumption.
         """
+        produced = 0
         for raw in frame_iter:
+            if produced >= expected_total_chunks:
+                raise ActivationCodecError(
+                    f"streamed response: peer shipped excess chunks "
+                    f"(expected_total_chunks={expected_total_chunks})"
+                )
             try:
                 msg = parse_message(raw)
             except (

@@ -773,6 +773,12 @@ class TestBoolRejection:
             )
 
     def test_parse_message_rejects_bool_protocol_version(self):
+        # L1 round-1 (3.x.7.1): bool/string/missing protocol_version is
+        # a version-negotiation failure, not a malformed-message
+        # failure — surface it as ``ChainRpcVersionMismatchError``.
+        # bool rejection itself preserved from M1 round-1 (Phase 3.x.7
+        # Task 8) — bool is a subclass of int in Python, so True == 1
+        # would slip through without the explicit type-check.
         payload = json.dumps({
             "type": ChainRpcMessageType.STAGE_ERROR.value,
             "protocol_version": True,  # would == 1 without explicit guard
@@ -780,7 +786,32 @@ class TestBoolRejection:
             "code": "X",
             "message": "",
         }).encode("utf-8")
-        with pytest.raises(ChainRpcMalformedError, match="protocol_version"):
+        with pytest.raises(ChainRpcVersionMismatchError, match="protocol_version"):
+            parse_message(payload)
+
+    def test_parse_message_rejects_string_protocol_version(self):
+        # L1 round-1 (3.x.7.1): non-int version → version mismatch.
+        payload = json.dumps({
+            "type": ChainRpcMessageType.STAGE_ERROR.value,
+            "protocol_version": "1",
+            "request_id": "r",
+            "code": "X",
+            "message": "",
+        }).encode("utf-8")
+        with pytest.raises(ChainRpcVersionMismatchError, match="protocol_version"):
+            parse_message(payload)
+
+    def test_parse_message_rejects_missing_protocol_version(self):
+        # L1 round-1 (3.x.7.1): a peer that omits protocol_version
+        # entirely is mid-negotiation, not a malformed message.
+        payload = json.dumps({
+            "type": ChainRpcMessageType.STAGE_ERROR.value,
+            # protocol_version absent
+            "request_id": "r",
+            "code": "X",
+            "message": "",
+        }).encode("utf-8")
+        with pytest.raises(ChainRpcVersionMismatchError, match="protocol_version"):
             parse_message(payload)
 
 
@@ -917,6 +948,37 @@ class TestStreamedRequestRoundTrip:
         assert isinstance(recovered, RunLayerSliceRequest)
         assert recovered.activation_manifest == manifest
         assert recovered.activation_blob == b""
+
+    def test_request_rejects_neither_blob_nor_manifest(self):
+        """M3 round-1 (3.x.7.1): the inline-XOR-streamed integrity
+        check rejects requests where BOTH the inline blob is empty AND
+        the manifest is absent. Without a payload path the message is
+        structurally meaningless."""
+        identity = generate_node_identity("settler")
+        token = HandoffToken.sign(
+            identity=identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=2,
+            deadline_unix=1000.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError,
+            match="exactly one payload path",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="m",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"",  # empty
+                activation_shape=(1, 4),
+                activation_dtype="float32",
+                upstream_token=token,
+                deadline_unix=1000.0,
+                activation_manifest=None,  # also absent
+            )
 
     def test_streamed_request_rejects_non_empty_blob(self):
         """Inline-XOR-streamed integrity check: when manifest is
@@ -1095,9 +1157,10 @@ class TestV1V2InlineByteEquivalence:
         )
         assert with_default == with_explicit_none
 
-    def test_inline_signing_payload_omits_manifest_sha_key(self):
+    def test_inline_signing_payload_omits_manifest_envelope_key(self):
         """Verify the conditional encoding: payload bytes MUST NOT
-        contain `activation_manifest_sha` when manifest is None."""
+        contain `activation_manifest_envelope` (the H2 remediation
+        key) when manifest is None."""
         payload = RunLayerSliceResponse.signing_payload(
             request_id="r",
             activation_blob=b"abc",
@@ -1109,9 +1172,16 @@ class TestV1V2InlineByteEquivalence:
             epsilon_spent=0.0,
             stage_node_id="n",
         )
+        assert b"activation_manifest_envelope" not in payload
+        # Defense in depth: also no legacy key.
         assert b"activation_manifest_sha" not in payload
 
-    def test_streamed_signing_payload_includes_manifest_sha(self):
+    def test_streamed_signing_payload_includes_full_manifest_envelope(self):
+        """H2 round-1 remediation: streamed signing payload commits
+        to ALL FIVE manifest fields (shard_id, payload_sha256,
+        payload_bytes, total_chunks, chunk_bytes) — not just
+        payload_sha256. Tampering ANY of them invalidates the
+        signature."""
         manifest = _make_manifest()
         payload = RunLayerSliceResponse.signing_payload(
             request_id="r",
@@ -1125,8 +1195,100 @@ class TestV1V2InlineByteEquivalence:
             stage_node_id="n",
             activation_manifest=manifest,
         )
-        assert b"activation_manifest_sha" in payload
+        assert b"activation_manifest_envelope" in payload
         assert manifest.payload_sha256.encode() in payload
+        # All five fields appear by name.
+        assert b"shard_id" in payload
+        assert b"payload_bytes" in payload
+        assert b"total_chunks" in payload
+        assert b"chunk_bytes" in payload
+
+    def test_tampered_manifest_payload_bytes_invalidates_signature(self):
+        """H2 round-1 remediation regression: a network-level relay
+        that tampers payload_bytes (without an Ed25519 key) MUST be
+        detected at signature verification."""
+        stage = generate_node_identity("alice")
+        anchor = FakeAnchor()
+        _register(anchor, stage)
+        manifest = _make_manifest(payload=b"honest")
+        response = RunLayerSliceResponse.sign(
+            identity=stage,
+            request_id="r",
+            activation_blob=b"",
+            activation_shape=(1,),
+            activation_dtype="float32",
+            duration_seconds=0.05,
+            tee_attestation=b"\x01" * 32,
+            tee_type=TEEType.SGX,
+            epsilon_spent=0.0,
+            activation_manifest=manifest,
+        )
+        # Inflate payload_bytes 1000× (DoS vector) while keeping
+        # payload_sha256 + signature intact.
+        tampered_manifest = ShardManifest(
+            shard_id=manifest.shard_id,
+            payload_sha256=manifest.payload_sha256,  # unchanged
+            payload_bytes=manifest.payload_bytes * 1000,
+            total_chunks=manifest.total_chunks,
+            chunk_bytes=manifest.chunk_bytes,
+        )
+        tampered = RunLayerSliceResponse(
+            request_id=response.request_id,
+            activation_blob=response.activation_blob,
+            activation_shape=response.activation_shape,
+            activation_dtype=response.activation_dtype,
+            duration_seconds=response.duration_seconds,
+            tee_attestation=response.tee_attestation,
+            tee_type=response.tee_type,
+            epsilon_spent=response.epsilon_spent,
+            stage_signature_b64=response.stage_signature_b64,
+            stage_node_id=response.stage_node_id,
+            activation_manifest=tampered_manifest,
+        )
+        assert tampered.verify_with_anchor(
+            anchor, expected_stage_node_id=stage.node_id
+        ) is False
+
+    def test_tampered_manifest_total_chunks_invalidates_signature(self):
+        stage = generate_node_identity("alice")
+        anchor = FakeAnchor()
+        _register(anchor, stage)
+        manifest = _make_manifest()
+        response = RunLayerSliceResponse.sign(
+            identity=stage,
+            request_id="r",
+            activation_blob=b"",
+            activation_shape=(1,),
+            activation_dtype="float32",
+            duration_seconds=0.05,
+            tee_attestation=b"\x01" * 32,
+            tee_type=TEEType.SGX,
+            epsilon_spent=0.0,
+            activation_manifest=manifest,
+        )
+        tampered_manifest = ShardManifest(
+            shard_id=manifest.shard_id,
+            payload_sha256=manifest.payload_sha256,
+            payload_bytes=manifest.payload_bytes,
+            total_chunks=manifest.total_chunks + 1000000,  # DoS vector
+            chunk_bytes=manifest.chunk_bytes,
+        )
+        tampered = RunLayerSliceResponse(
+            request_id=response.request_id,
+            activation_blob=response.activation_blob,
+            activation_shape=response.activation_shape,
+            activation_dtype=response.activation_dtype,
+            duration_seconds=response.duration_seconds,
+            tee_attestation=response.tee_attestation,
+            tee_type=response.tee_type,
+            epsilon_spent=response.epsilon_spent,
+            stage_signature_b64=response.stage_signature_b64,
+            stage_node_id=response.stage_node_id,
+            activation_manifest=tampered_manifest,
+        )
+        assert tampered.verify_with_anchor(
+            anchor, expected_stage_node_id=stage.node_id
+        ) is False
 
 
 class TestVersionAcceptance:

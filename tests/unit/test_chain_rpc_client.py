@@ -1065,6 +1065,7 @@ def _make_executor_with_streaming(
     streamed_transport,
     threshold: int = 3,
     chunk_bytes: int = 32,
+    max_streamed_payload_bytes: int = 1 * 1024 * 1024 * 1024,
 ) -> RpcChainExecutor:
     """Low threshold + small chunks force the streamed path on
     typical-sized test activations. Threshold=3 means any prompt
@@ -1078,6 +1079,7 @@ def _make_executor_with_streaming(
         output_decoder=_output_decoder,
         chunk_threshold_bytes=threshold,
         chunk_bytes=chunk_bytes,
+        max_streamed_payload_bytes=max_streamed_payload_bytes,
     )
 
 
@@ -1282,6 +1284,88 @@ class TestStreamedConstructionValidation:
                 output_decoder=_output_decoder,
                 chunk_bytes=0,
             )
+
+    def test_non_positive_max_streamed_payload_bytes_rejected(
+        self, settler, anchor, transport,
+    ):
+        with pytest.raises(ValueError, match="max_streamed_payload_bytes"):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=transport.send,
+                anchor=anchor,
+                prompt_encoder=_prompt_encoder,
+                output_decoder=_output_decoder,
+                max_streamed_payload_bytes=0,
+            )
+
+
+class TestStreamedClientEnvelopeValidation:
+    """H1 + H2 round-1 (Phase 3.x.7.1 Task 6): client-side envelope
+    sanity checks fire BEFORE response chunk consumption. Defense
+    against future signing-layer weakness AND a buggy peer that ships
+    a response envelope inconsistent with its declared shape/dtype."""
+
+    def test_response_envelope_exceeds_cap_rejected(
+        self, settler, anchor, alice, bob, transport, streamed_transport,
+    ):
+        """A response whose envelope.payload_bytes exceeds the
+        client's configured max_streamed_payload_bytes is rejected at
+        the client envelope-validation gate, not silently reassembled."""
+        # Cap = 8 bytes; alice's response activation is much larger.
+        executor = _make_executor_with_streaming(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            streamed_transport=streamed_transport,
+            threshold=3,
+            chunk_bytes=8,
+            max_streamed_payload_bytes=8,
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            executor.execute_chain(
+                request=_make_request("triggers-cap"), chain=chain,
+            )
+        assert exc_info.value.code == ExecutorErrorCode.ACTIVATION_INVALID
+        assert "max_streamed_payload_bytes" in exc_info.value.message
+
+    def test_excess_response_chunks_rejected(
+        self, settler, anchor, alice, bob, transport,
+        alice_streamed_sim, bob_streamed_sim,
+    ):
+        """A response that ships more chunk frames than
+        manifest.total_chunks declares is rejected at the bounded
+        client-side iterator (H1 round-1)."""
+        # Wrap alice_streamed_sim.handle to append an extra frame.
+        original_handle = alice_streamed_sim.handle
+
+        def malicious_handle(manifest_bytes, chunk_iter):
+            response_bytes, response_iter = original_handle(
+                manifest_bytes, chunk_iter
+            )
+            response_frames = list(response_iter)
+            # Duplicate the last frame so we exceed total_chunks by 1.
+            response_frames.append(response_frames[-1])
+            return response_bytes, iter(response_frames)
+
+        alice_streamed_sim.handle = malicious_handle  # type: ignore[method-assign]
+        bad_streamed = StreamedFakeTransport({
+            alice.node_id: alice_streamed_sim,
+            bob.node_id: bob_streamed_sim,
+        })
+        executor = _make_executor_with_streaming(
+            settler=settler, anchor=anchor,
+            inline_transport=transport,
+            streamed_transport=bad_streamed,
+            threshold=3,
+            chunk_bytes=8,
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        with pytest.raises(ChainExecutionError) as exc_info:
+            executor.execute_chain(
+                request=_make_request("excess-chunks-test"), chain=chain,
+            )
+        assert exc_info.value.code == ExecutorErrorCode.ACTIVATION_INVALID
+        assert exc_info.value.stage_index == 0
 
 
 class TestInlinePathStillWorksAtV2:
