@@ -106,6 +106,9 @@ class ChainRpcMessageType(str, Enum):
     RUN_LAYER_SLICE_RESPONSE = "run_layer_slice_response"
     STAGE_ERROR = "stage_error"
     ACTIVATION_CHUNK = "activation_chunk"  # v2: streamed-path chunk frame
+    # Phase 3.x.8 — streaming-token output (additive on protocol v2):
+    TOKEN_FRAME = "token_frame"  # incremental token output from tail stage
+    STREAM_FINAL_FRAME = "stream_final_frame"  # terminal frame; embeds signed response
 
 
 class StageErrorCode(str, Enum):
@@ -487,6 +490,16 @@ class RunLayerSliceRequest:
     # manifest's ``payload_sha256`` is the cryptographic commitment
     # to the to-be-assembled bytes.
     activation_manifest: Optional[ShardManifest] = None
+    # Phase 3.x.8 — streaming-token output. When True AND the
+    # dispatched stage is the chain tail (``is_final_stage`` at the
+    # server side), the server returns a TokenFrame stream followed
+    # by a StreamFinalFrame instead of a unary RunLayerSliceResponse.
+    # When True on a non-tail stage the server rejects with
+    # MALFORMED_REQUEST. When False (default), the wire format is
+    # byte-identical to a pre-3.x.8 message — the field is OMITTED
+    # from the canonical JSON entirely (mirroring the
+    # activation_manifest conditional encoding pattern).
+    streaming: bool = False
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value
@@ -580,6 +593,13 @@ class RunLayerSliceRequest:
                 "activation_manifest — exactly one payload path is "
                 "required"
             )
+        # Phase 3.x.8 — streaming flag must be a real bool (not int).
+        # Catches the same M1-style coercion hole the protocol_version
+        # check defends against.
+        if not isinstance(self.streaming, bool):
+            raise ChainRpcMalformedError(
+                f"streaming must be bool, got {type(self.streaming).__name__}"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         # activation_blob → hex for JSON-safety. For streamed (v2)
@@ -603,6 +623,12 @@ class RunLayerSliceRequest:
             out["activation_manifest"] = _shard_manifest_to_dict(
                 self.activation_manifest
             )
+        # Conditional encoding: streaming=False omits the field
+        # entirely so a v2-but-pre-3.x.8 serializer's bytes are
+        # byte-identical to a 3.x.8 serializer's. Only streaming=True
+        # adds the key.
+        if self.streaming:
+            out["streaming"] = True
         return out
 
     @classmethod
@@ -652,6 +678,16 @@ class RunLayerSliceRequest:
         manifest: Optional[ShardManifest] = None
         if manifest_raw is not None:
             manifest = _shard_manifest_from_dict(manifest_raw)
+        # streaming flag (Phase 3.x.8): default False when absent
+        # (preserves byte-equivalence with v2-pre-3.x.8 messages).
+        # When present, MUST be a real bool — int 0/1 rejected to
+        # preserve M1-style coercion-safety invariant.
+        streaming_raw = data.get("streaming", False)
+        if not isinstance(streaming_raw, bool):
+            raise ChainRpcMalformedError(
+                f"streaming must be bool, got "
+                f"{type(streaming_raw).__name__}"
+            )
         return cls(
             request_id=_required_str(data, "request_id"),
             model_id=_required_str(data, "model_id"),
@@ -664,6 +700,7 @@ class RunLayerSliceRequest:
             upstream_token=HandoffToken.from_dict(token_raw),
             deadline_unix=_required_number(data, "deadline_unix"),
             activation_manifest=manifest,
+            streaming=streaming_raw,
             protocol_version=_required_int(data, "protocol_version"),
         )
 
@@ -1030,6 +1067,189 @@ class StageError:
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.8 — streaming-token output wire types
+# ──────────────────────────────────────────────────────────────────────────
+
+
+# Permitted finish_reason values on TokenFrame / StreamFinalFrame's
+# embedded response. ``None`` means "more frames coming"; a non-None
+# value is set on the FINAL frame the runner emits.
+_FINISH_REASONS = frozenset({"stop", "max_tokens", "cancelled", "error"})
+
+
+@dataclass(frozen=True)
+class TokenFrame:
+    """Incremental token-output frame emitted by the tail stage during
+    autoregressive decode (Phase 3.x.8).
+
+    Multiple ``TokenFrame`` frames per stream, ordered strictly by
+    ``sequence_index`` (0-indexed, no gaps). The terminal frame on a
+    stream is always a ``StreamFinalFrame`` carrying the signed
+    ``RunLayerSliceResponse`` over the joined output bytes.
+
+    Bound to its parent request via ``request_id`` so a network relay
+    can't splice frames from one stream into another (mirrors the
+    relay-defense binding on ``ActivationChunk`` from 3.x.7.1).
+
+    The joined ``text_delta`` across all frames in a stream MUST equal
+    the UTF-8 decoding of the embedded response's ``activation_blob``
+    in the terminal ``StreamFinalFrame`` — this is how the stage's
+    Ed25519 signature commits to the streamed output (existing
+    ``RunLayerSliceResponse.signing_payload`` hex-encodes
+    ``activation_blob``; no new signing-payload field needed).
+    """
+
+    request_id: str
+    sequence_index: int  # 0-indexed; strictly increasing across stream
+    text_delta: str      # text emitted by this frame (may be empty)
+    token_id: Optional[int] = None        # vocab id if available
+    finish_reason: Optional[str] = None   # set on the LAST TokenFrame
+    protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = ChainRpcMessageType.TOKEN_FRAME.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        _validate_version(self.protocol_version)
+        if (
+            not isinstance(self.sequence_index, int)
+            or isinstance(self.sequence_index, bool)
+            or self.sequence_index < 0
+        ):
+            raise ChainRpcMalformedError(
+                f"sequence_index must be non-negative int, got "
+                f"{self.sequence_index!r}"
+            )
+        if not isinstance(self.text_delta, str):
+            raise ChainRpcMalformedError(
+                f"text_delta must be str, got "
+                f"{type(self.text_delta).__name__}"
+            )
+        if self.token_id is not None and (
+            not isinstance(self.token_id, int)
+            or isinstance(self.token_id, bool)
+        ):
+            raise ChainRpcMalformedError(
+                f"token_id must be int or None, got "
+                f"{type(self.token_id).__name__}"
+            )
+        if self.finish_reason is not None:
+            if not isinstance(self.finish_reason, str):
+                raise ChainRpcMalformedError(
+                    f"finish_reason must be str or None, got "
+                    f"{type(self.finish_reason).__name__}"
+                )
+            if self.finish_reason not in _FINISH_REASONS:
+                raise ChainRpcMalformedError(
+                    f"finish_reason must be one of "
+                    f"{sorted(_FINISH_REASONS)}, got "
+                    f"{self.finish_reason!r}"
+                )
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+            "sequence_index": self.sequence_index,
+            "text_delta": self.text_delta,
+        }
+        # Optional fields use conditional encoding so frames without
+        # token_id / finish_reason don't gain spurious null keys.
+        if self.token_id is not None:
+            out["token_id"] = self.token_id
+        if self.finish_reason is not None:
+            out["finish_reason"] = self.finish_reason
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "TokenFrame":
+        _expect_type(data, ChainRpcMessageType.TOKEN_FRAME)
+        token_id_raw = data.get("token_id")
+        if token_id_raw is not None and (
+            not isinstance(token_id_raw, int)
+            or isinstance(token_id_raw, bool)
+        ):
+            raise ChainRpcMalformedError(
+                f"token_id must be int or null, got "
+                f"{type(token_id_raw).__name__}"
+            )
+        finish_raw = data.get("finish_reason")
+        if finish_raw is not None and not isinstance(finish_raw, str):
+            raise ChainRpcMalformedError(
+                f"finish_reason must be str or null, got "
+                f"{type(finish_raw).__name__}"
+            )
+        text_raw = data.get("text_delta")
+        if not isinstance(text_raw, str):
+            raise ChainRpcMalformedError(
+                "text_delta must be string"
+            )
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            sequence_index=_required_int(data, "sequence_index"),
+            text_delta=text_raw,
+            token_id=token_id_raw,
+            finish_reason=finish_raw,
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+@dataclass(frozen=True)
+class StreamFinalFrame:
+    """Terminal frame on a streaming-token output stream
+    (Phase 3.x.8).
+
+    Carries the FULL signed ``RunLayerSliceResponse`` whose
+    ``activation_blob`` is the UTF-8-encoded joined output text
+    across all preceding ``TokenFrame.text_delta`` values. The
+    embedded response's stage signature commits to this joined text
+    via the existing ``signing_payload`` (hex-encodes
+    ``activation_blob``) — so a relay that tampers any TokenFrame's
+    ``text_delta`` causes the joined-bytes hash to diverge from
+    what the stage signed, invalidating the stream as a whole.
+
+    The ``activation_shape`` on the embedded response describes the
+    joined-text bytes (always 1-D byte tensor of length
+    ``len(joined_utf8)``); ``activation_dtype`` is ``"uint8"``.
+    """
+
+    response: RunLayerSliceResponse
+    protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = ChainRpcMessageType.STREAM_FINAL_FRAME.value
+
+    def __post_init__(self) -> None:
+        _validate_version(self.protocol_version)
+        if not isinstance(self.response, RunLayerSliceResponse):
+            raise ChainRpcMalformedError(
+                f"response must be RunLayerSliceResponse, got "
+                f"{type(self.response).__name__}"
+            )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "response": self.response.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "StreamFinalFrame":
+        _expect_type(data, ChainRpcMessageType.STREAM_FINAL_FRAME)
+        response_raw = data.get("response")
+        if not isinstance(response_raw, dict):
+            raise ChainRpcMalformedError(
+                f"response must be dict, got "
+                f"{type(response_raw).__name__}"
+            )
+        return cls(
+            response=RunLayerSliceResponse.from_dict(response_raw),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Codec
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -1039,6 +1259,8 @@ _MESSAGE_TYPE_REGISTRY: Dict[str, Callable[[Dict[str, Any]], Any]] = {
     ChainRpcMessageType.RUN_LAYER_SLICE_RESPONSE.value: RunLayerSliceResponse.from_dict,
     ChainRpcMessageType.STAGE_ERROR.value: StageError.from_dict,
     ChainRpcMessageType.ACTIVATION_CHUNK.value: ActivationChunk.from_dict,
+    ChainRpcMessageType.TOKEN_FRAME.value: TokenFrame.from_dict,
+    ChainRpcMessageType.STREAM_FINAL_FRAME.value: StreamFinalFrame.from_dict,
 }
 
 

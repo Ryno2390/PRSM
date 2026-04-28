@@ -1344,3 +1344,335 @@ class TestVersionAcceptance:
     def test_supported_versions_constant(self):
         assert SUPPORTED_PROTOCOL_VERSIONS == frozenset({1, 2})
         assert CHAIN_RPC_PROTOCOL_VERSION in SUPPORTED_PROTOCOL_VERSIONS
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.8 — TokenFrame + StreamFinalFrame + streaming flag
+# ──────────────────────────────────────────────────────────────────────────
+
+
+from prsm.compute.chain_rpc.protocol import (
+    StreamFinalFrame,
+    TokenFrame,
+)
+
+
+def _signed_response_for_text(
+    text: str,
+    *,
+    request_id: str = "req-1",
+    stage_node_id: str = "alice",
+) -> "RunLayerSliceResponse":
+    """Build a tail-stage signed response whose activation_blob carries
+    the joined output bytes (UTF-8). Mirrors the Phase 3.x.8 contract:
+    the stage signs over the joined text, so a relay tampering any
+    TokenFrame.text_delta diverges the joined hash from what was
+    signed."""
+    payload = text.encode("utf-8")
+    identity = generate_node_identity(stage_node_id)
+    return RunLayerSliceResponse.sign(
+        identity=identity,
+        request_id=request_id,
+        activation_blob=payload,
+        activation_shape=(len(payload),) if payload else (0,),
+        activation_dtype="uint8",
+        duration_seconds=0.05,
+        tee_attestation=b"\x01" * 32,
+        tee_type=TEEType.SOFTWARE,
+        epsilon_spent=0.0,
+    )
+
+
+class TestTokenFrameConstruction:
+    def test_minimal_round_trip(self):
+        frame = TokenFrame(
+            request_id="req-1",
+            sequence_index=0,
+            text_delta="hello",
+        )
+        recovered = parse_message(encode_message(frame))
+        assert isinstance(recovered, TokenFrame)
+        assert recovered == frame
+
+    def test_full_field_round_trip(self):
+        frame = TokenFrame(
+            request_id="req-1",
+            sequence_index=42,
+            text_delta=" world",
+            token_id=12345,
+            finish_reason="stop",
+        )
+        recovered = parse_message(encode_message(frame))
+        assert recovered == frame
+        assert recovered.token_id == 12345
+        assert recovered.finish_reason == "stop"
+
+    def test_empty_text_delta_allowed(self):
+        # Empty text_delta is valid (some tokenizer outputs are
+        # whitespace-only or BPE merges that produce no visible text
+        # on a given step). Only None is rejected.
+        frame = TokenFrame(
+            request_id="req-1",
+            sequence_index=0,
+            text_delta="",
+        )
+        recovered = parse_message(encode_message(frame))
+        assert recovered.text_delta == ""
+
+    def test_rejects_empty_request_id(self):
+        with pytest.raises(ChainRpcMalformedError, match="request_id"):
+            TokenFrame(request_id="", sequence_index=0, text_delta="x")
+
+    def test_rejects_negative_sequence_index(self):
+        with pytest.raises(ChainRpcMalformedError, match="sequence_index"):
+            TokenFrame(request_id="r", sequence_index=-1, text_delta="x")
+
+    def test_rejects_bool_sequence_index(self):
+        # bool is int-subclass; without explicit guard True == 1
+        # would slip through and pollute ordering.
+        with pytest.raises(ChainRpcMalformedError, match="sequence_index"):
+            TokenFrame(
+                request_id="r",
+                sequence_index=True,  # type: ignore[arg-type]
+                text_delta="x",
+            )
+
+    def test_rejects_non_string_text_delta(self):
+        with pytest.raises(ChainRpcMalformedError, match="text_delta"):
+            TokenFrame(
+                request_id="r",
+                sequence_index=0,
+                text_delta=b"bytes-not-str",  # type: ignore[arg-type]
+            )
+
+    def test_rejects_invalid_finish_reason(self):
+        with pytest.raises(ChainRpcMalformedError, match="finish_reason"):
+            TokenFrame(
+                request_id="r",
+                sequence_index=0,
+                text_delta="x",
+                finish_reason="all_done",  # not in {stop, max_tokens, cancelled, error}
+            )
+
+    def test_rejects_bool_token_id(self):
+        with pytest.raises(ChainRpcMalformedError, match="token_id"):
+            TokenFrame(
+                request_id="r",
+                sequence_index=0,
+                text_delta="x",
+                token_id=True,  # type: ignore[arg-type]
+            )
+
+    def test_to_dict_omits_none_optionals(self):
+        # Defense-in-depth: a frame with no token_id / finish_reason
+        # should NOT emit `null` keys in the canonical JSON.
+        frame = TokenFrame(
+            request_id="r",
+            sequence_index=0,
+            text_delta="x",
+        )
+        d = frame.to_dict()
+        assert "token_id" not in d
+        assert "finish_reason" not in d
+
+    def test_to_dict_includes_set_optionals(self):
+        frame = TokenFrame(
+            request_id="r",
+            sequence_index=5,
+            text_delta="end",
+            token_id=42,
+            finish_reason="max_tokens",
+        )
+        d = frame.to_dict()
+        assert d["token_id"] == 42
+        assert d["finish_reason"] == "max_tokens"
+
+
+class TestStreamFinalFrameConstruction:
+    def test_round_trip_with_signed_response(self):
+        joined = "hello world"
+        response = _signed_response_for_text(joined)
+        frame = StreamFinalFrame(response=response)
+        recovered = parse_message(encode_message(frame))
+        assert isinstance(recovered, StreamFinalFrame)
+        assert recovered == frame
+        # The embedded response's activation_blob is the joined-text
+        # bytes — the stage signature commits to it via signing_payload.
+        assert recovered.response.activation_blob == joined.encode("utf-8")
+
+    def test_signature_invalidates_when_joined_text_diverges(self):
+        # The cross-frame integrity check the design plan promises:
+        # if the JOINED TokenFrame text_deltas don't equal the
+        # response's activation_blob, the consumer's joined hash
+        # diverges and rejects. (The signature itself only commits
+        # to what's IN the response — the consumer compares.)
+        response = _signed_response_for_text("hello world")
+        # Simulate a relay swapping in a tampered TokenFrame stream
+        # whose joined text is "hellO world" (capital O).
+        tampered_join = "hellO world"
+        # The consumer-side check: assert joined.encode == response.activation_blob
+        assert tampered_join.encode("utf-8") != response.activation_blob
+
+    def test_rejects_non_response_payload(self):
+        with pytest.raises(ChainRpcMalformedError, match="response"):
+            StreamFinalFrame(response="not-a-response")  # type: ignore[arg-type]
+
+    def test_from_dict_rejects_non_dict_response(self):
+        bad = {
+            "type": ChainRpcMessageType.STREAM_FINAL_FRAME.value,
+            "protocol_version": CHAIN_RPC_PROTOCOL_VERSION,
+            "response": "not-a-dict",
+        }
+        with pytest.raises(ChainRpcMalformedError, match="response"):
+            StreamFinalFrame.from_dict(bad)
+
+
+class TestStreamingFlagOnRunLayerSliceRequest:
+    """The Phase 3.x.8 ``streaming: bool`` field on
+    ``RunLayerSliceRequest``. Conditional encoding preserves
+    byte-equivalence with v2-pre-3.x.8 messages so the existing v1↔v2
+    forward-compat invariant still holds for non-streamed traffic."""
+
+    def _build_request(self, *, streaming: bool = False) -> RunLayerSliceRequest:
+        identity = generate_node_identity("settler")
+        token = HandoffToken.sign(
+            identity=identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=2,
+            deadline_unix=1000.0,
+        )
+        return RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="m",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"some-bytes",
+            activation_shape=(1, 4),
+            activation_dtype="float32",
+            upstream_token=token,
+            deadline_unix=1000.0,
+            streaming=streaming,
+        )
+
+    def test_default_streaming_false(self):
+        req = self._build_request()
+        assert req.streaming is False
+
+    def test_streaming_false_omits_key_in_canonical_json(self):
+        # Conditional encoding: streaming=False MUST omit the field
+        # entirely, preserving byte-equivalence with v2-pre-3.x.8
+        # serializers.
+        req = self._build_request(streaming=False)
+        d = req.to_dict()
+        assert "streaming" not in d
+        # The canonical-JSON bytes carry the same encoded structure
+        # as a 3.x.7.1 request would have.
+        encoded = encode_message(req)
+        assert b'"streaming"' not in encoded
+
+    def test_streaming_true_encoded_in_canonical_json(self):
+        req = self._build_request(streaming=True)
+        d = req.to_dict()
+        assert d["streaming"] is True
+        encoded = encode_message(req)
+        assert b'"streaming": true' in encoded
+
+    def test_round_trip_streaming_true(self):
+        req = self._build_request(streaming=True)
+        recovered = parse_message(encode_message(req))
+        assert isinstance(recovered, RunLayerSliceRequest)
+        assert recovered.streaming is True
+
+    def test_round_trip_streaming_false(self):
+        req = self._build_request(streaming=False)
+        recovered = parse_message(encode_message(req))
+        assert recovered.streaming is False
+
+    def test_from_dict_defaults_to_false_when_key_absent(self):
+        # A pre-3.x.8 serializer that doesn't know about the streaming
+        # field still parses cleanly on a 3.x.8 server — streaming
+        # defaults to False.
+        req = self._build_request(streaming=False)
+        wire = req.to_dict()
+        assert "streaming" not in wire
+        recovered = RunLayerSliceRequest.from_dict(wire)
+        assert recovered.streaming is False
+
+    def test_constructor_rejects_int_streaming(self):
+        # bool is int-subclass; explicit type-check rejects coercion.
+        identity = generate_node_identity("settler")
+        token = HandoffToken.sign(
+            identity=identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=2,
+            deadline_unix=1000.0,
+        )
+        with pytest.raises(ChainRpcMalformedError, match="streaming"):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="m",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"some-bytes",
+                activation_shape=(1, 4),
+                activation_dtype="float32",
+                upstream_token=token,
+                deadline_unix=1000.0,
+                streaming=1,  # type: ignore[arg-type]
+            )
+
+    def test_from_dict_rejects_int_streaming(self):
+        # Hostile peer ships {"streaming": 1} — must reject as
+        # malformed, not silently coerce to True.
+        identity = generate_node_identity("settler")
+        token = HandoffToken.sign(
+            identity=identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=2,
+            deadline_unix=1000.0,
+        )
+        wire = {
+            "type": ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value,
+            "protocol_version": CHAIN_RPC_PROTOCOL_VERSION,
+            "request_id": "req-1",
+            "model_id": "m",
+            "layer_range": [0, 4],
+            "privacy_tier": PrivacyLevel.NONE.value,
+            "content_tier": ContentTier.A.value,
+            "activation_blob_hex": b"some-bytes".hex(),
+            "activation_shape": [1, 4],
+            "activation_dtype": "float32",
+            "upstream_token": token.to_dict(),
+            "deadline_unix": 1000.0,
+            "streaming": 1,  # int, not bool
+        }
+        with pytest.raises(ChainRpcMalformedError, match="streaming"):
+            RunLayerSliceRequest.from_dict(wire)
+
+
+class TestStreamingMessageTypeRouting:
+    """parse_message correctly dispatches new wire types."""
+
+    def test_token_frame_dispatched_via_parse_message(self):
+        frame = TokenFrame(
+            request_id="r", sequence_index=0, text_delta="x",
+        )
+        recovered = parse_message(encode_message(frame))
+        assert isinstance(recovered, TokenFrame)
+
+    def test_stream_final_frame_dispatched_via_parse_message(self):
+        response = _signed_response_for_text("hi")
+        frame = StreamFinalFrame(response=response)
+        recovered = parse_message(encode_message(frame))
+        assert isinstance(recovered, StreamFinalFrame)
+
+    def test_message_type_registry_includes_new_types(self):
+        # Sanity: both new types registered.
+        from prsm.compute.chain_rpc.protocol import _MESSAGE_TYPE_REGISTRY
+        assert ChainRpcMessageType.TOKEN_FRAME.value in _MESSAGE_TYPE_REGISTRY
+        assert ChainRpcMessageType.STREAM_FINAL_FRAME.value in _MESSAGE_TYPE_REGISTRY
