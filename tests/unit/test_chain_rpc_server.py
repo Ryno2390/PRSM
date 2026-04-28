@@ -804,3 +804,420 @@ class TestFinalStageDetection:
         )
         server.handle(encode_message(request))
         assert runner.calls[0]["is_final_stage"] is True
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.7.1 v2 streamed-path tests
+# ──────────────────────────────────────────────────────────────────────────
+
+
+import hashlib as _hashlib
+
+from prsm.compute.chain_rpc.activation_codec import (
+    ChunkedActivation as _CA,
+    chunk_activation as _chunk_activation,
+    reassemble_chunked as _reassemble,
+)
+from prsm.compute.chain_rpc.protocol import ActivationChunk as _ActivationChunk
+from prsm.node.shard_streaming import ShardChunk as _ShardChunk
+
+
+def _make_streamed_request(
+    *,
+    settler_identity,
+    activation: Optional[np.ndarray] = None,
+    request_id: str = "req-1",
+    model_id: str = "test-model",
+    layer_range: Tuple[int, int] = (0, 4),
+    privacy_tier: PrivacyLevel = PrivacyLevel.NONE,
+    deadline: float = 2000.0,
+    chunk_bytes: int = 64,
+):
+    """Build a streamed RunLayerSliceRequest manifest + ActivationChunk
+    frames suitable for handle_streamed."""
+    if activation is None:
+        activation = np.array([[1.0, 2.0, 3.0, 4.0]], dtype=np.float32)
+    chunked = _chunk_activation(
+        activation,
+        activation_id=f"{request_id}::stage-0::out-from-prev",
+        chunk_bytes=chunk_bytes,
+    )
+    token = HandoffToken.sign(
+        identity=settler_identity,
+        request_id=request_id,
+        chain_stage_index=0,
+        chain_total_stages=2,
+        deadline_unix=deadline,
+    )
+    request = RunLayerSliceRequest(
+        request_id=request_id,
+        model_id=model_id,
+        layer_range=layer_range,
+        privacy_tier=privacy_tier,
+        content_tier=ContentTier.A,
+        activation_blob=b"",
+        activation_shape=chunked.shape,
+        activation_dtype=chunked.dtype_str,
+        upstream_token=token,
+        deadline_unix=deadline,
+        activation_manifest=chunked.manifest,
+    )
+    chunk_frames = [
+        encode_message(_ActivationChunk(
+            request_id=request_id,
+            sequence=c.sequence,
+            data=c.data,
+            chunk_sha256=c.chunk_sha256,
+        ))
+        for c in chunked.chunks
+    ]
+    return encode_message(request), chunk_frames, activation
+
+
+def _decode_streamed_response(
+    response_manifest_bytes: bytes,
+    response_chunk_iter: Iterable[bytes],
+):
+    """Mirror of the client-side reassembly: parse manifest, parse
+    chunks, reassemble via ShardAssembler. Returns the recovered
+    np.ndarray plus the parsed RunLayerSliceResponse."""
+    response = parse_message(response_manifest_bytes)
+    if isinstance(response, StageError):
+        return None, response
+    assert isinstance(response, RunLayerSliceResponse)
+    assert response.activation_manifest is not None
+    shard_chunks = []
+    for raw in response_chunk_iter:
+        msg = parse_message(raw)
+        assert isinstance(msg, _ActivationChunk)
+        shard_chunks.append(_ShardChunk(
+            shard_id=response.activation_manifest.shard_id,
+            sequence=msg.sequence,
+            data=msg.data,
+            chunk_sha256=msg.chunk_sha256,
+        ))
+    chunked = _CA(
+        manifest=response.activation_manifest,
+        chunks=shard_chunks,
+        shape=response.activation_shape,
+        dtype_str=response.activation_dtype,
+    )
+    activation = _reassemble(chunked, chunks=shard_chunks)
+    return activation, response
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Imports for the v2 tests
+# ──────────────────────────────────────────────────────────────────────────
+
+from typing import Iterable
+
+
+class TestStreamedHappyPath:
+    def test_streamed_round_trip_returns_signed_response(
+        self, server, settler_identity, anchor, stage_identity, runner
+    ):
+        manifest_bytes, chunk_frames, original_activation = (
+            _make_streamed_request(settler_identity=settler_identity)
+        )
+
+        response_manifest_bytes, response_chunks_iter = server.handle_streamed(
+            manifest_bytes, iter(chunk_frames)
+        )
+        recovered_activation, response = _decode_streamed_response(
+            response_manifest_bytes, response_chunks_iter
+        )
+
+        assert response.request_id == "req-1"
+        # Default identity-transform runner means recovered activation
+        # equals the original.
+        np.testing.assert_array_equal(recovered_activation, original_activation)
+        # Stage-signed response verifies under the dispatched identity.
+        assert response.verify_with_anchor(
+            anchor, expected_stage_node_id=stage_identity.node_id
+        ) is True
+
+    def test_streamed_runner_called_with_correct_inputs(
+        self, server, settler_identity, runner
+    ):
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity
+        )
+        server.handle_streamed(manifest_bytes, iter(chunk_frames))
+
+        assert len(runner.calls) == 1
+        call = runner.calls[0]
+        assert call["layer_range"] == (0, 4)
+        assert call["privacy_tier"] == PrivacyLevel.NONE
+        assert call["activation_shape"] == (1, 4)
+
+
+class TestStreamedValidationGates:
+    """All gates from steps 2-6 must fire on the streamed path AND
+    BEFORE chunk consumption (so a peer that blasts garbage chunks at
+    a server doesn't waste assembly cost)."""
+
+    def _decode_error(self, response_bytes: bytes) -> StageError:
+        msg = parse_message(response_bytes)
+        assert isinstance(msg, StageError), (
+            f"expected StageError, got {type(msg).__name__}"
+        )
+        return msg
+
+    def test_invalid_token_rejected_before_chunks_consumed(
+        self, server, runner
+    ):
+        # Token signed by a settler NOT registered on the anchor.
+        rogue = generate_node_identity("rogue")
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=rogue,
+        )
+
+        # Pass a generator that records consumption.
+        consumed = []
+
+        def chunk_gen():
+            for f in chunk_frames:
+                consumed.append(f)
+                yield f
+
+        manifest_resp, _ = server.handle_streamed(
+            manifest_bytes, chunk_gen()
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.INVALID_TOKEN.value
+        # No chunks consumed — token failure short-circuited.
+        assert consumed == []
+        # No layer execution.
+        assert len(runner.calls) == 0
+
+    def test_deadline_exceeded_rejected_before_chunks(
+        self, server, settler_identity, runner
+    ):
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+            deadline=500.0,  # server clock is 1000.0
+        )
+
+        consumed = []
+
+        def chunk_gen():
+            for f in chunk_frames:
+                consumed.append(f)
+                yield f
+
+        manifest_resp, _ = server.handle_streamed(
+            manifest_bytes, chunk_gen()
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.DEADLINE_EXCEEDED.value
+        assert consumed == []
+
+    def test_unknown_model_rejected_before_chunks(
+        self, server, settler_identity, runner
+    ):
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+            model_id="ghost",
+        )
+        consumed = []
+
+        def chunk_gen():
+            for f in chunk_frames:
+                consumed.append(f)
+                yield f
+
+        manifest_resp, _ = server.handle_streamed(
+            manifest_bytes, chunk_gen()
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.MODEL_NOT_FOUND.value
+        assert consumed == []
+
+    def test_tier_gate_rejects_high_privacy_on_software_tee(
+        self, server, settler_identity,
+    ):
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+            privacy_tier=PrivacyLevel.HIGH,
+        )
+        manifest_resp, _ = server.handle_streamed(
+            manifest_bytes, iter(chunk_frames)
+        )
+        msg = parse_message(manifest_resp)
+        assert isinstance(msg, StageError)
+        assert msg.code == StageErrorCode.TIER_GATE.value
+
+
+class TestStreamedChunkValidation:
+    """Errors during chunk reassembly map to ACTIVATION_INVALID."""
+
+    def _decode_error(self, response_bytes: bytes) -> StageError:
+        msg = parse_message(response_bytes)
+        assert isinstance(msg, StageError)
+        return msg
+
+    def test_corrupted_chunk_rejected(self, server, settler_identity):
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+            activation=np.arange(64, dtype=np.float32),
+            chunk_bytes=64,
+        )
+        # Corrupt one chunk's data without updating its sha.
+        bad_chunk = parse_message(chunk_frames[0])
+        assert isinstance(bad_chunk, _ActivationChunk)
+        forged = _ActivationChunk(
+            request_id=bad_chunk.request_id,
+            sequence=bad_chunk.sequence,
+            data=b"\x00" * len(bad_chunk.data),
+            chunk_sha256=bad_chunk.chunk_sha256,  # original — won't match
+        )
+        chunk_frames[0] = encode_message(forged)
+        manifest_resp, _ = server.handle_streamed(
+            manifest_bytes, iter(chunk_frames)
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.ACTIVATION_INVALID.value
+
+    def test_chunk_request_id_mismatch_rejected(
+        self, server, settler_identity
+    ):
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+        )
+        # Splice a chunk that claims a different parent request.
+        original = parse_message(chunk_frames[0])
+        spliced = _ActivationChunk(
+            request_id="DIFFERENT-REQUEST",
+            sequence=original.sequence,
+            data=original.data,
+            chunk_sha256=original.chunk_sha256,
+        )
+        chunk_frames[0] = encode_message(spliced)
+        manifest_resp, _ = server.handle_streamed(
+            manifest_bytes, iter(chunk_frames)
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.ACTIVATION_INVALID.value
+
+    def test_garbage_chunk_frame_rejected(self, server, settler_identity):
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+        )
+        chunk_frames[0] = b"not-json"
+        manifest_resp, _ = server.handle_streamed(
+            manifest_bytes, iter(chunk_frames)
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.ACTIVATION_INVALID.value
+
+    def test_non_chunk_message_in_chunk_iter_rejected(
+        self, server, settler_identity
+    ):
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+        )
+        # Send a StageError as a "chunk" — wrong type.
+        chunk_frames[0] = encode_message(
+            StageError(request_id="req-1", code="X", message="")
+        )
+        manifest_resp, _ = server.handle_streamed(
+            manifest_bytes, iter(chunk_frames)
+        )
+        err = self._decode_error(manifest_resp)
+        assert err.code == StageErrorCode.ACTIVATION_INVALID.value
+
+
+class TestStreamedManifestRouting:
+    """The streamed handler rejects requests without an
+    activation_manifest (caller should use handle() for inline)."""
+
+    def test_inline_request_to_streamed_handler_rejected(
+        self, server, settler_identity
+    ):
+        # Build an inline-formatted RunLayerSliceRequest (no manifest)
+        # and try to dispatch it via handle_streamed.
+        inline_request = _make_request(settler_identity=settler_identity)
+        manifest_resp, _ = server.handle_streamed(
+            encode_message(inline_request), iter([])
+        )
+        msg = parse_message(manifest_resp)
+        assert isinstance(msg, StageError)
+        assert msg.code == StageErrorCode.MALFORMED_REQUEST.value
+        assert "lacks activation_manifest" in msg.message
+
+    def test_streamed_request_to_inline_handler_rejected(
+        self, server, settler_identity
+    ):
+        # Inverse: a streamed request reaching the inline handle()
+        # should also be rejected with MALFORMED_REQUEST.
+        manifest_bytes, _, _ = _make_streamed_request(
+            settler_identity=settler_identity
+        )
+        msg = parse_message(server.handle(manifest_bytes))
+        assert isinstance(msg, StageError)
+        assert msg.code == StageErrorCode.MALFORMED_REQUEST.value
+        assert "carries activation_manifest" in msg.message
+
+
+class TestStreamedNeverRaises:
+    """handle_streamed must never propagate exceptions through the
+    streaming transport boundary. Garbage manifests + chunks both
+    map to encoded StageError responses with empty chunk iter."""
+
+    @pytest.mark.parametrize("garbage_manifest", [
+        b"",
+        b"not-json",
+        b'{"type": "stage_error", "protocol_version": 1}',
+        b'{"type": null}',
+    ])
+    def test_handle_streamed_garbage_manifest_never_raises(
+        self, server, garbage_manifest
+    ):
+        manifest_resp, chunks = server.handle_streamed(
+            garbage_manifest, iter([])
+        )
+        assert isinstance(manifest_resp, bytes)
+        # The returned manifest must parse as a StageError.
+        parsed = parse_message(manifest_resp)
+        assert isinstance(parsed, StageError)
+        # Empty chunk iter on failure path.
+        assert list(chunks) == []
+
+    def test_handle_streamed_runner_exception_maps_to_internal_error(
+        self, stage_identity, registry, tee_runtime, anchor, settler_identity
+    ):
+        bad_runner = FakeRunner(raise_on_call=ValueError("oops"))
+        server = LayerStageServer(
+            identity=stage_identity,
+            registry=registry,
+            runner=bad_runner,
+            tee_runtime=tee_runtime,
+            anchor=anchor,
+            clock=lambda: 1000.0,
+        )
+        manifest_bytes, chunk_frames, _ = _make_streamed_request(
+            settler_identity=settler_identity,
+        )
+        manifest_resp, chunks = server.handle_streamed(
+            manifest_bytes, iter(chunk_frames)
+        )
+        msg = parse_message(manifest_resp)
+        assert isinstance(msg, StageError)
+        assert msg.code == StageErrorCode.INTERNAL_ERROR.value
+        assert list(chunks) == []
+
+
+class TestStreamedConstructionValidation:
+    def test_non_positive_chunk_bytes_rejected(
+        self, stage_identity, registry, runner, tee_runtime, anchor
+    ):
+        with pytest.raises(ValueError, match="chunk_bytes"):
+            LayerStageServer(
+                identity=stage_identity,
+                registry=registry,
+                runner=runner,
+                tee_runtime=tee_runtime,
+                anchor=anchor,
+                chunk_bytes=0,
+            )
