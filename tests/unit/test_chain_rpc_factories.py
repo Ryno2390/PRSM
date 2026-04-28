@@ -281,3 +281,107 @@ class TestProductionWiringSlotsIn:
         assert executor is not None
         # The chain_executor IS the factory output (unmodified).
         assert executor._chain_executor is rpc_exec  # type: ignore[attr-defined]
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.7.1 — streamed transport plumbing tests
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _stub_streamed_send(addr: str, manifest: bytes, chunks):
+    raise NotImplementedError("test stub")
+
+
+class TestMakeRpcChainExecutorStreaming:
+    def test_streamed_send_message_passes_through(self):
+        """Factory wires streamed_send_message= into the executor."""
+        from prsm.compute.chain_rpc import make_rpc_chain_executor
+        from prsm.node.identity import generate_node_identity
+
+        executor = make_rpc_chain_executor(
+            settler_identity=generate_node_identity("settler"),
+            send_message=_stub_send,
+            anchor=_FakeAnchor(),
+            streamed_send_message=_stub_streamed_send,
+        )
+        # Internal field set by constructor.
+        assert executor._streamed_send is _stub_streamed_send  # type: ignore[attr-defined]
+
+    def test_default_streamed_send_is_none(self):
+        from prsm.compute.chain_rpc import make_rpc_chain_executor
+        from prsm.node.identity import generate_node_identity
+
+        executor = make_rpc_chain_executor(
+            settler_identity=generate_node_identity("settler"),
+            send_message=_stub_send,
+            anchor=_FakeAnchor(),
+        )
+        assert executor._streamed_send is None  # type: ignore[attr-defined]
+
+    def test_chunk_threshold_passes_through(self):
+        from prsm.compute.chain_rpc import make_rpc_chain_executor
+        from prsm.node.identity import generate_node_identity
+
+        executor = make_rpc_chain_executor(
+            settler_identity=generate_node_identity("settler"),
+            send_message=_stub_send,
+            anchor=_FakeAnchor(),
+            chunk_threshold_bytes=512,
+            chunk_bytes=128,
+        )
+        assert executor._chunk_threshold_bytes == 512  # type: ignore[attr-defined]
+        assert executor._chunk_bytes == 128  # type: ignore[attr-defined]
+
+    def test_default_threshold_is_10_mib(self):
+        from prsm.compute.chain_rpc import make_rpc_chain_executor
+        from prsm.compute.chain_rpc.activation_codec import (
+            CHUNK_THRESHOLD_BYTES,
+            DEFAULT_CHUNK_BYTES_ACTIVATION,
+        )
+        from prsm.node.identity import generate_node_identity
+
+        executor = make_rpc_chain_executor(
+            settler_identity=generate_node_identity("settler"),
+            send_message=_stub_send,
+            anchor=_FakeAnchor(),
+        )
+        assert executor._chunk_threshold_bytes == CHUNK_THRESHOLD_BYTES  # type: ignore[attr-defined]
+        assert executor._chunk_bytes == DEFAULT_CHUNK_BYTES_ACTIVATION  # type: ignore[attr-defined]
+
+
+class TestMakeLayerStageServerStreaming:
+    def test_chunk_bytes_passes_through(self):
+        from prsm.compute.chain_rpc import make_layer_stage_server
+        from prsm.node.identity import generate_node_identity
+
+        server = make_layer_stage_server(
+            identity=generate_node_identity("alice"),
+            registry=_FakeRegistry(),
+            runner=_FakeRunner(),
+            tee_runtime=_FakeTEE(),
+            anchor=_FakeAnchor(),
+            chunk_bytes=512,
+        )
+        assert server._chunk_bytes == 512  # type: ignore[attr-defined]
+
+    def test_default_chunk_bytes_is_one_mib(self):
+        from prsm.compute.chain_rpc import make_layer_stage_server
+        from prsm.compute.chain_rpc.activation_codec import (
+            DEFAULT_CHUNK_BYTES_ACTIVATION,
+        )
+        from prsm.node.identity import generate_node_identity
+
+        server = make_layer_stage_server(
+            identity=generate_node_identity("alice"),
+            registry=_FakeRegistry(),
+            runner=_FakeRunner(),
+            tee_runtime=_FakeTEE(),
+            anchor=_FakeAnchor(),
+        )
+        assert server._chunk_bytes == DEFAULT_CHUNK_BYTES_ACTIVATION  # type: ignore[attr-defined]
+
+
+class TestStreamedSendMessageReExport:
+    def test_streamed_send_message_in_chain_rpc_top_level(self):
+        from prsm.compute.chain_rpc import StreamedSendMessage
+        assert StreamedSendMessage is not None

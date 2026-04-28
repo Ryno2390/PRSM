@@ -38,12 +38,17 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
+from prsm.compute.chain_rpc.activation_codec import (
+    CHUNK_THRESHOLD_BYTES,
+    DEFAULT_CHUNK_BYTES_ACTIVATION,
+)
 from prsm.compute.chain_rpc.client import (
     AddressResolver,
     OutputDecoder,
     PromptEncoder,
     RpcChainExecutor,
     SendMessage,
+    StreamedSendMessage,
 )
 from prsm.compute.chain_rpc.server import (
     LayerSliceRunner,
@@ -102,6 +107,9 @@ def make_rpc_chain_executor(
     prompt_encoder: Optional[PromptEncoder] = None,
     output_decoder: Optional[OutputDecoder] = None,
     address_resolver: Optional[AddressResolver] = None,
+    streamed_send_message: Optional[StreamedSendMessage] = None,
+    chunk_threshold_bytes: int = CHUNK_THRESHOLD_BYTES,
+    chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
     default_deadline_seconds: float = 30.0,
 ) -> RpcChainExecutor:
     """Build an ``RpcChainExecutor`` with production-friendly defaults.
@@ -112,7 +120,8 @@ def make_rpc_chain_executor(
                          signs the final InferenceReceipt at the
                          ParallaxScheduledExecutor layer.
       send_message       Phase 6 transport callable: (address, bytes)
-                         → bytes.
+                         → bytes. Used for inline-sized activations
+                         (≤ ``chunk_threshold_bytes``).
       anchor             Phase 3.x.3 anchor for verifying each stage's
                          response signature.
 
@@ -126,6 +135,18 @@ def make_rpc_chain_executor(
       address_resolver   Default: identity (node_id == address).
                          Suitable when the Phase 6 peer registry uses
                          node_ids directly.
+      streamed_send_message  Phase 3.x.7.1 streamed transport: ``(address,
+                         manifest_bytes, chunk_bytes_iter) → (response_
+                         manifest_bytes, response_chunk_bytes_iter)``.
+                         Production wires this to Phase 6 gRPC bidi-
+                         streaming. When None, activations exceeding
+                         ``chunk_threshold_bytes`` raise
+                         ``ChainExecutionError(ACTIVATION_TOO_LARGE)``.
+      chunk_threshold_bytes  Inline-vs-streamed cutoff (default 10 MiB
+                         from ``CHUNK_THRESHOLD_BYTES``). Activations
+                         below this ride inline; above, streamed.
+      chunk_bytes        Per-chunk size on the streamed path (default
+                         1 MiB from Phase 6 ``ShardChunker``).
       default_deadline_seconds  Default 30s.
     """
     if prompt_encoder is None or output_decoder is None:
@@ -145,10 +166,13 @@ def make_rpc_chain_executor(
     return RpcChainExecutor(
         settler_identity=settler_identity,
         send_message=send_message,
+        streamed_send_message=streamed_send_message,
         anchor=anchor,
         prompt_encoder=prompt_encoder or utf8_prompt_encoder,
         output_decoder=output_decoder or utf8_output_decoder,
         address_resolver=address_resolver,
+        chunk_threshold_bytes=chunk_threshold_bytes,
+        chunk_bytes=chunk_bytes,
         default_deadline_seconds=default_deadline_seconds,
     )
 
@@ -166,6 +190,7 @@ def make_layer_stage_server(
     tee_runtime: Any,
     anchor: Any,
     clock: Optional[Callable[[], float]] = None,
+    chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
 ) -> LayerStageServer:
     """Build a ``LayerStageServer`` for a node hosting one or more
     chain stages.
@@ -188,6 +213,9 @@ def make_layer_stage_server(
 
     Optional:
       clock         Defaults to ``time.time``. Tests override.
+      chunk_bytes   Per-chunk size when chunking response activations
+                    on the streamed path (Phase 3.x.7.1). Default
+                    1 MiB from Phase 6 ``ShardChunker``.
     """
     kwargs = dict(
         identity=identity,
@@ -195,6 +223,7 @@ def make_layer_stage_server(
         runner=runner,
         tee_runtime=tee_runtime,
         anchor=anchor,
+        chunk_bytes=chunk_bytes,
     )
     if clock is not None:
         kwargs["clock"] = clock
