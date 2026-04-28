@@ -722,3 +722,153 @@ class TestMultiByteUtf8:
         joined = "".join(c.text_delta for c in chunks)
         assert joined == family
         assert joined.encode("utf-8").decode("utf-8") == joined
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.10 Task 3 — Sampling parameters + stop conditions
+#
+# Verifies the request → model wiring of max_tokens / temperature /
+# top_k / top_p / do_sample / eos_token_id, AND the stop-condition
+# mapping to ``finish_reason ∈ {"stop", "max_tokens", "error"}``.
+# Greedy determinism is tested via mock-rerun equivalence; real-HF
+# determinism with a torch seed is exercised in Task 5 E2E.
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestSamplingAndStopConditions:
+    def test_temperature_zero_produces_deterministic_greedy_output(self):
+        # Drive runner twice with temperature=0. With the mock
+        # model the per-call output is trivially deterministic, but
+        # the test point is that the runner consistently passes
+        # ``do_sample=False`` so HF's own greedy path is engaged
+        # — that's what produces real determinism upstream.
+        class _Req:
+            max_tokens = None
+            temperature = 0.0
+
+        out1_calls = []
+        out2_calls = []
+        for sink in (out1_calls, out2_calls):
+            runner, mdl, _ = _make_runner(
+                emit_ids=[1, 2, 3],
+                id_to_piece={1: "a", 2: "b", 3: "c"},
+            )
+            chunks = _drive(runner, request=_Req())
+            sink.append((
+                "".join(c.text_delta for c in chunks),
+                mdl.last_call["do_sample"],
+                mdl.last_call["temperature"],
+            ))
+        # Same output text both runs, do_sample=False both runs.
+        assert out1_calls[0] == out2_calls[0]
+        assert out1_calls[0][1] is False
+        assert out1_calls[0][2] == 0.0
+
+    def test_temperature_positive_passes_sampling_params(self):
+        # temperature>0 → do_sample=True, and the SamplingDefaults'
+        # top_k=50 / top_p=0.95 reach the model unmodified.
+        class _Req:
+            max_tokens = None
+            temperature = 0.7
+
+        runner, mdl, _ = _make_runner(
+            emit_ids=[1],
+            id_to_piece={1: "x"},
+            sampling=SamplingDefaults(
+                max_tokens=8, temperature=1.0, top_k=50, top_p=0.95,
+            ),
+        )
+        _drive(runner, request=_Req())
+        assert mdl.last_call["do_sample"] is True
+        assert mdl.last_call["temperature"] == 0.7
+        assert mdl.last_call["top_k"] == 50
+        assert mdl.last_call["top_p"] == 0.95
+
+    def test_max_tokens_two_caps_generation_at_two(self):
+        class _Req:
+            max_tokens = 2
+            temperature = None
+
+        runner, mdl, _ = _make_runner(
+            emit_ids=[1, 2, 3, 4, 5],
+            id_to_piece={i: f"t{i} " for i in range(1, 6)},
+        )
+        chunks = _drive(runner, request=_Req())
+        # Only 2 chunks reach the wire; cap propagated to model.
+        assert len(chunks) == 2
+        assert mdl.last_call["max_new_tokens"] == 2
+
+    def test_finish_reason_stop_when_eos_reached(self):
+        # Model emits a non-EOS token then EOS. Runner reports stop.
+        runner, _, _ = _make_runner(
+            emit_ids=[1, 99],
+            id_to_piece={1: "hello"},
+            eos_token_id=99,
+        )
+        chunks = _drive(runner)
+        assert chunks[-1].finish_reason == "stop"
+
+    def test_finish_reason_max_tokens_when_cap_hit(self):
+        # Model would emit 5 tokens, none EOS. Cap=3 → terminal
+        # finish_reason="max_tokens" (NOT "stop").
+        runner, _, _ = _make_runner(
+            emit_ids=[1, 2, 3, 4, 5],
+            id_to_piece={i: f"w{i} " for i in range(1, 6)},
+            sampling=SamplingDefaults(max_tokens=3),
+        )
+        chunks = _drive(runner)
+        assert chunks[-1].finish_reason == "max_tokens"
+
+    def test_request_temperature_overrides_runner_default(self):
+        # Runner default temperature=1.0; request specifies 0.3 →
+        # 0.3 wins.
+        class _Req:
+            max_tokens = None
+            temperature = 0.3
+
+        runner, mdl, _ = _make_runner(
+            emit_ids=[1],
+            id_to_piece={1: "x"},
+            sampling=SamplingDefaults(max_tokens=8, temperature=1.0),
+        )
+        _drive(runner, request=_Req())
+        assert mdl.last_call["temperature"] == 0.3
+
+    def test_eos_token_id_wired_into_generate(self):
+        # tokenizer.eos_token_id MUST reach model.generate() so HF
+        # can stop early. Confirms the runner doesn't drop it.
+        runner, mdl, _ = _make_runner(
+            emit_ids=[1],
+            id_to_piece={1: "x"},
+            eos_token_id=42,
+        )
+        _drive(runner)
+        assert mdl.last_call["eos_token_id"] == 42
+
+    def test_default_max_tokens_used_when_request_none(self):
+        # request=None path falls back to SamplingDefaults.max_tokens.
+        runner, mdl, _ = _make_runner(
+            emit_ids=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            id_to_piece={i: "x" for i in range(1, 11)},
+            sampling=SamplingDefaults(max_tokens=4),
+        )
+        chunks = _drive(runner, request=None)
+        assert mdl.last_call["max_new_tokens"] == 4
+        assert len(chunks) == 4
+
+    def test_no_eos_token_id_passes_none(self):
+        # Tokenizer without eos_token_id → runner passes None
+        # through. HF's generate() handles this (no early stop).
+        runner, mdl, _ = _make_runner(
+            emit_ids=[1, 2],
+            id_to_piece={1: "a", 2: "b"},
+            eos_token_id=None,
+        )
+        _drive(runner)
+        assert mdl.last_call["eos_token_id"] is None
+        # Without EOS, terminal reason on natural exhaustion of the
+        # mock's emit list: finish_reason="max_tokens" (cap hit
+        # because all 2 tokens used; mock's loop ended at i=2 < cap).
+        # Actually with cap=16 and only 2 emit_ids, generate()
+        # returns having NOT triggered EOS — finish_reason maps to
+        # "max_tokens" per impl (not-EOS branch).
