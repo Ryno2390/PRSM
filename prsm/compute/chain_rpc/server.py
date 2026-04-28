@@ -57,6 +57,8 @@ from prsm.compute.chain_rpc.protocol import (
     RunLayerSliceResponse,
     StageError,
     StageErrorCode,
+    StreamFinalFrame,
+    TokenFrame,
     encode_message,
     parse_message,
 )
@@ -238,6 +240,7 @@ class LayerStageServer:
         clock: Callable[[], float] = time.time,
         chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
         max_streamed_payload_bytes: int = DEFAULT_MAX_STREAMED_PAYLOAD_BYTES,
+        streaming_runner: Optional[Any] = None,
     ) -> None:
         if identity is None or not hasattr(identity, "node_id"):
             raise RuntimeError(
@@ -269,6 +272,18 @@ class LayerStageServer:
                 f"max_streamed_payload_bytes must be positive, got "
                 f"{max_streamed_payload_bytes}"
             )
+        # Phase 3.x.8: streaming_runner is optional. When None, the
+        # token-stream handler returns a structured StageError on any
+        # streaming request (server doesn't support streaming). When
+        # set, must be a callable-bearing object with
+        # ``run_layer_slice_streaming``.
+        if streaming_runner is not None and not hasattr(
+            streaming_runner, "run_layer_slice_streaming"
+        ):
+            raise RuntimeError(
+                "LayerStageServer: streaming_runner must expose "
+                ".run_layer_slice_streaming(...) if provided"
+            )
 
         self._identity = identity
         self._registry = registry
@@ -278,6 +293,7 @@ class LayerStageServer:
         self._clock = clock
         self._chunk_bytes = int(chunk_bytes)
         self._max_streamed_payload_bytes = int(max_streamed_payload_bytes)
+        self._streaming_runner = streaming_runner
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -421,6 +437,130 @@ class LayerStageServer:
                 request.request_id,
             )
             return self._streamed_error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                f"internal error during dispatch: {exc.__class__.__name__}",
+            )
+
+    # ── token-stream public entry (Phase 3.x.8) ──────────────────────
+
+    def handle_token_stream(
+        self,
+        request_bytes: bytes,
+    ) -> Iterable[bytes]:
+        """Streaming-decode path. ONLY invoked for tail stages with
+        ``streaming=True``. Mirrors ``handle()``'s validation gates;
+        yields ``TokenFrame`` wire frames as the runner produces
+        chunks; finalizes with exactly one ``StreamFinalFrame``
+        carrying the signed ``RunLayerSliceResponse`` over the joined
+        output bytes.
+
+        NEVER raises through the wire boundary. Any failure path
+        emits a SOLE encoded ``StageError`` frame and the iterator
+        terminates. Consumers of this iterator MUST handle either
+        terminal type:
+          - ``StreamFinalFrame`` → stream completed cleanly.
+          - ``StageError`` → stream errored (no signed receipt
+            material available).
+
+        v1 contract: streaming + chunked-input composition is NOT
+        yet wired (a request with ``activation_manifest`` set
+        rejects with ``MALFORMED_REQUEST``). Phase 3.x.8 Task 7
+        revisits — for v1, the executor reassembles upstream chunked
+        activations into inline form before dispatching to the
+        streaming tail.
+        """
+        # Step 1: parse.
+        try:
+            request = parse_message(request_bytes)
+        except ChainRpcVersionMismatchError as exc:
+            yield self._error(
+                _UNKNOWN_REQUEST_ID,
+                StageErrorCode.UNSUPPORTED_VERSION,
+                str(exc),
+            )
+            return
+        except (ChainRpcMalformedError, ChainRpcUnknownTypeError) as exc:
+            yield self._error(
+                _UNKNOWN_REQUEST_ID,
+                StageErrorCode.MALFORMED_REQUEST,
+                str(exc),
+            )
+            return
+        except ChainRpcProtocolError as exc:
+            yield self._error(
+                _UNKNOWN_REQUEST_ID,
+                StageErrorCode.MALFORMED_REQUEST,
+                str(exc),
+            )
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "LayerStageServer.handle_token_stream: parse raised"
+            )
+            yield self._error(
+                _UNKNOWN_REQUEST_ID,
+                StageErrorCode.INTERNAL_ERROR,
+                f"internal error during parse: {exc.__class__.__name__}",
+            )
+            return
+
+        if not isinstance(request, RunLayerSliceRequest):
+            yield self._error(
+                getattr(request, "request_id", _UNKNOWN_REQUEST_ID),
+                StageErrorCode.MALFORMED_REQUEST,
+                f"token-stream handler only accepts "
+                f"RunLayerSliceRequest; got {type(request).__name__}",
+            )
+            return
+
+        # Routing invariant: token-stream handler requires streaming=True.
+        # A peer that calls this method on a non-streaming request is
+        # using the wrong RPC method; reject.
+        if not request.streaming:
+            yield self._error(
+                request.request_id,
+                StageErrorCode.MALFORMED_REQUEST,
+                "token-stream handler requires streaming=True "
+                "(use handle() for unary requests)",
+            )
+            return
+
+        # v1 scope: inline activations only on the streaming-output
+        # path. Streaming-input + streaming-output composition is a
+        # Task 7 follow-up; reject explicitly for now.
+        if request.activation_manifest is not None:
+            yield self._error(
+                request.request_id,
+                StageErrorCode.MALFORMED_REQUEST,
+                "token-stream handler v1: chunked-input + streaming-"
+                "output composition not yet supported (executor must "
+                "reassemble upstream chunks before dispatching to the "
+                "streaming tail)",
+            )
+            return
+
+        # Operator config: token-stream requests rejected when no
+        # streaming_runner is wired. INTERNAL_ERROR (not MALFORMED)
+        # because the request itself is well-formed; the server is
+        # simply not configured for streaming.
+        if self._streaming_runner is None:
+            yield self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                "server has no streaming_runner configured",
+            )
+            return
+
+        try:
+            yield from self._dispatch_token_stream(request)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "LayerStageServer.handle_token_stream: dispatch raised "
+                "for request_id=%r",
+                request.request_id,
+            )
+            yield self._error(
                 request.request_id,
                 StageErrorCode.INTERNAL_ERROR,
                 f"internal error during dispatch: {exc.__class__.__name__}",
@@ -634,6 +774,245 @@ class LayerStageServer:
             response_chunk_frames.append(encode_message(frame))
 
         return response_manifest_bytes, iter(response_chunk_frames)
+
+    # ── token-stream dispatch (Phase 3.x.8) ──────────────────────────
+
+    def _dispatch_token_stream(
+        self,
+        request: RunLayerSliceRequest,
+    ) -> Iterable[bytes]:
+        """Token-stream pipeline body. Validation BEFORE invoking the
+        runner; runner emits ``StreamingChunk``s that get encoded
+        into ``TokenFrame`` wire frames; terminal chunk's aggregate
+        fields populate the signed ``RunLayerSliceResponse`` carried
+        by the closing ``StreamFinalFrame``."""
+        # Steps 2-6: shared validation gates (token, deadline,
+        # registry, shard, tier).
+        gate_result = self._run_validation_gates(request)
+        if gate_result.error is not None:
+            yield self._error(
+                request.request_id, gate_result.error[0], gate_result.error[1]
+            )
+            return
+        model = gate_result.model
+
+        # Tail-stage invariant: streaming requests are only valid on
+        # the chain's tail. The executor's job is to dispatch
+        # streaming=True only to the tail; this gate catches an
+        # executor bug or an adversary trying to coerce a non-tail
+        # stage into emitting tokens.
+        if not _is_final_stage(model, request.layer_range):
+            yield self._error(
+                request.request_id,
+                StageErrorCode.MALFORMED_REQUEST,
+                "token-stream handler: streaming=True is only valid "
+                "on the chain's tail stage; this stage's layer_range "
+                f"{request.layer_range} is not the model tail",
+            )
+            return
+
+        # Step 7a: decode the inline activation.
+        try:
+            activation = decode_activation(
+                request.activation_blob,
+                request.activation_shape,
+                request.activation_dtype,
+            )
+        except ActivationCodecError as exc:
+            yield self._error(
+                request.request_id,
+                StageErrorCode.ACTIVATION_INVALID,
+                str(exc),
+            )
+            return
+
+        # Step 7b: invoke the streaming runner. Each ``StreamingChunk``
+        # becomes a TokenFrame; the terminal chunk also drives the
+        # signed StreamFinalFrame.
+        chunk_iter = None
+        try:
+            chunk_iter = self._streaming_runner.run_layer_slice_streaming(
+                model=model,
+                layer_range=request.layer_range,
+                activation=activation,
+                privacy_tier=request.privacy_tier,
+                is_final_stage=True,
+            )
+        except TimeoutError as exc:
+            yield self._error(
+                request.request_id, StageErrorCode.TIMEOUT, str(exc)
+            )
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "LayerStageServer: streaming_runner setup raised for "
+                "request_id=%r",
+                request.request_id,
+            )
+            yield self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                f"streaming-runner failure: {exc.__class__.__name__}",
+            )
+            return
+
+        # Iterate the runner. We don't know the terminal chunk until
+        # ``finish_reason`` is non-None on a yielded ``StreamingChunk``.
+        # Track joined-text invariant: the StreamFinalFrame's signed
+        # response.activation_blob MUST equal "".join(text_deltas)
+        # encoded UTF-8 — that's how the stage signature commits to
+        # the streamed output.
+        # Lazy import to avoid circular dependency: streaming_runner.py
+        # imports LayerSliceRunner from this module.
+        from prsm.compute.inference.streaming_runner import (
+            StreamingChunk as _StreamingChunk,
+        )
+        joined_parts: List[str] = []
+        terminal_seen = False
+        expected_seq = 0
+
+        try:
+            for chunk in chunk_iter:
+                if not isinstance(chunk, _StreamingChunk):
+                    yield self._error(
+                        request.request_id,
+                        StageErrorCode.INTERNAL_ERROR,
+                        f"streaming_runner yielded {type(chunk).__name__}; "
+                        f"expected StreamingChunk",
+                    )
+                    return
+                # Sequence-index invariant: 0-indexed, strictly
+                # increasing, no gaps. A runner that violates this
+                # is a bug — surface as INTERNAL_ERROR.
+                if chunk.sequence_index != expected_seq:
+                    yield self._error(
+                        request.request_id,
+                        StageErrorCode.INTERNAL_ERROR,
+                        f"streaming_runner emitted sequence_index="
+                        f"{chunk.sequence_index} (expected "
+                        f"{expected_seq})",
+                    )
+                    return
+                expected_seq += 1
+                joined_parts.append(chunk.text_delta)
+
+                # Encode + yield the TokenFrame wire bytes.
+                frame = TokenFrame(
+                    request_id=request.request_id,
+                    sequence_index=chunk.sequence_index,
+                    text_delta=chunk.text_delta,
+                    token_id=chunk.token_id,
+                    finish_reason=chunk.finish_reason,
+                )
+                yield encode_message(frame)
+
+                if chunk.finish_reason is not None:
+                    terminal_seen = True
+                    # The terminal chunk MUST also carry the final-
+                    # aggregate fields the StreamFinalFrame needs.
+                    if (
+                        chunk.full_output_text is None
+                        or chunk.duration_seconds is None
+                        or chunk.tee_attestation is None
+                        or chunk.tee_type is None
+                        or chunk.epsilon_spent is None
+                    ):
+                        yield self._error(
+                            request.request_id,
+                            StageErrorCode.INTERNAL_ERROR,
+                            "streaming_runner terminal chunk missing "
+                            "final-aggregate fields (full_output_text / "
+                            "duration_seconds / tee_attestation / "
+                            "tee_type / epsilon_spent)",
+                        )
+                        return
+
+                    # Joined-text invariant check: the stage signs
+                    # over full_output_text bytes; the consumer
+                    # joins TokenFrame deltas and asserts they
+                    # match. We enforce here too so a runner that
+                    # produces inconsistent text fails server-side
+                    # before signing.
+                    joined = "".join(joined_parts)
+                    if joined != chunk.full_output_text:
+                        yield self._error(
+                            request.request_id,
+                            StageErrorCode.INTERNAL_ERROR,
+                            "streaming_runner: joined text_deltas do "
+                            "not match terminal chunk's "
+                            "full_output_text (runner produced "
+                            "inconsistent stream)",
+                        )
+                        return
+                    # Build + yield the signed StreamFinalFrame.
+                    yield self._build_stream_final_frame(
+                        request_id=request.request_id,
+                        chunk=chunk,
+                    )
+                    return
+        except TimeoutError as exc:
+            yield self._error(
+                request.request_id, StageErrorCode.TIMEOUT, str(exc)
+            )
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "LayerStageServer: streaming_runner iteration raised for "
+                "request_id=%r",
+                request.request_id,
+            )
+            yield self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                f"streaming-runner iteration failure: "
+                f"{exc.__class__.__name__}",
+            )
+            return
+
+        # Iterator exhausted without ever emitting a terminal chunk
+        # (a runner that returns mid-stream silently). Surface as
+        # INTERNAL_ERROR so the consumer doesn't hang waiting for a
+        # StreamFinalFrame that's never coming.
+        if not terminal_seen:
+            yield self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                "streaming_runner exhausted without a terminal chunk "
+                "(no finish_reason set on any yielded chunk)",
+            )
+
+    def _build_stream_final_frame(
+        self,
+        *,
+        request_id: str,
+        chunk: Any,  # StreamingChunk — lazy-typed to avoid circular import
+    ) -> bytes:
+        """Encode the signed terminal frame for a token stream.
+
+        The embedded ``RunLayerSliceResponse``'s ``activation_blob``
+        is the UTF-8 encoding of the joined output text. The stage's
+        existing ``signing_payload`` hex-encodes ``activation_blob``
+        — so the signature commits to the streamed output without
+        any new signing-payload field. A relay that tampers any
+        ``TokenFrame.text_delta`` causes the joined-bytes hash to
+        diverge from what the stage signed, invalidating the stream
+        as a whole.
+        """
+        joined_bytes = chunk.full_output_text.encode("utf-8")  # type: ignore[union-attr]
+        response = RunLayerSliceResponse.sign(
+            identity=self._identity,
+            request_id=request_id,
+            activation_blob=joined_bytes,
+            activation_shape=(len(joined_bytes),)
+            if joined_bytes
+            else (0,),
+            activation_dtype="uint8",
+            duration_seconds=chunk.duration_seconds,  # type: ignore[arg-type]
+            tee_attestation=chunk.tee_attestation,  # type: ignore[arg-type]
+            tee_type=chunk.tee_type,  # type: ignore[arg-type]
+            epsilon_spent=chunk.epsilon_spent,  # type: ignore[arg-type]
+        )
+        return encode_message(StreamFinalFrame(response=response))
 
     # ── shared validation + run ───────────────────────────────────────
 

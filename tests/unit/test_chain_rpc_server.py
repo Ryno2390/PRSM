@@ -1409,3 +1409,629 @@ class TestStreamedEnvelopeValidation:
         err = self._decode_error(manifest_resp)
         assert err.code == StageErrorCode.ACTIVATION_INVALID.value
         assert "dtype" in err.message
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.8 — Token-stream handler tests
+# ──────────────────────────────────────────────────────────────────────────
+
+
+from prsm.compute.chain_rpc.protocol import (
+    StreamFinalFrame,
+    TokenFrame,
+)
+from prsm.compute.inference.streaming_runner import (
+    StreamingChunk,
+    SyntheticStreamingRunner,
+)
+
+
+def _make_streaming_request(
+    *,
+    settler_identity,
+    request_id: str = "req-stream-1",
+    model_id: str = "test-model",
+    layer_range: Tuple[int, int] = (0, 4),  # tail by default
+    privacy_tier: PrivacyLevel = PrivacyLevel.NONE,
+    deadline: float = 2000.0,
+    activation: Optional[np.ndarray] = None,
+    streaming: bool = True,
+) -> RunLayerSliceRequest:
+    """Streaming-flavor of _make_request."""
+    if activation is None:
+        activation = np.array([[1.0, 2.0, 3.0, 4.0]], dtype=np.float32)
+    blob = activation.tobytes()
+    token = HandoffToken.sign(
+        identity=settler_identity,
+        request_id=request_id,
+        chain_stage_index=0,
+        chain_total_stages=2,
+        deadline_unix=deadline,
+    )
+    return RunLayerSliceRequest(
+        request_id=request_id,
+        model_id=model_id,
+        layer_range=layer_range,
+        privacy_tier=privacy_tier,
+        content_tier=ContentTier.A,
+        activation_blob=blob,
+        activation_shape=tuple(activation.shape),
+        activation_dtype=str(activation.dtype),
+        upstream_token=token,
+        deadline_unix=deadline,
+        streaming=streaming,
+    )
+
+
+def _decode_stream_frames(
+    iter_bytes: Iterable[bytes],
+) -> Tuple[List[TokenFrame], Optional[StreamFinalFrame], Optional[StageError]]:
+    """Decode an iterator of wire frames into (token_frames,
+    stream_final_frame, error). Exactly one of stream_final_frame /
+    error is set when the stream terminates cleanly."""
+    tokens: List[TokenFrame] = []
+    final: Optional[StreamFinalFrame] = None
+    err: Optional[StageError] = None
+    for raw in iter_bytes:
+        msg = parse_message(raw)
+        if isinstance(msg, TokenFrame):
+            tokens.append(msg)
+        elif isinstance(msg, StreamFinalFrame):
+            final = msg
+        elif isinstance(msg, StageError):
+            err = msg
+        else:
+            raise AssertionError(
+                f"unexpected wire type in stream: {type(msg).__name__}"
+            )
+    return tokens, final, err
+
+
+@pytest.fixture
+def streaming_runner_for_text():
+    """Builds a SyntheticStreamingRunner that decodes activation bytes
+    back into a fixed canonical text. Tests can override by passing
+    different output_decoder via _make_streaming_server."""
+    def output_decoder(activation: np.ndarray) -> str:
+        return "hello world from synthetic"
+
+    return output_decoder
+
+
+def _make_streaming_server(
+    *, stage_identity, registry, runner, tee_runtime, anchor,
+    output_decoder=None,
+    splitter=None,
+) -> LayerStageServer:
+    """LayerStageServer wired with a SyntheticStreamingRunner."""
+    if output_decoder is None:
+        def output_decoder(activation: np.ndarray) -> str:  # noqa: E306
+            return "hello world from synthetic"
+    kwargs = {"runner": runner, "output_decoder": output_decoder}
+    if splitter is not None:
+        kwargs["splitter"] = splitter
+    streaming_runner = SyntheticStreamingRunner(**kwargs)
+    return LayerStageServer(
+        identity=stage_identity,
+        registry=registry,
+        runner=runner,
+        tee_runtime=tee_runtime,
+        anchor=anchor,
+        clock=lambda: 1000.0,
+        streaming_runner=streaming_runner,
+    )
+
+
+class TestTokenStreamHappyPath:
+    def test_tail_stage_streaming_yields_token_frames_then_final(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        tokens, final, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is None
+        assert final is not None
+        assert len(tokens) >= 1
+        # Joined invariant: concatenating text_deltas matches the
+        # signed StreamFinalFrame.response.activation_blob.
+        joined = "".join(t.text_delta for t in tokens)
+        assert joined == "hello world from synthetic"
+        assert final.response.activation_blob == joined.encode("utf-8")
+
+    def test_terminal_token_frame_has_finish_reason_stop(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        tokens, final, _ = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        # Only the LAST token frame may carry finish_reason.
+        for t in tokens[:-1]:
+            assert t.finish_reason is None
+        assert tokens[-1].finish_reason == "stop"
+        assert final is not None
+
+    def test_token_frames_have_strictly_increasing_sequence(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        tokens, _, _ = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        for i, t in enumerate(tokens):
+            assert t.sequence_index == i
+
+    def test_final_frame_response_signature_verifies_under_anchor(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        _, final, _ = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert final is not None
+        # The H2 invariant: signature must verify under the EXPECTED
+        # stage_node_id (caller-supplied), not the response self-claim.
+        assert final.response.verify_with_anchor(
+            anchor, expected_stage_node_id=stage_identity.node_id
+        ) is True
+
+
+class TestTokenStreamRouting:
+    """Routing invariants: the token-stream handler is for tail
+    streaming requests only. Mismatches are MALFORMED_REQUEST."""
+
+    def test_streaming_false_rejected(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        req = _make_streaming_request(
+            settler_identity=settler_identity, streaming=False
+        )
+        _, final, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert final is None
+        assert err is not None
+        assert err.code == StageErrorCode.MALFORMED_REQUEST.value
+        assert "streaming=True" in err.message
+
+    def test_non_tail_stage_rejected(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        # FakeModel has shards covering [0, 4); a layer_range of (0, 2)
+        # is covered (passes shard gate) but is NOT the tail.
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        req = _make_streaming_request(
+            settler_identity=settler_identity, layer_range=(0, 2),
+        )
+        _, final, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert final is None
+        assert err is not None
+        assert err.code == StageErrorCode.MALFORMED_REQUEST.value
+        assert "tail stage" in err.message
+
+    def test_chunked_input_rejected_v1(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        # v1 doesn't compose streaming-input + streaming-output.
+        manifest = ShardManifest(
+            shard_id="x",
+            payload_sha256="0" * 64,
+            payload_bytes=16,
+            total_chunks=1,
+            chunk_bytes=16,
+        )
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-chunked-stream",
+            chain_stage_index=0,
+            chain_total_stages=2,
+            deadline_unix=2000.0,
+        )
+        req = RunLayerSliceRequest(
+            request_id="req-chunked-stream",
+            model_id="test-model",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"",
+            activation_shape=(1, 4),
+            activation_dtype="float32",
+            upstream_token=token,
+            deadline_unix=2000.0,
+            activation_manifest=manifest,
+            streaming=True,
+        )
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        _, final, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert final is None
+        assert err is not None
+        assert err.code == StageErrorCode.MALFORMED_REQUEST.value
+        assert "chunked-input" in err.message
+
+    def test_no_streaming_runner_rejected_with_internal_error(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        # Server constructed WITHOUT a streaming_runner — token-stream
+        # requests must be rejected as INTERNAL_ERROR (operator
+        # misconfig, not a malformed request).
+        server = LayerStageServer(
+            identity=stage_identity,
+            registry=registry,
+            runner=runner,
+            tee_runtime=tee_runtime,
+            anchor=anchor,
+            clock=lambda: 1000.0,
+            # streaming_runner intentionally not provided.
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        _, _, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is not None
+        assert err.code == StageErrorCode.INTERNAL_ERROR.value
+        assert "streaming_runner" in err.message
+
+    def test_non_request_payload_rejected(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+    ):
+        # Send a StageError to the streaming handler — must surface
+        # as a single MALFORMED_REQUEST frame.
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        not_request = encode_message(
+            StageError(request_id="r", code="X", message="")
+        )
+        _, _, err = _decode_stream_frames(
+            server.handle_token_stream(not_request)
+        )
+        assert err is not None
+        assert err.code == StageErrorCode.MALFORMED_REQUEST.value
+
+
+class TestTokenStreamValidationGates:
+    """Existing 8-step validation gates fire BEFORE the runner is
+    invoked. Each error path emits a SOLE StageError frame."""
+
+    def test_invalid_token_rejected(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+    ):
+        # Use an unregistered settler — token verify fails at gate 2.
+        rogue_settler = generate_node_identity("unregistered-settler")
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        req = _make_streaming_request(settler_identity=rogue_settler)
+        _, _, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is not None
+        assert err.code == StageErrorCode.INVALID_TOKEN.value
+
+    def test_deadline_exceeded_rejected(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        req = _make_streaming_request(
+            settler_identity=settler_identity, deadline=500.0,  # past
+        )
+        _, _, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is not None
+        assert err.code == StageErrorCode.DEADLINE_EXCEEDED.value
+
+    def test_unknown_model_rejected(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        req = _make_streaming_request(
+            settler_identity=settler_identity, model_id="not-real",
+        )
+        _, _, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is not None
+        assert err.code == StageErrorCode.MODEL_NOT_FOUND.value
+
+
+class TestTokenStreamRunnerErrors:
+    """Runner-side failure modes. Either yields a clean StageError
+    terminal frame OR yields some TokenFrames followed by a terminal
+    StageError frame. Either way, NEVER raises."""
+
+    def test_runner_raises_at_setup(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        # A runner that raises BEFORE the for-loop starts (e.g. on
+        # generator construction) must surface as INTERNAL_ERROR.
+        class ExplodingRunner:
+            def run_layer_slice_streaming(self, **kwargs):
+                raise RuntimeError("boom at setup")
+
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=ExplodingRunner(),
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        tokens, final, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert tokens == []
+        assert final is None
+        assert err is not None
+        assert err.code == StageErrorCode.INTERNAL_ERROR.value
+
+    def test_runner_raises_mid_stream(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        class MidStreamCrasher:
+            def run_layer_slice_streaming(self, **kwargs):
+                yield StreamingChunk(sequence_index=0, text_delta="ok ")
+                yield StreamingChunk(sequence_index=1, text_delta="ok ")
+                raise RuntimeError("crashed mid-stream")
+
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=MidStreamCrasher(),
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        tokens, final, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert len(tokens) == 2
+        assert final is None
+        assert err is not None
+        assert err.code == StageErrorCode.INTERNAL_ERROR.value
+
+    def test_runner_emits_out_of_order_sequence_index(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        class OutOfOrderRunner:
+            def run_layer_slice_streaming(self, **kwargs):
+                yield StreamingChunk(sequence_index=0, text_delta="a")
+                # BUG: should be 1.
+                yield StreamingChunk(sequence_index=5, text_delta="b")
+
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=OutOfOrderRunner(),
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        _, _, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is not None
+        assert err.code == StageErrorCode.INTERNAL_ERROR.value
+        assert "sequence_index" in err.message
+
+    def test_runner_terminal_chunk_missing_aggregate_fields(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        class IncompleteTerminal:
+            def run_layer_slice_streaming(self, **kwargs):
+                # finish_reason set but final-aggregate fields are None.
+                yield StreamingChunk(
+                    sequence_index=0,
+                    text_delta="hi",
+                    finish_reason="stop",
+                    # Missing: full_output_text, duration_seconds, etc.
+                )
+
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=IncompleteTerminal(),
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        _, final, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert final is None
+        assert err is not None
+        assert err.code == StageErrorCode.INTERNAL_ERROR.value
+        assert "final-aggregate" in err.message
+
+    def test_runner_joined_text_diverges_from_full_output_text(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        class InconsistentRunner:
+            def run_layer_slice_streaming(self, **kwargs):
+                yield StreamingChunk(sequence_index=0, text_delta="hello ")
+                yield StreamingChunk(
+                    sequence_index=1,
+                    text_delta="world",
+                    finish_reason="stop",
+                    # MISMATCH: deltas join to "hello world", but the
+                    # full_output_text claims something else.
+                    full_output_text="DIFFERENT TEXT",
+                    duration_seconds=0.05,
+                    tee_attestation=b"\x00" * 32,
+                    tee_type=TEEType.SOFTWARE,
+                    epsilon_spent=0.0,
+                )
+
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=InconsistentRunner(),
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        _, final, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert final is None
+        assert err is not None
+        assert err.code == StageErrorCode.INTERNAL_ERROR.value
+        assert "joined text_deltas" in err.message
+
+    def test_runner_yields_wrong_type_rejected(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        class WrongType:
+            def run_layer_slice_streaming(self, **kwargs):
+                yield "not a StreamingChunk"  # type: ignore[misc]
+
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=WrongType(),
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        _, _, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is not None
+        assert err.code == StageErrorCode.INTERNAL_ERROR.value
+        assert "StreamingChunk" in err.message
+
+    def test_runner_exhausts_without_terminal_chunk(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        settler_identity,
+    ):
+        class NoTerminal:
+            def run_layer_slice_streaming(self, **kwargs):
+                yield StreamingChunk(sequence_index=0, text_delta="a")
+                yield StreamingChunk(sequence_index=1, text_delta="b")
+                # No terminal — iterator just ends.
+
+        server = LayerStageServer(
+            identity=stage_identity, registry=registry, runner=runner,
+            tee_runtime=tee_runtime, anchor=anchor,
+            clock=lambda: 1000.0,
+            streaming_runner=NoTerminal(),
+        )
+        req = _make_streaming_request(settler_identity=settler_identity)
+        tokens, final, err = _decode_stream_frames(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert len(tokens) == 2
+        assert final is None
+        assert err is not None
+        assert err.code == StageErrorCode.INTERNAL_ERROR.value
+        assert "terminal chunk" in err.message
+
+
+class TestTokenStreamNeverRaises:
+    """``handle_token_stream`` must never propagate exceptions through
+    the wire boundary. Garbage inputs all map to a single encoded
+    StageError frame."""
+
+    @pytest.mark.parametrize("garbage", [
+        b"",
+        b"not-json",
+        b'{"type": null}',
+        b'{"type": "stage_error", "protocol_version": 1}',
+    ])
+    def test_garbage_request_bytes_yield_single_stage_error(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+        garbage,
+    ):
+        server = _make_streaming_server(
+            stage_identity=stage_identity, registry=registry,
+            runner=runner, tee_runtime=tee_runtime, anchor=anchor,
+        )
+        # The garbage parses or doesn't, but the iterator must yield
+        # at most one StageError frame and terminate cleanly.
+        frames = list(server.handle_token_stream(garbage))
+        # We expect exactly one frame (the StageError) for truly
+        # garbage payloads. The "stage_error" payload parses fine
+        # but is the wrong message type — also produces a single
+        # StageError.
+        assert len(frames) == 1
+        msg = parse_message(frames[0])
+        assert isinstance(msg, StageError)
+
+
+class TestTokenStreamStreamingRunnerConstruction:
+    def test_invalid_streaming_runner_rejected_at_construction(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+    ):
+        class NoMethod:
+            pass
+
+        with pytest.raises(RuntimeError, match="run_layer_slice_streaming"):
+            LayerStageServer(
+                identity=stage_identity,
+                registry=registry,
+                runner=runner,
+                tee_runtime=tee_runtime,
+                anchor=anchor,
+                streaming_runner=NoMethod(),
+            )
+
+    def test_default_streaming_runner_is_none(
+        self, stage_identity, registry, runner, tee_runtime, anchor,
+    ):
+        server = LayerStageServer(
+            identity=stage_identity,
+            registry=registry,
+            runner=runner,
+            tee_runtime=tee_runtime,
+            anchor=anchor,
+        )
+        assert server._streaming_runner is None  # noqa: SLF001
