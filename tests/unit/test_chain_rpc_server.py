@@ -1884,13 +1884,17 @@ class TestTokenStreamRunnerErrors:
             streaming_runner=IncompleteTerminal(),
         )
         req = _make_streaming_request(settler_identity=settler_identity)
-        _, final, err = _decode_stream_frames(
+        tokens, final, err = _decode_stream_frames(
             server.handle_token_stream(encode_message(req))
         )
         assert final is None
         assert err is not None
         assert err.code == StageErrorCode.INTERNAL_ERROR.value
         assert "final-aggregate" in err.message
+        # M1 round-1 invariant: the terminal-chunk integrity check
+        # MUST fail BEFORE any terminal TokenFrame hits the wire —
+        # the docstring promises a SOLE error frame on failure.
+        assert tokens == []
 
     def test_runner_joined_text_diverges_from_full_output_text(
         self, stage_identity, registry, runner, tee_runtime, anchor,
@@ -1919,13 +1923,24 @@ class TestTokenStreamRunnerErrors:
             streaming_runner=InconsistentRunner(),
         )
         req = _make_streaming_request(settler_identity=settler_identity)
-        _, final, err = _decode_stream_frames(
+        tokens, final, err = _decode_stream_frames(
             server.handle_token_stream(encode_message(req))
         )
         assert final is None
         assert err is not None
         assert err.code == StageErrorCode.INTERNAL_ERROR.value
         assert "joined text_deltas" in err.message
+        # M1 round-1 invariant: the joined-text check fires BEFORE
+        # the terminal TokenFrame is published — non-terminal
+        # frames may already be on the wire (sequence_index < last)
+        # but the LAST chunk's TokenFrame is held back until
+        # validation passes. Here only the non-terminal "hello "
+        # chunk is emitted; the terminal "world" chunk's
+        # full_output_text mismatch fails before its TokenFrame
+        # would be yielded.
+        assert len(tokens) == 1
+        assert tokens[0].text_delta == "hello "
+        assert tokens[0].finish_reason is None
 
     def test_runner_yields_wrong_type_rejected(
         self, stage_identity, registry, runner, tee_runtime, anchor,

@@ -911,19 +911,18 @@ class LayerStageServer:
                 expected_seq += 1
                 joined_parts.append(chunk.text_delta)
 
-                # Encode + yield the TokenFrame wire bytes.
-                frame = TokenFrame(
-                    request_id=request.request_id,
-                    sequence_index=chunk.sequence_index,
-                    text_delta=chunk.text_delta,
-                    token_id=chunk.token_id,
-                    finish_reason=chunk.finish_reason,
-                )
-                yield encode_message(frame)
-
+                # M1 round-1 remediation: terminal-chunk integrity
+                # checks run BEFORE the terminal TokenFrame is
+                # emitted on the wire. The "sole error frame on
+                # failure" invariant in the handler's docstring
+                # holds: a runner producing an inconsistent
+                # terminal chunk yields a StageError WITHOUT any
+                # preceding terminal TokenFrame. Non-terminal
+                # chunks (finish_reason=None) emit normally — the
+                # joined-text invariant only resolves on the
+                # terminal chunk anyway.
                 if chunk.finish_reason is not None:
-                    terminal_seen = True
-                    # The terminal chunk MUST also carry the final-
+                    # The terminal chunk MUST carry the final-
                     # aggregate fields the StreamFinalFrame needs.
                     if (
                         chunk.full_output_text is None
@@ -945,9 +944,10 @@ class LayerStageServer:
                     # Joined-text invariant check: the stage signs
                     # over full_output_text bytes; the consumer
                     # joins TokenFrame deltas and asserts they
-                    # match. We enforce here too so a runner that
-                    # produces inconsistent text fails server-side
-                    # before signing.
+                    # match. We enforce here BEFORE signing so a
+                    # runner that produces inconsistent text fails
+                    # without emitting either the terminal
+                    # TokenFrame OR the StreamFinalFrame.
                     joined = "".join(joined_parts)
                     if joined != chunk.full_output_text:
                         yield self._error(
@@ -959,6 +959,21 @@ class LayerStageServer:
                             "inconsistent stream)",
                         )
                         return
+
+                # Encode + yield the TokenFrame wire bytes. For the
+                # terminal chunk this only runs after the integrity
+                # checks above have passed.
+                frame = TokenFrame(
+                    request_id=request.request_id,
+                    sequence_index=chunk.sequence_index,
+                    text_delta=chunk.text_delta,
+                    token_id=chunk.token_id,
+                    finish_reason=chunk.finish_reason,
+                )
+                yield encode_message(frame)
+
+                if chunk.finish_reason is not None:
+                    terminal_seen = True
                     # Build + yield the signed StreamFinalFrame.
                     yield self._build_stream_final_frame(
                         request_id=request.request_id,
