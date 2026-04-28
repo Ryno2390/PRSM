@@ -124,6 +124,7 @@ This is the catalog of activation-inversion attacks adapted to PRSM. Each attack
 - **Prior art:** classic side-channel literature (Kocher et al.); adapted to LLM serving (recent work on KV-cache timing).
 - **Expected strength:** moderate for MoE architectures (routing decisions leak); lower for dense transformers.
 - **Mitigation alignment:** time-padding the SPRK dispatch (not currently specified); TEE attestation doesn't cover this.
+- **2026-04-28 update:** Phase 3.x.10's `AutoregressiveStreamingRunner` introduces a concrete, characterized instance of A5 at the per-token emission boundary — inter-token wire-time latency leaks output complexity / vocabulary distribution / output length to a passive on-path observer. Acceptable for Tier A + Tier B (the output itself is intended for the user); blocks Tier C until constant-time padding lands in Phase 3.x.10.x. See `docs/2026-04-28-phase3.x.10-timing-sidechannel-memo.md` for the full characterization, tier scoping, and M1/M2 mitigation candidates.
 
 ### 3.6 A6: Fault injection / adaptive-probe attacks
 
@@ -331,6 +332,8 @@ Ring 9's DP noise has a privacy budget set at deployment time. It wasn't designe
 
 ### 10.4 Timing defenses are not specified anywhere in the current stack
 
+**2026-04-28 update:** Phase 3.x.10's `AutoregressiveStreamingRunner` introduces a per-token inter-token-latency leak (a concrete instance of A5 §3.5). Mitigation is now scoped: the runner ships Tier-A + Tier-B-eligible without padding, and Tier C is gated off until Phase 3.x.10.x lands constant-time padding (M1 fixed-rate emission preferred; M2 batched-trailing emission as toggle). The Phase 3.x.10.x design plan will be the first concrete timing-defense spec in the stack. See `docs/2026-04-28-phase3.x.10-timing-sidechannel-memo.md` §5.
+
 §5's A5 row has no current defense (column entries are all ❌). If R3 Phase 1 shows A5 is a meaningful attack, Phase 2 needs a new Line Item (time-padding on SPRK dispatch). This would expand R3 scope from "evaluate existing defenses" to "specify a new defense." Deferred to R3 Phase 2 results before scoping.
 
 ### 10.5 Academic-partner NDA and publication balance
@@ -352,6 +355,7 @@ A Foundation-funded red team that finds a novel attack against PRSM has an obvio
 - **Phase 2 Line Item B** — R3 validates or invalidates topology randomization's sufficiency.
 - **Phase 2 Line Item C** — R3 measures TEE's residual risk once non-TEE attacks (A3, A5) are characterized.
 - **Ring 9 DP noise** — R3 informs budget calibration.
+- **Phase 3.x.10 streaming runner timing memo** (`docs/2026-04-28-phase3.x.10-timing-sidechannel-memo.md`) — concretizes one A5 instance (per-token inter-token latency at the streaming runner's emission boundary), scopes by content tier, and tracks Phase 3.x.10.x as the first timing-defense engineering spec in the stack.
 
 ### 11.3 To strategy
 
