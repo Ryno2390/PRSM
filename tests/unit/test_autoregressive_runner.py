@@ -487,3 +487,238 @@ class TestConstructorValidation:
                 tee_type=TEEType.SOFTWARE,
                 prompt_provider=None,  # type: ignore[arg-type]
             )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.10 Task 2 — Multi-byte UTF-8 handling
+#
+# Byte-level BPE tokenizers split codepoints across token boundaries.
+# A 4-byte emoji like 🎉 (F0 9F 8E 89) may span 2-3 BPE tokens; a
+# 3-byte CJK char like 中 (E4 B8 AD) may span 2. The
+# ``_HFStreamerAdapter`` cumulative-decode + U+FFFD-suffix detection
+# must hold the buffer across these boundaries so that
+# ``"".join(text_deltas)`` ALWAYS forms valid UTF-8.
+#
+# The fake tokenizer below maps token id → raw bytes and uses Python's
+# ``bytes.decode("utf-8", errors="replace")`` semantics — which match
+# HF's byte-level tokenizers in collapsing incomplete trailing
+# sequences into a single ``"�"`` replacement char.
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _BPEFakeTokenizer:
+    """Byte-level BPE-shaped tokenizer. ``decode(ids,
+    skip_special_tokens=True)`` concatenates per-token byte payloads
+    and decodes via UTF-8 with errors="replace" — incomplete
+    trailing multi-byte sequences become a single ``"\\ufffd"``
+    suffix, which is the signal the adapter buffers on.
+    """
+
+    def __init__(
+        self,
+        *,
+        id_to_bytes: Dict[int, bytes],
+        prompt_ids: List[int],
+        eos_token_id: Optional[int] = None,
+    ) -> None:
+        self._id_to_bytes = id_to_bytes
+        self._prompt_ids = prompt_ids
+        self.eos_token_id = eos_token_id
+        self._special: set = set()
+        if eos_token_id is not None:
+            self._special.add(eos_token_id)
+
+    def encode(self, text: str) -> List[int]:
+        return list(self._prompt_ids)
+
+    def decode(
+        self, ids: List[int], skip_special_tokens: bool = True,
+    ) -> str:
+        joined = b"".join(
+            self._id_to_bytes.get(int(i), b"")
+            for i in ids
+            if not (skip_special_tokens and i in self._special)
+        )
+        return joined.decode("utf-8", errors="replace")
+
+
+def _make_bpe_runner(
+    *,
+    emit_ids: List[int],
+    id_to_bytes: Dict[int, bytes],
+    eos_token_id: Optional[int] = None,
+) -> Tuple[AutoregressiveStreamingRunner, _FakeModel, _BPEFakeTokenizer]:
+    tok = _BPEFakeTokenizer(
+        id_to_bytes=id_to_bytes,
+        prompt_ids=[100, 101],
+        eos_token_id=eos_token_id,
+    )
+    mdl = _FakeModel(emit_ids=emit_ids)
+    runner = AutoregressiveStreamingRunner(
+        model=mdl,
+        tokenizer=tok,
+        tee_attestation=b"\x01" * 32,
+        tee_type=TEEType.SOFTWARE,
+        sampling_defaults=SamplingDefaults(max_tokens=32),
+        prompt_provider=_prompt_provider,
+    )
+    return runner, mdl, tok
+
+
+class TestMultiByteUtf8:
+    def test_ascii_passes_through_unchanged(self):
+        # Each token is a whole ASCII char — decode never produces
+        # U+FFFD, so every token boundary flushes immediately.
+        runner, _, _ = _make_bpe_runner(
+            emit_ids=[1, 2, 3, 4, 5],
+            id_to_bytes={
+                1: b"h", 2: b"i", 3: b"!", 4: b" ", 5: b"o",
+            },
+        )
+        chunks = _drive(runner)
+        joined = "".join(c.text_delta for c in chunks)
+        assert joined == "hi! o"
+        # UTF-8 round-trip invariant.
+        assert joined.encode("utf-8").decode("utf-8") == joined
+
+    def test_emoji_split_across_two_tokens_buffers_until_complete(self):
+        # 🎉 = F0 9F 8E 89 (4 bytes). Split as [F0 9F] [8E 89].
+        # After token 1: cumulative decode ends in U+FFFD → adapter
+        # holds buffer, emits NOTHING. After token 2: full emoji,
+        # adapter emits "🎉" as a single piece.
+        emoji = "🎉"
+        b = emoji.encode("utf-8")
+        assert len(b) == 4
+        runner, _, _ = _make_bpe_runner(
+            emit_ids=[1, 2],
+            id_to_bytes={1: b[:2], 2: b[2:]},
+        )
+        chunks = _drive(runner)
+        # Exactly ONE non-empty text_delta carrying the whole emoji.
+        non_empty = [c for c in chunks if c.text_delta]
+        assert len(non_empty) == 1
+        assert non_empty[0].text_delta == "🎉"
+        # Joined output is valid UTF-8.
+        joined = "".join(c.text_delta for c in chunks)
+        assert joined == "🎉"
+        joined.encode("utf-8").decode("utf-8")  # would raise on invalid
+
+    def test_emoji_split_across_three_tokens_buffers_until_complete(self):
+        # 🎉 = F0 9F 8E 89, split as [F0] [9F 8E] [89]. All three
+        # intermediate cumulative decodes must end in U+FFFD →
+        # nothing emits until the final token completes the codepoint.
+        b = "🎉".encode("utf-8")
+        runner, _, _ = _make_bpe_runner(
+            emit_ids=[1, 2, 3],
+            id_to_bytes={1: b[:1], 2: b[1:3], 3: b[3:]},
+        )
+        chunks = _drive(runner)
+        non_empty = [c for c in chunks if c.text_delta]
+        assert len(non_empty) == 1
+        assert non_empty[0].text_delta == "🎉"
+
+    def test_cjk_split_across_two_tokens_buffers_until_complete(self):
+        # 中 = E4 B8 AD (3 bytes). Split as [E4 B8] [AD].
+        b = "中".encode("utf-8")
+        assert len(b) == 3
+        runner, _, _ = _make_bpe_runner(
+            emit_ids=[1, 2],
+            id_to_bytes={1: b[:2], 2: b[2:]},
+        )
+        chunks = _drive(runner)
+        non_empty = [c for c in chunks if c.text_delta]
+        assert len(non_empty) == 1
+        assert non_empty[0].text_delta == "中"
+
+    def test_mixed_ascii_emoji_cjk_sequence_joined_invariant(self):
+        # "ab🎉中c" — interleaved, emoji + CJK split across token
+        # boundaries. The joined-deltas-form-valid-UTF-8 invariant
+        # MUST hold for every intermediate state too.
+        emoji_b = "🎉".encode("utf-8")  # 4 bytes
+        cjk_b = "中".encode("utf-8")  # 3 bytes
+        runner, _, _ = _make_bpe_runner(
+            emit_ids=[1, 2, 3, 4, 5, 6, 7],
+            id_to_bytes={
+                1: b"a",
+                2: b"b",
+                3: emoji_b[:2],   # incomplete emoji prefix
+                4: emoji_b[2:],   # completes emoji
+                5: cjk_b[:1],     # incomplete cjk prefix
+                6: cjk_b[1:],     # completes cjk
+                7: b"c",
+            },
+        )
+        chunks = _drive(runner)
+        joined = "".join(c.text_delta for c in chunks)
+        assert joined == "ab🎉中c"
+        # Strict UTF-8 round-trip — would raise if any delta
+        # contained bare lone surrogates / invalid sequences.
+        assert joined.encode("utf-8").decode("utf-8") == joined
+
+    def test_partial_buffer_at_end_of_stream_flushed_via_end(self):
+        # Stream truncates mid-multi-byte: only [E4 B8] of 中 emits,
+        # then generate() returns. The runner's defensive
+        # ``adapter.end()`` flushes the buffered partial as U+FFFD.
+        # The point: end() DOES emit something rather than swallowing
+        # the buffer, AND the emitted text is still valid UTF-8.
+        b = "中".encode("utf-8")
+        runner, _, _ = _make_bpe_runner(
+            emit_ids=[1],
+            id_to_bytes={1: b[:2]},  # truncated mid-codepoint
+        )
+        chunks = _drive(runner)
+        joined = "".join(c.text_delta for c in chunks)
+        # Replacement char emitted at end-of-stream rather than
+        # silent data loss.
+        assert "�" in joined
+        # Still valid UTF-8.
+        assert joined.encode("utf-8").decode("utf-8") == joined
+
+    def test_replacement_char_detection_holds_buffer_correctly(self):
+        # Direct unit test on the adapter: drive put() with
+        # incomplete bytes, assert NO callback fires; then complete
+        # the codepoint, assert ONE callback fires with the whole
+        # piece. Exercises the U+FFFD-suffix branch of
+        # ``_maybe_flush`` in isolation.
+        from prsm.compute.inference.autoregressive_runner import (
+            _HFStreamerAdapter,
+        )
+
+        captured: List[Tuple[str, int]] = []
+
+        def on_text(piece: str, tid: int) -> None:
+            captured.append((piece, tid))
+
+        b = "🎉".encode("utf-8")
+        tok = _BPEFakeTokenizer(
+            id_to_bytes={1: b[:2], 2: b[2:]},
+            prompt_ids=[],
+        )
+        adapter = _HFStreamerAdapter(tokenizer=tok, on_text=on_text)
+        adapter.put(1)
+        # After the incomplete-prefix put, NO emission.
+        assert captured == []
+        adapter.put(2)
+        # After the completing put, ONE emission with the whole emoji.
+        assert len(captured) == 1
+        assert captured[0][0] == "🎉"
+        assert captured[0][1] == 2
+
+    def test_zero_width_joiner_family_emoji_sequence(self):
+        # 👨‍👩‍👧 = man + ZWJ + woman + ZWJ + girl = 5 codepoints,
+        # 18 UTF-8 bytes. Split across many tokens — every
+        # intermediate state must be valid UTF-8 (or buffered).
+        family = "👨‍👩‍👧"
+        b = family.encode("utf-8")
+        # Split into 6 ~3-byte chunks deliberately not aligned with
+        # codepoint boundaries.
+        chunks_b = [b[i:i + 3] for i in range(0, len(b), 3)]
+        emit_ids = list(range(1, len(chunks_b) + 1))
+        id_to_bytes = dict(zip(emit_ids, chunks_b))
+        runner, _, _ = _make_bpe_runner(
+            emit_ids=emit_ids, id_to_bytes=id_to_bytes,
+        )
+        chunks = _drive(runner)
+        joined = "".join(c.text_delta for c in chunks)
+        assert joined == family
+        assert joined.encode("utf-8").decode("utf-8") == joined
