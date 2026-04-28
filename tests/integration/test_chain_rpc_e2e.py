@@ -858,3 +858,506 @@ class TestReferenceComputation:
         first_half = _apply_layer_range(encoded, (0, 2))
         chained = _apply_layer_range(first_half, (2, 4))
         np.testing.assert_array_equal(full, chained)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.7.1 streamed-path E2E
+# ──────────────────────────────────────────────────────────────────────────
+
+
+from typing import Iterable as _Iterable, Tuple as _Tuple
+
+
+class FakeStreamingNetwork:
+    """Sibling to FakeNetwork that routes streamed requests to each
+    server's handle_streamed. Production uses Phase 6 gRPC bidi-
+    streaming; here we just call the server's handle_streamed directly.
+    """
+
+    def __init__(self) -> None:
+        self._handlers: Dict[str, Callable] = {}
+
+    def register(
+        self,
+        address: str,
+        handle_streamed: Callable[[bytes, _Iterable[bytes]],
+                                  _Tuple[bytes, _Iterable[bytes]]],
+    ) -> None:
+        self._handlers[address] = handle_streamed
+
+    def disconnect(self, address: str) -> None:
+        self._handlers.pop(address, None)
+
+    def send_streamed(
+        self,
+        address: str,
+        manifest_bytes: bytes,
+        chunk_iter: _Iterable[bytes],
+    ) -> _Tuple[bytes, _Iterable[bytes]]:
+        handler = self._handlers.get(address)
+        if handler is None:
+            raise ConnectionError(f"no streamed node at {address}")
+        return handler(manifest_bytes, chunk_iter)
+
+
+def _make_streaming_stage_node(
+    *,
+    identity: NodeIdentity,
+    address: str,
+    layer_range: Tuple[int, int],
+    anchor: SimulatedAnchorClient,
+    inline_network: FakeNetwork,
+    streamed_network: FakeStreamingNetwork,
+    chunk_bytes: int = 256,
+    tee_type: TEEType = TEEType.SOFTWARE,
+) -> StageNode:
+    """Build a stage node wired to BOTH inline + streamed networks."""
+    registry = _LocalRegistry(
+        models={MODEL_ID: _make_model_with_layers(layer_range)}
+    )
+    tee_runtime = _LocalTEE(tee_type=tee_type)
+    runner = DeterministicLayerRunner(
+        attestation=hashlib.sha256(identity.node_id.encode()).digest(),
+        tee_type=tee_type,
+    )
+    server = make_layer_stage_server(
+        identity=identity,
+        registry=registry,
+        runner=runner,
+        tee_runtime=tee_runtime,
+        anchor=anchor,
+        chunk_bytes=chunk_bytes,
+    )
+    inline_network.register(address, server.handle)
+    streamed_network.register(address, server.handle_streamed)
+    return StageNode(
+        identity=identity,
+        address=address,
+        layer_range=layer_range,
+        runner=runner,
+        server=server,
+        registry=registry,
+        tee_runtime=tee_runtime,
+    )
+
+
+def _make_streaming_executor(
+    *,
+    settler: NodeIdentity,
+    inline_network: FakeNetwork,
+    streamed_network: FakeStreamingNetwork,
+    anchor_client: SimulatedAnchorClient,
+    chunk_threshold_bytes: int,
+    chunk_bytes: int = 256,
+) -> RpcChainExecutor:
+    return make_rpc_chain_executor(
+        settler_identity=settler,
+        send_message=inline_network.send,
+        streamed_send_message=streamed_network.send_streamed,
+        anchor=anchor_client,
+        chunk_threshold_bytes=chunk_threshold_bytes,
+        chunk_bytes=chunk_bytes,
+    )
+
+
+class TestStreamedActivation:
+    """Streamed-path E2E: activations exceeding the inline threshold
+    route via chunked streaming through real LayerStageServers; output
+    is bit-identical to a single-host reference."""
+
+    def test_streamed_two_stage_chain_matches_single_host(
+        self, settler, alice, bob, anchor_pair
+    ):
+        """Identical math, identical output: streamed path must
+        produce bit-identical results to single-host reference."""
+        _, anchor_client = anchor_pair
+        inline_net = FakeNetwork()
+        streamed_net = FakeStreamingNetwork()
+
+        _make_streaming_stage_node(
+            identity=alice, address=alice.node_id,
+            layer_range=(0, TOTAL_LAYERS),
+            anchor=anchor_client,
+            inline_network=inline_net, streamed_network=streamed_net,
+        )
+        _make_streaming_stage_node(
+            identity=bob, address=bob.node_id,
+            layer_range=(0, TOTAL_LAYERS),
+            anchor=anchor_client,
+            inline_network=inline_net, streamed_network=streamed_net,
+        )
+        # Threshold = 4 → any prompt encoded to ≥ 8 bytes streams.
+        executor = _make_streaming_executor(
+            settler=settler,
+            inline_network=inline_net,
+            streamed_network=streamed_net,
+            anchor_client=anchor_client,
+            chunk_threshold_bytes=4,
+            chunk_bytes=8,
+        )
+        chain = _build_chain([alice.node_id, bob.node_id])
+        prompt = "the quick brown fox jumps over the lazy dog"
+
+        result = executor.execute_chain(
+            request=_make_request(prompt=prompt),
+            chain=chain,
+        )
+
+        # Bit-identical to single-host reference.
+        reference = utf8_output_decoder(_single_host_reference(prompt))
+        assert result.output == reference
+
+    def test_streamed_three_stage_chain_matches_single_host(
+        self, settler, alice, bob, charlie, anchor_pair
+    ):
+        _, anchor_client = anchor_pair
+        inline_net = FakeNetwork()
+        streamed_net = FakeStreamingNetwork()
+        for ident in (alice, bob, charlie):
+            _make_streaming_stage_node(
+                identity=ident, address=ident.node_id,
+                layer_range=(0, TOTAL_LAYERS),
+                anchor=anchor_client,
+                inline_network=inline_net, streamed_network=streamed_net,
+            )
+        executor = _make_streaming_executor(
+            settler=settler,
+            inline_network=inline_net,
+            streamed_network=streamed_net,
+            anchor_client=anchor_client,
+            chunk_threshold_bytes=4,
+            chunk_bytes=8,
+        )
+        from prsm.compute.parallax_scheduling.prsm_request_router import (
+            GPUChain,
+        )
+        chain = GPUChain(
+            request_id="req-1",
+            region="us-east",
+            stages=(alice.node_id, bob.node_id, charlie.node_id),
+            layer_ranges=((0, 1), (1, 2), (2, 4)),
+            total_latency_ms=10.0,
+            stale_profile_count=0,
+        )
+
+        result = executor.execute_chain(
+            request=_make_request(prompt="streamed-3-stage-test"),
+            chain=chain,
+        )
+
+        reference = utf8_output_decoder(
+            _single_host_reference("streamed-3-stage-test")
+        )
+        assert result.output == reference
+
+
+class TestMultiMBStreamedActivation:
+    """The headline scaling scenario: an activation that genuinely
+    cannot fit the inline-path 64 MiB cap (post-hex+JSON overhead)
+    routes successfully via streaming. Run on a 16 MiB raw float32
+    activation chunked into ≥ 16 chunks of 1 MiB each.
+
+    To keep the test fast we use a single stage that simply identity-
+    transforms the activation rather than running 4 layer transforms;
+    the 4-layer math is exhaustively tested in the smaller TestStreamed*
+    cases above. Here we're stressing the chunk transport.
+    """
+
+    def test_16_mib_activation_round_trips_streamed(
+        self, settler, alice, anchor_pair
+    ):
+        _, anchor_client = anchor_pair
+        inline_net = FakeNetwork()
+        streamed_net = FakeStreamingNetwork()
+
+        # Use 1 MiB chunks so a 16 MiB activation produces 16 chunks.
+        ONE_MIB = 1 * 1024 * 1024
+        _make_streaming_stage_node(
+            identity=alice, address=alice.node_id,
+            layer_range=(0, TOTAL_LAYERS),
+            anchor=anchor_client,
+            inline_network=inline_net, streamed_network=streamed_net,
+            chunk_bytes=ONE_MIB,
+        )
+        # Threshold low so any non-trivial activation streams.
+        executor = _make_streaming_executor(
+            settler=settler,
+            inline_network=inline_net,
+            streamed_network=streamed_net,
+            anchor_client=anchor_client,
+            chunk_threshold_bytes=4,
+            chunk_bytes=ONE_MIB,
+        )
+
+        # Custom prompt encoder: produce a 16 MiB float32 activation
+        # directly (bypass the UTF-8 default for stress sizing).
+        # 4 MiB of float32 = 1 M elements; 16 MiB = 4 M elements.
+        rng = np.random.default_rng(seed=42)
+        big_activation = rng.standard_normal(
+            size=(4_000_000,)
+        ).astype(np.float32)
+        assert big_activation.nbytes == 4 * 4_000_000  # = 16 MiB
+
+        # Custom encoder/decoder: round-trip bytes losslessly.
+        def big_encoder(prompt: str) -> np.ndarray:
+            return big_activation
+
+        def big_decoder(arr: np.ndarray) -> str:
+            return arr.dtype.str + "::" + str(arr.shape) + "::" + str(arr.nbytes)
+
+        custom_executor = make_rpc_chain_executor(
+            settler_identity=settler,
+            send_message=inline_net.send,
+            streamed_send_message=streamed_net.send_streamed,
+            anchor=anchor_client,
+            prompt_encoder=big_encoder,
+            output_decoder=big_decoder,
+            chunk_threshold_bytes=4,
+            chunk_bytes=ONE_MIB,
+        )
+
+        # Single-stage chain so we test transport without compounding
+        # the 4-layer transform on a 16 MiB activation (fast).
+        from prsm.compute.parallax_scheduling.prsm_request_router import (
+            GPUChain,
+        )
+        chain = GPUChain(
+            request_id="req-bigact",
+            region="us-east",
+            stages=(alice.node_id,),
+            layer_ranges=((0, 4),),
+            total_latency_ms=10.0,
+            stale_profile_count=0,
+        )
+
+        result = custom_executor.execute_chain(
+            request=_make_request(
+                prompt="ignored", request_id="req-bigact"
+            ),
+            chain=chain,
+        )
+
+        # The decoder reports dtype/shape/bytes — recovered output
+        # MUST report the same shape + nbytes as input (after layer
+        # transform on int64, the byte width changes).
+        # Layer transform: float32 → int64 (per _apply_layer_range
+        # cast). 4M elements × 8 bytes = 32 MiB output. Shape and
+        # element count preserved.
+        assert "(4000000,)" in result.output
+        # Output dtype is int64 (8-byte) per the layer math.
+        assert "int64" in result.output or "i8" in result.output
+
+    def test_16_mib_activation_bit_identical_to_single_host(
+        self, settler, alice, anchor_pair
+    ):
+        """Bit-equivalence at scale. Same big activation routed via
+        streaming MUST produce the same int64 output array (byte-for-
+        byte) as single-host application of the layer math."""
+        _, anchor_client = anchor_pair
+        inline_net = FakeNetwork()
+        streamed_net = FakeStreamingNetwork()
+        ONE_MIB = 1 * 1024 * 1024
+
+        _make_streaming_stage_node(
+            identity=alice, address=alice.node_id,
+            layer_range=(0, TOTAL_LAYERS),
+            anchor=anchor_client,
+            inline_network=inline_net, streamed_network=streamed_net,
+            chunk_bytes=ONE_MIB,
+        )
+
+        rng = np.random.default_rng(seed=99)
+        big_activation = rng.standard_normal(
+            size=(4_000_000,)
+        ).astype(np.float32)
+
+        captured = {}
+
+        def big_encoder(prompt: str) -> np.ndarray:
+            return big_activation
+
+        def big_decoder(arr: np.ndarray) -> str:
+            captured["output"] = arr
+            return "ok"
+
+        executor = make_rpc_chain_executor(
+            settler_identity=settler,
+            send_message=inline_net.send,
+            streamed_send_message=streamed_net.send_streamed,
+            anchor=anchor_client,
+            prompt_encoder=big_encoder,
+            output_decoder=big_decoder,
+            chunk_threshold_bytes=4,
+            chunk_bytes=ONE_MIB,
+        )
+
+        from prsm.compute.parallax_scheduling.prsm_request_router import (
+            GPUChain,
+        )
+        chain = GPUChain(
+            request_id="req-bit-eq",
+            region="us-east",
+            stages=(alice.node_id,),
+            layer_ranges=((0, TOTAL_LAYERS),),
+            total_latency_ms=10.0,
+            stale_profile_count=0,
+        )
+
+        result = executor.execute_chain(
+            request=_make_request(prompt="ignored", request_id="req-bit-eq"),
+            chain=chain,
+        )
+        assert result.output == "ok"
+
+        # Single-host reference: apply layer math directly.
+        reference = _apply_layer_range(big_activation, (0, TOTAL_LAYERS))
+        # The chain output MUST match byte-for-byte.
+        np.testing.assert_array_equal(captured["output"], reference)
+
+    def test_streamed_response_is_chunked_when_output_exceeds_threshold(
+        self, settler, alice, anchor_pair
+    ):
+        """When the response activation also exceeds the chunk
+        threshold, the response carries a manifest + chunks (not
+        inline). Verifies symmetric streaming."""
+        from prsm.compute.chain_rpc.protocol import (
+            RunLayerSliceResponse,
+        )
+
+        _, anchor_client = anchor_pair
+        inline_net = FakeNetwork()
+        streamed_net = FakeStreamingNetwork()
+
+        ONE_MIB = 1 * 1024 * 1024
+        node = _make_streaming_stage_node(
+            identity=alice, address=alice.node_id,
+            layer_range=(0, TOTAL_LAYERS),
+            anchor=anchor_client,
+            inline_network=inline_net, streamed_network=streamed_net,
+            chunk_bytes=ONE_MIB,
+        )
+
+        # Capture the wire response by intercepting the streamed
+        # transport.
+        captured_responses = []
+        original = streamed_net.send_streamed
+
+        def intercept(addr, manifest_bytes, chunk_iter):
+            resp_manifest, resp_chunks = original(addr, manifest_bytes, chunk_iter)
+            # Materialize chunks to allow inspection.
+            chunk_list = list(resp_chunks)
+            captured_responses.append((resp_manifest, chunk_list))
+            return resp_manifest, iter(chunk_list)
+
+        rng = np.random.default_rng(seed=11)
+        big_activation = rng.standard_normal(
+            size=(2_000_000,)
+        ).astype(np.float32)  # 8 MiB float32 → 16 MiB int64 after math
+
+        def big_encoder(prompt: str) -> np.ndarray:
+            return big_activation
+
+        def big_decoder(arr: np.ndarray) -> str:
+            return "ok"
+
+        executor = make_rpc_chain_executor(
+            settler_identity=settler,
+            send_message=inline_net.send,
+            streamed_send_message=intercept,
+            anchor=anchor_client,
+            prompt_encoder=big_encoder,
+            output_decoder=big_decoder,
+            chunk_threshold_bytes=4,
+            chunk_bytes=ONE_MIB,
+        )
+
+        from prsm.compute.parallax_scheduling.prsm_request_router import (
+            GPUChain,
+        )
+        chain = GPUChain(
+            request_id="req-resp-streamed",
+            region="us-east",
+            stages=(alice.node_id,),
+            layer_ranges=((0, TOTAL_LAYERS),),
+            total_latency_ms=10.0,
+            stale_profile_count=0,
+        )
+
+        result = executor.execute_chain(
+            request=_make_request(
+                prompt="ignored", request_id="req-resp-streamed"
+            ),
+            chain=chain,
+        )
+        assert result.output == "ok"
+
+        # The captured response MUST be a streamed RunLayerSliceResponse:
+        # activation_blob empty + activation_manifest set + chunks
+        # delivered.
+        assert len(captured_responses) == 1
+        resp_manifest_bytes, resp_chunks = captured_responses[0]
+        from prsm.compute.chain_rpc.protocol import parse_message
+        resp = parse_message(resp_manifest_bytes)
+        assert isinstance(resp, RunLayerSliceResponse)
+        assert resp.activation_blob == b""
+        assert resp.activation_manifest is not None
+        # Multi-chunk response (8 MiB float32 → 16 MiB int64 / 1 MiB
+        # per chunk = 16 chunks).
+        assert len(resp_chunks) >= 8
+        assert resp.activation_manifest.total_chunks == len(resp_chunks)
+
+
+class TestStreamedActivationTooLarge:
+    """When the activation exceeds the inline threshold but no
+    streamed transport is wired, the executor surfaces a structured
+    ACTIVATION_TOO_LARGE failure — bit-identical to the unit-test
+    coverage but verified end-to-end against a real
+    LayerStageServer + ParallaxScheduledExecutor."""
+
+    def test_activation_too_large_when_no_streamed_transport(
+        self, settler, alice, bob, anchor_pair
+    ):
+        from prsm.compute.chain_rpc.client import (
+            ChainExecutionError,
+            ExecutorErrorCode,
+        )
+
+        _, anchor_client = anchor_pair
+        inline_net = FakeNetwork()
+        # No streamed network wired.
+        streamed_net = FakeStreamingNetwork()
+
+        # Build stages but only register them on the inline network —
+        # caller supplies inline transport only.
+        for ident in (alice, bob):
+            registry = _LocalRegistry(
+                models={MODEL_ID: _make_model_with_layers((0, TOTAL_LAYERS))}
+            )
+            tee_runtime = _LocalTEE(tee_type=TEEType.SOFTWARE)
+            runner = DeterministicLayerRunner(
+                attestation=hashlib.sha256(ident.node_id.encode()).digest(),
+            )
+            server = make_layer_stage_server(
+                identity=ident,
+                registry=registry,
+                runner=runner,
+                tee_runtime=tee_runtime,
+                anchor=anchor_client,
+            )
+            inline_net.register(ident.node_id, server.handle)
+
+        # Threshold low; no streamed transport.
+        executor = make_rpc_chain_executor(
+            settler_identity=settler,
+            send_message=inline_net.send,
+            anchor=anchor_client,
+            chunk_threshold_bytes=4,
+        )
+        chain = _build_chain([alice.node_id, bob.node_id])
+
+        with pytest.raises(ChainExecutionError) as exc_info:
+            executor.execute_chain(
+                request=_make_request(prompt="something"),
+                chain=chain,
+            )
+        assert exc_info.value.code == ExecutorErrorCode.ACTIVATION_TOO_LARGE
