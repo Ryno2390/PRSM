@@ -315,11 +315,14 @@ class TestEosTriggersStop:
 
 
 class TestMidGenerateException:
-    def test_mid_generate_exception_yields_terminal_error(self):
-        # Model raises after 2 tokens. Runner yields a single
-        # terminal error chunk (per the implementation: partial
-        # text rides as full_output_text on the terminal chunk;
-        # text_delta is empty).
+    def test_mid_generate_exception_yields_partial_then_terminal_error(self):
+        # Model raises after 2 tokens. Round-1 H1 remediation: the
+        # 2 buffered pieces MUST emit as non-terminal StreamingChunks
+        # first (preserving the streaming-UX invariant that produced
+        # tokens become wire frames), THEN a terminal error chunk
+        # with empty text_delta and full_output_text=joined. The
+        # server's joined-text invariant
+        # ("".join(text_deltas) == terminal.full_output_text) holds.
         runner, _, _ = _make_runner(
             emit_ids=[1, 2, 3, 4],
             id_to_piece={1: "aa ", 2: "bb ", 3: "cc ", 4: "dd"},
@@ -327,13 +330,35 @@ class TestMidGenerateException:
             raise_exc=RuntimeError("boom"),
         )
         chunks = _drive(runner)
-        # Implementation yields exactly ONE terminal chunk on
-        # exception (even if pieces accumulated before the crash).
+        # 2 non-terminal pieces + 1 terminal error chunk.
+        assert len(chunks) == 3
+        assert chunks[0].text_delta == "aa "
+        assert chunks[0].finish_reason is None
+        assert chunks[1].text_delta == "bb "
+        assert chunks[1].finish_reason is None
         terminal = chunks[-1]
         assert terminal.finish_reason == "error"
         assert terminal.text_delta == ""
-        # Partial output is preserved on the terminal chunk.
         assert terminal.full_output_text == "aa bb "
+        # Server-side joined-text invariant holds.
+        joined = "".join(c.text_delta for c in chunks)
+        assert joined == terminal.full_output_text
+
+    def test_exception_before_any_pieces_yields_only_terminal_error(self):
+        # Crash on the FIRST token → no buffered pieces. Single
+        # terminal error chunk with empty text_delta + empty
+        # full_output_text. Server invariant trivially holds.
+        runner, _, _ = _make_runner(
+            emit_ids=[1, 2, 3],
+            id_to_piece={1: "aa ", 2: "bb ", 3: "cc "},
+            raise_after=0,
+            raise_exc=RuntimeError("boom"),
+        )
+        chunks = _drive(runner)
+        assert len(chunks) == 1
+        assert chunks[0].finish_reason == "error"
+        assert chunks[0].text_delta == ""
+        assert chunks[0].full_output_text == ""
 
 
 class TestNonTailDispatch:

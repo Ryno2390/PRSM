@@ -67,15 +67,14 @@ from prsm.compute.inference.parallax_executor import (
     GpuPoolProvider,
     ParallaxScheduledExecutor,
 )
-from prsm.compute.inference.streaming_runner import (
-    StreamingChunk,
-    StreamingLayerRunner,
-    SyntheticStreamingRunner,
-)
-from prsm.compute.inference.autoregressive_runner import (
-    AutoregressiveStreamingRunner,
-    SamplingDefaults,
-)
+
+# Phase 3.x.8 streaming-runner Protocol + 3.x.10 autoregressive
+# runner ride the same lazy-import path as chain_rpc names because
+# ``streaming_runner`` itself imports ``LayerSliceRunner`` from
+# ``prsm.compute.chain_rpc.server``, which transitively imports
+# back into ``prsm.compute.inference.models`` — eager re-export
+# would create a circular import. Lazy resolution defers the
+# import to first attribute access.
 
 # Phase 3.x.7 — cross-host ChainExecutor implementation is re-exported
 # at the inference package surface so production callers get one-call
@@ -91,6 +90,14 @@ _LAZY_CHAIN_RPC_NAMES = frozenset({
     "RpcChainExecutor",
     "make_layer_stage_server",
     "make_rpc_chain_executor",
+})
+
+_LAZY_STREAMING_NAMES = frozenset({
+    "StreamingChunk",
+    "StreamingLayerRunner",
+    "SyntheticStreamingRunner",
+    "AutoregressiveStreamingRunner",
+    "SamplingDefaults",
 })
 
 
@@ -109,6 +116,24 @@ def __getattr__(name: str):
             "RpcChainExecutor": RpcChainExecutor,
             "make_layer_stage_server": make_layer_stage_server,
             "make_rpc_chain_executor": make_rpc_chain_executor,
+        }
+        return attrs[name]
+    if name in _LAZY_STREAMING_NAMES:
+        from prsm.compute.inference.streaming_runner import (
+            StreamingChunk,
+            StreamingLayerRunner,
+            SyntheticStreamingRunner,
+        )
+        from prsm.compute.inference.autoregressive_runner import (
+            AutoregressiveStreamingRunner,
+            SamplingDefaults,
+        )
+        attrs = {
+            "StreamingChunk": StreamingChunk,
+            "StreamingLayerRunner": StreamingLayerRunner,
+            "SyntheticStreamingRunner": SyntheticStreamingRunner,
+            "AutoregressiveStreamingRunner": AutoregressiveStreamingRunner,
+            "SamplingDefaults": SamplingDefaults,
         }
         return attrs[name]
     raise AttributeError(

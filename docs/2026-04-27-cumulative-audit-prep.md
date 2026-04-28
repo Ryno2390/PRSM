@@ -898,49 +898,106 @@ tokens from a real model rather than synthetic word splits.
     generate is Phase 3.x.10.x.
 
 **Test coverage at the tag.**
-- 51 unit tests in ``test_autoregressive_runner.py``:
-  - 10 helper tests (_coerce_token_ids + _last_token_id).
-  - 9 happy-path runner tests (N chunks, monotonic indices,
-    terminal aggregate fields, max_tokens cap, EOS → stop,
-    mid-generate exception, non-tail error chunk, generator
-    shape, immediate-EOS edge case, request override of defaults,
-    greedy on temperature=0, Protocol structural membership,
-    constructor validation × 4).
+- 52 unit tests in ``test_autoregressive_runner.py``:
+  - 10 helper tests (_coerce_token_ids × 6 + _last_token_id × 4).
+  - 17 happy-path runner / shape / construction-validation tests:
+    TestRunnerEmitsChunks (3 — N chunks, monotonic indices,
+    terminal aggregate fields), TestMaxTokensCap (1),
+    TestEosTriggersStop (1), TestMidGenerateException (2 —
+    partial-emits-then-error, pre-decode error),
+    TestNonTailDispatch (1), TestRunnerIsIterable (1),
+    TestEmptyEmission (1), TestRequestOverridesDefaults (2),
+    TestProtocolStructural (1), TestConstructorValidation (4).
   - 8 multi-byte UTF-8 tests (ASCII passthrough, emoji 2-token
     + 3-token splits, CJK 2-token, mixed interleaving, end-of-
     stream U+FFFD flush, direct adapter buffer-hold, ZWJ family
     👨‍👩‍👧 across 6 codepoint-misaligned 3-byte chunks).
-  - 9 sampling + stop-condition tests (greedy determinism,
-    do_sample wiring, top_k/top_p, max_tokens cap, EOS stop,
-    cap reason, override default, eos_token_id wiring,
-    request=None default fallback, no-eos passthrough).
-  - 8 tail-only contract tests (exact one chunk, error shape,
-    no preceding leak, no model.generate call, no prompt_provider
-    call, attestation carries, post-non-tail tail dispatch
-    unchanged, docstring invariant).
-- 6 E2E integration tests in ``test_autoregressive_runner_e2e.py``
-  (marked ``@pytest.mark.slow``; opt-in via ``pytest -m slow``).
-  Uses real distilgpt2 via transformers + torch:
+  - 9 sampling + stop-condition tests.
+  - 8 tail-only contract tests (incl. introspectable docstring
+    invariant via ``test_docstring_documents_phase_3_x_11_deferral``).
+- 4 server-wired integration tests in
+  ``tests/integration/test_autoregressive_runner_server_wire.py``
+  (round-1 H1+M3 remediation): mocked HF model + real
+  ``LayerStageServer.handle_token_stream`` proves the
+  joined-text invariant holds end-to-end through the production
+  server stack — happy path, mid-decode exception (H1
+  regression), sequence-index monotonicity across the partial-
+  then-terminal sequence, pre-decode exception falls through to
+  StageError.
+- 6 slow-marked E2E tests in
+  ``tests/integration/test_autoregressive_runner_e2e.py`` (opt-in
+  via ``pytest -m slow``). Uses real distilgpt2 via transformers
+  + torch:
   - test_real_decode_emits_streaming_chunks
   - test_joined_deltas_form_valid_utf8
   - test_greedy_decode_bit_identical_on_rerun
   - test_finish_reason_correctly_set
   - test_receipt_with_streamed_output_flag_verifies (signs +
-    verifies via identity AND via standalone public_key_b64;
+    verifies via identity AND via standalone public_key_b64 —
     the prod verification path)
   - test_streamed_flag_tampering_invalidates_signature (Phase
     3.x.8 Task 4 downgrade-resistance proven against the REAL
     output path)
 
+**Round-1 → round-2 surface.**
+- Round-1: NEEDS-REMEDIATION-PRE-TAG with H1 (mid-decode
+  exception path violated server's joined-text invariant —
+  partial output dropped on the wire), M1 (audit-prep line
+  numbers off), M2 (test-count math inconsistent), M3 (E2E did
+  not route through ``LayerStageServer``, so H1 was undetectable
+  by CI), M4 (server doesn't plumb ``request=`` to runner —
+  sampling overrides dead-letter through prod path), M5
+  (runner exported but no production wiring), L1 (stale
+  ``_prompt_id_count`` comment), L3 (redundant ``if piece:``).
+  L2/L4 deferred.
+- H1 + M1 + M2 + M3 + L1 + L3 remediated pre-tag. M4 + M5
+  documented as honest-scope caveats below; deferred to
+  Phase 3.x.10.x.
+- Round-2: APPROVED-FOR-TAG.
+
+**Production wiring caveats deferred to Phase 3.x.10.x.**
+
+  1. **No production caller constructs the runner yet.** The
+     runner is exported at the package surface but no code path
+     in ``prsm/`` instantiates ``AutoregressiveStreamingRunner``
+     and passes it to ``LayerStageServer(streaming_runner=)``.
+     The runtime guarantees in this section are exercised only
+     by the test suite. This is analogous to the dormant
+     scaffolding pattern Phase 3.x.8 left for Phase 3.x.8.1 to
+     close. A Phase 3.x.10.x follow-up will wire the runner into
+     the operator's node-startup path so end users typing into
+     ``prsm_inference`` actually hit the new runner.
+
+  2. **Sampling overrides via ``request=`` are bypassed in the
+     production server path.** The runner accepts an optional
+     ``request: Any = None`` for sampling resolution, and when
+     consumed directly (as in the unit tests + the slow E2E)
+     ``request.max_tokens`` + ``request.temperature`` correctly
+     override ``SamplingDefaults``. But
+     ``LayerStageServer.handle_token_stream`` (server.py:834-840)
+     does not pass ``request=`` through — every server-mediated
+     dispatch falls back to the runner's construction-time
+     defaults. Plumbing the wire-format extension to carry
+     sampling params end-to-end is Phase 3.x.10.x scope.
+
 **Auditor prompts:** start with the runner's class docstring in
-``prsm/compute/inference/autoregressive_runner.py:222-262`` for
+``prsm/compute/inference/autoregressive_runner.py:232-272`` for
 the contract scope. Then read the
 ``_HFStreamerAdapter._maybe_flush`` U+FFFD branch
-(autoregressive_runner.py:164-179) — that's the multi-byte
+(autoregressive_runner.py:174-189) — that's the multi-byte
 correctness invariant. The tail-only contract enforcement at
-line 361-372 is the Phase 3.x.11 deferral boundary. Receipt
-verification through the runner's TEE attestation is exercised
-by ``test_receipt_with_streamed_output_flag_verifies`` against
+``autoregressive_runner.py:371-382`` is the Phase 3.x.11
+deferral boundary. The mid-decode exception path at
+``autoregressive_runner.py:441-471`` (post-H1 remediation) is
+the round-1 fix that preserves the server's joined-text
+invariant — re-emit buffered pieces as non-terminal TokenFrames
+first, then a terminal error chunk. The integration test
+``test_mid_decode_exception_partial_emits_then_terminal`` in
+``tests/integration/test_autoregressive_runner_server_wire.py``
+is the regression test that pins it through the production
+server. Receipt verification through the runner's TEE
+attestation is exercised by
+``test_receipt_with_streamed_output_flag_verifies`` against
 real distilgpt2 output. The timing-side-channel memo
 (``docs/2026-04-28-phase3.x.10-timing-sidechannel-memo.md``) is
 the disclosed residual; Tier C is structurally blocked until

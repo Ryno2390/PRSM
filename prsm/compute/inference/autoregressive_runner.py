@@ -145,13 +145,13 @@ class _HFStreamerAdapter:
     def put(self, value: Any) -> None:
         # HF passes either a 0-d tensor, a 1-d ``[N]`` tensor, or a
         # 2-d ``[1, N]`` tensor. Normalize to a Python list of ints.
+        # When ``streamer=`` is passed to ``model.generate``, HF's
+        # streamer convention is that ``put`` only receives the
+        # GENERATED tokens — prefill/prompt tokens are consumed
+        # inside ``generate()`` and never reach the streamer.
         ids = _coerce_token_ids(value)
         if not ids:
             return
-        # Skip the prompt's input_ids — HF's streamer convention
-        # passes the full input on the first call. The runner sets
-        # ``self._prompt_id_count`` BEFORE generate() so the adapter
-        # knows where the prompt ends and generation begins.
         for tid in ids:
             self.token_ids.append(int(tid))
         self._maybe_flush()
@@ -161,16 +161,15 @@ class _HFStreamerAdapter:
         # may include text that didn't get flushed during put()
         # because the buffer ended mid-character (e.g., the model
         # stopped between a 4-byte emoji's two BPE tokens).
+        # End-of-stream may include a trailing replacement char if
+        # generation truly ended mid-character — that's a
+        # model/tokenizer issue, not ours; emit as-is.
         text = self._cumulative_decode()
         if len(text) > self._print_offset:
             piece = text[self._print_offset:]
-            # End-of-stream may include a trailing replacement char
-            # if generation truly ended mid-character — that's a
-            # model/tokenizer issue, not ours; emit as-is.
-            if piece:
-                tid = self.token_ids[-1] if self.token_ids else -1
-                self._on_text(piece, tid)
-                self._print_offset = len(text)
+            tid = self.token_ids[-1] if self.token_ids else -1
+            self._on_text(piece, tid)
+            self._print_offset = len(text)
 
     def _maybe_flush(self) -> None:
         text = self._cumulative_decode()
@@ -439,12 +438,24 @@ class AutoregressiveStreamingRunner:
             # got the signal (custom model, mocked test).
             adapter.end()
         except Exception as exc:  # noqa: BLE001
-            # Mid-decode crash → terminal error chunk. Whatever
-            # was buffered up to this point is included as the
-            # joined-output prefix on the terminal chunk so the
-            # signed receipt's activation_blob commits to it.
+            # Mid-decode crash. The buffered ``pieces`` MUST be
+            # emitted as non-terminal StreamingChunks first, then a
+            # terminal error chunk with empty ``text_delta`` and
+            # ``full_output_text=joined``. The server-side
+            # joined-text invariant (``LayerStageServer.handle_token_stream``
+            # asserts ``"".join(text_deltas) == terminal.full_output_text``)
+            # would reject a single-chunk error path that put the
+            # partial on ``full_output_text`` but not on the
+            # delta sequence — receipt would never commit to the
+            # partial output. Round-1 review H1 remediation.
             partial = "".join(p for p, _ in pieces)
             duration = time.time() - start_ts
+            for i, (piece, tid) in enumerate(pieces):
+                yield StreamingChunk(
+                    sequence_index=i,
+                    text_delta=piece,
+                    token_id=tid if tid >= 0 else None,
+                )
             yield StreamingChunk(
                 sequence_index=len(pieces),
                 text_delta="",
