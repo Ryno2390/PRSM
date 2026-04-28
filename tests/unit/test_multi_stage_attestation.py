@@ -228,6 +228,89 @@ class TestEnvelopeRoundTrip:
         with pytest.raises(MultiStageMalformedError, match="non-empty"):
             decode_multi_stage_attestation(bad)
 
+    def test_decode_rejects_duplicate_stage_index(self):
+        """M2 regression: settler injecting duplicate stage_index
+        could mask a SOFTWARE stage's presence."""
+        body = json.dumps({
+            "version": MULTI_STAGE_ATTESTATION_VERSION,
+            "stages": [
+                {"stage_index": 0, "stage_node_id": "alice",
+                 "tee_type": "sgx", "attestation_hex": "01"},
+                {"stage_index": 0, "stage_node_id": "bob",
+                 "tee_type": "sgx", "attestation_hex": "02"},
+            ],
+        }).encode("utf-8")
+        bad = MULTI_STAGE_MAGIC_PREFIX + body
+        with pytest.raises(MultiStageMalformedError, match="duplicate"):
+            decode_multi_stage_attestation(bad)
+
+    def test_decode_rejects_non_contiguous_indices(self):
+        """M2 regression: gap in stage_index sequence (e.g., 0 + 2
+        but no 1) → settler omitted a stage."""
+        body = json.dumps({
+            "version": MULTI_STAGE_ATTESTATION_VERSION,
+            "stages": [
+                {"stage_index": 0, "stage_node_id": "alice",
+                 "tee_type": "sgx", "attestation_hex": "01"},
+                {"stage_index": 2, "stage_node_id": "charlie",
+                 "tee_type": "sgx", "attestation_hex": "03"},
+            ],
+        }).encode("utf-8")
+        bad = MULTI_STAGE_MAGIC_PREFIX + body
+        with pytest.raises(MultiStageMalformedError, match="contiguous"):
+            decode_multi_stage_attestation(bad)
+
+    def test_decode_rejects_out_of_range_index(self):
+        body = json.dumps({
+            "version": MULTI_STAGE_ATTESTATION_VERSION,
+            "stages": [
+                {"stage_index": 5, "stage_node_id": "x",
+                 "tee_type": "sgx", "attestation_hex": "01"},
+            ],
+        }).encode("utf-8")
+        bad = MULTI_STAGE_MAGIC_PREFIX + body
+        with pytest.raises(MultiStageMalformedError, match="contiguous"):
+            decode_multi_stage_attestation(bad)
+
+    def test_decode_returns_sorted_by_stage_index(self):
+        """Even with valid input arriving out-of-order, decode returns
+        stages sorted for deterministic iteration."""
+        stages = _stages(
+            (1, "bob", TEEType.TDX, b"\x02"),
+            (0, "alice", TEEType.SGX, b"\x01"),
+            (2, "charlie", TEEType.SEV, b"\x03"),
+        )
+        blob = encode_multi_stage_attestation(stages)
+        recovered = decode_multi_stage_attestation(blob)
+        assert recovered is not None
+        assert [s.stage_index for s in recovered] == [0, 1, 2]
+        assert [s.stage_node_id for s in recovered] == [
+            "alice", "bob", "charlie",
+        ]
+
+    def test_decode_expected_stage_count_match(self):
+        stages = _stages(
+            (0, "alice", TEEType.SGX, b"\x01"),
+            (1, "bob", TEEType.SGX, b"\x02"),
+        )
+        blob = encode_multi_stage_attestation(stages)
+        recovered = decode_multi_stage_attestation(
+            blob, expected_stage_count=2
+        )
+        assert recovered is not None
+        assert len(recovered) == 2
+
+    def test_decode_expected_stage_count_mismatch_raises(self):
+        """M2 regression: caller knows the chain length and asserts
+        the envelope has the same count — defends against omission."""
+        stages = _stages(
+            (0, "alice", TEEType.SGX, b"\x01"),
+            (1, "bob", TEEType.SGX, b"\x02"),
+        )
+        blob = encode_multi_stage_attestation(stages)
+        with pytest.raises(MultiStageMalformedError, match="3"):
+            decode_multi_stage_attestation(blob, expected_stage_count=3)
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Magic-prefix detection
@@ -323,7 +406,23 @@ class TestVerifyStageAttestations:
         r = results[0]
         assert r.structurally_ok is True
         assert r.vendor_verified is None
+        assert r.is_placeholder is True
+        # stage_index sentinel for single-stage back-compat.
+        assert r.stage_index == -1
         assert "single-stage" in r.message.lower()
+
+    def test_multi_stage_results_not_marked_placeholder(self):
+        """L7 regression: real multi-stage entries must NOT have
+        is_placeholder=True. Monitoring layers depend on this flag
+        to skip back-compat results when aggregating tee_type counts."""
+        stages = _stages(
+            (0, "alice", TEEType.SGX, b"\x01"),
+            (1, "bob", TEEType.TDX, b"\x02"),
+        )
+        blob = encode_multi_stage_attestation(stages)
+        ok, results = verify_stage_attestations(blob)
+        assert ok is True
+        assert all(not r.is_placeholder for r in results)
 
     def test_empty_bytes_treated_as_single_stage(self):
         # No envelope → opaque single-stage.

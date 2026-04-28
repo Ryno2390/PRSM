@@ -60,20 +60,26 @@ from prsm.node.identity import NodeIdentity, verify_signature
 CHAIN_RPC_PROTOCOL_VERSION = 1
 """Wire-format version. Bump when any wire dataclass changes shape."""
 
-MAX_HANDSHAKE_BYTES = 1 * 1024 * 1024
-"""Hard cap on a JSON-encoded chain-RPC message. Activation blobs are
-the bulk of any real `RunLayerSliceRequest`; for large activations
-(>10MB) the transport layer splits them via the Phase 6 streaming
-chunker and the wire payload here references the chunked stream
-metadata rather than carrying raw bytes inline. 1 MiB gives ample
-headroom for everything else (token, metadata, small activations
-inline) while keeping a hard ceiling on what `parse_message` will
-allocate before we bail out.
+MAX_HANDSHAKE_BYTES = 64 * 1024 * 1024
+"""Hard cap on a JSON-encoded chain-RPC message.
 
-Stages that need to enforce a different ceiling can wrap parse_message
-in their own size check; the wire protocol's contract is "messages
-larger than this are rejected at parse time," not "messages must fit
-this cap."
+v1 inlines activation blobs hex-encoded inside the JSON envelope.
+Hex doubles size + JSON adds modest framing overhead; a 64 MiB cap
+swallows ~25 MiB of raw activation bytes — enough for typical LLM
+activations (e.g., 2048-token × 4096-dim float16 ≈ 16 MiB raw,
+≈ 33 MiB hex+JSON).
+
+Future work (Phase 3.x.7.x): wire the Phase 6 streaming chunker
+(``activation_codec.chunk_activation``) for activations exceeding
+``CHUNK_THRESHOLD_BYTES`` so the wire layer doesn't have to allocate
+the full hex string in memory. The codec is shipped (Task 3); only
+the transport-side wiring remains. Until then, the inline path
+handles the production-sized activation regime by raising the cap.
+
+Stages enforcing a different ceiling can wrap parse_message in their
+own size check; the wire protocol's contract is "messages larger
+than this are rejected at parse time," not "messages must fit this
+cap."
 """
 
 
@@ -171,13 +177,21 @@ class HandoffToken:
         _validate_str_field("request_id", self.request_id)
         _validate_str_field("settler_node_id", self.settler_node_id)
         _validate_str_field("signature_b64", self.signature_b64)
-        if not isinstance(self.chain_stage_index, int) or self.chain_stage_index < 0:
+        # Reject bool: isinstance(True, int) is True in Python; without
+        # this guard a peer sending {"chain_stage_index": false} would
+        # produce a token with bool-typed numeric fields.
+        if (
+            not isinstance(self.chain_stage_index, int)
+            or isinstance(self.chain_stage_index, bool)
+            or self.chain_stage_index < 0
+        ):
             raise ChainRpcMalformedError(
                 f"chain_stage_index must be non-negative int, got "
                 f"{self.chain_stage_index!r}"
             )
         if (
             not isinstance(self.chain_total_stages, int)
+            or isinstance(self.chain_total_stages, bool)
             or self.chain_total_stages <= 0
         ):
             raise ChainRpcMalformedError(
@@ -590,18 +604,48 @@ class RunLayerSliceResponse:
             stage_node_id=identity.node_id,
         )
 
-    def verify_with_anchor(self, anchor: Any) -> bool:
-        """Verify this response's stage signature using the stage's
-        pubkey resolved from the on-chain anchor.
+    def verify_with_anchor(
+        self, anchor: Any, *, expected_stage_node_id: str
+    ) -> bool:
+        """Verify this response's stage signature against the EXPECTED
+        stage's pubkey resolved from the on-chain anchor.
 
-        Same anchor-verify-on-read pattern as ``HandoffToken``.
-        Returns False on any failure (no anchor, not registered,
-        signature mismatch); raises only on transient anchor-RPC
-        infrastructure errors.
+        ``expected_stage_node_id`` MUST be the node_id the caller
+        dispatched the request to — typically the GPUChain stage at
+        the current chain index. The check rejects when:
+
+          - the response's claimed ``stage_node_id`` doesn't match
+            ``expected_stage_node_id`` (defends against an attacker
+            with ANY anchor-registered identity replacing the legit
+            stage's response with their own genuine signature; without
+            this check, the lookup-by-self-claim path would accept
+            Mallory's response under Mallory's pubkey because Mallory
+            IS anchor-registered)
+
+          - the resolved pubkey doesn't verify the stage's signature
+
+        The Phase 3.x.5 SignedManifestEntry / Phase 3.x.6
+        SignedProfileEntry pattern is functionally equivalent: the
+        identity to look up is supplied EXTERNALLY by the caller, not
+        pulled from the response. RunLayerSliceResponse takes the
+        externally-supplied identity as a kwarg to make the contract
+        impossible to misuse.
+
+        Returns False on any failure path; raises only on transient
+        anchor-RPC infrastructure errors.
         """
         if anchor is None or not hasattr(anchor, "lookup"):
             return False
-        stage_pubkey_b64 = anchor.lookup(self.stage_node_id)
+        if not isinstance(expected_stage_node_id, str) or not expected_stage_node_id:
+            return False
+        # Anchor-verify against the EXPECTED identity, not the
+        # response's self-declared one. If a malicious peer signed
+        # with their own (also anchor-registered) key, the lookup
+        # below uses the expected node's pubkey, so the bad signature
+        # fails verification.
+        if self.stage_node_id != expected_stage_node_id:
+            return False
+        stage_pubkey_b64 = anchor.lookup(expected_stage_node_id)
         if not stage_pubkey_b64:
             return False
         payload = self.signing_payload(
@@ -792,7 +836,10 @@ def _validate_str_field(name: str, value: Any) -> None:
 
 
 def _validate_version(version: Any) -> None:
-    if not isinstance(version, int):
+    # bool is a subclass of int in Python; reject explicitly so a
+    # peer sending {"protocol_version": true} doesn't slip through
+    # via True == 1.
+    if not isinstance(version, int) or isinstance(version, bool):
         raise ChainRpcMalformedError(
             f"protocol_version must be int, got {type(version).__name__}"
         )
@@ -819,7 +866,11 @@ def _required_str(data: Dict[str, Any], field_name: str) -> str:
 
 def _required_int(data: Dict[str, Any], field_name: str) -> int:
     value = data.get(field_name)
-    if not isinstance(value, int):
+    # Reject bool explicitly; isinstance(True, int) is True in Python
+    # so {"chain_stage_index": true} would otherwise produce a token
+    # whose int field is True, polluting downstream telemetry +
+    # equality semantics.
+    if not isinstance(value, int) or isinstance(value, bool):
         raise ChainRpcMalformedError(
             f"{field_name} must be int, got {type(value).__name__}"
         )

@@ -197,6 +197,8 @@ def is_multi_stage_attestation(blob: bytes) -> bool:
 
 def decode_multi_stage_attestation(
     blob: bytes,
+    *,
+    expected_stage_count: Optional[int] = None,
 ) -> Optional[List[StageAttestation]]:
     """Decode a multi-stage envelope into a list of stage attestations.
 
@@ -209,6 +211,16 @@ def decode_multi_stage_attestation(
     structurally invalid envelope. The boundary is intentional:
     "no envelope" is a normal back-compat path; "envelope present
     but broken" is a corruption signal worth raising.
+
+    Structural validation enforced:
+      - ``stages`` is a non-empty list
+      - ``stage_index`` values are exactly 0..N-1 (contiguous, no
+        gaps)
+      - no duplicate ``stage_index``
+      - if ``expected_stage_count`` is given, ``len(stages)`` must
+        match it (defends against a settler omitting a SOFTWARE stage
+        from the envelope to upgrade the receipt's apparent worst-
+        case TEE type)
     """
     if not is_multi_stage_attestation(blob):
         return None
@@ -234,7 +246,30 @@ def decode_multi_stage_attestation(
         raise MultiStageMalformedError(
             "envelope must contain non-empty 'stages' list"
         )
-    return [StageAttestation.from_dict(s) for s in raw_stages]
+    stages = [StageAttestation.from_dict(s) for s in raw_stages]
+
+    # Structural integrity: stage_index values must be exactly
+    # 0..N-1 (contiguous, no gaps, no duplicates). Otherwise a
+    # settler could omit a SOFTWARE stage to upgrade the apparent
+    # worst-case TEE type seen by a receipt verifier.
+    indices = [s.stage_index for s in stages]
+    if len(set(indices)) != len(indices):
+        raise MultiStageMalformedError(
+            f"envelope contains duplicate stage_index values: {sorted(indices)}"
+        )
+    if sorted(indices) != list(range(len(stages))):
+        raise MultiStageMalformedError(
+            f"envelope stage_index values must be 0..{len(stages) - 1} "
+            f"(contiguous); got {sorted(indices)}"
+        )
+    if expected_stage_count is not None and len(stages) != expected_stage_count:
+        raise MultiStageMalformedError(
+            f"envelope has {len(stages)} stages; "
+            f"caller expected {expected_stage_count}"
+        )
+
+    # Return stages sorted by stage_index for deterministic iteration.
+    return sorted(stages, key=lambda s: s.stage_index)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -292,14 +327,24 @@ class StageVerificationResult:
     """Outcome of verifying one stage's attestation.
 
     Fields:
-      stage_index       Echoed from the envelope.
-      stage_node_id     Echoed from the envelope.
-      tee_type          The stage's claimed TEE type.
+      stage_index       Echoed from the envelope, or ``-1`` for the
+                        single-stage opaque-bytes back-compat path.
+      stage_node_id     Echoed from the envelope, or empty string for
+                        the back-compat path.
+      tee_type          The stage's claimed TEE type. For
+                        ``is_placeholder=True`` this is ``SOFTWARE``
+                        as a conservative default — callers MUST NOT
+                        treat this as a real software-tier event.
       structurally_ok   True iff the envelope entry parsed cleanly.
                         v1 stops here; v2 wires platform-vendor RPC.
       vendor_verified   None for v1 (no vendor service wired). v2:
                         True iff the platform-vendor attestation
                         service confirmed the report.
+      is_placeholder    True iff this result represents the single-
+                        stage opaque-bytes back-compat path (no
+                        multi-stage envelope present). Monitoring
+                        layers aggregating ``tee_type`` counts MUST
+                        skip placeholder results.
       message           Free-form description of the verification
                         outcome (mainly for failure paths).
     """
@@ -310,6 +355,7 @@ class StageVerificationResult:
     structurally_ok: bool
     vendor_verified: Optional[bool]
     message: str
+    is_placeholder: bool = False
 
 
 def verify_stage_attestations(
@@ -338,14 +384,17 @@ def verify_stage_attestations(
     if not is_multi_stage_attestation(blob):
         # Treat as single-stage opaque attestation. We can't infer the
         # stage_node_id or tee_type from raw bytes; report a placeholder
-        # entry so callers have a uniform return shape.
+        # entry (is_placeholder=True) so callers can distinguish it
+        # from a real multi-stage entry. Monitoring layers aggregating
+        # tee_type counts MUST skip placeholder results.
         return True, [StageVerificationResult(
-            stage_index=0,
+            stage_index=-1,
             stage_node_id="",
             tee_type=TEEType.SOFTWARE,
             structurally_ok=True,
             vendor_verified=None,
             message="single-stage opaque attestation (no envelope)",
+            is_placeholder=True,
         )]
 
     try:

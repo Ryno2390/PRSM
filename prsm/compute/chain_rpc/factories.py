@@ -33,6 +33,7 @@ design plan §4 Task 6 acceptance criterion calls for.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Optional
 
 import numpy as np
@@ -49,6 +50,9 @@ from prsm.compute.chain_rpc.server import (
     LayerStageServer,
 )
 from prsm.node.identity import NodeIdentity
+
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -124,6 +128,20 @@ def make_rpc_chain_executor(
                          node_ids directly.
       default_deadline_seconds  Default 30s.
     """
+    if prompt_encoder is None or output_decoder is None:
+        # Loud one-time warning when defaults activate. The docstring
+        # already calls this out, but an SDK user constructing the
+        # factory with minimum args might not read it; the runtime
+        # warning ensures the test-friendly default never silently
+        # ships to prod with a real LLM model.
+        logger.warning(
+            "make_rpc_chain_executor: using utf8_prompt_encoder / "
+            "utf8_output_decoder defaults — these are TEST-FRIENDLY "
+            "byte-passthrough adapters, NOT real tokenizers. Production "
+            "callers MUST pass prompt_encoder= + output_decoder= "
+            "wrapping the model's actual tokenizer + de-tokenizer. "
+            "See factories.py docstring for details."
+        )
     return RpcChainExecutor(
         settler_identity=settler_identity,
         send_message=send_message,

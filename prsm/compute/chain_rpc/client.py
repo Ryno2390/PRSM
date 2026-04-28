@@ -513,34 +513,27 @@ class RpcChainExecutor:
                 ),
             )
 
-        # Stage signature must verify under the stage's anchor pubkey.
-        # Failure here is the strongest signal the server returned an
-        # unauthentic response — a stronger signal than output
-        # divergence (which could be honest non-determinism). Caller
-        # may choose to fire a Phase 7.1 challenge for this code.
-        if not response.verify_with_anchor(self._anchor):
+        # Stage signature must verify under the EXPECTED stage's
+        # anchor pubkey — i.e., the node we dispatched to, not
+        # whatever identity the response self-declares. The
+        # ``expected_stage_node_id`` kwarg makes the API impossible to
+        # misuse: a substituted response signed by Mallory (any anchor-
+        # registered identity) fails because Alice's pubkey doesn't
+        # verify Mallory's signature, regardless of whether Mallory
+        # IS anchor-registered. Failure here is the strongest signal
+        # the server returned an unauthentic response — caller may
+        # choose to fire a Phase 7.1 challenge for this code.
+        if not response.verify_with_anchor(
+            self._anchor, expected_stage_node_id=stage_node_id
+        ):
             raise ChainExecutionError(
                 stage_index=stage_index,
                 stage_node_id=stage_node_id,
                 code=ExecutorErrorCode.INVALID_STAGE_SIGNATURE,
                 message=(
                     f"stage response signature failed anchor verification "
-                    f"(claimed stage_node_id={response.stage_node_id!r})"
-                ),
-            )
-
-        # Defensive: the response's stage_node_id MUST match the
-        # node we addressed. Otherwise a stage signed on behalf of
-        # a different identity, even if the signature itself
-        # verifies under THAT identity's pubkey on the anchor.
-        if response.stage_node_id != stage_node_id:
-            raise ChainExecutionError(
-                stage_index=stage_index,
-                stage_node_id=stage_node_id,
-                code=ExecutorErrorCode.INVALID_STAGE_SIGNATURE,
-                message=(
-                    f"response stage_node_id {response.stage_node_id!r} "
-                    f"does not match dispatched stage {stage_node_id!r}"
+                    f"(expected stage_node_id={stage_node_id!r}, "
+                    f"claimed={response.stage_node_id!r})"
                 ),
             )
 

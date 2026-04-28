@@ -327,15 +327,21 @@ class TestConstruction:
 
 
 class TestHappyPath:
-    def test_returns_signed_response(self, server, settler_identity, anchor):
+    def test_returns_signed_response(
+        self, server, settler_identity, anchor, stage_identity
+    ):
         request = _make_request(settler_identity=settler_identity)
         response_bytes = server.handle(encode_message(request))
         response = parse_message(response_bytes)
 
         assert isinstance(response, RunLayerSliceResponse)
         assert response.request_id == "req-1"
-        # Stage-signed response verifies under the stage's pubkey.
-        assert response.verify_with_anchor(anchor) is True
+        # Stage-signed response verifies under the EXPECTED stage's
+        # pubkey (caller supplies the dispatched node_id explicitly to
+        # close the substitution-attack hole — see Task 8 H2 finding).
+        assert response.verify_with_anchor(
+            anchor, expected_stage_node_id=stage_identity.node_id
+        ) is True
 
     def test_runner_called_with_correct_inputs(
         self, server, runner, settler_identity

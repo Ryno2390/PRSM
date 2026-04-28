@@ -483,7 +483,9 @@ class TestRunLayerSliceResponseSign:
             epsilon_spent=0.5,
         )
         assert response.stage_node_id == stage.node_id
-        assert response.verify_with_anchor(anchor) is True
+        assert response.verify_with_anchor(
+            anchor, expected_stage_node_id=stage.node_id
+        ) is True
 
     def test_verify_fails_for_tampered_activation(self):
         stage = generate_node_identity("alice")
@@ -513,7 +515,9 @@ class TestRunLayerSliceResponseSign:
             stage_signature_b64=response.stage_signature_b64,
             stage_node_id=response.stage_node_id,
         )
-        assert tampered.verify_with_anchor(anchor) is False
+        assert tampered.verify_with_anchor(
+            anchor, expected_stage_node_id=stage.node_id
+        ) is False
 
     def test_verify_fails_for_tampered_tee_attestation(self):
         stage = generate_node_identity("alice")
@@ -542,7 +546,81 @@ class TestRunLayerSliceResponseSign:
             stage_signature_b64=response.stage_signature_b64,
             stage_node_id=response.stage_node_id,
         )
-        assert tampered.verify_with_anchor(anchor) is False
+        assert tampered.verify_with_anchor(
+            anchor, expected_stage_node_id=stage.node_id
+        ) is False
+
+    def test_verify_rejects_substitution_under_different_signer(self):
+        """H2 regression: a malicious peer with their own anchor-
+        registered identity signs a response and claims to be the
+        real stage. Without expected_stage_node_id parameter, the
+        signature would verify under Mallory's pubkey. With it,
+        the lookup uses Alice's pubkey and rejects."""
+        alice = generate_node_identity("alice")
+        mallory = generate_node_identity("mallory")
+        anchor = FakeAnchor()
+        _register(anchor, alice)
+        _register(anchor, mallory)
+
+        # Mallory signs a response and brazenly claims to be alice.
+        response = RunLayerSliceResponse.sign(
+            identity=mallory,
+            request_id="req-1",
+            activation_blob=b"forged",
+            activation_shape=(1,),
+            activation_dtype="float32",
+            duration_seconds=0.05,
+            tee_attestation=b"\x01" * 32,
+            tee_type=TEEType.SGX,
+            epsilon_spent=0.0,
+        )
+        # Hand-edit stage_node_id to claim alice (the impersonation
+        # — sig still verifies under Mallory's pubkey at lookup-self
+        # time, but expected-id check fires first).
+        impersonating = RunLayerSliceResponse(
+            request_id=response.request_id,
+            activation_blob=response.activation_blob,
+            activation_shape=response.activation_shape,
+            activation_dtype=response.activation_dtype,
+            duration_seconds=response.duration_seconds,
+            tee_attestation=response.tee_attestation,
+            tee_type=response.tee_type,
+            epsilon_spent=response.epsilon_spent,
+            stage_signature_b64=response.stage_signature_b64,
+            stage_node_id=alice.node_id,  # claim to be alice
+        )
+        # Caller dispatched to alice → expects alice. Substitution
+        # rejected at the cross-field check.
+        assert impersonating.verify_with_anchor(
+            anchor, expected_stage_node_id=alice.node_id
+        ) is False
+        # Verify the ORIGINAL response (truthful stage_node_id =
+        # mallory) does verify when the caller dispatched to mallory.
+        assert response.verify_with_anchor(
+            anchor, expected_stage_node_id=mallory.node_id
+        ) is True
+
+    def test_verify_rejects_empty_expected_stage_node_id(self):
+        stage = generate_node_identity("alice")
+        anchor = FakeAnchor()
+        _register(anchor, stage)
+        response = RunLayerSliceResponse.sign(
+            identity=stage,
+            request_id="r",
+            activation_blob=b"x",
+            activation_shape=(1,),
+            activation_dtype="float32",
+            duration_seconds=0.05,
+            tee_attestation=b"\x01" * 32,
+            tee_type=TEEType.SGX,
+            epsilon_spent=0.0,
+        )
+        assert response.verify_with_anchor(
+            anchor, expected_stage_node_id=""
+        ) is False
+        assert response.verify_with_anchor(
+            anchor, expected_stage_node_id=None  # type: ignore[arg-type]
+        ) is False
 
 
 class TestRunLayerSliceResponseRoundTrip:
@@ -665,6 +743,45 @@ class TestCodec:
 # ──────────────────────────────────────────────────────────────────────────
 # Constants sanity
 # ──────────────────────────────────────────────────────────────────────────
+
+
+class TestBoolRejection:
+    """M1 regression: bool is a subclass of int in Python; without
+    explicit guards a peer sending {field: true} would slip through
+    via True == 1, polluting downstream telemetry + equality."""
+
+    def test_handoff_token_rejects_bool_chain_stage_index(self):
+        with pytest.raises(ChainRpcMalformedError, match="chain_stage_index"):
+            HandoffToken(
+                request_id="r",
+                settler_node_id="s",
+                chain_stage_index=False,  # type: ignore[arg-type]
+                chain_total_stages=3,
+                deadline_unix=100.0,
+                signature_b64="sig",
+            )
+
+    def test_handoff_token_rejects_bool_chain_total_stages(self):
+        with pytest.raises(ChainRpcMalformedError, match="chain_total_stages"):
+            HandoffToken(
+                request_id="r",
+                settler_node_id="s",
+                chain_stage_index=0,
+                chain_total_stages=True,  # type: ignore[arg-type]
+                deadline_unix=100.0,
+                signature_b64="sig",
+            )
+
+    def test_parse_message_rejects_bool_protocol_version(self):
+        payload = json.dumps({
+            "type": ChainRpcMessageType.STAGE_ERROR.value,
+            "protocol_version": True,  # would == 1 without explicit guard
+            "request_id": "r",
+            "code": "X",
+            "message": "",
+        }).encode("utf-8")
+        with pytest.raises(ChainRpcMalformedError, match="protocol_version"):
+            parse_message(payload)
 
 
 class TestConstants:

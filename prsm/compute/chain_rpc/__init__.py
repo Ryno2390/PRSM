@@ -1,12 +1,28 @@
 """Phase 3.x.7 cross-host ChainExecutor RPC layer.
 
-Wire protocol + LayerStageServer + RpcChainExecutor for running an
-inference chain (a `GPUChain` decided by the Phase 3.x.6 scheduler)
-across PRSM nodes on real Phase 6 transport.
+Wire protocol + LayerStageServer + RpcChainExecutor + activation
+codec + production-wiring factories for running an inference chain
+(a ``GPUChain`` decided by the Phase 3.x.6 scheduler) across PRSM
+nodes on real Phase 6 transport.
 
-Task 1 ships the wire protocol only — server and client land in Tasks
-2 and 4. The public surface is curated as those tasks land; this
-__init__ currently re-exports the protocol-layer types.
+Public surface (curated):
+  - Wire protocol: ``HandoffToken``, ``RunLayerSliceRequest``,
+    ``RunLayerSliceResponse``, ``StageError``, ``StageErrorCode``,
+    ``encode_message`` / ``parse_message``, ``MAX_HANDSHAKE_BYTES``,
+    ``CHAIN_RPC_PROTOCOL_VERSION``.
+  - Server: ``LayerStageServer``, ``LayerSliceRunner`` Protocol,
+    ``LayerSliceResult``.
+  - Client: ``RpcChainExecutor``, ``ChainExecutionError``,
+    ``ExecutorErrorCode``, ``StageOutcome``.
+  - Activation codec: ``encode_activation`` / ``decode_activation``,
+    ``chunk_activation`` / ``reassemble_chunked``, ``encode_for_wire``,
+    ``ChunkedActivation``, ``ActivationCodecError``.
+  - Production-wiring factories: ``make_rpc_chain_executor``,
+    ``make_layer_stage_server``, ``utf8_prompt_encoder`` /
+    ``utf8_output_decoder`` (test-friendly defaults).
+
+Production callers typically use the inference-package re-exports
+instead: ``from prsm.compute.inference import make_rpc_chain_executor``.
 """
 
 from prsm.compute.chain_rpc.activation_codec import (
