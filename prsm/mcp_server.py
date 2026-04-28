@@ -27,7 +27,17 @@ import inspect
 import json
 import logging
 import os
-from typing import Any, Awaitable, Callable, Dict, Optional, Sequence
+from typing import (
+    Any,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -543,6 +553,207 @@ async def _call_node_api(method: str, path: str, data: Dict = None) -> Dict[str,
                 timeout=aiohttp.ClientTimeout(total=120),
             ) as resp:
                 return await resp.json()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Phase 3.x.8.1 Task 3 — SSE streaming client for /compute/inference/stream
+# ──────────────────────────────────────────────────────────────────────
+
+
+class InferenceError(RuntimeError):
+    """Structured error from a streaming inference dispatch.
+
+    Raised by ``_call_node_api_streaming`` when the SSE stream
+    terminates with an ``event: error`` frame. ``code`` carries the
+    machine-readable error code (e.g. ``EXECUTION_FAILURE``,
+    ``INTERNAL_ERROR``) and ``message`` is the human-readable
+    description. The MCP tool handler maps this to an MCP-friendly
+    error response — same surface as a non-success unary response.
+    """
+
+    def __init__(self, message: str, *, code: Optional[str] = None):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+async def _parse_sse(response: Any) -> AsyncIterator[Tuple[str, str]]:
+    """Minimal Server-Sent Events parser. Yields ``(event_type,
+    data)`` tuples per W3C SSE spec.
+
+    Frame structure:
+      event: <type>\\n
+      data: <payload>\\n
+      \\n   <- blank line terminates the frame
+
+    Multi-line ``data:`` is concatenated with literal newlines
+    between lines. ``event:`` defaults to ``"message"`` when absent
+    (per spec). Comment lines (starting with ``:``) and unknown
+    fields are silently ignored. The parser does NOT try to handle
+    every edge case in the SSE spec — it handles the framing PRSM
+    emits, which is the strict ``event:``/``data:``/blank-line
+    pattern. Anything more exotic from a peer is ignored at the
+    field level rather than crashing the parser.
+    """
+    event_type = "message"
+    data_lines: List[str] = []
+    # aiohttp's response.content is an asyncio.StreamReader-shaped
+    # object. iter_any() yields raw bytes chunks; we accumulate +
+    # split on newlines so a chunk-boundary mid-frame doesn't break
+    # parsing.
+    buffer = ""
+    async for chunk in response.content.iter_any():
+        buffer += chunk.decode("utf-8", errors="replace")
+        # Process complete lines; keep the trailing partial line in
+        # the buffer for the next chunk.
+        while "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+            line = line.rstrip("\r")  # tolerate CRLF
+            if line == "":
+                # Blank line — frame terminator.
+                if data_lines:
+                    yield event_type, "\n".join(data_lines)
+                    data_lines = []
+                    event_type = "message"
+            elif line.startswith(":"):
+                # SSE comment — ignored.
+                continue
+            elif line.startswith("event:"):
+                # ``event: <type>`` — strip the prefix + optional
+                # leading space (per SSE spec's "leading space
+                # after the colon is consumed if present").
+                value = line[len("event:"):]
+                if value.startswith(" "):
+                    value = value[1:]
+                event_type = value
+            elif line.startswith("data:"):
+                value = line[len("data:"):]
+                if value.startswith(" "):
+                    value = value[1:]
+                data_lines.append(value)
+            # Other fields (id:, retry:) are silently ignored.
+    # If the connection closed mid-line (no trailing newline at all),
+    # process the remaining buffered text as a final line. Then if
+    # data_lines accumulated anything (with or without a trailing
+    # blank-line terminator), flush them as a final frame —
+    # defensive against servers that forget the trailing blank line.
+    if buffer:
+        line = buffer.rstrip("\r")
+        if line.startswith("data:"):
+            value = line[len("data:"):]
+            if value.startswith(" "):
+                value = value[1:]
+            data_lines.append(value)
+        elif line.startswith("event:"):
+            value = line[len("event:"):]
+            if value.startswith(" "):
+                value = value[1:]
+            event_type = value
+        # Other unterminated fields ignored (id:, retry:, comment).
+    if data_lines:
+        yield event_type, "\n".join(data_lines)
+
+
+async def _call_node_api_streaming(
+    path: str,
+    data: Dict[str, Any],
+    emit_progress: ProgressEmitter,
+) -> Dict[str, Any]:
+    """Open an SSE connection to a node-API endpoint, forward token
+    events to ``emit_progress``, return the final result dict on
+    terminal ``event: result``.
+
+    Raises:
+      ``InferenceError`` when the stream terminates with an
+        ``event: error`` frame. The ``code`` attribute carries the
+        server-side error code.
+      ``RuntimeError`` when the stream closes without a terminal
+        ``result`` or ``error`` event (server crash / connection
+        drop / etc.).
+
+    Phase 3.x.8.1 Task 3 — wires the
+    ``POST /compute/inference/stream`` endpoint (Task 2) to the MCP
+    progress-event surface. Caller is responsible for catching
+    ``InferenceError`` and formatting an MCP-friendly error
+    response.
+    """
+    import aiohttp
+    import json as _json
+
+    url = await _get_node_api_url()
+    api_key = os.environ.get("PRSM_NODE_API_KEY", "")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    sequence_count = 0
+
+    # No total timeout — streaming inference can run for minutes.
+    # Per-chunk timeout via sock_read keeps a hung server detectable
+    # without bounding the overall stream length.
+    timeout = aiohttp.ClientTimeout(total=None, sock_read=120)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            f"{url}{path}",
+            json=data or {},
+            headers=headers,
+        ) as response:
+            response.raise_for_status()
+            async for event_type, event_data in _parse_sse(response):
+                if event_type == "token":
+                    try:
+                        payload = _json.loads(event_data)
+                    except _json.JSONDecodeError as exc:
+                        # Malformed token event — surface as an
+                        # InferenceError rather than crashing the
+                        # iterator. Token frames carry user-visible
+                        # text so a parse failure here is a server
+                        # bug worth surfacing.
+                        raise InferenceError(
+                            f"malformed token event: {exc}",
+                            code="MALFORMED_RESPONSE",
+                        )
+                    text_delta = payload.get("text_delta", "")
+                    sequence_count += 1
+                    await emit_progress(
+                        text_delta,
+                        float(sequence_count),
+                        None,
+                    )
+                elif event_type == "result":
+                    try:
+                        return _json.loads(event_data)
+                    except _json.JSONDecodeError as exc:
+                        raise InferenceError(
+                            f"malformed result event: {exc}",
+                            code="MALFORMED_RESPONSE",
+                        )
+                elif event_type == "error":
+                    try:
+                        err = _json.loads(event_data)
+                    except _json.JSONDecodeError:
+                        # Even the error event is malformed — surface
+                        # as InferenceError with the raw payload.
+                        raise InferenceError(
+                            f"malformed error event: {event_data!r}",
+                            code="MALFORMED_RESPONSE",
+                        )
+                    raise InferenceError(
+                        err.get("error", "unknown inference error"),
+                        code=err.get("code"),
+                    )
+                # Unknown event types are ignored — forward-compat
+                # with future server-side event additions.
+
+    # Stream closed without a terminal result/error event.
+    raise RuntimeError(
+        "SSE stream ended without a 'result' or 'error' event "
+        "(server crashed or connection dropped mid-stream)"
+    )
 
 
 MINIMUM_BUDGET_FTNS = 0.01
