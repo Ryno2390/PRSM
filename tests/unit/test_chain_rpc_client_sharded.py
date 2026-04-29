@@ -1009,3 +1009,194 @@ class TestShardedPerIterationAttestation:
         # Generator's already closed; further next() raises
         # StopIteration; verifying the cancellation contract by
         # construction (above lines didn't see a result).
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.x Task 4 — executor lifts chunked + sharded PREFILL guard
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestShardedChunkedPrefillExecutorGuard:
+    """Phase 3.x.11.x Task 4: lift the executor-side guard for
+    PREFILL when ``enable_sharded_decode=True`` AND the activation
+    crosses ``chunk_threshold_bytes``. INCREMENTAL stays unary-only.
+
+    Pre-3.x.11.x: ``_dispatch_stage`` raised ACTIVATION_TOO_LARGE
+    for ANY chunked dispatch on a sharded executor (Phase 3.x.11
+    Task 9 M1 belt-and-braces).
+    Post-3.x.11.x: PREFILL chunked → routes through
+    ``_dispatch_streamed`` → server's ``_dispatch_streamed_sharded``.
+    INCREMENTAL chunked → still raises ACTIVATION_TOO_LARGE with
+    the refined "single-position INCREMENTAL doesn't benefit
+    from chunking" message.
+    """
+
+    def test_incremental_chunked_still_raises_activation_too_large(self):
+        # The new guard fires on (enable_sharded_decode AND
+        # decode_mode != PREFILL AND blob > chunk_threshold_bytes).
+        # Isolate by calling _dispatch_stage directly with
+        # synthesized inputs — bypasses the per-token chain loop
+        # interleaving with PREFILL-streamed-not-wired paths.
+        settler = generate_node_identity("settler")
+        alice = generate_node_identity("alice")
+        anchor = _FakeAnchor()
+        anchor.registered[alice.node_id] = alice.public_key_b64
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=lambda a, b: b"",
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder_passthrough,
+            output_decoder=_output_decoder_passthrough,
+            enable_sharded_decode=True,
+            tokenizer=_FakeTokenizer(),
+            sharded_default_max_tokens=4,
+            chunk_threshold_bytes=4,
+        )
+        # Stage 1 INCREMENTAL input: np.int64 single token = 8 bytes
+        # (forces chunking under threshold=4).
+        activation = np.array([42], dtype=np.int64)
+        with pytest.raises(ChainExecutionError) as exc_info:
+            executor._dispatch_stage(
+                stage_index=0,
+                stage_node_id=alice.node_id,
+                layer_range=(0, 3),
+                activation=activation,
+                request=_make_request("hi", max_tokens=4),
+                chain_total=1,
+                deadline_unix=2000.0,
+                decode_mode=DecodeMode.INCREMENTAL,
+                include_sampling_fields=True,
+            )
+        assert exc_info.value.code == ExecutorErrorCode.ACTIVATION_TOO_LARGE
+        assert "INCREMENTAL is unary-only" in exc_info.value.message
+        assert "single-position" in exc_info.value.message.lower()
+
+    def test_non_sharded_chunked_path_unchanged(self):
+        # Non-sharded executor + chunk_threshold_bytes=4 should
+        # route through to _dispatch_streamed (regular runner)
+        # WITHOUT firing the sharded INCREMENTAL guard. This pins
+        # the back-compat invariant for Phase 3.x.7.1 callers.
+        settler = generate_node_identity("settler")
+        anchor = _FakeAnchor()
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=lambda a, b: b"",
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder_passthrough,
+            output_decoder=_output_decoder_passthrough,
+            enable_sharded_decode=False,
+            chunk_threshold_bytes=4,
+            # No streamed_send_message wired → chunked dispatch
+            # raises a DIFFERENT error (ACTIVATION_TOO_LARGE
+            # because streamed transport not wired). This is the
+            # PRE-3.x.11.x behavior; the new guard's INCREMENTAL
+            # message must NOT appear.
+        )
+        # Construct a chain + request that would chunk.
+        # Note: execute_chain (non-streaming) will hit the
+        # streamed path because chunk_threshold_bytes=4 and
+        # prompt_encoder produces > 4 bytes.
+        with pytest.raises(ChainExecutionError) as exc_info:
+            executor.execute_chain(
+                request=_make_request("hello world world", max_tokens=4),
+                chain=_make_chain([generate_node_identity("alice").node_id]),
+            )
+        # The error code is ACTIVATION_TOO_LARGE (streamed transport
+        # not wired) — but the MESSAGE must NOT contain the
+        # INCREMENTAL-specific guard text. Pre-3.x.11.x
+        # error message stays unchanged.
+        assert exc_info.value.code == ExecutorErrorCode.ACTIVATION_TOO_LARGE
+        assert "INCREMENTAL is unary-only" not in exc_info.value.message
+
+    def test_non_chunked_sharded_path_unchanged(self):
+        # Sharded executor + DEFAULT chunk_threshold_bytes (large
+        # enough that small activations stay inline) → existing
+        # Phase 3.x.11 inline path used. Sanity that the new
+        # guard doesn't fire on the common case.
+        settler = generate_node_identity("settler")
+        alice = generate_node_identity("alice")
+        anchor = _FakeAnchor()
+        anchor.registered[alice.node_id] = alice.public_key_b64
+        sim = _ShardedStageSim(
+            alice, is_tail=True,
+            sample_script=[(10, True)],
+        )
+        transport = _ShardedTransport({alice.node_id: sim})
+        executor = _make_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            tokenizer=_FakeTokenizer(),
+        )
+        chain = _make_chain([alice.node_id])
+        # Should complete cleanly via inline path.
+        events = list(executor.execute_chain_streaming(
+            request=_make_request("hi", max_tokens=4),
+            chain=chain,
+        ))
+        # No exceptions; reached final result.
+        results = [
+            e for e in events if isinstance(e, ChainExecutionResult)
+        ]
+        assert len(results) == 1
+
+    def test_prefill_chunked_routes_to_streamed_transport(self):
+        # The load-bearing positive case: chunked PREFILL on a
+        # sharded executor lifts the M1 guard and routes to
+        # streamed_send_message. We don't need a full E2E here;
+        # the integration test in Task 5 covers the end-to-end
+        # roundtrip. This unit test confirms the guard is
+        # actually lifted (vs. the pre-3.x.11.x raise).
+        settler = generate_node_identity("settler")
+        alice = generate_node_identity("alice")
+        anchor = _FakeAnchor()
+        anchor.registered[alice.node_id] = alice.public_key_b64
+        sim = _ShardedStageSim(
+            alice, is_tail=True,
+            sample_script=[(10, True)],
+        )
+        transport = _ShardedTransport({alice.node_id: sim})
+
+        # Streamed-send observer: just records that the streamed
+        # path was invoked + raises ACTIVATION_TOO_LARGE so the
+        # test doesn't need to construct the full streamed-server
+        # round-trip (Task 5 covers that).
+        streamed_send_invocations = []
+
+        def _streamed_send(addr, manifest_bytes, chunk_iter):
+            # Drain chunk_iter to verify chunked path was reached.
+            chunks = list(chunk_iter)
+            streamed_send_invocations.append({
+                "address": addr,
+                "manifest_bytes": manifest_bytes,
+                "chunk_count": len(chunks),
+            })
+            # Raise to short-circuit; Task 5 covers full round-trip.
+            raise RuntimeError("test-shortcircuit")
+
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            streamed_send_message=_streamed_send,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder_passthrough,
+            output_decoder=_output_decoder_passthrough,
+            enable_sharded_decode=True,
+            tokenizer=_FakeTokenizer(),
+            sharded_default_max_tokens=4,
+            chunk_threshold_bytes=4,  # forces chunking
+        )
+        chain = _make_chain([alice.node_id])
+
+        # Drain — expect a TRANSPORT_ERROR (test-shortcircuit
+        # raised inside streamed_send) rather than
+        # ACTIVATION_TOO_LARGE. This confirms PREFILL went
+        # through the streamed path (M1 guard lifted).
+        with pytest.raises(ChainExecutionError) as exc_info:
+            list(executor.execute_chain_streaming(
+                request=_make_request("hi", max_tokens=4),
+                chain=chain,
+            ))
+        # NOT ACTIVATION_TOO_LARGE — guard was lifted.
+        assert exc_info.value.code == ExecutorErrorCode.TRANSPORT_ERROR
+        assert "test-shortcircuit" in exc_info.value.message
+        # Streamed transport WAS invoked.
+        assert len(streamed_send_invocations) == 1

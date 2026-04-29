@@ -1518,28 +1518,31 @@ class RpcChainExecutor:
         )
 
         if should_chunk(blob, threshold=self._chunk_threshold_bytes):
-            # Phase 3.x.11 Task 9 round-1 M1 remediation: sharded
-            # decode is unary-only by design (design plan §3.4).
-            # When the sharded path produces an activation that
-            # would otherwise route through chunked transport,
-            # surface ACTIVATION_TOO_LARGE with a clear message
-            # rather than silently falling into the streamed wire
-            # path (where the server would route to the regular
-            # non-sharded runner and TAIL_TOKEN_MISSING would
-            # mis-attribute the cause).
-            if self._enable_sharded_decode:
+            # Phase 3.x.11.x Task 4: chunked + sharded PREFILL is
+            # supported (server's _dispatch_streamed routes to
+            # _dispatch_streamed_sharded when sharded_runner is
+            # wired AND decode_mode=PREFILL). INCREMENTAL stays
+            # unary-only — single-position activations don't
+            # benefit from chunking; surface
+            # ACTIVATION_TOO_LARGE with the unary-only message.
+            if (
+                self._enable_sharded_decode
+                and decode_mode != DecodeMode.PREFILL
+            ):
                 raise ChainExecutionError(
                     stage_index=stage_index,
                     stage_node_id=stage_node_id,
                     code=ExecutorErrorCode.ACTIVATION_TOO_LARGE,
                     message=(
-                        f"sharded decode is unary-only (design plan §3.4); "
-                        f"activation {len(blob)} bytes exceeds inline "
-                        f"threshold {self._chunk_threshold_bytes} but "
-                        f"chunked + sharded composition is a Phase "
-                        f"3.x.11.x follow-up. Reduce prompt length or "
-                        f"max_tokens, or run a chain with smaller "
-                        f"per-stage hidden state."
+                        f"sharded INCREMENTAL is unary-only (design "
+                        f"plan §3.4); activation {len(blob)} bytes "
+                        f"exceeds inline threshold "
+                        f"{self._chunk_threshold_bytes}. Single-position "
+                        f"INCREMENTAL activations don't benefit from "
+                        f"chunking; if your hidden_dim produces > "
+                        f"{self._chunk_threshold_bytes}-byte single-"
+                        f"position activations the model is structurally "
+                        f"incompatible with sharded decode."
                     ),
                 )
             return self._dispatch_streamed(
