@@ -114,19 +114,38 @@ class BatchedTrailingShardedExecutor:
             request=request, chain=chain,
         ):
             if isinstance(event, StreamToken):
+                if result is not None:
+                    # Round-1 review M1 remediation: tokens emitted
+                    # by the inner AFTER the terminal result violate
+                    # the streaming contract (the result is supposed
+                    # to be the LAST event). Drop them rather than
+                    # silently merging into the joined text — that
+                    # would re-order content across the terminal
+                    # boundary.
+                    continue
                 tokens.append(event)
             elif isinstance(event, ChainExecutionResult):
-                # Capture but don't emit yet — the joined token
-                # must come first so wire ordering matches the
-                # non-decorated streaming contract.
+                # Eagerly emit the joined token + result on receipt
+                # of the terminal. Stop draining the inner — any
+                # post-terminal events are protocol violations.
                 result = event
+                break
             else:
                 # Unknown event type — pass through to preserve
                 # forward-compat (a future executor variant adds
                 # a new event type).
                 yield event
         if tokens:
-            joined = "".join(t.text_delta for t in tokens)
+            # Round-1 review M2 remediation: defensive str coerce —
+            # if upstream ever ships a non-str text_delta (the
+            # StreamToken dataclass types it str, but
+            # RpcChainExecutor doesn't enforce at runtime), the
+            # join would TypeError mid-generator and the whole
+            # Tier C request would crash hard. Coerce defensively.
+            joined = "".join(
+                str(t.text_delta) if t.text_delta is not None else ""
+                for t in tokens
+            )
             last = tokens[-1]
             yield StreamToken(
                 sequence_index=0,

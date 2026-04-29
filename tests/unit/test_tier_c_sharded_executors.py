@@ -144,21 +144,21 @@ class TestBatchedTrailingShardedExecutor:
         ))
         assert events == [result]
 
-    def test_event_ordering_token_before_result(self):
-        # Even if inner yields in (result, tokens, ...) order (which
-        # would be a bug in the inner, but we shouldn't propagate
-        # the bug), the decorator MUST emit the joined token first
-        # then the result.
+    def test_post_result_tokens_dropped_round1_m1(self):
+        # Round-1 review M1 remediation. Tokens emitted by the
+        # inner AFTER the terminal result violate the streaming
+        # contract — the decorator MUST drop them rather than
+        # silently merging into the joined text (which would
+        # re-order content across the terminal boundary).
         inner = _FakeChainExecutor([
             _token(0, "x"),
             _result(),
-            _token(1, "y"),
+            _token(1, "y"),  # post-terminal — DROPPED
         ])
         decorator = BatchedTrailingShardedExecutor(inner=inner)
         events = list(decorator.execute_chain_streaming(
             request="req", chain="chain",
         ))
-        # Joined token = "xy"; result follows.
         tokens = [
             (i, e) for i, e in enumerate(events)
             if isinstance(e, StreamToken)
@@ -170,7 +170,34 @@ class TestBatchedTrailingShardedExecutor:
         assert len(tokens) == 1
         assert len(results) == 1
         assert tokens[0][0] < results[0][0]
-        assert tokens[0][1].text_delta == "xy"
+        # Joined text contains ONLY pre-terminal token "x" — "y"
+        # was correctly dropped.
+        assert tokens[0][1].text_delta == "x"
+
+    def test_non_str_text_delta_coerced_round1_m2(self):
+        # Round-1 review M2 remediation. Defensive coerce for
+        # non-str text_delta — if upstream ever ships None or a
+        # non-string type, the decorator must NOT TypeError mid-
+        # generator and crash the entire Tier C request.
+        inner = _FakeChainExecutor([
+            _token(0, "alpha"),
+            StreamToken(
+                sequence_index=1,
+                text_delta=None,  # type: ignore[arg-type]
+                token_id=None,
+                finish_reason=None,
+            ),
+            _token(2, "beta", finish_reason="stop"),
+            _result(),
+        ])
+        decorator = BatchedTrailingShardedExecutor(inner=inner)
+        events = list(decorator.execute_chain_streaming(
+            request="req", chain="chain",
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        # The None text_delta contributed "" — joined is "alphabeta".
+        assert tokens[0].text_delta == "alphabeta"
+        assert tokens[0].finish_reason == "stop"
 
     def test_passthrough_of_request_chain_args(self):
         inner = _FakeChainExecutor([_result()])
