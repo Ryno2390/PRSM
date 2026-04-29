@@ -1,12 +1,12 @@
 # PRSM Mainnet Audit — Bundle Coordinator
 
-**Date:** 2026-04-27 (refreshed for cumulative tag)
-**Bundle tag reference:** `cumulative-audit-prep-20260427` — extends `phase7.1x-audit-prep-20260422-2` with five additional phases (3.x.2 / 3.x.3 / 3.x.4 / 3.x.5 + Phase 4 Task 3).
+**Date:** 2026-04-29 (refreshed for cumulative tag — adds 3.x.6 + 3.x.7 + 3.x.7.1 + 3.x.8 + 3.x.8.1 + 3.x.10 + 3.x.10.x streaming-inference surface)
+**Bundle tag reference:** `cumulative-audit-prep-20260429` — extends `cumulative-audit-prep-20260427` with seven additional phases covering the full streaming-inference path from Parallax scheduling through the production runner factory.
 **Engagement model:** single auditor, one remediation cycle, one Base mainnet deploy ceremony.
 
 This is the first document an external auditor should read. It frames the full audit tree as one coherent engagement, points to the per-phase scope bundles that drill into each surface, and surfaces the cross-phase seams that an auditor should focus on first.
 
-> **📌 For auditors starting here:** the most recent audit-prep bundle is **`docs/2026-04-27-cumulative-audit-prep.md`** — it stacks on top of the 2026-04-22 baseline with the new in-scope surface (one new Solidity contract, four new Python phases, one new HTTP API + JS SDK helper). All round-1 review HIGH/MEDIUM findings across the new phases are **RESOLVED pre-audit**. The 2026-04-22 baseline (`docs/2026-04-22-phase7.1x-audit-prep.md`) remains authoritative for the 7/7.1/7.1x economic substrate; this refresh ADDS to it rather than replacing.
+> **📌 For auditors starting here:** the most recent audit-prep bundle is **`docs/2026-04-27-cumulative-audit-prep.md`** at tag `cumulative-audit-prep-20260429` — it now stacks the original 2026-04-22 economic-layer baseline + 2026-04-27 multi-phase additions + the seven streaming-inference phases (§7.1-§7.7 of the cumulative-audit-prep doc). All round-1 review HIGH/MEDIUM findings across all phases are **RESOLVED pre-audit**. The 2026-04-22 baseline (`docs/2026-04-22-phase7.1x-audit-prep.md`) remains authoritative for the 7/7.1/7.1x economic substrate; this refresh ADDS to it rather than replacing.
 
 ---
 
@@ -19,6 +19,13 @@ Three phases ship the core PRSM economic layer and must be reviewed together bec
 | **Phase 3.1** | A (receipt-only) | `phase3.1-merge-ready-20260421` | `BatchSettlementRegistry` + `EscrowPool` + challenge handlers (DOUBLE_SPEND / INVALID_SIGNATURE / NO_ESCROW / EXPIRED) |
 | **Phase 7** | C (stake + slash) | `phase7-merge-ready-20260421` | `StakeBond.sol` (new) + registry slash-hook extension + Python StakeManager + marketplace on-chain tier gate |
 | **Phase 7.1** | B (redundant execution) | `phase7.1-merge-ready-20260421` | `CONSENSUS_MISMATCH` reason code + cross-batch handler + Python MultiDispatcher / ShardConsensus + orchestrator consensus routing |
+| **Phase 3.x.6** | A | `phase3.x.6-merge-ready-20260427` | Parallax inference scheduler (vendored GradientHQ/parallax) + 4 PRSM-original trust adapters + ParallaxScheduledExecutor |
+| **Phase 3.x.7** | A | `phase3.x.7-merge-ready-20260428` | Cross-host ChainExecutor: RpcChainExecutor + LayerStageServer + multi-stage TEE attestation envelope |
+| **Phase 3.x.7.1** | A | `phase3.x.7.1-merge-ready-20260428` | Chunked activation streaming (v2 wire format adds ActivationChunk + manifest field) |
+| **Phase 3.x.8** | A | `phase3.x.8-merge-ready-20260428` | Streaming-token output: TokenFrame + StreamFinalFrame wire format + StreamingLayerRunner Protocol + receipt streamed_output flag |
+| **Phase 3.x.8.1** | A | `phase3.x.8.1-merge-ready-20260428` | SSE-framed POST /compute/inference/stream endpoint + design plan §3.4 settle-on-tokens-emitted billing policy |
+| **Phase 3.x.10** | A | `phase3.x.10-merge-ready-20260428` | AutoregressiveStreamingRunner (real HF generate; replaces SyntheticStreamingRunner placeholder) + per-token timing side-channel memo |
+| **Phase 3.x.10.x** | A | `phase3.x.10.x-merge-ready-20260428` | Production wiring: max_tokens + temperature wire fields + StreamingSamplingShim + make_autoregressive_streaming_runner factory |
 
 **Why bundled:**
 - Phase 7's `stakeBond.slash(...)` call sits inside Phase 3.1's `challengeReceipt` flow.
@@ -31,9 +38,18 @@ Splitting the audits would risk seam-crossing findings falling between engagemen
 
 ## 2. Per-phase scope bundles (read in order)
 
-1. **`docs/2026-04-21-phase7.1-audit-prep.md`** — most recent; covers the CONSENSUS_MISMATCH extension.
-2. **`docs/2026-04-21-phase7-audit-prep.md`** — covers StakeBond + slash hook into Phase 3.1.
-3. **Phase 3.1 surface** — covered by the Phase 7 bundle's §1.2 "out of scope" (Phase 3.1 was already merge-ready and forms the unchanged substrate Phase 7 and 7.1 build on).
+1. **`docs/2026-04-27-cumulative-audit-prep.md`** — most recent; cumulative bundle covering all post-economic-layer phases. Read sections in order:
+   - §2.1-§2.7 — Solidity + Python + JS SDK additions (3.x.2 / 3.x.3 / 3.x.4 / 3.x.5 + Phase 4 Task 3).
+   - §7.1 — Parallax third-party-derived components (Phase 3.x.6).
+   - §7.2 — Cross-Host ChainExecutor (Phase 3.x.7).
+   - §7.3 — Chunked Activation Streaming (Phase 3.x.7.1).
+   - §7.4 — Streaming-Token Output (Phase 3.x.8).
+   - §7.5 — Streaming HTTP Endpoint (Phase 3.x.8.1).
+   - §7.6 — Real Autoregressive Streaming Runner (Phase 3.x.10).
+   - §7.7 — Production Wiring + Sampling-Param Plumbing (Phase 3.x.10.x).
+2. **`docs/2026-04-21-phase7.1-audit-prep.md`** — covers the CONSENSUS_MISMATCH extension.
+3. **`docs/2026-04-21-phase7-audit-prep.md`** — covers StakeBond + slash hook into Phase 3.1.
+4. **Phase 3.1 surface** — covered by the Phase 7 bundle's §1.2 "out of scope" (Phase 3.1 was already merge-ready and forms the unchanged substrate Phase 7 and 7.1 build on).
 
 Each per-phase bundle contains: in/out-of-scope, commit range, threat model, known issues with auditor prompts, engagement plan.
 
