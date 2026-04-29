@@ -186,6 +186,10 @@ class _FakeModel:
             top_p=top_p,
             eos_token_id=eos_token_id,
         )
+        # Mirror HF behavior: prompt's input_ids go through
+        # streamer.put() first (Phase 3.x.10.y Task 1).
+        if input_ids:
+            streamer.put(list(input_ids))
         emitted: List[int] = []
         for i, tid in enumerate(self.emit_ids):
             if i >= max_new_tokens:

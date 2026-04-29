@@ -117,6 +117,13 @@ class _FakeModel:
             top_p=top_p,
             eos_token_id=eos_token_id,
         )
+        # Mirror HF's behavior: pass the prompt's input_ids to
+        # streamer.put() first (Phase 3.x.10.y Task 1's
+        # prompt-echo fix relies on this; the runner sets the
+        # adapter's prompt_id_count=len(input_ids) so the
+        # adapter accumulates these without flushing).
+        if input_ids:
+            streamer.put(list(input_ids))
         emitted: List[int] = []
         for i, tid in enumerate(self.emit_ids):
             if i >= max_new_tokens:
@@ -1052,3 +1059,142 @@ class TestTailOnlyContract:
         assert "phase 3.x.11" in cls_doc
         # Tail-only contract is also a stated invariant.
         assert "tail-only" in cls_doc
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.10.y Task 1 — HF prompt-echo fix (skip_prompt semantics)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestHFPromptEchoSkip:
+    """When ``streamer.put()`` is called with the FULL
+    ``input_ids + first_generated_token`` on the first call (HF's
+    real-model behavior for byte-level BPE tokenizers), the
+    adapter MUST skip the prompt's decoded text. Pre-3.x.10.y
+    distilgpt2 streams emitted the prompt back as the first wire
+    chunk (observed in 3.x.10.x's full-stack E2E)."""
+
+    def test_first_put_with_prompt_only_emits_nothing(self):
+        # Direct adapter test: drive put() with just the prompt
+        # tokens — no generated tokens yet. NO emission expected.
+        from prsm.compute.inference.autoregressive_runner import (
+            _HFStreamerAdapter,
+        )
+
+        captured: List[Tuple[str, int]] = []
+        tok = _FakeTokenizer(
+            id_to_piece={1: "p1", 2: "p2", 3: "gen"},
+            prompt_ids=[1, 2],
+        )
+        adapter = _HFStreamerAdapter(
+            tokenizer=tok,
+            on_text=lambda piece, tid: captured.append((piece, tid)),
+            prompt_id_count=2,
+        )
+        adapter.put([1, 2])  # prompt only
+        assert captured == [], (
+            "adapter MUST NOT emit text for prompt-only put() "
+            "before the prompt boundary is crossed"
+        )
+
+    def test_put_crossing_boundary_emits_only_generated_text(self):
+        # First put() carries prompt + first generated token (HF's
+        # actual behavior). Adapter must emit ONLY the generated
+        # token's text — prompt text is suppressed.
+        from prsm.compute.inference.autoregressive_runner import (
+            _HFStreamerAdapter,
+        )
+
+        captured: List[Tuple[str, int]] = []
+        tok = _FakeTokenizer(
+            id_to_piece={1: "prom", 2: "pt", 3: "gen"},
+            prompt_ids=[1, 2],
+        )
+        adapter = _HFStreamerAdapter(
+            tokenizer=tok,
+            on_text=lambda piece, tid: captured.append((piece, tid)),
+            prompt_id_count=2,
+        )
+        # Single put() carrying [prompt[0], prompt[1], generated_0].
+        adapter.put([1, 2, 3])
+        # Exactly ONE emission: just the generated text.
+        assert len(captured) == 1
+        assert captured[0][0] == "gen"
+        assert captured[0][1] == 3
+
+    def test_back_compat_zero_prompt_id_count_preserves_old_behavior(self):
+        # ``prompt_id_count=0`` (default) — adapter behaves
+        # exactly as Phase 3.x.10 specified before the fix.
+        # Test fakes that don't set prompt_id_count keep working.
+        from prsm.compute.inference.autoregressive_runner import (
+            _HFStreamerAdapter,
+        )
+
+        captured: List[Tuple[str, int]] = []
+        tok = _FakeTokenizer(
+            id_to_piece={1: "a", 2: "b", 3: "c"},
+            prompt_ids=[],
+        )
+        adapter = _HFStreamerAdapter(
+            tokenizer=tok,
+            on_text=lambda piece, tid: captured.append((piece, tid)),
+        )
+        # No prompt_id_count → first put() emits immediately.
+        adapter.put(1)
+        adapter.put(2)
+        adapter.put(3)
+        assert [c[0] for c in captured] == ["a", "b", "c"]
+
+    def test_runner_passes_prompt_id_count_to_adapter(self):
+        # End-to-end through the runner with HF-mimicking fake
+        # model: prompt is encoded to [100, 101], fake's
+        # generate() emits prompt via streamer.put first then
+        # generated tokens, runner sets prompt_id_count=2 on the
+        # adapter, output chunks contain only generated text.
+        runner, _, _ = _make_runner(
+            emit_ids=[1, 2, 3],
+            id_to_piece={
+                100: "prompt-",  # prompt token 0
+                101: "ids ",     # prompt token 1
+                1: "first",
+                2: " second",
+                3: " third",
+            },
+        )
+        chunks = _drive(runner)
+        joined = "".join(c.text_delta for c in chunks)
+        # Prompt text MUST NOT appear in any chunk's text_delta.
+        assert "prompt-" not in joined
+        assert "ids " not in joined
+        # Generated text appears intact.
+        assert joined == "first second third"
+
+    def test_runner_handles_prompt_with_no_generated_tokens(self):
+        # Edge case: model.generate is called but emits zero
+        # generated tokens. Runner's terminal chunk reflects
+        # empty output (max_tokens cap was effectively 0 / no
+        # tokens produced).
+        runner, _, _ = _make_runner(
+            emit_ids=[],  # no generated tokens
+            id_to_piece={100: "p", 101: "p"},
+        )
+        chunks = _drive(runner)
+        # Single terminal chunk with empty text (the runner's
+        # "empty pieces" branch from Phase 3.x.10 Task 1).
+        assert len(chunks) == 1
+        assert chunks[0].text_delta == ""
+        assert chunks[0].full_output_text == ""
+
+    def test_prompt_skipping_does_not_break_eos_detection(self):
+        # The runner's EOS detection reads token_ids[-1] from the
+        # adapter. With prompt-skipping, the adapter still
+        # accumulates ALL token ids (so token_ids[-1] is always
+        # the latest seen). EOS detection MUST still work.
+        runner, _, _ = _make_runner(
+            emit_ids=[1, 99],  # token 1 then EOS
+            id_to_piece={100: "p", 101: "p", 1: "hi"},
+            eos_token_id=99,
+        )
+        chunks = _drive(runner)
+        assert chunks[-1].finish_reason == "stop"
+        assert chunks[-1].full_output_text == "hi"

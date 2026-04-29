@@ -46,6 +46,10 @@ class _FakeModel:
             if isinstance(as_list[0], list):
                 as_list = as_list[0]
             input_ids = as_list
+        # Mirror HF behavior: prompt's input_ids go through
+        # streamer.put() first (Phase 3.x.10.y Task 1).
+        if input_ids:
+            streamer.put(list(input_ids))
         # Emit one token then end.
         streamer.put(1)
         streamer.end()

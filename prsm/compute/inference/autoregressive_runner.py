@@ -126,6 +126,7 @@ class _HFStreamerAdapter:
         *,
         tokenizer: Any,
         on_text: Callable[[str, int], None],
+        prompt_id_count: int = 0,
     ) -> None:
         self._tokenizer = tokenizer
         self._on_text = on_text
@@ -137,6 +138,29 @@ class _HFStreamerAdapter:
         # avoid re-emitting earlier text. New emissions are the
         # diff between the latest decode and ``_print_offset``.
         self._print_offset: int = 0
+        # Phase 3.x.10.y Task 1 — HF prompt-echo fix.
+        # Real-HF ``model.generate(streamer=...)`` for byte-level BPE
+        # tokenizers (e.g., GPT-2 family) calls ``streamer.put()``
+        # with the FULL ``input_ids + first_generated_token`` on the
+        # first call. Without skip-prompt logic, our cumulative-
+        # decode emits the prompt back as the first wire chunk
+        # (observed in Phase 3.x.10.x's full-stack E2E for
+        # distilgpt2). ``prompt_id_count`` tells the adapter how
+        # many leading token ids belong to the prompt; the adapter
+        # accumulates them for cumulative-decode position
+        # correctness but advances ``_print_offset`` to the prompt's
+        # decoded length the moment the boundary is crossed, so
+        # subsequent ``_maybe_flush`` only emits text from
+        # generated tokens onward. Mirrors HF's
+        # ``TextStreamer(skip_prompt=True)`` semantics.
+        # Default 0: no skipping (back-compat for callers that
+        # don't set the count, e.g. test fakes).
+        self._prompt_id_count: int = prompt_id_count
+        # While ``_in_prompt_phase`` is True, ``put()`` accumulates
+        # ids without flushing. Flips False the first time
+        # ``len(token_ids) > prompt_id_count``; from that point on
+        # ``put()`` flushes normally.
+        self._in_prompt_phase: bool = prompt_id_count > 0
 
     @property
     def last_token_id(self) -> Optional[int]:
@@ -145,15 +169,29 @@ class _HFStreamerAdapter:
     def put(self, value: Any) -> None:
         # HF passes either a 0-d tensor, a 1-d ``[N]`` tensor, or a
         # 2-d ``[1, N]`` tensor. Normalize to a Python list of ints.
-        # When ``streamer=`` is passed to ``model.generate``, HF's
-        # streamer convention is that ``put`` only receives the
-        # GENERATED tokens — prefill/prompt tokens are consumed
-        # inside ``generate()`` and never reach the streamer.
+        # For byte-level BPE tokenizers, the FIRST put() call
+        # carries the full input_ids + first generated token; the
+        # ``prompt_id_count`` skip-prompt logic below filters that
+        # back to just the generated portion before flushing.
         ids = _coerce_token_ids(value)
         if not ids:
             return
         for tid in ids:
             self.token_ids.append(int(tid))
+        if self._in_prompt_phase:
+            if len(self.token_ids) <= self._prompt_id_count:
+                # Still in the prompt portion — don't flush yet.
+                return
+            # Just crossed the prompt boundary. Pin
+            # ``_print_offset`` at the prompt's decoded length so
+            # the upcoming ``_maybe_flush`` only emits text from
+            # generated tokens onward.
+            prompt_text = self._tokenizer.decode(
+                self.token_ids[:self._prompt_id_count],
+                skip_special_tokens=True,
+            )
+            self._print_offset = len(prompt_text)
+            self._in_prompt_phase = False
         self._maybe_flush()
 
     def end(self) -> None:
@@ -164,6 +202,12 @@ class _HFStreamerAdapter:
         # End-of-stream may include a trailing replacement char if
         # generation truly ended mid-character — that's a
         # model/tokenizer issue, not ours; emit as-is.
+        # Prompt-phase guard (Phase 3.x.10.y Task 1): if we never
+        # crossed the prompt boundary, the model produced zero
+        # generated tokens — nothing to emit (the prompt itself
+        # MUST NOT leak as wire text).
+        if self._in_prompt_phase:
+            return
         text = self._cumulative_decode()
         if len(text) > self._print_offset:
             piece = text[self._print_offset:]
@@ -385,6 +429,14 @@ class AutoregressiveStreamingRunner:
             layer_range, activation, privacy_tier,
         )
         input_ids = self._tokenizer.encode(prompt)
+        # Capture the prompt token count BEFORE the tensor wrap —
+        # the adapter uses it to skip the prompt's text on the
+        # first put() call (Phase 3.x.10.y Task 1 fix; HF's
+        # TextStreamer-equivalent skip_prompt semantics for
+        # byte-level BPE tokenizers).
+        prompt_id_count = len(input_ids) if hasattr(
+            input_ids, "__len__"
+        ) else 0
         # Real-HF ``model.generate`` requires a 2-d ``[batch=1, seq_len]``
         # ``torch.Tensor``; tokenizer.encode returns ``List[int]``. Wrap
         # only when torch is available AND we got a list (already-tensor
@@ -418,7 +470,9 @@ class AutoregressiveStreamingRunner:
             pieces.append((piece, tid))
 
         adapter = _HFStreamerAdapter(
-            tokenizer=self._tokenizer, on_text=on_text,
+            tokenizer=self._tokenizer,
+            on_text=on_text,
+            prompt_id_count=prompt_id_count,
         )
 
         start_ts = time.time()

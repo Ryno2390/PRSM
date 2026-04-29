@@ -243,12 +243,11 @@ class TestFullStackProductionWiring:
         # SamplingDefaults; the cap would have been 64 and the
         # finish_reason at this prompt+model would NOT have been
         # "max_tokens" within 4 generated tokens.
-        # Note: HF's streamer for byte-level BPE tokenizers
-        # (distilgpt2 uses GPT-2 BPE) emits the prompt back as
-        # its first chunk before the generated tokens — so the
-        # frame count includes the prompt-echo plus the 4
-        # generated tokens. The cap-propagation invariant holds
-        # regardless of the exact wire frame count.
+        # 3.x.10.y Task 1 update: the prompt-echo fix
+        # (skip_prompt semantics in _HFStreamerAdapter) means the
+        # wire chunks now contain ONLY generated tokens — the
+        # prompt no longer leaks as the first chunk. We verify
+        # both invariants below.
         model, tok = hf_model_and_tokenizer
         server, settler_identity, _ = _build_full_stack_server(model, tok)
         req = _make_streaming_request(
@@ -265,6 +264,15 @@ class TestFullStackProductionWiring:
         # through, finish_reason would not be max_tokens within
         # 4 generated tokens for this prompt.)
         assert tokens[-1].finish_reason == "max_tokens"
+        # 3.x.10.y Task 1 invariant: the prompt "The quick brown fox"
+        # MUST NOT appear in any wire chunk's text_delta now that
+        # skip_prompt semantics are wired through. Pre-fix, the
+        # first chunk was literally the prompt text.
+        joined = "".join(t.text_delta for t in tokens)
+        assert "The quick brown fox" not in joined, (
+            "prompt-echo regression: prompt text should be skipped "
+            "by _HFStreamerAdapter's skip_prompt logic"
+        )
 
     def test_greedy_temperature_zero_bit_identical_across_runs(
         self, hf_model_and_tokenizer,
