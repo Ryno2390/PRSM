@@ -191,3 +191,171 @@ class TestBatchedTrailingShardedExecutor:
             RuntimeError, match="execute_chain_streaming",
         ):
             BatchedTrailingShardedExecutor(inner=_Bogus())
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Task 2 — FixedRateShardedExecutor (M1)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _ScriptedClock:
+    """Deterministic monotonic clock — tests advance time explicitly
+    via the sleep stub. Each ``sleep(dt)`` advances ``now`` by ``dt``
+    so the cadence math becomes reproducible without wall-clock."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = float(start)
+        self.sleep_calls: List[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleep_calls.append(float(seconds))
+        self.now += float(seconds)
+
+
+class TestFixedRateShardedExecutor:
+    def test_protocol_conformance_execute_chain_streaming(self):
+        decorator = FixedRateShardedExecutor(
+            inner=_FakeChainExecutor([_result()]),
+            cadence_seconds=0.05,
+        )
+        assert callable(getattr(decorator, "execute_chain_streaming", None))
+
+    def test_first_token_emitted_without_initial_delay(self):
+        # First StreamToken has no prior emission to gate against,
+        # so it should pass through immediately (no sleep).
+        clk = _ScriptedClock()
+        inner = _FakeChainExecutor([
+            _token(0, "hello"),
+            _result(),
+        ])
+        decorator = FixedRateShardedExecutor(
+            inner=inner, cadence_seconds=0.5,
+            clock=clk, sleep=clk.sleep,
+        )
+        events = list(decorator.execute_chain_streaming(
+            request="r", chain="c",
+        ))
+        assert len(events) == 2
+        assert clk.sleep_calls == []  # no initial delay
+
+    def test_subsequent_tokens_paced_at_cadence(self):
+        # Inner emits 3 tokens back-to-back (chain runs faster than
+        # cadence). Decorator must sleep ≈ cadence between each.
+        clk = _ScriptedClock(start=1000.0)
+        inner = _FakeChainExecutor([
+            _token(0, "a"),
+            _token(1, "b"),
+            _token(2, "c"),
+            _result(),
+        ])
+        decorator = FixedRateShardedExecutor(
+            inner=inner, cadence_seconds=0.5,
+            clock=clk, sleep=clk.sleep,
+        )
+        list(decorator.execute_chain_streaming(
+            request="r", chain="c",
+        ))
+        # First token: no sleep. Tokens 2 + 3: sleep ≈ 0.5 each.
+        # Result: no sleep (pass-through).
+        assert len(clk.sleep_calls) == 2
+        for s in clk.sleep_calls:
+            assert s == pytest.approx(0.5, abs=1e-9)
+
+    def test_no_artificial_delay_when_inner_runs_slower_than_cadence(self):
+        # Simulate the inner already taking longer than cadence
+        # between tokens — decorator should NOT sleep.
+        clk = _ScriptedClock(start=1000.0)
+        inner_events = [
+            _token(0, "a"),
+            _token(1, "b"),
+            _result(),
+        ]
+        # Wrap inner so that yielding each event advances the clock
+        # past the cadence target.
+        original_inner = _FakeChainExecutor(inner_events)
+        cadence = 0.05
+
+        class _SlowInner:
+            def execute_chain_streaming(self, *, request, chain):
+                for ev in original_inner.execute_chain_streaming(
+                    request=request, chain=chain,
+                ):
+                    yield ev
+                    clk.now += cadence * 2.0  # advance > cadence
+
+        decorator = FixedRateShardedExecutor(
+            inner=_SlowInner(), cadence_seconds=cadence,
+            clock=clk, sleep=clk.sleep,
+        )
+        list(decorator.execute_chain_streaming(
+            request="r", chain="c",
+        ))
+        # No sleep — chain was already slow enough.
+        assert clk.sleep_calls == []
+
+    def test_chain_execution_result_forwarded_without_cadence_delay(self):
+        # The terminal isn't part of the per-token timing surface;
+        # gating it would just delay receipt without masking.
+        clk = _ScriptedClock(start=1000.0)
+        inner = _FakeChainExecutor([
+            _token(0, "a"),
+            _result(),
+        ])
+        decorator = FixedRateShardedExecutor(
+            inner=inner, cadence_seconds=10.0,  # generous cadence
+            clock=clk, sleep=clk.sleep,
+        )
+        events = list(decorator.execute_chain_streaming(
+            request="r", chain="c",
+        ))
+        # 2 events. Sleep called only on the inter-token delay (none
+        # here since just one token); result passes through.
+        assert len(events) == 2
+        assert clk.sleep_calls == []
+
+    def test_construction_rejects_non_positive_cadence(self):
+        inner = _FakeChainExecutor([_result()])
+        for bad in [0.0, -0.1, 0]:
+            with pytest.raises(ValueError, match="cadence_seconds"):
+                FixedRateShardedExecutor(
+                    inner=inner, cadence_seconds=bad,
+                )
+
+    def test_construction_rejects_bool_cadence(self):
+        # bool is a subclass of int in Python — explicit defense.
+        inner = _FakeChainExecutor([_result()])
+        with pytest.raises(ValueError, match="cadence_seconds"):
+            FixedRateShardedExecutor(
+                inner=inner, cadence_seconds=True,  # type: ignore[arg-type]
+            )
+
+    def test_construction_rejects_none_inner(self):
+        with pytest.raises(RuntimeError, match="requires an inner"):
+            FixedRateShardedExecutor(
+                inner=None, cadence_seconds=0.05,
+            )
+
+    def test_construction_rejects_non_streaming_inner(self):
+        class _Bogus:
+            pass
+        with pytest.raises(
+            RuntimeError, match="execute_chain_streaming",
+        ):
+            FixedRateShardedExecutor(
+                inner=_Bogus(), cadence_seconds=0.05,
+            )
+
+    def test_passthrough_of_request_chain_args(self):
+        clk = _ScriptedClock()
+        inner = _FakeChainExecutor([_result()])
+        decorator = FixedRateShardedExecutor(
+            inner=inner, cadence_seconds=0.05,
+            clock=clk, sleep=clk.sleep,
+        )
+        list(decorator.execute_chain_streaming(
+            request="my-request", chain="my-chain",
+        ))
+        assert inner.call_log == [("my-request", "my-chain")]
