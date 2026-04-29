@@ -37,17 +37,84 @@ from prsm.compute.inference.draft_model import (
 # ──────────────────────────────────────────────────────────────────────────
 
 
+class _FakeRow:
+    def __init__(self, vals):
+        self._vals = vals
+
+    def tolist(self):
+        return list(self._vals)
+
+
+class _FakeSequencesTensor:
+    """[1, seq_len] sequences tensor mock; supports
+    ``output.sequences[0].tolist()`` access pattern."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def __getitem__(self, idx):
+        return _FakeRow(self._rows[idx])
+
+
+class _FakeScoreTensor:
+    """[1, vocab] score tensor mock for one decoding step.
+    Indexable as ``score[0]`` → [vocab] row; supports
+    ``torch.softmax(...)[token_id].item()`` via the score's
+    own ``softmax_at_id`` helper (the test path uses
+    monkeypatched ``torch.softmax`` to invoke it).
+    """
+
+    def __init__(self, target_probs):
+        # target_probs is dict[token_id, prob] for the tokens
+        # we care about; missing tokens have prob ~ 0.
+        self._target_probs = dict(target_probs)
+
+    def __getitem__(self, idx):
+        # score[0] → returns self (we represent the row directly).
+        return self
+
+    def softmax_prob(self, token_id):
+        return float(self._target_probs.get(int(token_id), 0.0))
+
+
+class _FakeGenerateOutput:
+    """GenerateOutput mock with .sequences + .scores attributes."""
+
+    def __init__(self, sequences, scores):
+        self.sequences = sequences
+        self.scores = scores
+
+
 class _FakeHFModel:
     """Deterministic HF-shaped stub. ``.generate()`` extends
-    input_ids with a scripted per-position next-token map.
+    input_ids with a scripted per-position next-token map AND
+    (Phase 3.x.11.y.x) optionally with a per-position score
+    map for stochastic propose_with_probs.
 
-    The script is a callable ``(input_ids: List[int]) -> List[int]``
-    returning the K new tokens to append. Tests inject scripts
-    that exercise specific propose/commit/EOS scenarios."""
+    Greedy-only constructor ``_FakeHFModel(token_script)``: the
+    script is ``(input_ids, k) -> List[int]`` returning the K
+    new tokens. Probabilities are not modeled (greedy reports
+    1.0 per token in the runner, doesn't call softmax).
+
+    Stochastic constructor ``_FakeHFModel.stochastic(script)``:
+    the script is ``(input_ids, k) -> List[Tuple[int, dict]]``
+    returning `(token_id, target_probs_dict)` per step where
+    `target_probs_dict[token_id]` is the probability the
+    runner should observe via softmax-lookup. Other vocab ids
+    in the dict are unused by the rejection-sampling test
+    path but ride through faithfully.
+    """
 
     def __init__(self, script: Any) -> None:
         self._script = script
+        self._stochastic_script: Any = None
         self.generate_calls: List[List[int]] = []
+
+    @classmethod
+    def stochastic(cls, stochastic_script: Any) -> "_FakeHFModel":
+        m = cls(lambda _hist, _k: [])  # placeholder; unused
+        m._stochastic_script = stochastic_script
+        return m
 
     def generate(
         self,
@@ -57,33 +124,39 @@ class _FakeHFModel:
         do_sample: bool,
         temperature: float = 1.0,
         pad_token_id: int = 0,
+        output_scores: bool = False,
+        return_dict_in_generate: bool = False,
     ):
         # input_ids is a torch.Tensor of shape [1, seq_len];
         # convert to list-of-int for the script.
         in_list = input_ids[0].tolist()
         self.generate_calls.append(in_list)
-        new_tokens = self._script(in_list, max_new_tokens)
-        # Pad-or-truncate to max_new_tokens (mirrors HF's
-        # contract under do_sample=False).
-        new_tokens = new_tokens[:max_new_tokens]
-        # Return a torch-tensor-like object with .tolist().
+
+        # Choose script branch by do_sample.
+        if do_sample:
+            if self._stochastic_script is None:
+                raise AssertionError(
+                    "_FakeHFModel: do_sample=True requires the "
+                    "stochastic script — use _FakeHFModel.stochastic(...)"
+                )
+            script_out = self._stochastic_script(in_list, max_new_tokens)
+            # script_out: List[Tuple[int, dict]]
+            new_tokens = [t for (t, _p) in script_out[:max_new_tokens]]
+            scores = tuple(
+                _FakeScoreTensor(p) for (_t, p) in script_out[:max_new_tokens]
+            )
+        else:
+            new_tokens = self._script(in_list, max_new_tokens)[:max_new_tokens]
+            scores = tuple(_FakeScoreTensor({}) for _ in new_tokens)
+
         full = list(in_list) + list(new_tokens)
-
-        class _Output:
-            def __init__(self, rows):
-                self._rows = rows
-
-            def __getitem__(self, idx):
-                return _Row(self._rows[idx])
-
-        class _Row:
-            def __init__(self, vals):
-                self._vals = vals
-
-            def tolist(self):
-                return list(self._vals)
-
-        return _Output([full])
+        if return_dict_in_generate:
+            return _FakeGenerateOutput(
+                sequences=_FakeSequencesTensor([full]),
+                scores=scores,
+            )
+        # Legacy pre-3.x.11.y.x path (unused by current runner).
+        return _FakeSequencesTensor([full])
 
 
 class _FakeTorchTensor:
@@ -119,9 +192,37 @@ def _shim_torch(monkeypatch):
     import types
 
     if "torch" in sys.modules:
-        # Real torch available — no shim needed; HFDraftModel
-        # calls torch.tensor(...) which works with the fake model
-        # because it doesn't do any tensor math.
+        # Real torch available — most ops (torch.tensor,
+        # torch.no_grad) work with the fake model because it
+        # doesn't do tensor math. But ``torch.softmax`` rejects
+        # ``_FakeScoreTensor`` since it isn't a real Tensor.
+        # Patch only the softmax slot to the fake-aware shim
+        # below; leave the rest of torch alone so other tests
+        # that share the module are unaffected.
+        real_torch = sys.modules["torch"]
+
+        class _FakeSoftmaxResult:
+            def __init__(self, score_tensor):
+                self._score = score_tensor
+
+            def __getitem__(self, idx):
+                class _Scalar:
+                    def __init__(self, val):
+                        self._val = val
+
+                    def item(self):
+                        return self._val
+
+                sp = getattr(self._score, "softmax_prob", None)
+                if sp is None:
+                    return _Scalar(0.0)
+                return _Scalar(sp(int(idx)))
+
+        def _fake_softmax(t, dim=-1):
+            return _FakeSoftmaxResult(t)
+
+        real_softmax = getattr(real_torch, "softmax", None)
+        monkeypatch.setattr(real_torch, "softmax", _fake_softmax)
         yield
         return
 
@@ -137,9 +238,39 @@ def _shim_torch(monkeypatch):
     def _fake_tensor(data, dtype=None):
         return _FakeTorchTensor(data)
 
+    class _FakeSoftmaxResult:
+        """Result of torch.softmax — the runner indexes it as
+        ``probs[id].item()``. We delegate to the FakeScoreTensor's
+        own ``softmax_prob`` helper to look up the test's
+        scripted probability for that token id.
+        """
+
+        def __init__(self, score_tensor):
+            self._score = score_tensor
+
+        def __getitem__(self, idx):
+            class _Scalar:
+                def __init__(self, val):
+                    self._val = val
+
+                def item(self):
+                    return self._val
+
+            # Use the score tensor's softmax_prob if available
+            # (FakeScoreTensor); otherwise return 0.0 (greedy
+            # path doesn't reach this code under do_sample=False).
+            sp = getattr(self._score, "softmax_prob", None)
+            if sp is None:
+                return _Scalar(0.0)
+            return _Scalar(sp(int(idx)))
+
+    def _fake_softmax(t, dim=-1):
+        return _FakeSoftmaxResult(t)
+
     fake_torch.no_grad = _NoGrad
     fake_torch.tensor = _fake_tensor
     fake_torch.long = "long"
+    fake_torch.softmax = _fake_softmax
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     yield
 
@@ -291,15 +422,19 @@ class TestPropose:
         )
         assert out == [10, 999, 20, 30]
 
-    def test_propose_raises_on_temperature_nonzero(self):
+    def test_propose_raises_on_negative_temperature(self):
+        # Phase 3.x.11.y.x lifted the greedy-only gate. The runner
+        # now accepts ``temperature > 0`` (routes to do_sample=True
+        # in propose_with_probs); negative temperatures remain
+        # invalid and raise.
         m = HFDraftModel(model=_FakeHFModel(lambda _, k: []))
         m.reset(request_id="r1", prompt_input_ids=[1, 2, 3])
-        with pytest.raises(DraftModelError, match="greedy-only"):
+        with pytest.raises(DraftModelError, match="non-negative"):
             m.propose(
                 request_id="r1",
                 parent_token_id=5,
                 k=4,
-                temperature=0.7,
+                temperature=-0.5,
             )
 
     def test_propose_raises_on_unknown_request_id(self):
@@ -524,3 +659,143 @@ class TestMultipleRequests:
         m.evict(request_id="r1")
         assert "r1" not in m
         assert "r2" in m
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.y.x Task 2 — propose_with_probs
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestProposeWithProbs:
+    """Phase 3.x.11.y.x Task 2 — sampling-correct draft probs.
+
+    Covers:
+      - Greedy (temperature=0.0) returns 1.0 per token (degenerate)
+      - Stochastic (temperature>0) returns softmax(scores)[id] per
+        position via FakeScoreTensor.softmax_prob lookup
+      - Length match: len(probs) == len(ids) always
+      - EOS truncation trims both ids AND probs symmetrically
+      - propose() thin-wrapper discards probs, returns identical
+        ids to propose_with_probs's first element
+      - Negative temperature raises (only validation now; positive
+        no longer raises after Phase 3.x.11.y.x lifted greedy gate)
+    """
+
+    def test_greedy_returns_one_point_zero_per_token(self):
+        m = HFDraftModel(model=_FakeHFModel(lambda _, k: [10, 20, 30]))
+        m.reset(request_id="r1", prompt_input_ids=[1, 2, 3])
+        ids, probs = m.propose_with_probs(
+            request_id="r1", parent_token_id=5, k=3,
+            temperature=0.0,
+        )
+        assert ids == [10, 20, 30]
+        assert probs == [1.0, 1.0, 1.0]
+
+    def test_stochastic_returns_softmax_probs(self):
+        # Stochastic script returns scripted (token, target_probs)
+        # per step. The runner's softmax-lookup recovers
+        # target_probs[token].
+        fake = _FakeHFModel.stochastic(
+            lambda _hist, _k: [
+                (10, {10: 0.7}),
+                (20, {20: 0.4}),
+                (30, {30: 0.55}),
+            ]
+        )
+        m = HFDraftModel(model=fake)
+        m.reset(request_id="r1", prompt_input_ids=[1, 2, 3])
+        ids, probs = m.propose_with_probs(
+            request_id="r1", parent_token_id=5, k=3,
+            temperature=0.7,
+        )
+        assert ids == [10, 20, 30]
+        assert probs == pytest.approx([0.7, 0.4, 0.55], rel=1e-6)
+
+    def test_length_match_invariant(self):
+        # K=4 but script returns only 2 (early-exit emulation).
+        # propose_with_probs should still return matching len.
+        fake = _FakeHFModel.stochastic(
+            lambda _hist, _k: [(7, {7: 0.9}), (8, {8: 0.5})]
+        )
+        m = HFDraftModel(model=fake)
+        m.reset(request_id="r1", prompt_input_ids=[1, 2, 3])
+        ids, probs = m.propose_with_probs(
+            request_id="r1", parent_token_id=5, k=4,
+            temperature=0.5,
+        )
+        assert len(ids) == len(probs)
+
+    def test_eos_trims_ids_and_probs_symmetrically(self):
+        # EOS=999 mid-script. Tokens after EOS dropped; probs
+        # truncated to match.
+        fake = _FakeHFModel.stochastic(
+            lambda _hist, _k: [
+                (10, {10: 0.6}),
+                (999, {999: 0.3}),  # EOS
+                (20, {20: 0.5}),    # never observed
+                (30, {30: 0.4}),    # never observed
+            ]
+        )
+        m = HFDraftModel(model=fake, eos_token_id=999)
+        m.reset(request_id="r1", prompt_input_ids=[1, 2, 3])
+        ids, probs = m.propose_with_probs(
+            request_id="r1", parent_token_id=5, k=4,
+            temperature=0.7,
+        )
+        # EOS included; tokens after dropped.
+        assert ids == [10, 999]
+        assert probs == pytest.approx([0.6, 0.3], rel=1e-6)
+
+    def test_propose_wrapper_discards_probs(self):
+        # propose() returns just ids; propose_with_probs() returns
+        # (ids, probs). Both should produce the same id sequence
+        # under identical inputs (greedy path).
+        m1 = HFDraftModel(model=_FakeHFModel(lambda _, k: [42, 43]))
+        m1.reset(request_id="r1", prompt_input_ids=[1, 2, 3])
+        ids1 = m1.propose(
+            request_id="r1", parent_token_id=5, k=2,
+            temperature=0.0,
+        )
+
+        m2 = HFDraftModel(model=_FakeHFModel(lambda _, k: [42, 43]))
+        m2.reset(request_id="r2", prompt_input_ids=[1, 2, 3])
+        ids2, _probs2 = m2.propose_with_probs(
+            request_id="r2", parent_token_id=5, k=2,
+            temperature=0.0,
+        )
+        assert ids1 == ids2 == [42, 43]
+
+    def test_negative_temperature_rejected(self):
+        # v2 lifts the greedy-only gate; positive temperatures
+        # are now valid. Negative temps remain invalid.
+        m = HFDraftModel(model=_FakeHFModel(lambda _, k: [1]))
+        m.reset(request_id="r1", prompt_input_ids=[1, 2, 3])
+        with pytest.raises(DraftModelError, match="non-negative"):
+            m.propose_with_probs(
+                request_id="r1", parent_token_id=5, k=1,
+                temperature=-0.1,
+            )
+
+    def test_positive_temperature_does_not_raise(self):
+        # Inverse of the negative-temp test. Confirms v1 greedy-
+        # only gate has been lifted by Phase 3.x.11.y.x.
+        fake = _FakeHFModel.stochastic(
+            lambda _hist, _k: [(7, {7: 0.5})]
+        )
+        m = HFDraftModel(model=fake)
+        m.reset(request_id="r1", prompt_input_ids=[1, 2, 3])
+        # Should NOT raise.
+        ids, probs = m.propose_with_probs(
+            request_id="r1", parent_token_id=5, k=1,
+            temperature=0.7,
+        )
+        assert ids == [7]
+        assert probs == pytest.approx([0.5], rel=1e-6)
+
+    def test_unknown_request_id_raises(self):
+        m = HFDraftModel(model=_FakeHFModel(lambda _, k: []))
+        with pytest.raises(DraftStateNotFoundError):
+            m.propose_with_probs(
+                request_id="never-reset",
+                parent_token_id=5, k=1, temperature=0.0,
+            )

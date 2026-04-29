@@ -118,8 +118,15 @@ class DraftModel(Protocol):
     ) -> List[int]:
         """Propose up to K speculative tokens following
         ``parent_token_id``. Returns ``up to K`` token ids — may
-        be fewer than K if the draft model emits EOS early. v1
-        is greedy-only; ``temperature != 0.0`` raises.
+        be fewer than K if the draft model emits EOS early.
+
+        v1 (Phase 3.x.11.y) is greedy-only; ``temperature != 0.0``
+        raises. v2 (Phase 3.x.11.y.x) supports ``temperature > 0``
+        but callers should prefer ``propose_with_probs`` to also
+        receive the per-token sampling probabilities required by
+        the Leviathan-2023 rejection-sampling correction. Without
+        the probs, the executor falls back to v1 greedy prefix-
+        match logic regardless of the configured temperature.
 
         ``parent_token_id`` is the token whose successor we want
         to predict. On the first call after reset,
@@ -128,6 +135,34 @@ class DraftModel(Protocol):
         subsequent calls, ``parent_token_id`` is the LAST token
         the verifier emitted in the previous round (matches
         ``accepted_token_ids[-1]`` from the previous commit).
+        """
+        ...
+
+    def propose_with_probs(
+        self,
+        *,
+        request_id: str,
+        parent_token_id: int,
+        k: int,
+        temperature: float,
+    ) -> Tuple[List[int], List[float]]:
+        """Phase 3.x.11.y.x — stochastic propose. Returns
+        ``(proposed_ids, proposed_probs)`` where
+        ``proposed_probs[i]`` is the probability ``q(d_i)`` the
+        draft model assigned to ``proposed_ids[i]`` at the i-th
+        sampling step. Greedy path (``temperature == 0.0``)
+        returns probabilities of 1.0 per token (degenerate
+        under argmax sampling). Stochastic path (``temperature
+        > 0``) returns ``softmax(scaled_logits)[id]`` per
+        position after any top-k / top-p filtering.
+
+        ``len(proposed_probs) == len(proposed_ids)`` always.
+        Each prob in ``[0, 1]``; greedy reports 1.0 exactly.
+
+        Used by the executor's speculation loop to populate
+        ``RunLayerSliceRequest.proposed_token_probs`` so the
+        tail can run Leviathan-2023 rejection sampling against
+        the verifier's distribution.
         """
         ...
 
@@ -258,11 +293,53 @@ class HFDraftModel:
         k: int,
         temperature: float,
     ) -> List[int]:
+        """Thin wrapper around ``propose_with_probs`` that
+        discards the probabilities. Kept for v1 callers (Phase
+        3.x.11.y greedy path); v2 callers (Phase 3.x.11.y.x
+        stochastic path) should prefer ``propose_with_probs``
+        directly.
+        """
+        ids, _probs = self.propose_with_probs(
+            request_id=request_id,
+            parent_token_id=parent_token_id,
+            k=k,
+            temperature=temperature,
+        )
+        return ids
+
+    def propose_with_probs(
+        self,
+        *,
+        request_id: str,
+        parent_token_id: int,
+        k: int,
+        temperature: float,
+    ) -> Tuple[List[int], List[float]]:
+        """Phase 3.x.11.y.x reference impl. Returns
+        ``(proposed_ids, proposed_probs)`` per the ``DraftModel``
+        Protocol contract.
+
+        Greedy (``temperature == 0.0``) — uses ``do_sample=False``
+        to argmax-decode K tokens, reports probability 1.0 per
+        token (degenerate under argmax). v1 callers via
+        ``propose`` get an identical id sequence to Phase
+        3.x.11.y semantics.
+
+        Stochastic (``temperature > 0``) — uses
+        ``do_sample=True`` with the requested temperature plus
+        any top-k / top-p filtering configured on the model's
+        generation_config (HF defaults preserved). Reports
+        ``softmax(scaled_logits)[sampled_id]`` per step using
+        ``output_scores=True``. The scores HF returns are
+        post-temperature/top-k/top-p (``LogitsProcessor`` chain
+        output), so the softmax + lookup is the exact sampling
+        probability the model used.
+        """
         if request_id not in self._states:
             raise DraftStateNotFoundError(
-                f"HFDraftModel.propose: no draft state for "
-                f"request_id={request_id!r}; caller must invoke "
-                f"reset() at PREFILL boundary first"
+                f"HFDraftModel.propose_with_probs: no draft state "
+                f"for request_id={request_id!r}; caller must "
+                f"invoke reset() at PREFILL boundary first"
             )
         if (
             isinstance(parent_token_id, bool)
@@ -270,8 +347,8 @@ class HFDraftModel:
             or parent_token_id < 0
         ):
             raise DraftModelError(
-                f"HFDraftModel.propose: parent_token_id must be "
-                f"non-negative int, got {parent_token_id!r}"
+                f"HFDraftModel.propose_with_probs: parent_token_id "
+                f"must be non-negative int, got {parent_token_id!r}"
             )
         if (
             isinstance(k, bool)
@@ -279,61 +356,85 @@ class HFDraftModel:
             or k <= 0
         ):
             raise DraftModelError(
-                f"HFDraftModel.propose: k must be positive int, "
-                f"got {k!r}"
+                f"HFDraftModel.propose_with_probs: k must be "
+                f"positive int, got {k!r}"
             )
-        if temperature != 0.0:
+        if (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, (int, float))
+            or temperature < 0.0
+        ):
             raise DraftModelError(
-                f"HFDraftModel.propose: v1 is greedy-only; "
-                f"temperature must be 0.0, got {temperature!r}. "
-                f"Sampling-correct speculation under temperature > 0 "
-                f"requires the Leviathan-2023 rejection-sampling "
-                f"correction — deferred to Phase 3.x.11.y.x."
+                f"HFDraftModel.propose_with_probs: temperature "
+                f"must be non-negative number, got {temperature!r}"
             )
 
         state = self._states[request_id]
-        # Append parent_token_id to history if not already there.
-        # On the first propose after reset, history == [prompt]
-        # and parent_token_id is the first chain-emitted token —
-        # append. On subsequent proposes, history was extended by
-        # commit() with accepted_token_ids ending in
-        # parent_token_id — skip append (don't double-consume).
+        # Append parent_token_id to history if not already there
+        # (same logic as v1 — handles the fresh-after-reset vs
+        # after-commit cases).
         if (
             not state.full_history
             or state.full_history[-1] != parent_token_id
         ):
             state.full_history.append(parent_token_id)
 
-        # Generate K greedy tokens via HF.
         import torch
+        do_sample = float(temperature) > 0.0
         with torch.no_grad():
             input_ids = torch.tensor(
                 [state.full_history], dtype=torch.long,
             )
-            output = self._model.generate(
+            gen_kwargs = dict(
                 input_ids=input_ids,
                 max_new_tokens=k,
-                do_sample=False,
-                temperature=1.0,  # ignored when do_sample=False
+                do_sample=do_sample,
                 pad_token_id=(
                     self._eos_token_id
                     if self._eos_token_id is not None else 0
                 ),
+                output_scores=True,
+                return_dict_in_generate=True,
             )
-        full_out = output[0].tolist()
-        proposed = full_out[len(state.full_history):]
+            if do_sample:
+                gen_kwargs["temperature"] = float(temperature)
+            else:
+                # do_sample=False ignores temperature; pass 1.0
+                # to avoid HF warnings about "temperature ignored
+                # when do_sample=False".
+                gen_kwargs["temperature"] = 1.0
+            output = self._model.generate(**gen_kwargs)
 
-        # Stop early on EOS (include the EOS marker in the
-        # returned prefix so the executor knows speculation
-        # truncated naturally).
+        # GenerateOutput has .sequences (full-history + new) and
+        # .scores (tuple of K logits tensors, post-LogitsProcessor).
+        sequences = output.sequences[0].tolist()
+        scores = output.scores  # tuple, len == k_actual <= k
+        proposed_full = sequences[len(state.full_history):]
+
+        # Compute per-token probabilities. For each step i:
+        # - greedy: prob = 1.0 (argmax has all the mass under
+        #   degenerate point-mass).
+        # - stochastic: prob = softmax(scores[i])[proposed_full[i]]
+        probs: List[float] = []
+        if do_sample:
+            for i, tok in enumerate(proposed_full):
+                step_logits = scores[i][0]  # [vocab]
+                step_probs = torch.softmax(step_logits, dim=-1)
+                probs.append(float(step_probs[int(tok)].item()))
+        else:
+            probs = [1.0] * len(proposed_full)
+
+        # Stop early on EOS (include the EOS marker; trim the
+        # probs to match).
         if (
             self._eos_token_id is not None
-            and self._eos_token_id in proposed
+            and self._eos_token_id in proposed_full
         ):
-            eos_idx = proposed.index(self._eos_token_id)
-            proposed = proposed[: eos_idx + 1]
+            eos_idx = proposed_full.index(self._eos_token_id)
+            proposed_full = proposed_full[: eos_idx + 1]
+            probs = probs[: eos_idx + 1]
 
-        return list(proposed)
+        return list(proposed_full), probs
 
     def commit(
         self,
