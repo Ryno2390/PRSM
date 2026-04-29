@@ -95,9 +95,11 @@ _LAZY_CHAIN_RPC_NAMES = frozenset({
 _LAZY_STREAMING_NAMES = frozenset({
     "StreamingChunk",
     "StreamingLayerRunner",
+    "StreamingSamplingShim",
     "SyntheticStreamingRunner",
     "AutoregressiveStreamingRunner",
     "SamplingDefaults",
+    "make_autoregressive_streaming_runner",
 })
 
 
@@ -122,18 +124,26 @@ def __getattr__(name: str):
         from prsm.compute.inference.streaming_runner import (
             StreamingChunk,
             StreamingLayerRunner,
+            StreamingSamplingShim,
             SyntheticStreamingRunner,
         )
         from prsm.compute.inference.autoregressive_runner import (
             AutoregressiveStreamingRunner,
             SamplingDefaults,
         )
+        from prsm.compute.inference.factories import (
+            make_autoregressive_streaming_runner,
+        )
         attrs = {
             "StreamingChunk": StreamingChunk,
             "StreamingLayerRunner": StreamingLayerRunner,
+            "StreamingSamplingShim": StreamingSamplingShim,
             "SyntheticStreamingRunner": SyntheticStreamingRunner,
             "AutoregressiveStreamingRunner": AutoregressiveStreamingRunner,
             "SamplingDefaults": SamplingDefaults,
+            "make_autoregressive_streaming_runner": (
+                make_autoregressive_streaming_runner
+            ),
         }
         return attrs[name]
     raise AttributeError(
@@ -193,6 +203,9 @@ __all__ = [
     # Phase 3.x.10 — Real autoregressive streaming runner
     "AutoregressiveStreamingRunner",
     "SamplingDefaults",
+    # Phase 3.x.10.x — Server → runner sampling shim + factories
+    "StreamingSamplingShim",
+    "make_autoregressive_streaming_runner",
     # Exceptions
     "InferenceExecutorError",
     "InsufficientBudgetError",

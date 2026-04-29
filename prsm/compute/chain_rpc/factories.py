@@ -191,6 +191,7 @@ def make_layer_stage_server(
     anchor: Any,
     clock: Optional[Callable[[], float]] = None,
     chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
+    streaming_runner: Optional[Any] = None,
 ) -> LayerStageServer:
     """Build a ``LayerStageServer`` for a node hosting one or more
     chain stages.
@@ -212,10 +213,22 @@ def make_layer_stage_server(
       anchor        Phase 3.x.3 anchor for verifying upstream tokens.
 
     Optional:
-      clock         Defaults to ``time.time``. Tests override.
-      chunk_bytes   Per-chunk size when chunking response activations
-                    on the streamed path (Phase 3.x.7.1). Default
-                    1 MiB from Phase 6 ``ShardChunker``.
+      clock              Defaults to ``time.time``. Tests override.
+      chunk_bytes        Per-chunk size when chunking response activations
+                         on the streamed path (Phase 3.x.7.1). Default
+                         1 MiB from Phase 6 ``ShardChunker``.
+      streaming_runner   Phase 3.x.10.x — optional
+                         ``StreamingLayerRunner`` (Phase 3.x.8) wired
+                         in for the token-stream path. When None
+                         (default), the server rejects
+                         ``handle_token_stream`` requests with
+                         ``INTERNAL_ERROR`` ("not configured for
+                         streaming") — back-compat with operators
+                         not opting into streaming. When set
+                         (typically built via
+                         ``make_autoregressive_streaming_runner``),
+                         the chat-style streaming UX through
+                         ``prsm_inference`` MCP tool is live.
     """
     kwargs = dict(
         identity=identity,
@@ -227,4 +240,6 @@ def make_layer_stage_server(
     )
     if clock is not None:
         kwargs["clock"] = clock
+    if streaming_runner is not None:
+        kwargs["streaming_runner"] = streaming_runner
     return LayerStageServer(**kwargs)
