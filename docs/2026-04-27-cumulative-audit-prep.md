@@ -2114,6 +2114,60 @@ Phase 3.x.11.y.x lifts Phase 3.x.11.y's `temperature > 0` raise and ships sampli
 
 ---
 
+## 7.13 Tier C Constant-Time Sharded Decode (Phase 3.x.11.q)
+
+Phase 3.x.11.q lifts the named "Tier C structurally denied at the sharded dispatch boundary" deferral that has been carrying across Phase 3.x.11 + 3.x.11.x + 3.x.11.y + 3.x.11.y.x. Tier C content can now flow through sharded autoregressive decode at Tier A/B perf characteristics, with the per-token timing surface masked at the chain-executor boundary via one of two operator-wired decorators (mirrors the §7.8 single-host pattern).
+
+**Tag:** `phase3.x.11.q-merge-ready-20260XXX` (pending Task 7 review).
+
+**Headline guarantees.**
+
+1. **`BatchedTrailingShardedExecutor` (M2).** Drains the inner executor's full stream, then emits ONE `StreamToken` (joined text) followed by ONE `ChainExecutionResult`. From a wire observer on the executor → caller path, exactly two events appear regardless of how many tokens the inner chain produced or at what per-token cadence. Verified at the chain-level (unit test) AND end-to-end against real distilgpt2 with `max_tokens=4` (E2E test produces exactly 1 StreamToken). Empty inner stream emits nothing; result-only inner passes ChainExecutionResult through unchanged.
+
+2. **`FixedRateShardedExecutor` (M1).** Each `StreamToken` from the inner executor is held until at least `cadence_seconds` have elapsed since the previous yield. The chain runs at native speed; the decorator's `yield` is what gates emission. Inter-StreamToken intervals on the executor → caller wire are clamped to ≥ cadence regardless of per-token chain compute variance. ChainExecutionResult forwards immediately (terminal isn't part of the per-token timing surface). Clock + sleep are injectable at construction for test determinism. Verified end-to-end at 50ms cadence with real distilgpt2 (every inter-frame interval ≥ cadence - 5ms tolerance).
+
+3. **`make_tier_c_sharded_executor(inner, *, mode, cadence_seconds=None)` factory.** Mode-string selection (`'m2'` / `'m1'`) mirrors Phase 3.x.10.y's pattern. Cadence required for m1, rejected for m2 (M2 has no cadence concept — the misconfig surfaces early). Unknown mode raises ValueError with allowed values.
+
+4. **`ParallaxScheduledExecutor` routing-layer integration.** New constructor kwarg `tier_c_chain_executor: Optional[Any]`; `execute_streaming` branches on `request.content_tier`:
+   - Tier A/B → default `chain_executor` (unchanged from sprint-4)
+   - Tier C + decorator wired → decorator
+   - Tier C + decorator unwired → structured `InferenceResult.failure(...)` with operator-fixable message naming `make_tier_c_sharded_executor`. **No silent fallback to the leaky path** — operators learn the deploy needs the decorator.
+
+5. **Construction-time defense.** `tier_c_chain_executor` without `execute_chain_streaming` is rejected at `__init__` with a clear message naming the factory. Catches operator misconfig at server-start time, not first-Tier-C-request time.
+
+6. **Per-stage `_dispatch_sharded` TIER_GATE deny stays in place** as defense-in-depth. A misconfigured executor that tries to send Tier C dispatches directly to stages still gets rejected at the stage. The chain-level decorator is the trust-policy boundary, not the per-stage server.
+
+7. **Speculation under Tier C remains denied.** Phase 3.x.11.y.x's three new content-correlated wire surfaces (accept-rate, `proposed_token_probs`, adaptive K) are NOT covered by chain-level decorators. Phase 3.x.11.q.y is the bundled placeholder that composes the 3.x.11.q decorators with encrypted/padded probs + masked accept-rate + flat-K mode.
+
+**Trust seams (auditor focus).**
+
+- **Decorator implements `execute_chain_streaming` only.** No synchronous `execute_chain` surface. Tier C non-streaming continues to be denied at the per-stage `_dispatch_sharded` TIER_GATE — the decorator only opens the streaming path. **Auditor: confirm `tests/unit/test_tier_c_sharded_executors.py::TestBatchedTrailingShardedExecutor::test_construction_rejects_non_streaming_inner` and the M1 equivalent — defense-in-depth on the decorator boundary itself.**
+
+- **Routing-layer no-silent-fallback invariant.** When Tier C is requested but no decorator is wired, the failure path is structured (`InferenceResult.failure` with operator-fixable message). The default `chain_executor` is NOT invoked. **Auditor: confirm `tests/unit/test_parallax_executor.py::TestTierCRoutingIntegration::test_tier_c_without_decorator_surfaces_failure` asserts both the failure presence AND that `primary.streaming_calls == []` (default executor not touched).**
+
+- **Per-stage wire still leaks** (load-bearing scope-honesty point). The chain-executor decorator wraps the executor → caller path; the executor → per-stage path continues to dispatch at chain native rate. A network observer on a single stage's transport learns the raw per-token cadence. **This is intentional honest scope** in v1 — Phase 3.x.11.q.x is the bundled placeholder for per-stage cadence wrapping. Documented in threat-model addendum §3.7 + audit-prep §7.13. **Auditor: confirm operators understand they need to compose with per-stage Tier C wrappers (Phase 3.x.10.y pattern) for full-network masking.**
+
+- **Cadence calibration is an operator responsibility.** M1's cadence MUST be ≥ chain native per-token rate; otherwise the decorator yields immediately every tick and provides no masking. Recommended starting point: 2× measured native rate. **Auditor: there's no in-code enforcement that cadence > native — operators set this via config + measure native rate themselves. Phase 3.x.11.q.z (adaptive cadence) deferred.**
+
+- **Total stream duration leaks total token count under M1; total response size leaks total joined-text length under M2.** Cadence × frame count = duration (M1); single trailing frame leaks cumulative byte count (M2). Operators mitigate by capping `max_tokens` per Tier C request; the M2 leak ceiling is text length × bytes/token + the response size cap (operator-configurable padding deferred to Phase 3.x.11.q.x).
+
+- **Routing-layer invariant: only ContentTier.C triggers the decorator.** Unit-test invariants confirm Tier A and Tier B requests do NOT touch the decorator and continue using the default chain_executor. **Auditor: this is the regression boundary — Tier A/B traffic is bit-identical to sprint-4 behavior. Confirm `test_tier_a_uses_default_executor` + `test_tier_b_uses_default_executor` are present.**
+
+**Honest scope (carries forward to follow-up phases).**
+
+- **Per-stage wire still leaks** → Phase 3.x.11.q.x (per-stage cadence wrapper for full-network masking).
+- **Speculation under Tier C still denied** → Phase 3.x.11.q.y (bundles 3.x.11.q decorators with encrypted/padded `proposed_token_probs` + masked accept-rate + flat-K mode).
+- **Total response size leaks under M2** → Phase 3.x.11.q.x (operator-configurable padding to fixed max-length).
+- **Adaptive cadence based on observed network load** → Phase 3.x.11.q.z.
+- **Mid-stream cadence change** not supported.
+- **Cadence calibration** is operator responsibility (no in-code measurement).
+
+**Round-1 review remediations (pre-tag).** TBD on Task 7 review.
+
+**Auditor reading path.** Start at this section. Then read threat-model addendum §3.7 for the chain-level vs per-stage scope-honesty point. Then `prsm/compute/chain_rpc/tier_c_sharded_executors.py` (~250 lines, two decorators — the load-bearing implementations sit here). Then `prsm/compute/chain_rpc/factories.py:make_tier_c_sharded_executor` for the mode-string factory. Then `prsm/compute/inference/parallax_executor.py:execute_streaming` for the Tier C routing branch (search `Phase 3.x.11.q` to find the routing block). Then `tests/unit/test_tier_c_sharded_executors.py` for the 25 unit tests covering both decorators + factory. Then `tests/unit/test_parallax_executor.py::TestTierCRoutingIntegration` for the 6 routing tests. Then `tests/integration/test_phase3_x_11_sharded_e2e.py::TestTierCShardedDecoratorsE2E` for the 3 real-distilgpt2 E2E tests proving the timing-mask invariants end-to-end.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
@@ -2139,3 +2193,4 @@ When the Foundation signs the auditor contract:
 - **0.9 (2026-04-29)** — added §7.11 "Speculative Decoding" covering Phase 3.x.11.y. 7 headline guarantees: VERIFY wire-format extension (verified_token_ids + accepted_count co-set invariant + RollbackCacheRequest/Response envelopes + signing-payload commitment mirroring Phase 3.x.11 Task 5 critical-fix pattern); KVCacheManager.rollback with caller-injected truncate_fn (payload-opaque); DraftModel Protocol + HFDraftModel reference impl (greedy-only at v1); ShardedAutoregressiveRunner VERIFY support (forward_verify + apply_lm_head_and_sample_batch + truncate_cache); executor speculation loop with greedy-only-at-temperature-0 invariant (PROMPT_ENCODE_ERROR on positive temp; both correctness gate AND threat-model-containment gate); RollbackCacheRequest server handler (MissingVerifyCapabilityError → MALFORMED_REQUEST mapping preserves caller-bug-vs-internal-crash invariant); real-distilgpt2 + HFDraftModel E2E with bit-identical greedy proof. Critical adapter remediation during E2E bring-up: HF GPT2's eager attention defaults to FULL attention across new tokens for K+1 batched cached forward — explicit 4D additive causal mask required. Threat-model addendum §3.5 added covering the new per-iteration accept-rate timing surface (directly observable via accepted_count, indirectly via RollbackCacheRequest.n_positions_to_drop); operator advisory + Tier C structural deny carry-over + greedy-only invariant are the v1 mitigations. Sampling-correct speculation under temperature > 0 deferred to Phase 3.x.11.y.x (Leviathan-2023); constant-time speculation for Tier C deferred to Phase 3.x.11.q.y bundle; authenticated rollback envelope deferred to Phase 3.x.11.y.x if telemetry warrants. Phase 3.x.11.y tag: phase3.x.11.y-merge-ready-20260XXX (pending Task 9 review).
 
 - **1.0 (2026-04-29)** — added §7.12 "Sampling-Correct Speculation under Temperature > 0" covering Phase 3.x.11.y.x. 8 headline guarantees: greedy-equivalence regression preserved (v1 traffic bit-identical to Phase 3.x.11.y); sampling-correctness invariant under T > 0 (Leviathan-2023 §2.2 marginal-output-equals-softmax(logits/T) — proven via 5000-trial unit test + 2-stage E2E with TV<0.35 at distilgpt2+T=0.7+top_k=50); `proposed_token_probs` wire-format extension co-set with proposed_token_ids + signing-payload commitment + omit-when-None canonical encoding; tail-shape narrowing (v2 returns ac+1, NOT K+1; split-validator on both runner and executor sides); critical correctness fix to rollback math (`(k_round + 1) - len(emitted)` instead of `len(verified) - len(emitted)`, which under-counts in v2 partial-accept); adaptive K state machine (rolling 4-round window, halve <25% / double >75%, floor 1 / ceiling MAX_VERIFY_BATCH_TOKENS-1); server-side stale-runner backwards-compat (TypeError → MALFORMED_REQUEST, no silent fallback); executor-side capability check on draft.propose_with_probs. Threat-model addendum §3.6 added covering 3 new content-correlated surfaces: accept-rate channel narrows under stochastic (was deterministic v1, now noisy v2); proposed_token_probs ships K floats per VERIFY round (NEW wire surface, strongest leak); adaptive K cross-round correlation (operator-configurable flat-K opt-out for privacy-vs-perf trade). Phase 3.x.11.q.y bundled placeholder for constant-time speculation (encrypted/padded probs + masked accept-rate). Phase 3.x.11.y.x tag: phase3.x.11.y.x-merge-ready-20260429 (pending Task 9 review).
+- **1.1 (2026-04-29)** — added §7.13 "Tier C Constant-Time Sharded Decode" covering Phase 3.x.11.q. 7 headline guarantees: BatchedTrailingShardedExecutor (M2 — single trailing frame), FixedRateShardedExecutor (M1 — cadence-driven yield with injectable clock/sleep), make_tier_c_sharded_executor factory (mode-string selection), ParallaxScheduledExecutor routing-layer integration (Tier A/B unchanged; Tier C with decorator routes correctly; Tier C without decorator surfaces structured failure naming the factory — no silent fallback), construction-time defense (decorator without execute_chain_streaming rejected at __init__), per-stage TIER_GATE deny stays as defense-in-depth, speculation under Tier C remains denied (Phase 3.x.11.q.y bundle). Threat-model addendum §3.7 added (1.3 revision) covering chain-level vs per-stage scope-honesty point — chain-executor decorator masks executor → caller wire only; per-stage cadence wrapping deferred to Phase 3.x.11.q.x. Mitigation table gains 2 new rows. Auditor reading path entries 10 + 11 added. Phase 3.x.11.q tag: phase3.x.11.q-merge-ready-20260XXX (pending Task 7 review).
