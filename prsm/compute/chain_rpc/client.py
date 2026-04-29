@@ -86,9 +86,12 @@ from prsm.compute.chain_rpc.protocol import (
 from prsm.node.shard_streaming import ShardChunk
 from prsm.compute.inference.models import InferenceRequest
 from prsm.compute.inference.multi_stage_attestation import (
+    IterationAttestation,
     StageAttestation,
+    encode_multi_iteration_attestation,
     encode_multi_stage_attestation,
     worst_case_tee_type,
+    worst_case_tee_type_across_iterations,
 )
 from prsm.compute.inference.parallax_executor import ChainExecutionResult
 from prsm.compute.parallax_scheduling.prsm_request_router import GPUChain
@@ -766,7 +769,13 @@ class RpcChainExecutor:
 
         deadline_unix = self._clock() + self._default_deadline_seconds
         chain_total = len(chain.stages)
-        cumulative_outcomes: List[StageOutcome] = []
+        # Phase 3.x.11.x Task 2: per-iteration accumulation. Each
+        # inner list is one chain pass (PREFILL + each INCREMENTAL).
+        # Receipt-emit step encodes via the multi-iteration envelope
+        # so verifiers can confirm "stage K served EVERY dispatch,
+        # not just the last one".
+        per_iteration_outcomes: List[List[StageOutcome]] = []
+        per_iteration_decode_modes: List[DecodeMode] = []
         output_text_parts: List[str] = []
         max_tokens = (
             int(getattr(request, "max_tokens", None) or 0)
@@ -784,7 +793,8 @@ class RpcChainExecutor:
                     deadline_unix=deadline_unix,
                 )
             )
-            cumulative_outcomes.extend(prefill_outcomes)
+            per_iteration_outcomes.append(prefill_outcomes)
+            per_iteration_decode_modes.append(DecodeMode.PREFILL)
             text_delta = self._decode_token_to_text(next_token_id)
             output_text_parts.append(text_delta)
             yield StreamToken(
@@ -806,7 +816,8 @@ class RpcChainExecutor:
                         deadline_unix=deadline_unix,
                     )
                 )
-                cumulative_outcomes.extend(inc_outcomes)
+                per_iteration_outcomes.append(inc_outcomes)
+                per_iteration_decode_modes.append(DecodeMode.INCREMENTAL)
                 text_delta = self._decode_token_to_text(next_token_id)
                 output_text_parts.append(text_delta)
                 yield StreamToken(
@@ -824,40 +835,14 @@ class RpcChainExecutor:
                 )
                 sequence_idx += 1
 
-            # Step 3: aggregate per-stage outcomes — the receipt
-            # commits to ONE attestation record per stage (the
-            # final iteration's). Per-iteration attestations are
-            # NOT aggregated separately at v1; operators wanting
-            # per-token attestation chains add it via Phase
-            # 3.x.11.x receipt-format extension.
-            last_per_stage: dict = {}
-            total_duration = 0.0
-            total_epsilon = 0.0
-            for outcome in cumulative_outcomes:
-                last_per_stage[outcome.stage_index] = outcome
-                total_duration += outcome.duration_seconds
-                total_epsilon += outcome.epsilon_spent
-            ordered = [
-                last_per_stage[i]
-                for i in sorted(last_per_stage.keys())
-            ]
-            stage_attestations = [
-                StageAttestation(
-                    stage_index=outcome.stage_index,
-                    stage_node_id=outcome.stage_node_id,
-                    tee_type=outcome.tee_type,
-                    attestation=outcome.tee_attestation,
-                )
-                for outcome in ordered
-            ]
-            yield ChainExecutionResult(
-                output="".join(output_text_parts),
-                duration_seconds=total_duration,
-                tee_attestation=encode_multi_stage_attestation(
-                    stage_attestations,
-                ),
-                tee_type=worst_case_tee_type(stage_attestations),
-                epsilon_spent=total_epsilon,
+            # Step 3: emit ChainExecutionResult with per-iteration
+            # attestation envelope. Phase 3.x.11.x Task 2 — closes
+            # the "no per-iteration cryptographic commitment" gap
+            # from the Phase 3.x.11 threat-model addendum §3.2.
+            yield self._build_sharded_chain_result(
+                output_text="".join(output_text_parts),
+                per_iteration_outcomes=per_iteration_outcomes,
+                per_iteration_decode_modes=per_iteration_decode_modes,
             )
         finally:
             # Broadcast eviction on EVERY exit path (terminal or
@@ -941,6 +926,77 @@ class RpcChainExecutor:
         next_token_id = int(last_response.next_token_id)
         is_terminal = bool(last_response.is_terminal)
         return next_token_id, is_terminal, outcomes
+
+    def _build_sharded_chain_result(
+        self,
+        *,
+        output_text: str,
+        per_iteration_outcomes: List[List[StageOutcome]],
+        per_iteration_decode_modes: List[DecodeMode],
+    ) -> ChainExecutionResult:
+        """Phase 3.x.11.x Task 2: build the terminal
+        ``ChainExecutionResult`` for a sharded-decode stream.
+
+        The receipt's ``tee_attestation`` field carries a
+        multi-iteration envelope (Phase 3.x.11.x Task 1)
+        committing to one ``StageAttestation`` per stage PER
+        iteration. ``tee_type`` is the worst-case across ALL
+        iterations' stages — a single SOFTWARE stage in any
+        iteration drags the whole receipt to SOFTWARE.
+        ``duration_seconds`` + ``epsilon_spent`` aggregate
+        across every per-iteration outcome.
+
+        Tolerates the empty-iterations case (caller may invoke
+        from cancellation paths where PREFILL never completed)
+        by emitting an empty-output result with the existing
+        single-stage envelope encoder. The non-sharded receipt
+        path (``execute_chain``) is unchanged — this helper is
+        sharded-only.
+        """
+        if not per_iteration_outcomes:
+            return ChainExecutionResult(
+                output=output_text,
+                duration_seconds=0.0,
+                tee_attestation=b"",
+                tee_type=TEEType.SOFTWARE,
+                epsilon_spent=0.0,
+            )
+
+        iteration_records: List[IterationAttestation] = []
+        total_duration = 0.0
+        total_epsilon = 0.0
+        for it_idx, outcomes in enumerate(per_iteration_outcomes):
+            decode_mode = per_iteration_decode_modes[it_idx]
+            ordered = sorted(outcomes, key=lambda o: o.stage_index)
+            stage_records = [
+                StageAttestation(
+                    stage_index=outcome.stage_index,
+                    stage_node_id=outcome.stage_node_id,
+                    tee_type=outcome.tee_type,
+                    attestation=outcome.tee_attestation,
+                )
+                for outcome in ordered
+            ]
+            iteration_records.append(IterationAttestation(
+                iteration_index=it_idx,
+                decode_mode=decode_mode,
+                stage_records=stage_records,
+            ))
+            for outcome in outcomes:
+                total_duration += outcome.duration_seconds
+                total_epsilon += outcome.epsilon_spent
+
+        return ChainExecutionResult(
+            output=output_text,
+            duration_seconds=total_duration,
+            tee_attestation=encode_multi_iteration_attestation(
+                iteration_records,
+            ),
+            tee_type=worst_case_tee_type_across_iterations(
+                iteration_records,
+            ),
+            epsilon_spent=total_epsilon,
+        )
 
     def _decode_token_to_text(self, token_id: int) -> str:
         """tokenizer.decode([token_id], skip_special_tokens=True)

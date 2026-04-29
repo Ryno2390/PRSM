@@ -43,6 +43,12 @@ from prsm.compute.chain_rpc.protocol import (
     encode_message,
     parse_message,
 )
+from prsm.compute.inference.multi_stage_attestation import (
+    decode_multi_iteration_attestation,
+    decode_multi_stage_attestation,
+    is_multi_iteration_attestation,
+    is_multi_stage_attestation,
+)
 from prsm.compute.chain_rpc.activation_codec import (
     decode_activation,
     encode_activation,
@@ -832,3 +838,174 @@ class TestShardedSamplingPropagation:
             chain=chain,
         ))
         assert sim.requests[0].temperature == 0.0
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.x Task 2 — per-iteration receipt attestation envelope
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestShardedPerIterationAttestation:
+    def _build_two_stage_with_eos_after_n(self, n_tokens: int):
+        """Helper: 2-stage chain whose tail emits n_tokens then
+        is_terminal=True. Returns (executor, alice_id, bob_id,
+        alice_sim, bob_sim)."""
+        settler = generate_node_identity("settler")
+        alice = generate_node_identity("alice")
+        bob = generate_node_identity("bob")
+        anchor = _FakeAnchor()
+        anchor.registered[alice.node_id] = alice.public_key_b64
+        anchor.registered[bob.node_id] = bob.public_key_b64
+        alice_sim = _ShardedStageSim(alice, is_tail=False)
+        script = [(i + 100, i == n_tokens - 1) for i in range(n_tokens)]
+        bob_sim = _ShardedStageSim(bob, is_tail=True, sample_script=script)
+        transport = _ShardedTransport({
+            alice.node_id: alice_sim,
+            bob.node_id: bob_sim,
+        })
+        executor = _make_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            tokenizer=_FakeTokenizer(),
+        )
+        return executor, alice, bob, alice_sim, bob_sim
+
+    def test_one_iteration_receipt_uses_iteration_envelope(self):
+        # PREFILL produces token #1 with is_terminal=True →
+        # exactly 1 iteration. Receipt's tee_attestation MUST be
+        # the multi-iteration envelope, not the legacy
+        # multi-stage envelope.
+        executor, alice, bob, _, _ = (
+            self._build_two_stage_with_eos_after_n(1)
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        events = list(executor.execute_chain_streaming(
+            request=_make_request("hi", max_tokens=5), chain=chain,
+        ))
+        result = next(
+            e for e in events if isinstance(e, ChainExecutionResult)
+        )
+        # New envelope, not the legacy one.
+        assert is_multi_iteration_attestation(result.tee_attestation)
+        assert not is_multi_stage_attestation(result.tee_attestation)
+        # Decode + assert iteration shape.
+        iterations = decode_multi_iteration_attestation(
+            result.tee_attestation,
+        )
+        assert iterations is not None
+        assert len(iterations) == 1
+        assert iterations[0].iteration_index == 0
+        assert iterations[0].decode_mode == DecodeMode.PREFILL
+        assert len(iterations[0].stage_records) == 2
+
+    def test_four_iteration_receipt_has_one_record_per_iteration(self):
+        # 4-token decode → 1 PREFILL + 3 INCREMENTALs = 4
+        # iterations. Each iteration carries 2 stage records
+        # (alice + bob).
+        executor, alice, bob, _, _ = (
+            self._build_two_stage_with_eos_after_n(4)
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        events = list(executor.execute_chain_streaming(
+            request=_make_request("hi", max_tokens=10), chain=chain,
+        ))
+        result = next(
+            e for e in events if isinstance(e, ChainExecutionResult)
+        )
+        iterations = decode_multi_iteration_attestation(
+            result.tee_attestation,
+        )
+        assert iterations is not None
+        assert len(iterations) == 4
+        # iteration 0 = PREFILL; 1..3 = INCREMENTALs.
+        assert iterations[0].decode_mode == DecodeMode.PREFILL
+        for it in iterations[1:]:
+            assert it.decode_mode == DecodeMode.INCREMENTAL
+        # Each iteration has 2 stage records (alice + bob).
+        for it in iterations:
+            assert len(it.stage_records) == 2
+            stage_node_ids = {s.stage_node_id for s in it.stage_records}
+            assert stage_node_ids == {alice.node_id, bob.node_id}
+
+    def test_iteration_envelope_aggregates_duration_and_epsilon(self):
+        # The receipt's duration_seconds + epsilon_spent must
+        # aggregate across ALL iterations, not just the last.
+        executor, alice, bob, alice_sim, bob_sim = (
+            self._build_two_stage_with_eos_after_n(3)
+        )
+        # Configure non-trivial per-stage duration.
+        alice_sim.duration = 0.05
+        bob_sim.duration = 0.07
+        chain = _make_chain([alice.node_id, bob.node_id])
+        events = list(executor.execute_chain_streaming(
+            request=_make_request("hi", max_tokens=10), chain=chain,
+        ))
+        result = next(
+            e for e in events if isinstance(e, ChainExecutionResult)
+        )
+        # 3 iterations × 2 stages × (0.05 + 0.07) = 0.36
+        assert result.duration_seconds == pytest.approx(0.36)
+
+    def test_non_sharded_execute_chain_receipt_unchanged(self):
+        # Sanity: the unary execute_chain (non-sharded) still
+        # produces the legacy multi-stage envelope. Phase 3.x.11.x
+        # MUST NOT change non-sharded receipts. Pin via
+        # is_multi_stage_attestation True + is_multi_iteration
+        # False.
+        from prsm.compute.chain_rpc.client import RpcChainExecutor
+        settler = generate_node_identity("settler")
+        alice = generate_node_identity("alice")
+        bob = generate_node_identity("bob")
+        anchor = _FakeAnchor()
+        anchor.registered[alice.node_id] = alice.public_key_b64
+        anchor.registered[bob.node_id] = bob.public_key_b64
+        alice_sim = _ShardedStageSim(alice, is_tail=False)
+        bob_sim = _ShardedStageSim(
+            bob, is_tail=False,  # ignored by execute_chain
+        )
+        transport = _ShardedTransport({
+            alice.node_id: alice_sim,
+            bob.node_id: bob_sim,
+        })
+        executor = RpcChainExecutor(
+            settler_identity=settler,
+            send_message=transport.send,
+            anchor=anchor,
+            prompt_encoder=_prompt_encoder_passthrough,
+            output_decoder=_output_decoder_passthrough,
+            enable_sharded_decode=False,  # NON-sharded
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        result = executor.execute_chain(
+            request=_make_request("hi", max_tokens=2),
+            chain=chain,
+        )
+        # Legacy envelope is untouched.
+        assert is_multi_stage_attestation(result.tee_attestation)
+        assert not is_multi_iteration_attestation(result.tee_attestation)
+        decoded = decode_multi_stage_attestation(result.tee_attestation)
+        assert decoded is not None
+        assert len(decoded) == 2
+
+    def test_cancellation_mid_stream_no_receipt_emitted(self):
+        # When the caller closes mid-stream, no
+        # ChainExecutionResult is emitted (Phase 3.x.11 contract).
+        # The eviction broadcast still fires via finally — see
+        # TestShardedCancellation::test_caller_close_triggers_eviction_broadcast_to_all_stages.
+        # This test confirms no partial receipt slips out, and
+        # the new per-iteration envelope code-path doesn't change
+        # that contract.
+        executor, alice, bob, _, _ = (
+            self._build_two_stage_with_eos_after_n(10)
+        )
+        chain = _make_chain([alice.node_id, bob.node_id])
+        gen = executor.execute_chain_streaming(
+            request=_make_request("hi", max_tokens=10), chain=chain,
+        )
+        # Pull two tokens then close.
+        tokens_seen = [next(gen), next(gen)]
+        gen.close()
+        assert all(isinstance(t, StreamToken) for t in tokens_seen)
+        # No partial ChainExecutionResult ever yielded.
+        # Generator's already closed; further next() raises
+        # StopIteration; verifying the cancellation contract by
+        # construction (above lines didn't see a result).
