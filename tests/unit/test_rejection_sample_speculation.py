@@ -297,3 +297,129 @@ class TestRejectionSampleSpeculation:
         np.testing.assert_allclose(empirical, target, atol=0.025), (
             f"empirical {empirical} vs target {target}"
         )
+
+    def test_distribution_convergence_at_K4_first_emit(self):
+        """Round-1 review M1 remediation (1/2). Convergence test at
+        K=4 validating the §2.2 marginal-equals-target claim under
+        Option C.1's degenerate-q regime (q a TRUE point mass with
+        mass 1.0). The K=1 test above proved the per-position
+        invariant; this test exercises the multi-position partial-
+        accept paths.
+
+        Setup: K=4 with target p = [0.5, 0.3, 0.15, 0.05] at every
+        position 0..K and d_i = 0 with q(d_i) = 1.0 (degenerate
+        point mass — Option C.1 is exact here). Per-position
+        accept_prob = min(1, p(0)/q(0)) = 0.5. Residual on reject:
+        r(0) = max(0, 0.5 - 1.0) = 0; r(t!=0) = p(t); normalize
+        → [0, 0.6, 0.3, 0.1].
+
+        Theorem (Leviathan-2023 §2.2 + Option C.1 degenerate-q):
+          P(first emit = 0)   = P(accept_at_0) = 0.5 = p(0) ✓
+          P(first emit = t!=0) = P(reject_at_0) * r0_norm(t)
+                               = 0.5 * (p(t)/0.5) = p(t) ✓
+
+        The marginal of ids[0] equals p REGARDLESS of K. K=4
+        exercises the K=4 → K=3 → ... → K=0 partial-accept depth +
+        all-accept bonus from p_K. Total emitted varies 1..K+1=5;
+        we restrict the convergence assertion to ids[0] which is
+        what the load-bearing claim covers.
+
+        5000 trials; ~3σ tolerance.
+        """
+        target = np.array(
+            [0.5, 0.3, 0.15, 0.05], dtype=np.float64,
+        )
+        rng = np.random.default_rng(seed=2026042901)
+        N = 5000
+        K = 4
+        target_distributions = [target.copy() for _ in range(K + 1)]
+        proposed_ids = [0] * K
+        proposed_probs = [1.0] * K  # degenerate: Option C.1 exact
+        emitted_first_token = np.zeros(4, dtype=np.int64)
+        for _ in range(N):
+            ids, ac = rejection_sample_speculation(
+                target_distributions=target_distributions,
+                proposed_token_ids=proposed_ids,
+                proposed_token_probs=proposed_probs,
+                rng=rng,
+            )
+            assert 0 <= ac <= K
+            assert len(ids) == ac + 1
+            emitted_first_token[ids[0]] += 1
+
+        empirical = emitted_first_token / N
+        np.testing.assert_allclose(empirical, target, atol=0.025), (
+            f"K=4 first-emit empirical {empirical} vs target "
+            f"{target}; §2.2 marginal claim violated under Option "
+            f"C.1 degenerate-q regime"
+        )
+
+    def test_option_c1_drift_under_stochastic_q_documented(self):
+        """Round-1 review M1 remediation (2/2) — honest-scope
+        companion. Option C.1 treats q as a point mass on d_i with
+        mass q(d_i); under stochastic drafting (q(d_i) < 1.0), the
+        residual computation differs from the §2.2 exact construction
+        because the true q has nonzero mass on non-d_i tokens that
+        C.1 ignores.
+
+        This test pins the C.1 marginal numerically — both
+        documenting the drift for the audit trail AND catching any
+        future change to the helper that would break C.1's
+        determinism.
+
+        Setup: K=1, target p = [0.5, 0.3, 0.15, 0.05], q(d_0) = 0.6.
+        Under Option C.1:
+          accept_prob = min(1, 0.5/0.6) = 0.8333...
+          residual r = [max(0, 0.5 - 0.6), 0.3, 0.15, 0.05]
+                     = [0, 0.3, 0.15, 0.05]; sum = 0.5;
+                     normalized = [0, 0.6, 0.3, 0.1]
+          P(emit 0)   = 0.8333
+          P(emit t>0) = (1 - 0.8333) * r_norm(t)
+                      = 0.1667 * [0, 0.6, 0.3, 0.1]
+                      = [0, 0.1, 0.05, 0.0167]
+          C.1 marginal = [0.8333, 0.1, 0.05, 0.0167]
+
+        Under §2.2 EXACT (with the true stochastic q on the full
+        vocab), the marginal would equal target p. C.1 differs.
+        Phase 3.x.11.y.x' bumps to Option C.3 (full top-M draft
+        distribution wire) if production telemetry shows the
+        drift matters in real traffic. Until then, threat-model
+        addendum §3.6 documents this as honest scope.
+        """
+        target = np.array(
+            [0.5, 0.3, 0.15, 0.05], dtype=np.float64,
+        )
+        rng = np.random.default_rng(seed=2026042902)
+        N = 5000
+        accept_prob = min(1.0, target[0] / 0.6)
+        r = target.copy()
+        r[0] = max(0.0, target[0] - 0.6)
+        r_norm = r / r.sum()
+        c1_marginal = np.zeros_like(target)
+        c1_marginal[0] = accept_prob
+        c1_marginal[1:] = (1.0 - accept_prob) * r_norm[1:]
+        assert abs(c1_marginal.sum() - 1.0) < 1e-9
+        max_abs_drift = np.max(np.abs(c1_marginal - target))
+        assert max_abs_drift > 0.05, (
+            f"Test setup invalid: C.1 marginal {c1_marginal} should "
+            f"differ from target {target} by > 0.05 under non-"
+            f"degenerate q"
+        )
+
+        emitted = np.zeros(4, dtype=np.int64)
+        for _ in range(N):
+            ids, ac = rejection_sample_speculation(
+                target_distributions=[target.copy(), target.copy()],
+                proposed_token_ids=[0],
+                proposed_token_probs=[0.6],
+                rng=rng,
+            )
+            emitted[ids[0]] += 1
+
+        empirical = emitted / N
+        np.testing.assert_allclose(empirical, c1_marginal, atol=0.025), (
+            f"empirical {empirical} vs C.1-analytical {c1_marginal} "
+            f"(target was {target}, drift = "
+            f"{np.abs(c1_marginal - target)}) — helper drifted "
+            f"from documented Option C.1 algorithm"
+        )

@@ -1310,7 +1310,9 @@ class RpcChainExecutor:
                         n_positions_to_drop=cached_extra,
                     )
 
-                # Step 2g: adaptive K — record this round's
+                # Step 2g: adaptive K — v2-only to preserve v1's
+                # bit-identical-to-Phase-3.x.11.y regression
+                # (round-1 review L3). Record this round's
                 # (accepted_count, K) and once the rolling window
                 # is full, recompute smoothed accept-rate and
                 # adjust K for the NEXT round. Halve below 25%,
@@ -1319,17 +1321,18 @@ class RpcChainExecutor:
                 # an executor-side parameter; the chain stages
                 # adapt naturally to the new batch size on the
                 # next VERIFY dispatch.
-                accept_history.append((accepted_count, k_round))
-                if len(accept_history) == accept_history.maxlen:
-                    total_ac = sum(a for a, _ in accept_history)
-                    total_k = sum(kk for _, kk in accept_history)
-                    rate = (
-                        (total_ac / total_k) if total_k > 0 else 0.0
-                    )
-                    if rate < 0.25:
-                        k = max(1, k // 2)
-                    elif rate > 0.75:
-                        k = min(k_max, k * 2)
+                if use_stochastic:
+                    accept_history.append((accepted_count, k_round))
+                    if len(accept_history) == accept_history.maxlen:
+                        total_ac = sum(a for a, _ in accept_history)
+                        total_k = sum(kk for _, kk in accept_history)
+                        rate = (
+                            (total_ac / total_k) if total_k > 0 else 0.0
+                        )
+                        if rate < 0.25:
+                            k = max(1, k // 2)
+                        elif rate > 0.75:
+                            k = min(k_max, k * 2)
 
                 # Step 2f: terminal logic. Chain reports terminal
                 # iff EOS in emitted OR tokens_generated reached
