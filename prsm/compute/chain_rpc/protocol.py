@@ -74,6 +74,15 @@ server gets rejected at the v1 parser. Production rolling-deploy
 flows handle this by upgrading servers before clients."""
 
 MAX_HANDSHAKE_BYTES = 64 * 1024 * 1024
+
+MAX_VERIFY_BATCH_TOKENS = 65
+"""Phase 3.x.11.y — cap on the number of verified tokens returned
+in a VERIFY response (parent + K drafts). 64 is well above any
+reasonable speculation depth (literature reports 4-8 as the
+practical sweet spot); 65 = 64 drafts + 1 parent verification
+position. Defends against a hostile peer claiming a huge
+``verified_token_ids`` list that explodes server-side memory at
+parse time."""
 """Hard cap on a JSON-encoded chain-RPC message.
 
 v1 inlines activation blobs hex-encoded inside the JSON envelope.
@@ -112,19 +121,32 @@ class ChainRpcMessageType(str, Enum):
     # Phase 3.x.11 — sharded-decode KV-cache eviction signal:
     EVICT_CACHE_REQUEST = "evict_cache_request"  # executor → stage broadcast on terminal/cancel
     EVICT_CACHE_RESPONSE = "evict_cache_response"  # stage → executor ack
+    # Phase 3.x.11.y — speculative-decoding cache rollback signal:
+    ROLLBACK_CACHE_REQUEST = "rollback_cache_request"  # executor → stage on rejected speculative suffix
+    ROLLBACK_CACHE_RESPONSE = "rollback_cache_response"  # stage → executor ack
 
 
 class DecodeMode(str, Enum):
     """Phase 3.x.11 — sharded autoregressive decode mode.
 
-    A sharded autoregressive request runs the chain twice in
-    distinct modes:
+    A sharded autoregressive request runs the chain in distinct
+    modes:
 
     - ``PREFILL`` — first dispatch in a request; full prompt
       forward through the stage's layers; allocates fresh
       KV-cache keyed on ``request_id``.
     - ``INCREMENTAL`` — per-token dispatch; single-position
       forward with cached KV; mutates existing cache.
+    - ``VERIFY`` *(Phase 3.x.11.y — speculative decoding)* —
+      batched K+1-position forward with cached KV from the
+      parent token. Stage 1 input is
+      ``[parent_token_id, draft_1, draft_2, ..., draft_K]``;
+      Stage > 1 input is K+1 positions of hidden state. Tail
+      stage samples K+1 logits + computes ``accepted_count``
+      (longest matching prefix between draft and verified
+      argmaxes). Executor accepts the prefix + rolls back the
+      KV-cache for any rejected suffix via
+      ``RollbackCacheRequest``.
 
     Default ``PREFILL`` preserves byte-equivalence with
     pre-3.x.11 messages (omit-when-default canonical
@@ -134,6 +156,7 @@ class DecodeMode(str, Enum):
 
     PREFILL = "prefill"
     INCREMENTAL = "incremental"
+    VERIFY = "verify"
 
 
 class StageErrorCode(str, Enum):
@@ -879,6 +902,19 @@ class RunLayerSliceResponse:
     # canonical encoding pattern).
     next_token_id: Optional[int] = None
     is_terminal: bool = False
+    # Phase 3.x.11.y — speculative-decoding tail-stage signals.
+    # ``verified_token_ids`` (when set) carries K+1 argmax tokens
+    # — one per VERIFY input position. ``accepted_count`` is the
+    # length of the longest matching prefix between the request's
+    # draft proposals and the verified argmaxes (``0..K``;
+    # `0` means no draft tokens accepted, `K` means all accepted).
+    # Both are populated only on tail-stage VERIFY dispatches;
+    # non-VERIFY responses (PREFILL / INCREMENTAL) leave them
+    # None. Default None preserves byte-equivalence with
+    # pre-3.x.11.y signed bytes (omit-when-default canonical
+    # encoding pattern).
+    verified_token_ids: Optional[Tuple[int, ...]] = None
+    accepted_count: Optional[int] = None
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_RESPONSE.value
@@ -968,6 +1004,80 @@ class RunLayerSliceResponse:
                 f"is_terminal must be bool, got "
                 f"{type(self.is_terminal).__name__}"
             )
+        # Phase 3.x.11.y — speculative-decoding tail signals.
+        # verified_token_ids must be a tuple of non-negative
+        # ints with length capped at MAX_VERIFY_BATCH_TOKENS
+        # (defends against a hostile peer claiming a huge
+        # speculation depth that explodes server-side memory).
+        # accepted_count must be a non-negative int <= len(
+        # verified_token_ids) - 1 (since one position is the
+        # parent's verifier-output, accepted_count is the
+        # number of DRAFT tokens accepted, max == K when all
+        # K drafts match).
+        # Both fields must be co-set: setting one without the
+        # other is a malformed VERIFY response.
+        verified_set = self.verified_token_ids is not None
+        accepted_set = self.accepted_count is not None
+        if verified_set != accepted_set:
+            raise ChainRpcMalformedError(
+                "verified_token_ids and accepted_count must be "
+                "co-set on VERIFY responses (got "
+                f"verified={self.verified_token_ids!r}, "
+                f"accepted={self.accepted_count!r})"
+            )
+        if verified_set:
+            if not isinstance(self.verified_token_ids, tuple):
+                raise ChainRpcMalformedError(
+                    f"verified_token_ids must be tuple, got "
+                    f"{type(self.verified_token_ids).__name__}"
+                )
+            if not self.verified_token_ids:
+                raise ChainRpcMalformedError(
+                    "verified_token_ids must be non-empty when "
+                    "set (must contain at least the parent's "
+                    "verifier-output)"
+                )
+            if len(self.verified_token_ids) > MAX_VERIFY_BATCH_TOKENS:
+                raise ChainRpcMalformedError(
+                    f"verified_token_ids length "
+                    f"{len(self.verified_token_ids)} exceeds cap "
+                    f"{MAX_VERIFY_BATCH_TOKENS} — defends against "
+                    f"hostile peer claiming huge speculation depth"
+                )
+            for tok in self.verified_token_ids:
+                if isinstance(tok, bool) or not isinstance(tok, int):
+                    raise ChainRpcMalformedError(
+                        f"verified_token_ids entries must be int, "
+                        f"got {type(tok).__name__}"
+                    )
+                if tok < 0:
+                    raise ChainRpcMalformedError(
+                        f"verified_token_ids entries must be "
+                        f"non-negative, got {tok}"
+                    )
+            if (
+                isinstance(self.accepted_count, bool)
+                or not isinstance(self.accepted_count, int)
+            ):
+                raise ChainRpcMalformedError(
+                    f"accepted_count must be int, got "
+                    f"{type(self.accepted_count).__name__}"
+                )
+            if self.accepted_count < 0:
+                raise ChainRpcMalformedError(
+                    f"accepted_count must be non-negative, got "
+                    f"{self.accepted_count}"
+                )
+            # accepted_count <= K, where K = len(verified) - 1
+            # (the first verified position is the parent's
+            # output; tokens 1..K are the K drafts that may or
+            # may not match).
+            max_accepted = len(self.verified_token_ids) - 1
+            if self.accepted_count > max_accepted:
+                raise ChainRpcMalformedError(
+                    f"accepted_count {self.accepted_count} exceeds "
+                    f"max {max_accepted} (K = len(verified)-1)"
+                )
 
     @staticmethod
     def signing_payload(
@@ -983,6 +1093,8 @@ class RunLayerSliceResponse:
         activation_manifest: Optional[ShardManifest] = None,
         next_token_id: Optional[int] = None,
         is_terminal: bool = False,
+        verified_token_ids: Optional[Tuple[int, ...]] = None,
+        accepted_count: Optional[int] = None,
     ) -> bytes:
         """Canonical bytes the stage signs over the response.
 
@@ -1042,6 +1154,18 @@ class RunLayerSliceResponse:
             payload["next_token_id"] = int(next_token_id)
         if is_terminal:
             payload["is_terminal"] = True
+        # Phase 3.x.11.y — commit speculative-decoding tail
+        # signals when set. Omit-when-default preserves
+        # pre-3.x.11.y byte-equivalence: PREFILL/INCREMENTAL
+        # responses (no VERIFY signals) produce the same
+        # signing payload as pre-3.x.11.y signed bytes.
+        # Co-set invariant enforced at __post_init__; here
+        # both keys are added together.
+        if verified_token_ids is not None:
+            payload["verified_token_ids"] = [
+                int(t) for t in verified_token_ids
+            ]
+            payload["accepted_count"] = int(accepted_count or 0)
         return json.dumps(payload, sort_keys=True).encode("utf-8")
 
     @classmethod
@@ -1059,6 +1183,8 @@ class RunLayerSliceResponse:
         activation_manifest: Optional[ShardManifest] = None,
         next_token_id: Optional[int] = None,
         is_terminal: bool = False,
+        verified_token_ids: Optional[Tuple[int, ...]] = None,
+        accepted_count: Optional[int] = None,
     ) -> "RunLayerSliceResponse":
         """Construct + sign a fresh response under the stage ``identity``.
 
@@ -1087,6 +1213,8 @@ class RunLayerSliceResponse:
             activation_manifest=activation_manifest,
             next_token_id=next_token_id,
             is_terminal=is_terminal,
+            verified_token_ids=verified_token_ids,
+            accepted_count=accepted_count,
         )
         sig = identity.sign(payload)
         return cls(
@@ -1103,6 +1231,11 @@ class RunLayerSliceResponse:
             activation_manifest=activation_manifest,
             next_token_id=next_token_id,
             is_terminal=is_terminal,
+            verified_token_ids=(
+                tuple(verified_token_ids)
+                if verified_token_ids is not None else None
+            ),
+            accepted_count=accepted_count,
         )
 
     def verify_with_anchor(
@@ -1162,6 +1295,8 @@ class RunLayerSliceResponse:
             activation_manifest=self.activation_manifest,
             next_token_id=self.next_token_id,
             is_terminal=self.is_terminal,
+            verified_token_ids=self.verified_token_ids,
+            accepted_count=self.accepted_count,
         )
         return verify_signature(
             stage_pubkey_b64, payload, self.stage_signature_b64
@@ -1194,6 +1329,16 @@ class RunLayerSliceResponse:
             out["next_token_id"] = int(self.next_token_id)
         if self.is_terminal:
             out["is_terminal"] = True
+        # Phase 3.x.11.y — speculative-decoding tail signals.
+        # Omit-when-default canonical encoding: VERIFY responses
+        # carry both keys; non-VERIFY responses produce byte-
+        # identical wire bytes with pre-3.x.11.y. Co-set
+        # invariant enforced by __post_init__.
+        if self.verified_token_ids is not None:
+            out["verified_token_ids"] = [
+                int(t) for t in self.verified_token_ids
+            ]
+            out["accepted_count"] = int(self.accepted_count or 0)
         return out
 
     @classmethod
@@ -1246,6 +1391,43 @@ class RunLayerSliceResponse:
                 f"is_terminal must be bool, got "
                 f"{type(is_terminal_raw).__name__}"
             )
+        # Phase 3.x.11.y — speculative-decoding tail signals.
+        # Default None when absent. Type-checked tightly: list
+        # of non-negative ints capped at MAX_VERIFY_BATCH_TOKENS;
+        # accepted_count non-negative int. Co-set invariant
+        # enforced at __post_init__ via the constructed
+        # dataclass — same boundary catches malformed wire.
+        verified_raw = data.get("verified_token_ids")
+        verified_token_ids: Optional[Tuple[int, ...]] = None
+        if verified_raw is not None:
+            if not isinstance(verified_raw, list):
+                raise ChainRpcMalformedError(
+                    f"verified_token_ids must be list, got "
+                    f"{type(verified_raw).__name__}"
+                )
+            if len(verified_raw) > MAX_VERIFY_BATCH_TOKENS:
+                raise ChainRpcMalformedError(
+                    f"verified_token_ids length {len(verified_raw)} "
+                    f"exceeds cap {MAX_VERIFY_BATCH_TOKENS}"
+                )
+            for t in verified_raw:
+                if isinstance(t, bool) or not isinstance(t, int):
+                    raise ChainRpcMalformedError(
+                        f"verified_token_ids entries must be int, "
+                        f"got {type(t).__name__}"
+                    )
+            verified_token_ids = tuple(int(t) for t in verified_raw)
+        accepted_raw = data.get("accepted_count")
+        accepted_count: Optional[int] = None
+        if accepted_raw is not None:
+            if isinstance(accepted_raw, bool) or not isinstance(
+                accepted_raw, int
+            ):
+                raise ChainRpcMalformedError(
+                    f"accepted_count must be int, got "
+                    f"{type(accepted_raw).__name__}"
+                )
+            accepted_count = int(accepted_raw)
         return cls(
             request_id=_required_str(data, "request_id"),
             activation_blob=blob_bytes,
@@ -1260,6 +1442,8 @@ class RunLayerSliceResponse:
             activation_manifest=manifest,
             next_token_id=next_token_id_raw,
             is_terminal=is_terminal_raw,
+            verified_token_ids=verified_token_ids,
+            accepted_count=accepted_count,
             protocol_version=_required_int(data, "protocol_version"),
         )
 
@@ -1594,6 +1778,159 @@ class EvictCacheResponse:
         )
 
 
+@dataclass(frozen=True)
+class RollbackCacheRequest:
+    """Phase 3.x.11.y — executor → stage on rejected speculative
+    suffix.
+
+    Sent by the executor's speculation loop when a VERIFY round
+    accepted fewer than K draft tokens. The server-side handler
+    truncates the LAST ``n_positions_to_drop`` positions from
+    the cache. Idempotent: rollback past position 0 (or larger
+    than current seq_len) is a no-op + returns
+    ``rolled_back=False``.
+
+    Wire: ``request_id`` + ``n_positions_to_drop``. No signature
+    — non-load-bearing for correctness because the next VERIFY
+    dispatch's signed response commits to the (correct) cache
+    state, and a malicious rollback that drops too much state
+    surfaces as MALFORMED_REQUEST or wrong-output downstream.
+
+    Cap on ``n_positions_to_drop`` is ``MAX_VERIFY_BATCH_TOKENS``
+    — defends against a hostile peer claiming a huge rollback
+    that doesn't correspond to any speculation round.
+    """
+
+    request_id: str
+    n_positions_to_drop: int
+    protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = ChainRpcMessageType.ROLLBACK_CACHE_REQUEST.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        if (
+            isinstance(self.n_positions_to_drop, bool)
+            or not isinstance(self.n_positions_to_drop, int)
+        ):
+            raise ChainRpcMalformedError(
+                f"n_positions_to_drop must be int, got "
+                f"{type(self.n_positions_to_drop).__name__}"
+            )
+        if self.n_positions_to_drop < 0:
+            raise ChainRpcMalformedError(
+                f"n_positions_to_drop must be non-negative, got "
+                f"{self.n_positions_to_drop}"
+            )
+        if self.n_positions_to_drop > MAX_VERIFY_BATCH_TOKENS:
+            raise ChainRpcMalformedError(
+                f"n_positions_to_drop {self.n_positions_to_drop} "
+                f"exceeds cap {MAX_VERIFY_BATCH_TOKENS}"
+            )
+        _validate_version(self.protocol_version)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+            "n_positions_to_drop": self.n_positions_to_drop,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RollbackCacheRequest":
+        _expect_type(data, ChainRpcMessageType.ROLLBACK_CACHE_REQUEST)
+        n_raw = data.get("n_positions_to_drop")
+        if isinstance(n_raw, bool) or not isinstance(n_raw, int):
+            raise ChainRpcMalformedError(
+                f"n_positions_to_drop must be int, got "
+                f"{type(n_raw).__name__}"
+            )
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            n_positions_to_drop=int(n_raw),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+@dataclass(frozen=True)
+class RollbackCacheResponse:
+    """Phase 3.x.11.y — stage → executor ack for
+    ``RollbackCacheRequest``.
+
+    ``rolled_back=True`` means the manager truncated at least
+    one position; ``rolled_back=False`` is the no-op idempotent
+    path (e.g., the request asked to drop more positions than
+    the cache held — TTL eviction may have raced; or the cache
+    was already empty).
+
+    ``actual_dropped`` returns the actual number of positions
+    truncated — useful for metrics + executor-side rollback
+    accounting (the executor knows EXACTLY how much it tried
+    to roll back, vs. how much actually came off).
+    """
+
+    request_id: str
+    rolled_back: bool
+    actual_dropped: int
+    protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = ChainRpcMessageType.ROLLBACK_CACHE_RESPONSE.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        if not isinstance(self.rolled_back, bool):
+            raise ChainRpcMalformedError(
+                f"rolled_back must be bool, got "
+                f"{type(self.rolled_back).__name__}"
+            )
+        if (
+            isinstance(self.actual_dropped, bool)
+            or not isinstance(self.actual_dropped, int)
+        ):
+            raise ChainRpcMalformedError(
+                f"actual_dropped must be int, got "
+                f"{type(self.actual_dropped).__name__}"
+            )
+        if self.actual_dropped < 0:
+            raise ChainRpcMalformedError(
+                f"actual_dropped must be non-negative, got "
+                f"{self.actual_dropped}"
+            )
+        _validate_version(self.protocol_version)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+            "rolled_back": self.rolled_back,
+            "actual_dropped": self.actual_dropped,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RollbackCacheResponse":
+        _expect_type(data, ChainRpcMessageType.ROLLBACK_CACHE_RESPONSE)
+        rolled_raw = data.get("rolled_back")
+        if not isinstance(rolled_raw, bool):
+            raise ChainRpcMalformedError(
+                f"rolled_back must be bool, got "
+                f"{type(rolled_raw).__name__}"
+            )
+        actual_raw = data.get("actual_dropped")
+        if isinstance(actual_raw, bool) or not isinstance(actual_raw, int):
+            raise ChainRpcMalformedError(
+                f"actual_dropped must be int, got "
+                f"{type(actual_raw).__name__}"
+            )
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            rolled_back=rolled_raw,
+            actual_dropped=int(actual_raw),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Codec
 # ──────────────────────────────────────────────────────────────────────────
@@ -1608,6 +1945,8 @@ _MESSAGE_TYPE_REGISTRY: Dict[str, Callable[[Dict[str, Any]], Any]] = {
     ChainRpcMessageType.STREAM_FINAL_FRAME.value: StreamFinalFrame.from_dict,
     ChainRpcMessageType.EVICT_CACHE_REQUEST.value: EvictCacheRequest.from_dict,
     ChainRpcMessageType.EVICT_CACHE_RESPONSE.value: EvictCacheResponse.from_dict,
+    ChainRpcMessageType.ROLLBACK_CACHE_REQUEST.value: RollbackCacheRequest.from_dict,
+    ChainRpcMessageType.ROLLBACK_CACHE_RESPONSE.value: RollbackCacheResponse.from_dict,
 }
 
 
