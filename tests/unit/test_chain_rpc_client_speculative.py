@@ -1,0 +1,869 @@
+"""Phase 3.x.11.y Task 5 — RpcChainExecutor speculative-decoding
+tests.
+
+Covers ``draft_model=`` opt-in path on ``execute_chain_streaming``:
+  - Construction validation (greedy-only, depth bounds, draft
+    requires sharded_decode, callable rollback transport)
+  - Multi-tokens-per-iteration on full accept (K+1 emitted per
+    VERIFY round)
+  - All-rejected fallback (only the verifier's correction emits)
+  - Partial accept (longest matching prefix)
+  - max_tokens cap honored across speculation rounds (including
+    mid-emit truncation)
+  - EOS in emitted tokens terminates the loop
+  - Cancellation propagates draft.evict + cache eviction broadcast
+    even when caller closes the generator early
+  - Greedy-equivalence: speculation output is bit-identical to
+    Phase 3.x.11 single-token decode for the same prompt + temp=0
+  - Rollback broadcast triggers on partial accept; not triggered
+    when accepted_count == K
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pytest
+
+from prsm.compute.chain_rpc.client import (
+    ChainExecutionError,
+    ExecutorErrorCode,
+    RpcChainExecutor,
+    StreamToken,
+)
+from prsm.compute.chain_rpc.protocol import (
+    DecodeMode,
+    EvictCacheRequest,
+    EvictCacheResponse,
+    RollbackCacheRequest,
+    RollbackCacheResponse,
+    RunLayerSliceRequest,
+    RunLayerSliceResponse,
+    encode_message,
+    parse_message,
+)
+from prsm.compute.chain_rpc.activation_codec import (
+    decode_activation,
+    encode_activation,
+)
+from prsm.compute.inference.models import ContentTier, InferenceRequest
+from prsm.compute.inference.parallax_executor import ChainExecutionResult
+from prsm.compute.parallax_scheduling.prsm_request_router import GPUChain
+from prsm.compute.tee.models import PrivacyLevel, TEEType
+from prsm.node.identity import generate_node_identity
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Fakes
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _FakeAnchor:
+    def __init__(self) -> None:
+        self.registered: Dict[str, str] = {}
+
+    def lookup(self, node_id: str) -> Optional[str]:
+        return self.registered.get(node_id)
+
+
+class _FakeTokenizer:
+    def encode(self, text: str) -> List[int]:
+        words = text.split()
+        return [max(1, len(w)) for w in words] or [1]
+
+    def decode(
+        self,
+        ids: List[int],
+        skip_special_tokens: bool = True,
+    ) -> str:
+        return " ".join(f"tok{tid}" for tid in ids)
+
+
+class _SpecStageSim:
+    """Per-stage VERIFY-aware sim. PREFILL/INCREMENTAL behave like
+    the Phase 3.x.11 sim (echo input + tail samples script).
+    VERIFY: tail returns scripted (verified_token_ids,
+    accepted_count, is_terminal) per round; non-tail just echoes
+    K+1 hidden states.
+
+    Scripts:
+      - sample_script:   List[(token, is_terminal)] for PREFILL +
+                         INCREMENTAL tail responses.
+      - verify_script:   List[(verified_tuple, accepted_count,
+                         is_terminal)] for VERIFY tail responses.
+    """
+
+    def __init__(
+        self,
+        identity,
+        *,
+        is_tail: bool,
+        sample_script: Optional[List[Tuple[int, bool]]] = None,
+        verify_script: Optional[
+            List[Tuple[Tuple[int, ...], int, bool]]
+        ] = None,
+    ) -> None:
+        self.identity = identity
+        self.is_tail = is_tail
+        self._sample_script = list(sample_script or [])
+        self._sample_cursor = 0
+        self._verify_script = list(verify_script or [])
+        self._verify_cursor = 0
+        self.requests: List[RunLayerSliceRequest] = []
+
+    def handle(self, request_bytes: bytes) -> bytes:
+        request = parse_message(request_bytes)
+        assert isinstance(request, RunLayerSliceRequest)
+        self.requests.append(request)
+
+        in_arr = decode_activation(
+            request.activation_blob,
+            request.activation_shape,
+            request.activation_dtype,
+        )
+        out_arr = in_arr.astype(np.float32)
+        out_blob, out_shape, out_dtype = encode_activation(out_arr)
+
+        next_token_id: Optional[int] = None
+        is_terminal = False
+        verified_token_ids: Optional[Tuple[int, ...]] = None
+        accepted_count: Optional[int] = None
+
+        if self.is_tail:
+            if request.decode_mode == DecodeMode.VERIFY:
+                if self._verify_cursor >= len(self._verify_script):
+                    raise AssertionError(
+                        "_SpecStageSim: verify_script exhausted "
+                        "(test bug)"
+                    )
+                v, ac, term = self._verify_script[self._verify_cursor]
+                self._verify_cursor += 1
+                verified_token_ids = tuple(int(t) for t in v)
+                accepted_count = int(ac)
+                is_terminal = bool(term)
+                # next_token_id = last emitted (= verified[ac]).
+                next_token_id = int(verified_token_ids[accepted_count])
+            else:
+                if self._sample_cursor >= len(self._sample_script):
+                    raise AssertionError(
+                        f"_SpecStageSim: sample_script exhausted "
+                        f"(cursor={self._sample_cursor}, len="
+                        f"{len(self._sample_script)})"
+                    )
+                next_token_id, is_terminal = self._sample_script[
+                    self._sample_cursor
+                ]
+                self._sample_cursor += 1
+
+        response = RunLayerSliceResponse.sign(
+            identity=self.identity,
+            request_id=request.request_id,
+            activation_blob=out_blob,
+            activation_shape=out_shape,
+            activation_dtype=out_dtype,
+            duration_seconds=0.001,
+            tee_attestation=b"\x02" * 32,
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
+            next_token_id=next_token_id,
+            is_terminal=is_terminal,
+            verified_token_ids=verified_token_ids,
+            accepted_count=accepted_count,
+        )
+        return encode_message(response)
+
+
+class _SpecTransport:
+    def __init__(self, sims: Dict[str, _SpecStageSim]) -> None:
+        self.sims = sims
+
+    def send(self, address: str, request_bytes: bytes) -> bytes:
+        sim = self.sims.get(address)
+        if sim is None:
+            raise ConnectionError(f"no sim at {address!r}")
+        return sim.handle(request_bytes)
+
+
+class _FakeDraft:
+    """Fake DraftModel — proposes a scripted list of tokens per
+    propose call. Records every call so tests can assert on
+    parent_token_id threading + commit ordering."""
+
+    def __init__(
+        self, *, propose_script: List[List[int]],
+    ) -> None:
+        self._propose_script = list(propose_script)
+        self._propose_cursor = 0
+        self.reset_calls: List[dict] = []
+        self.propose_calls: List[dict] = []
+        self.commit_calls: List[dict] = []
+        self.evict_calls: List[str] = []
+
+    def reset(
+        self, *, request_id: str, prompt_input_ids: List[int],
+    ) -> None:
+        self.reset_calls.append(
+            {"request_id": request_id, "prompt": list(prompt_input_ids)}
+        )
+
+    def propose(
+        self,
+        *,
+        request_id: str,
+        parent_token_id: int,
+        k: int,
+        temperature: float,
+    ) -> List[int]:
+        self.propose_calls.append({
+            "request_id": request_id,
+            "parent_token_id": parent_token_id,
+            "k": k,
+            "temperature": temperature,
+        })
+        if self._propose_cursor >= len(self._propose_script):
+            raise AssertionError(
+                f"_FakeDraft: propose_script exhausted (cursor="
+                f"{self._propose_cursor})"
+            )
+        out = self._propose_script[self._propose_cursor]
+        self._propose_cursor += 1
+        return list(out)
+
+    def commit(
+        self, *, request_id: str, accepted_token_ids: List[int],
+    ) -> None:
+        self.commit_calls.append({
+            "request_id": request_id,
+            "accepted": list(accepted_token_ids),
+        })
+
+    def evict(self, *, request_id: str) -> None:
+        self.evict_calls.append(request_id)
+
+
+class _RollbackLog:
+    def __init__(self) -> None:
+        self.calls: List[Tuple[str, RollbackCacheRequest]] = []
+
+    def __call__(self, address: str, payload: bytes) -> bytes:
+        msg = parse_message(payload)
+        assert isinstance(msg, RollbackCacheRequest)
+        self.calls.append((address, msg))
+        return encode_message(
+            RollbackCacheResponse(
+                request_id=msg.request_id,
+                rolled_back=True,
+                actual_dropped=msg.n_positions_to_drop,
+            )
+        )
+
+
+class _EvictionLog:
+    def __init__(self) -> None:
+        self.calls: List[str] = []
+
+    def __call__(self, address: str, payload: bytes) -> bytes:
+        msg = parse_message(payload)
+        assert isinstance(msg, EvictCacheRequest)
+        self.calls.append(address)
+        return encode_message(
+            EvictCacheResponse(
+                request_id=msg.request_id, evicted=True,
+            )
+        )
+
+
+def _prompt_passthrough(prompt: str) -> np.ndarray:
+    raw = prompt.encode("utf-8")
+    pad = (4 - len(raw) % 4) % 4
+    return np.frombuffer(raw + b"\x00" * pad, dtype=np.int32).copy()
+
+
+def _output_passthrough(arr: np.ndarray) -> str:
+    return arr.tobytes().rstrip(b"\x00").decode("utf-8", errors="replace")
+
+
+def _make_chain(stages: List[str], total_layers: int = 4) -> GPUChain:
+    n = len(stages)
+    per_stage = total_layers // n if n > 0 else 0
+    layer_ranges = []
+    for i in range(n):
+        start = i * per_stage
+        end = (i + 1) * per_stage if i < n - 1 else total_layers
+        layer_ranges.append((start, end))
+    return GPUChain(
+        request_id="req-1",
+        region="us-east",
+        stages=tuple(stages),
+        layer_ranges=tuple(layer_ranges),
+        total_latency_ms=10.0,
+        stale_profile_count=0,
+    )
+
+
+def _make_request(
+    *,
+    max_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+    prompt: str = "hello",
+) -> InferenceRequest:
+    return InferenceRequest(
+        prompt=prompt,
+        model_id="m",
+        budget_ftns=Decimal("10.0"),
+        privacy_tier=PrivacyLevel.NONE,
+        content_tier=ContentTier.A,
+        request_id="req-1",
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+
+
+def _make_spec_executor(
+    *,
+    transport: _SpecTransport,
+    settler,
+    anchor,
+    draft: _FakeDraft,
+    speculation_depth: int = 4,
+    rollback_send=None,
+    cache_evict_send=None,
+) -> RpcChainExecutor:
+    return RpcChainExecutor(
+        settler_identity=settler,
+        send_message=transport.send,
+        anchor=anchor,
+        prompt_encoder=_prompt_passthrough,
+        output_decoder=_output_passthrough,
+        enable_sharded_decode=True,
+        tokenizer=_FakeTokenizer(),
+        draft_model=draft,
+        speculation_depth=speculation_depth,
+        rollback_cache_send_message=rollback_send,
+        cache_evict_send_message=cache_evict_send,
+        sharded_default_max_tokens=64,
+    )
+
+
+def _build_single_stage(
+    *,
+    sample_script: List[Tuple[int, bool]],
+    verify_script: List[Tuple[Tuple[int, ...], int, bool]],
+):
+    settler = generate_node_identity()
+    tail = generate_node_identity()
+    anchor = _FakeAnchor()
+    anchor.registered[tail.node_id] = tail.public_key_b64
+    sim = _SpecStageSim(
+        tail,
+        is_tail=True,
+        sample_script=sample_script,
+        verify_script=verify_script,
+    )
+    transport = _SpecTransport({tail.node_id: sim})
+    chain = _make_chain([tail.node_id])
+    return settler, anchor, transport, sim, chain
+
+
+def _build_two_stage(
+    *,
+    sample_script: List[Tuple[int, bool]],
+    verify_script: List[Tuple[Tuple[int, ...], int, bool]],
+):
+    settler = generate_node_identity()
+    s1 = generate_node_identity()
+    s2 = generate_node_identity()
+    anchor = _FakeAnchor()
+    anchor.registered[s1.node_id] = s1.public_key_b64
+    anchor.registered[s2.node_id] = s2.public_key_b64
+    sim1 = _SpecStageSim(s1, is_tail=False)
+    sim2 = _SpecStageSim(
+        s2, is_tail=True,
+        sample_script=sample_script,
+        verify_script=verify_script,
+    )
+    transport = _SpecTransport({
+        s1.node_id: sim1, s2.node_id: sim2,
+    })
+    chain = _make_chain([s1.node_id, s2.node_id])
+    return settler, anchor, transport, (sim1, sim2), chain
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Construction validation
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestSpeculativeConstructionValidation:
+    def test_draft_requires_sharded_decode(self):
+        settler = generate_node_identity()
+        anchor = _FakeAnchor()
+        with pytest.raises(
+            RuntimeError, match="enable_sharded_decode=True"
+        ):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=lambda a, b: b"",
+                anchor=anchor,
+                prompt_encoder=_prompt_passthrough,
+                output_decoder=_output_passthrough,
+                enable_sharded_decode=False,  # missing
+                draft_model=_FakeDraft(propose_script=[[1]]),
+            )
+
+    def test_draft_missing_methods_rejected(self):
+        settler = generate_node_identity()
+        anchor = _FakeAnchor()
+
+        class _BadDraft:
+            def reset(self, **kw): ...
+            # missing propose/commit/evict
+
+        with pytest.raises(RuntimeError, match="propose"):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=lambda a, b: b"",
+                anchor=anchor,
+                prompt_encoder=_prompt_passthrough,
+                output_decoder=_output_passthrough,
+                enable_sharded_decode=True,
+                tokenizer=_FakeTokenizer(),
+                draft_model=_BadDraft(),
+            )
+
+    def test_speculation_depth_bool_rejected(self):
+        settler = generate_node_identity()
+        anchor = _FakeAnchor()
+        with pytest.raises(ValueError, match="speculation_depth"):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=lambda a, b: b"",
+                anchor=anchor,
+                prompt_encoder=_prompt_passthrough,
+                output_decoder=_output_passthrough,
+                enable_sharded_decode=True,
+                tokenizer=_FakeTokenizer(),
+                draft_model=_FakeDraft(propose_script=[[1]]),
+                speculation_depth=True,  # type: ignore[arg-type]
+            )
+
+    def test_speculation_depth_zero_rejected(self):
+        settler = generate_node_identity()
+        anchor = _FakeAnchor()
+        with pytest.raises(ValueError, match="speculation_depth"):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=lambda a, b: b"",
+                anchor=anchor,
+                prompt_encoder=_prompt_passthrough,
+                output_decoder=_output_passthrough,
+                enable_sharded_decode=True,
+                tokenizer=_FakeTokenizer(),
+                draft_model=_FakeDraft(propose_script=[[1]]),
+                speculation_depth=0,
+            )
+
+    def test_speculation_depth_above_cap_rejected(self):
+        from prsm.compute.chain_rpc.protocol import (
+            MAX_VERIFY_BATCH_TOKENS,
+        )
+        settler = generate_node_identity()
+        anchor = _FakeAnchor()
+        with pytest.raises(ValueError, match="exceeds K cap"):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=lambda a, b: b"",
+                anchor=anchor,
+                prompt_encoder=_prompt_passthrough,
+                output_decoder=_output_passthrough,
+                enable_sharded_decode=True,
+                tokenizer=_FakeTokenizer(),
+                draft_model=_FakeDraft(propose_script=[[1]]),
+                speculation_depth=MAX_VERIFY_BATCH_TOKENS,
+            )
+
+    def test_non_callable_rollback_rejected(self):
+        settler = generate_node_identity()
+        anchor = _FakeAnchor()
+        with pytest.raises(
+            RuntimeError, match="rollback_cache_send_message"
+        ):
+            RpcChainExecutor(
+                settler_identity=settler,
+                send_message=lambda a, b: b"",
+                anchor=anchor,
+                prompt_encoder=_prompt_passthrough,
+                output_decoder=_output_passthrough,
+                enable_sharded_decode=True,
+                tokenizer=_FakeTokenizer(),
+                draft_model=_FakeDraft(propose_script=[[1]]),
+                rollback_cache_send_message="not callable",  # type: ignore[arg-type]
+            )
+
+    def test_temperature_nonzero_rejected_at_dispatch(self):
+        # v1 greedy-only — request.temperature > 0 raises at the
+        # first chain pass.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(42, False)],
+            verify_script=[],
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=_FakeDraft(propose_script=[[100]]),
+        )
+        # Generator is lazy — pull once to trigger.
+        gen = executor.execute_chain_streaming(
+            request=_make_request(max_tokens=4, temperature=0.7),
+            chain=chain,
+        )
+        with pytest.raises(
+            ChainExecutionError, match="greedy-only"
+        ):
+            next(gen)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Speculation behaviors
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestSpeculationLoop:
+    def test_full_accept_emits_k_plus_one_per_round(self):
+        # K=4. PREFILL emits token 7. Round 1: drafts [10,20,30,40];
+        # verifier returns [10,20,30,40,99] all-match → emit
+        # 5 tokens (round 1 alone produces tokens 8..12). Total 6
+        # tokens emitted. max_tokens=6 → terminate after round 1.
+        settler, anchor, transport, sim, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 30, 40, 99), 4, False)],
+        )
+        rollback_log = _RollbackLog()
+        evict_log = _EvictionLog()
+        draft = _FakeDraft(propose_script=[[10, 20, 30, 40]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=4,
+            rollback_send=rollback_log, cache_evict_send=evict_log,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=6, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 10, 20, 30, 40, 99]
+        # All-accepted: rollback_count = K+1 - (K+1) = 0 → no
+        # broadcast.
+        assert rollback_log.calls == []
+        # Eviction broadcast on terminal.
+        assert len(evict_log.calls) == 1
+        # Draft model received reset, propose, commit, evict.
+        assert len(draft.reset_calls) == 1
+        assert len(draft.propose_calls) == 1
+        assert draft.propose_calls[0]["parent_token_id"] == 7
+        assert draft.propose_calls[0]["k"] == 4
+        assert len(draft.commit_calls) == 1
+        assert draft.commit_calls[0]["accepted"] == [10, 20, 30, 40, 99]
+        assert draft.evict_calls == ["req-1"]
+
+    def test_zero_accepted_emits_one_correction(self):
+        # PREFILL emits token 7. Round 1 drafts [10, 20]; verifier
+        # returns [50, 51, 52], 0 match → emit only [50]. Round 2
+        # drafts [60, 61]; verifier returns [70, 71, 72], 0 match
+        # → emit [70]. max_tokens=3 → terminate.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[
+                ((50, 51, 52), 0, False),
+                ((70, 71, 72), 0, False),
+            ],
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraft(propose_script=[[10, 20], [60, 61]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            rollback_send=rollback_log,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=3, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 50, 70]
+        # Each round rolled back K+1 - 1 = 2 positions.
+        assert len(rollback_log.calls) == 2
+        for _, msg in rollback_log.calls:
+            assert msg.n_positions_to_drop == 2
+
+    def test_partial_accept(self):
+        # PREFILL emits 7. K=4, drafts [10, 20, 30, 40]; verifier
+        # returns [10, 20, 99, 98, 97], accepted_count=2 → emit
+        # [10, 20, 99]. max_tokens=4 → next round drafts [50,51,
+        # 52,53]; verifier returns [200, ...], 0 match → emit
+        # [200]. Total 5 tokens (PREFILL + 4 = max).
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[
+                ((10, 20, 99, 98, 97), 2, False),
+                ((200, 201, 202, 203, 204), 0, False),
+            ],
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraft(propose_script=[
+            [10, 20, 30, 40],
+            [50, 51, 52, 53],
+        ])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=4,
+            rollback_send=rollback_log,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=5, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        # PREFILL=7, partial=10,20,99, then round 2's correction=200
+        assert [t.token_id for t in tokens] == [7, 10, 20, 99, 200]
+        # Round 1: rolled back K+1 - (accepted+1) = 5 - 3 = 2.
+        # Round 2: rolled back K+1 - 1 = 4.
+        assert [m.n_positions_to_drop for _, m in rollback_log.calls] == [2, 4]
+        # Round 2's parent = last emitted from round 1 = 99.
+        assert draft.propose_calls[1]["parent_token_id"] == 99
+
+    def test_eos_in_emitted_terminates(self):
+        # PREFILL emits 7. K=4, drafts [10, 20, 30, 40]; verifier
+        # returns [10, 20, 999_eos, 98, 97], accepted_count=2 →
+        # emit [10, 20, 999]. Tail flags terminal=True. Loop ends.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 999, 98, 97), 2, True)],
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraft(propose_script=[[10, 20, 30, 40]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=4,
+            rollback_send=rollback_log,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=64, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 10, 20, 999]
+        assert tokens[-1].finish_reason == "stop"
+
+    def test_max_tokens_cap_truncates_mid_round(self):
+        # max_tokens=3. PREFILL=7. Round 1 drafts [10, 20, 30, 40];
+        # verifier returns full-accept [10,20,30,40,99], so
+        # emit-cap = 3 - 1 (already emitted PREFILL) = 2 → emit
+        # [10, 20] only. Round 1 should TRUNCATE.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 30, 40, 99), 4, False)],
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraft(propose_script=[[10, 20, 30, 40]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=4,
+            rollback_send=rollback_log,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=3, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 10, 20]
+        assert tokens[-1].finish_reason == "max_tokens"
+        # 5 cached - 2 emitted = 3 dropped via rollback.
+        assert len(rollback_log.calls) == 1
+        assert rollback_log.calls[0][1].n_positions_to_drop == 3
+        # draft.commit was called with the actually-emitted prefix.
+        assert draft.commit_calls[0]["accepted"] == [10, 20]
+
+    def test_rollback_broadcast_only_on_partial_accept(self):
+        # All-accepted round → no rollback. Partial round →
+        # rollback with the correct count.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[
+                ((10, 20, 30), 2, False),  # K=2, all match → 0 dropped
+                ((40, 41, 42), 0, False),  # K=2, 0 match → 2 dropped
+            ],
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraft(propose_script=[[10, 20], [50, 51]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            rollback_send=rollback_log,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=5, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        # PREFILL=7, round1=[10,20,30] (all 3 emitted), round2=[40]
+        assert [t.token_id for t in tokens] == [7, 10, 20, 30, 40]
+        # Only round 2 triggered rollback (round 1 was full-accept
+        # → no extra cached).
+        assert len(rollback_log.calls) == 1
+        assert rollback_log.calls[0][1].n_positions_to_drop == 2
+
+    def test_two_stage_chain_threads_proposed_to_tail(self):
+        # 2-stage chain. Stage 1 sees VERIFY input as 5 token ids
+        # in activation_blob; stage 2 (tail) computes
+        # accepted_count. Verify the wire request to BOTH stages
+        # carries proposed_token_ids.
+        settler, anchor, transport, sims, chain = _build_two_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 30, 40, 99), 4, False)],
+        )
+        sim1, sim2 = sims
+        draft = _FakeDraft(propose_script=[[10, 20, 30, 40]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=4,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=6, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 10, 20, 30, 40, 99]
+        # Find the VERIFY request hitting each stage.
+        verify_reqs_s1 = [
+            r for r in sim1.requests
+            if r.decode_mode == DecodeMode.VERIFY
+        ]
+        verify_reqs_s2 = [
+            r for r in sim2.requests
+            if r.decode_mode == DecodeMode.VERIFY
+        ]
+        assert len(verify_reqs_s1) == 1
+        assert len(verify_reqs_s2) == 1
+        assert verify_reqs_s1[0].proposed_token_ids == (10, 20, 30, 40)
+        assert verify_reqs_s2[0].proposed_token_ids == (10, 20, 30, 40)
+
+    def test_cancellation_evicts_draft_and_cache(self):
+        # Caller closes the generator after the first yield. finally
+        # block must call draft.evict + eviction broadcast.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 99), 2, False)] * 10,
+        )
+        evict_log = _EvictionLog()
+        draft = _FakeDraft(
+            propose_script=[[10, 20]] * 10,
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            cache_evict_send=evict_log,
+        )
+        gen = executor.execute_chain_streaming(
+            request=_make_request(max_tokens=64, temperature=0.0),
+            chain=chain,
+        )
+        # Pull the first token (PREFILL emit) then close mid-stream.
+        first = next(gen)
+        assert isinstance(first, StreamToken)
+        assert first.token_id == 7
+        gen.close()
+        # Eviction fired despite early close.
+        assert len(evict_log.calls) == 1
+        assert draft.evict_calls == ["req-1"]
+
+    def test_greedy_equivalence_with_non_speculative(self):
+        # With temperature=0, the speculative output (as token id
+        # sequence) MUST match a non-speculative single-token
+        # decode for the same prompt. Construct two parallel
+        # single-stage runs:
+        #   A) speculative, K=4, drafts always all-accept against
+        #      verifier's [50, 60, 70, 80, 90] script.
+        #   B) non-speculative — sample_script returns
+        #      [50, 60, 70, 80, 90, 99] (one per call).
+        # Both should emit the same first 6 tokens (PREFILL=42
+        # in A's sample_script vs B's first sample, plus 5 from
+        # spec/incremental). To make them comparable, both runs
+        # use sample_script that produces 42 on PREFILL.
+
+        # Run A (speculative).
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(42, False)],
+            verify_script=[((50, 60, 70, 80, 90), 4, False)],
+        )
+        draft = _FakeDraft(propose_script=[[50, 60, 70, 80]])
+        spec_exec = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=4,
+        )
+        spec_events = list(spec_exec.execute_chain_streaming(
+            request=_make_request(max_tokens=6, temperature=0.0),
+            chain=chain,
+        ))
+        spec_ids = [
+            e.token_id for e in spec_events
+            if isinstance(e, StreamToken)
+        ]
+        # Run B (non-speculative — fresh executor + transport).
+        settler_b = generate_node_identity()
+        tail_b = generate_node_identity()
+        anchor_b = _FakeAnchor()
+        anchor_b.registered[tail_b.node_id] = tail_b.public_key_b64
+        sim_b = _SpecStageSim(
+            tail_b, is_tail=True,
+            sample_script=[
+                (42, False), (50, False), (60, False),
+                (70, False), (80, False), (90, False),
+            ],
+        )
+        trans_b = _SpecTransport({tail_b.node_id: sim_b})
+        chain_b = _make_chain([tail_b.node_id])
+        baseline_exec = RpcChainExecutor(
+            settler_identity=settler_b,
+            send_message=trans_b.send,
+            anchor=anchor_b,
+            prompt_encoder=_prompt_passthrough,
+            output_decoder=_output_passthrough,
+            enable_sharded_decode=True,
+            tokenizer=_FakeTokenizer(),
+            sharded_default_max_tokens=64,
+        )
+        baseline_events = list(baseline_exec.execute_chain_streaming(
+            request=_make_request(max_tokens=6, temperature=0.0),
+            chain=chain_b,
+        ))
+        baseline_ids = [
+            e.token_id for e in baseline_events
+            if isinstance(e, StreamToken)
+        ]
+        assert spec_ids == baseline_ids == [42, 50, 60, 70, 80, 90]
+
+    def test_chain_terminal_overrides_continuing_speculation(self):
+        # Tail flagged is_terminal=True on first VERIFY round →
+        # loop exits after that round even if max_tokens budget
+        # remains.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 30), 2, True)],  # all match + EOS
+        )
+        draft = _FakeDraft(propose_script=[[10, 20]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=64, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        # PREFILL + 3 emitted (full accept includes bonus); loop
+        # terminated by chain's is_terminal=True.
+        assert [t.token_id for t in tokens] == [7, 10, 20, 30]
+        # Only one propose round despite generous max_tokens.
+        assert len(draft.propose_calls) == 1

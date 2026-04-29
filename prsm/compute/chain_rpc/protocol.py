@@ -572,6 +572,18 @@ class RunLayerSliceRequest:
     # (same omit-when-default pattern Phase 3.x.10.x used for
     # ``max_tokens`` / ``temperature``).
     decode_mode: DecodeMode = DecodeMode.PREFILL
+    # Phase 3.x.11.y — speculative-decoding draft proposals. Set
+    # only on VERIFY dispatches (the executor's speculation loop
+    # carries the K draft tokens from the draft model so the tail
+    # stage can compute ``accepted_count`` against the verifier's
+    # K+1 argmaxes). On non-VERIFY dispatches MUST be None.
+    # ``len`` is capped at ``MAX_VERIFY_BATCH_TOKENS - 1`` (since K
+    # drafts produce K+1 verified positions, mirrors the response-
+    # side cap on ``verified_token_ids``). Default None preserves
+    # byte-equivalence with pre-3.x.11.y signed bytes (omit-when-
+    # default canonical encoding pattern, same as ``decode_mode`` /
+    # ``streaming`` / sampling fields).
+    proposed_token_ids: Optional[Tuple[int, ...]] = None
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value
@@ -711,6 +723,48 @@ class RunLayerSliceRequest:
                 f"decode_mode must be DecodeMode, got "
                 f"{type(self.decode_mode).__name__}"
             )
+        # Phase 3.x.11.y — proposed_token_ids validation. Set
+        # iff decode_mode == VERIFY; non-empty tuple of non-
+        # negative ints; length capped at
+        # MAX_VERIFY_BATCH_TOKENS - 1 (K drafts → K+1 verified;
+        # K cap matches the response-side verified-len cap minus
+        # the +1 verifier output).
+        if self.proposed_token_ids is not None:
+            if self.decode_mode != DecodeMode.VERIFY:
+                raise ChainRpcMalformedError(
+                    f"proposed_token_ids set but decode_mode is "
+                    f"{self.decode_mode.value!r}; proposed_token_ids "
+                    f"is meaningful only on VERIFY dispatches"
+                )
+            if not isinstance(self.proposed_token_ids, tuple):
+                raise ChainRpcMalformedError(
+                    f"proposed_token_ids must be tuple, got "
+                    f"{type(self.proposed_token_ids).__name__}"
+                )
+            if not self.proposed_token_ids:
+                raise ChainRpcMalformedError(
+                    "proposed_token_ids must be non-empty when set "
+                    "(at least one draft token; speculation_depth >= 1)"
+                )
+            if len(self.proposed_token_ids) >= MAX_VERIFY_BATCH_TOKENS:
+                raise ChainRpcMalformedError(
+                    f"proposed_token_ids length "
+                    f"{len(self.proposed_token_ids)} exceeds K cap "
+                    f"{MAX_VERIFY_BATCH_TOKENS - 1} (K drafts "
+                    f"produce K+1 verified positions; K must "
+                    f"satisfy K+1 <= MAX_VERIFY_BATCH_TOKENS)"
+                )
+            for tok in self.proposed_token_ids:
+                if isinstance(tok, bool) or not isinstance(tok, int):
+                    raise ChainRpcMalformedError(
+                        f"proposed_token_ids entries must be int, "
+                        f"got {type(tok).__name__}"
+                    )
+                if tok < 0:
+                    raise ChainRpcMalformedError(
+                        f"proposed_token_ids entries must be non-"
+                        f"negative, got {tok}"
+                    )
 
     def to_dict(self) -> Dict[str, Any]:
         # activation_blob → hex for JSON-safety. For streamed (v2)
@@ -751,6 +805,12 @@ class RunLayerSliceRequest:
         # signed bytes.
         if self.decode_mode != DecodeMode.PREFILL:
             out["decode_mode"] = self.decode_mode.value
+        # Phase 3.x.11.y — proposed_token_ids. Omit-when-None
+        # preserves byte-equivalence with pre-3.x.11.y signed
+        # bytes (proposed_token_ids is set only on VERIFY
+        # dispatches, which by definition didn't exist pre-3.x.11.y).
+        if self.proposed_token_ids is not None:
+            out["proposed_token_ids"] = list(self.proposed_token_ids)
         return out
 
     @classmethod
@@ -853,6 +913,25 @@ class RunLayerSliceRequest:
                 raise ChainRpcMalformedError(
                     f"decode_mode invalid: {exc}"
                 ) from exc
+        # Phase 3.x.11.y — proposed_token_ids. Default None when
+        # absent (preserves byte-equivalence with pre-3.x.11.y
+        # messages). When present, MUST be a list of non-negative
+        # ints (bool rejected via the inner type check).
+        proposed_raw = data.get("proposed_token_ids")
+        proposed_tuple: Optional[Tuple[int, ...]] = None
+        if proposed_raw is not None:
+            if not isinstance(proposed_raw, list):
+                raise ChainRpcMalformedError(
+                    f"proposed_token_ids must be list, got "
+                    f"{type(proposed_raw).__name__}"
+                )
+            for tok in proposed_raw:
+                if isinstance(tok, bool) or not isinstance(tok, int):
+                    raise ChainRpcMalformedError(
+                        f"proposed_token_ids entries must be int, "
+                        f"got {type(tok).__name__}"
+                    )
+            proposed_tuple = tuple(int(t) for t in proposed_raw)
         return cls(
             request_id=_required_str(data, "request_id"),
             model_id=_required_str(data, "model_id"),
@@ -869,6 +948,7 @@ class RunLayerSliceRequest:
             max_tokens=max_tokens_raw,
             temperature=temperature_raw,
             decode_mode=decode_mode,
+            proposed_token_ids=proposed_tuple,
             protocol_version=_required_int(data, "protocol_version"),
         )
 

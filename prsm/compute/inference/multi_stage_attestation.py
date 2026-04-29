@@ -362,12 +362,14 @@ class IterationAttestation:
     the last one".
 
     Fields:
-      iteration_index   0-based; 0 = PREFILL, 1+ = INCREMENTALs.
-                        Receivers can detect missing / out-of-order
-                        iterations.
-      decode_mode       The ``DecodeMode`` for this iteration. Must
-                        match ``iteration_index == 0 → PREFILL``;
-                        else INCREMENTAL.
+      iteration_index   0-based; 0 = PREFILL, 1+ = INCREMENTAL or
+                        VERIFY (Phase 3.x.11.y speculative
+                        decoding). Receivers can detect missing /
+                        out-of-order iterations.
+      decode_mode       The ``DecodeMode`` for this iteration.
+                        ``iteration_index == 0`` → PREFILL;
+                        subsequent iterations are INCREMENTAL
+                        (Phase 3.x.11) or VERIFY (Phase 3.x.11.y).
       stage_records     Per-stage attestations for this iteration.
                         Same shape as the existing single-iteration
                         envelope's ``StageAttestation[]``.
@@ -412,10 +414,14 @@ class IterationAttestation:
                 f"iteration_index=0 requires decode_mode=PREFILL, "
                 f"got {self.decode_mode.value!r}"
             )
-        if self.iteration_index > 0 and self.decode_mode != DecodeMode.INCREMENTAL:
+        if self.iteration_index > 0 and self.decode_mode not in (
+            DecodeMode.INCREMENTAL,
+            DecodeMode.VERIFY,
+        ):
             raise MultiStageMalformedError(
-                f"iteration_index>{0} requires decode_mode=INCREMENTAL, "
-                f"got {self.decode_mode.value!r}"
+                f"iteration_index>{0} requires decode_mode in "
+                f"{{INCREMENTAL, VERIFY}}, got "
+                f"{self.decode_mode.value!r}"
             )
 
     def to_dict(self) -> Dict[str, Any]:

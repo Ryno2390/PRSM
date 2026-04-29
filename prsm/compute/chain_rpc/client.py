@@ -51,7 +51,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Callable, Iterable, Iterator, List, Optional, Protocol, Tuple, Union
+from typing import Any, Callable, Iterable, Iterator, List, Optional, Protocol, Tuple, Union
 
 import numpy as np
 
@@ -66,6 +66,7 @@ from prsm.compute.chain_rpc.activation_codec import (
     should_chunk,
 )
 from prsm.compute.chain_rpc.protocol import (
+    MAX_VERIFY_BATCH_TOKENS,
     ActivationChunk,
     ChainRpcMalformedError,
     ChainRpcProtocolError,
@@ -75,6 +76,8 @@ from prsm.compute.chain_rpc.protocol import (
     EvictCacheRequest,
     EvictCacheResponse,
     HandoffToken,
+    RollbackCacheRequest,
+    RollbackCacheResponse,
     RunLayerSliceRequest,
     RunLayerSliceResponse,
     StageError,
@@ -335,6 +338,21 @@ class RpcChainExecutor:
         tokenizer: Optional[object] = None,
         cache_evict_send_message: Optional[SendMessage] = None,
         sharded_default_max_tokens: int = 512,
+        # ── Phase 3.x.11.y speculative-decoding opt-in ─────────────────
+        # When ``draft_model`` is wired, the executor's sharded-
+        # decode streaming path branches to the speculative loop:
+        # draft.propose → chain VERIFY → accept → rollback → emit.
+        # When None (default), behaves exactly as Phase 3.x.11
+        # single-token decode (greedy-equivalent output).
+        # ``speculation_depth`` is the K in K+1 (the count of draft
+        # tokens proposed per round); the chain forwards K+1 with
+        # the parent. Cap at MAX_VERIFY_BATCH_TOKENS - 1 so the
+        # K+1 batch fits the response-side cap. Greedy-only at v1
+        # — temperature > 0 raises (Leviathan-2023 sampling-correct
+        # speculation deferred to Phase 3.x.11.y.x).
+        draft_model: Optional[Any] = None,
+        speculation_depth: int = 4,
+        rollback_cache_send_message: Optional[SendMessage] = None,
     ) -> None:
         if settler_identity is None or not hasattr(settler_identity, "node_id"):
             raise RuntimeError(
@@ -428,6 +446,44 @@ class RpcChainExecutor:
                 f"sharded_default_max_tokens must be positive int, "
                 f"got {sharded_default_max_tokens!r}"
             )
+        # Phase 3.x.11.y — speculative-decoding validation.
+        if draft_model is not None:
+            if not enable_sharded_decode:
+                raise RuntimeError(
+                    "RpcChainExecutor: draft_model= requires "
+                    "enable_sharded_decode=True (speculation is a "
+                    "sharded-decode optimization)"
+                )
+            for attr in ("reset", "propose", "commit", "evict"):
+                if not callable(getattr(draft_model, attr, None)):
+                    raise RuntimeError(
+                        f"RpcChainExecutor: draft_model must "
+                        f"implement {attr}(...) per DraftModel "
+                        f"Protocol — see prsm.compute.inference.draft_model"
+                    )
+        if (
+            isinstance(speculation_depth, bool)
+            or not isinstance(speculation_depth, int)
+            or speculation_depth <= 0
+        ):
+            raise ValueError(
+                f"speculation_depth must be positive int, got "
+                f"{speculation_depth!r}"
+            )
+        if speculation_depth >= MAX_VERIFY_BATCH_TOKENS:
+            raise ValueError(
+                f"speculation_depth {speculation_depth} exceeds K cap "
+                f"{MAX_VERIFY_BATCH_TOKENS - 1} (K drafts produce K+1 "
+                f"verified positions; K must satisfy K+1 <= "
+                f"{MAX_VERIFY_BATCH_TOKENS})"
+            )
+        if rollback_cache_send_message is not None and not callable(
+            rollback_cache_send_message,
+        ):
+            raise RuntimeError(
+                "RpcChainExecutor: rollback_cache_send_message must "
+                "be callable if provided"
+            )
 
         self._settler = settler_identity
         self._send = send_message
@@ -446,6 +502,9 @@ class RpcChainExecutor:
         self._tokenizer = tokenizer
         self._cache_evict_send = cache_evict_send_message
         self._sharded_default_max_tokens = int(sharded_default_max_tokens)
+        self._draft_model = draft_model
+        self._speculation_depth = int(speculation_depth)
+        self._rollback_cache_send = rollback_cache_send_message
 
     # ── ChainExecutor Protocol ────────────────────────────────────────
 
@@ -623,11 +682,18 @@ class RpcChainExecutor:
         # Phase 3.x.11 sharded-decode branch — per-token chain
         # redispatch with KV-cache handoff. Skips the
         # token_stream_send_message wire entirely (sharded uses
-        # only unary dispatches).
+        # only unary dispatches). Phase 3.x.11.y: when
+        # ``draft_model`` is wired, branch further into the
+        # speculative-decoding loop (chain VERIFY + rollback).
         if self._enable_sharded_decode:
-            yield from self._execute_chain_streaming_sharded(
-                request=request, chain=chain,
-            )
+            if self._draft_model is not None:
+                yield from self._execute_chain_streaming_sharded_speculative(
+                    request=request, chain=chain,
+                )
+            else:
+                yield from self._execute_chain_streaming_sharded(
+                    request=request, chain=chain,
+                )
             return
         if self._token_stream_send is None:
             raise ChainExecutionError(
@@ -926,6 +992,447 @@ class RpcChainExecutor:
         next_token_id = int(last_response.next_token_id)
         is_terminal = bool(last_response.is_terminal)
         return next_token_id, is_terminal, outcomes
+
+    # ── Phase 3.x.11.y speculative-decoding path ─────────────────────
+
+    def _execute_chain_streaming_sharded_speculative(
+        self,
+        *,
+        request: InferenceRequest,
+        chain: GPUChain,
+    ) -> Iterator[Union[StreamToken, ChainExecutionResult]]:
+        """Speculative-decoding sharded streaming. Same shape as
+        ``_execute_chain_streaming_sharded`` (PREFILL → loop →
+        terminal receipt) but the loop dispatches VERIFY rounds
+        instead of single-token INCREMENTALs.
+
+        Per VERIFY round (cost = T network round-trips for
+        accepted_count + 1 emitted tokens):
+          1. ``draft.propose(parent=last_emitted, k=K)`` — draft
+             model produces K candidate tokens.
+          2. Dispatch ``decode_mode=VERIFY`` with input
+             ``[parent, d_1, ..., d_K]`` to Stage 1; intermediate
+             stages forward batched K+1 hidden states; tail
+             returns ``verified_token_ids`` (K+1 argmaxes) +
+             ``accepted_count`` (longest matching prefix).
+          3. Emit ``verified[: accepted_count + 1]`` —
+             accepted_count + 1 tokens (last is verifier's
+             correction or bonus).
+          4. ``draft.commit(accepted_token_ids=emitted)`` — draft
+             rolls its state forward.
+          5. If ``accepted_count < K``: broadcast
+             ``RollbackCacheRequest(K - accepted_count)`` to all
+             chain stages (drop the speculatively-cached-but-
+             rejected suffix).
+          6. Continue with last emitted token as next parent.
+
+        v1 honest scope (mirrors design plan §3.6):
+          - **Greedy-only.** Speculation correctness under
+            ``temperature > 0`` requires the Leviathan-2023
+            sampling-correction; v1 raises if the request
+            specifies positive temperature. Sampling-correct
+            speculation is Phase 3.x.11.y.x.
+          - **Output equivalence with non-speculative greedy.**
+            For ``temperature == 0``, the emitted token sequence
+            is bit-identical to Phase 3.x.11 single-token
+            INCREMENTAL decode against the same chain. Speculation
+            is a perf optimization, not a sampling change.
+          - **Per-iteration accept-rate timing surface.**
+            ``accepted_count`` is observable on the wire — the
+            operator/network observer learns the acceptance-rate
+            distribution. Tier C remains structurally denied for
+            sharded decode (Phase 3.x.11.q deferred).
+        """
+        # Greedy-only at v1. Surface as PROMPT_ENCODE_ERROR — the
+        # request shape is rejected at the executor boundary
+        # before any stage dispatch (closest existing code; full
+        # MALFORMED_REQUEST is a follow-up enum addition if other
+        # client-side validations land).
+        request_temp = getattr(request, "temperature", None)
+        if request_temp is not None and float(request_temp) != 0.0:
+            raise ChainExecutionError(
+                stage_index=-1,
+                stage_node_id="",
+                code=ExecutorErrorCode.PROMPT_ENCODE_ERROR,
+                message=(
+                    f"speculative decoding (Phase 3.x.11.y) is greedy-"
+                    f"only at v1; request.temperature must be 0.0 "
+                    f"or unset, got {request_temp}. Sampling-correct "
+                    f"speculation under temperature > 0 requires the "
+                    f"Leviathan-2023 rejection-sampling correction "
+                    f"(deferred to Phase 3.x.11.y.x)."
+                ),
+            )
+
+        # Encode prompt → input_ids (same as non-speculative path).
+        try:
+            initial_input_ids = self._tokenizer.encode(request.prompt)
+        except Exception as exc:  # noqa: BLE001
+            raise ChainExecutionError(
+                stage_index=-1,
+                stage_node_id="",
+                code=ExecutorErrorCode.PROMPT_ENCODE_ERROR,
+                message=(
+                    f"tokenizer.encode raised: "
+                    f"{exc.__class__.__name__}: {exc}"
+                ),
+            ) from exc
+        if not isinstance(initial_input_ids, list) or not initial_input_ids:
+            raise ChainExecutionError(
+                stage_index=-1,
+                stage_node_id="",
+                code=ExecutorErrorCode.PROMPT_ENCODE_ERROR,
+                message=(
+                    f"tokenizer.encode must return a non-empty list of "
+                    f"int token ids; got "
+                    f"{type(initial_input_ids).__name__}"
+                ),
+            )
+
+        deadline_unix = self._clock() + self._default_deadline_seconds
+        per_iteration_outcomes: List[List[StageOutcome]] = []
+        per_iteration_decode_modes: List[DecodeMode] = []
+        output_text_parts: List[str] = []
+        max_tokens = (
+            int(getattr(request, "max_tokens", None) or 0)
+            or self._sharded_default_max_tokens
+        )
+        k = self._speculation_depth
+
+        # Initialize draft model BEFORE PREFILL dispatch. Caller
+        # cancellation between PREFILL and the first yield is rare
+        # but real (transport stall, deadline elapse): doing reset
+        # up-front means the finally-block draft.evict always has
+        # state to clean up. Mirrors the chain-side cache: the
+        # server allocates on PREFILL receipt; the draft is the
+        # client-side mirror of that.
+        self._draft_model.reset(
+            request_id=request.request_id,
+            prompt_input_ids=initial_input_ids,
+        )
+        draft_reset_done = True
+        try:
+            # Step 1: PREFILL pass — produces token #1.
+            next_token_id, is_terminal, prefill_outcomes = (
+                self._run_chain_iteration_sharded(
+                    request=request,
+                    chain=chain,
+                    decode_mode=DecodeMode.PREFILL,
+                    input_ids=initial_input_ids,
+                    deadline_unix=deadline_unix,
+                )
+            )
+            per_iteration_outcomes.append(prefill_outcomes)
+            per_iteration_decode_modes.append(DecodeMode.PREFILL)
+            text_delta = self._decode_token_to_text(next_token_id)
+            output_text_parts.append(text_delta)
+            yield StreamToken(
+                sequence_index=0,
+                text_delta=text_delta,
+                token_id=next_token_id,
+                finish_reason=("stop" if is_terminal else None),
+            )
+            tokens_emitted = 1
+
+            # Step 2: speculative VERIFY loop.
+            while not is_terminal and tokens_emitted < max_tokens:
+                # Step 2a: draft proposes K tokens.
+                proposed = self._draft_model.propose(
+                    request_id=request.request_id,
+                    parent_token_id=next_token_id,
+                    k=k,
+                    temperature=0.0,
+                )
+                if not isinstance(proposed, list) or not proposed:
+                    raise ChainExecutionError(
+                        stage_index=-1,
+                        stage_node_id="",
+                        code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                        message=(
+                            f"draft_model.propose returned "
+                            f"{type(proposed).__name__}; expected "
+                            f"non-empty list of int token ids"
+                        ),
+                    )
+                # Step 2b: chain VERIFY.
+                (
+                    verified,
+                    accepted_count,
+                    chain_terminal,
+                    verify_outcomes,
+                ) = self._run_chain_iteration_sharded_verify(
+                    request=request,
+                    chain=chain,
+                    parent_token_id=next_token_id,
+                    proposed_token_ids=proposed,
+                    deadline_unix=deadline_unix,
+                )
+                per_iteration_outcomes.append(verify_outcomes)
+                per_iteration_decode_modes.append(DecodeMode.VERIFY)
+
+                # Step 2c: emit accepted_count + 1 tokens. Cap
+                # against max_tokens — if we'd overshoot, truncate
+                # the emit + flag terminal; the rollback below
+                # accounts for the truncation.
+                emitted = list(verified[: accepted_count + 1])
+                cap_hit_mid_emit = False
+                if tokens_emitted + len(emitted) >= max_tokens:
+                    emitted = emitted[: max_tokens - tokens_emitted]
+                    cap_hit_mid_emit = True
+                for tok in emitted:
+                    text_delta = self._decode_token_to_text(tok)
+                    output_text_parts.append(text_delta)
+                    finish = None
+                    if (
+                        chain_terminal
+                        and tok == emitted[-1]
+                    ):
+                        finish = "stop"
+                    elif (
+                        cap_hit_mid_emit
+                        and tok == emitted[-1]
+                    ):
+                        finish = "max_tokens"
+                    yield StreamToken(
+                        sequence_index=tokens_emitted,
+                        text_delta=text_delta,
+                        token_id=int(tok),
+                        finish_reason=finish,
+                    )
+                    tokens_emitted += 1
+
+                # Step 2d: draft.commit on the actually-emitted
+                # tokens (handles the cap_hit_mid_emit truncation
+                # case correctly — draft history reflects what
+                # the user actually saw).
+                if emitted:
+                    self._draft_model.commit(
+                        request_id=request.request_id,
+                        accepted_token_ids=[int(t) for t in emitted],
+                    )
+
+                # Step 2e: rollback the rejected suffix on every
+                # chain stage. ``cached_extra`` is the count of
+                # K+1 verified positions that were cached but
+                # NOT actually emitted. cap_hit_mid_emit case:
+                # we emitted FEWER than accepted_count + 1, so the
+                # extra-cached count grows.
+                cached_extra = (
+                    len(verified) - len(emitted)
+                )
+                if cached_extra > 0:
+                    self._rollback_cache_on_stages(
+                        chain=chain,
+                        request_id=request.request_id,
+                        n_positions_to_drop=cached_extra,
+                    )
+
+                # Step 2f: terminal logic. Chain reports terminal
+                # iff EOS in emitted OR tokens_generated reached
+                # max_tokens server-side. We also enforce the
+                # client-side cap.
+                if cap_hit_mid_emit or tokens_emitted >= max_tokens:
+                    is_terminal = True
+                elif chain_terminal:
+                    is_terminal = True
+                else:
+                    # Continue speculation with the LAST emitted
+                    # token as parent (= verified[accepted_count]
+                    # in the no-cap case; = the truncated last in
+                    # cap_hit case but cap_hit terminates anyway).
+                    next_token_id = int(emitted[-1])
+
+            # Step 3: emit ChainExecutionResult.
+            yield self._build_sharded_chain_result(
+                output_text="".join(output_text_parts),
+                per_iteration_outcomes=per_iteration_outcomes,
+                per_iteration_decode_modes=per_iteration_decode_modes,
+            )
+        finally:
+            # Eviction on every exit path — terminal, cancellation,
+            # exception. Best-effort (server-side TTL bounds the
+            # leak window if broadcast misses).
+            if draft_reset_done:
+                try:
+                    self._draft_model.evict(
+                        request_id=request.request_id,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "RpcChainExecutor: draft_model.evict raised "
+                        "%s: %s — proceeding with chain eviction",
+                        exc.__class__.__name__, exc,
+                    )
+            self._evict_cache_on_stages(
+                chain=chain, request_id=request.request_id,
+            )
+
+    def _run_chain_iteration_sharded_verify(
+        self,
+        *,
+        request: InferenceRequest,
+        chain: GPUChain,
+        parent_token_id: int,
+        proposed_token_ids: List[int],
+        deadline_unix: float,
+    ) -> Tuple[Tuple[int, ...], int, bool, List[StageOutcome]]:
+        """One VERIFY pass through the chain.
+
+        Stage 1 input is ``[parent_token_id, d_1, ..., d_K]`` — K+1
+        token ids encoded as ``np.int64``. Intermediate stages
+        forward the K+1 batch of hidden states. Tail returns
+        ``verified_token_ids`` (K+1 argmaxes) + ``accepted_count``
+        (longest-prefix match) + ``next_token_id`` (last emitted)
+        + ``is_terminal``.
+
+        Returns
+        ``(verified_token_ids, accepted_count, is_terminal,
+        per_stage_outcomes)``. Tail must populate
+        ``verified_token_ids`` + ``accepted_count`` —
+        ``MALFORMED_RESPONSE`` if absent (server-side runner
+        wasn't VERIFY-tail-capable).
+        """
+        chain_total = len(chain.stages)
+        outcomes: List[StageOutcome] = []
+        # Stage 1 input: K+1 token ids as np.int64. Server
+        # adapter detects "dtype=int64 + decode_mode=VERIFY"
+        # and routes to the token-embedding path before the
+        # batched K+1 forward.
+        verify_input_ids = [int(parent_token_id)] + [
+            int(t) for t in proposed_token_ids
+        ]
+        activation = np.array(verify_input_ids, dtype=np.int64)
+        proposed_tuple: Tuple[int, ...] = tuple(
+            int(t) for t in proposed_token_ids
+        )
+        last_response: Optional[RunLayerSliceResponse] = None
+
+        for stage_index in range(chain_total):
+            stage_node_id = chain.stages[stage_index]
+            layer_range = tuple(chain.layer_ranges[stage_index])
+            response, activation = self._dispatch_stage(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                layer_range=layer_range,
+                activation=activation,
+                request=request,
+                chain_total=chain_total,
+                deadline_unix=deadline_unix,
+                decode_mode=DecodeMode.VERIFY,
+                include_sampling_fields=True,
+                proposed_token_ids=proposed_tuple,
+            )
+            outcomes.append(StageOutcome(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                duration_seconds=response.duration_seconds,
+                tee_attestation=response.tee_attestation,
+                tee_type=response.tee_type,
+                epsilon_spent=response.epsilon_spent,
+            ))
+            last_response = response
+
+        if (
+            last_response is None
+            or last_response.verified_token_ids is None
+            or last_response.accepted_count is None
+        ):
+            tail_node = chain.stages[-1]
+            raise ChainExecutionError(
+                stage_index=chain_total - 1,
+                stage_node_id=tail_node,
+                code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                message=(
+                    f"sharded VERIFY: tail stage {tail_node!r} "
+                    f"returned response without "
+                    f"verified_token_ids/accepted_count; server-"
+                    f"side runner must be VERIFY-tail-capable "
+                    f"(see ShardedAutoregressiveRunner forward_verify "
+                    f"+ apply_lm_head_and_sample_batch)"
+                ),
+            )
+        verified = tuple(int(t) for t in last_response.verified_token_ids)
+        if len(verified) != len(proposed_token_ids) + 1:
+            tail_node = chain.stages[-1]
+            raise ChainExecutionError(
+                stage_index=chain_total - 1,
+                stage_node_id=tail_node,
+                code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                message=(
+                    f"sharded VERIFY: tail returned "
+                    f"{len(verified)} verified tokens but expected "
+                    f"K+1={len(proposed_token_ids) + 1}"
+                ),
+            )
+        accepted_count = int(last_response.accepted_count)
+        is_terminal = bool(last_response.is_terminal)
+        return verified, accepted_count, is_terminal, outcomes
+
+    def _rollback_cache_on_stages(
+        self,
+        *,
+        chain: GPUChain,
+        request_id: str,
+        n_positions_to_drop: int,
+    ) -> None:
+        """Best-effort RollbackCacheRequest broadcast. Encodes a
+        ``RollbackCacheRequest`` and sends it via
+        ``rollback_cache_send_message`` to every chain stage.
+        Server-side handler routes to ``KVCacheManager.rollback``
+        (Phase 3.x.11.y Task 6).
+
+        Never raises — rollback is best-effort by design (server-
+        side TTL sweeper bounds the leak window if a broadcast
+        misses; the manager is idempotent so duplicate broadcasts
+        from retried close paths are safe).
+        """
+        if self._rollback_cache_send is None or n_positions_to_drop <= 0:
+            return
+        try:
+            rollback_bytes = encode_message(
+                RollbackCacheRequest(
+                    request_id=request_id,
+                    n_positions_to_drop=int(n_positions_to_drop),
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "RpcChainExecutor: failed to encode "
+                "RollbackCacheRequest for request_id=%r: %s: %s — "
+                "relying on server-side TTL sweeper",
+                request_id, exc.__class__.__name__, exc,
+            )
+            return
+        for stage_node_id in chain.stages:
+            try:
+                address = self._resolve_address(stage_node_id)
+                response_bytes = self._rollback_cache_send(
+                    address, rollback_bytes,
+                )
+                if response_bytes:
+                    try:
+                        ack = parse_message(response_bytes)
+                        if not isinstance(ack, RollbackCacheResponse):
+                            logger.warning(
+                                "RpcChainExecutor: stage_node_id=%r "
+                                "returned non-RollbackCacheResponse "
+                                "to rollback broadcast (%s) — TTL "
+                                "sweeper will close the gap",
+                                stage_node_id, type(ack).__name__,
+                            )
+                    except ChainRpcProtocolError as exc:
+                        logger.warning(
+                            "RpcChainExecutor: stage_node_id=%r "
+                            "rollback ack failed to parse: %s",
+                            stage_node_id, exc,
+                        )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "RpcChainExecutor: rollback broadcast to "
+                    "stage_node_id=%r raised %s: %s — relying on "
+                    "server-side TTL sweeper",
+                    stage_node_id, exc.__class__.__name__, exc,
+                )
 
     def _build_sharded_chain_result(
         self,
@@ -1484,6 +1991,7 @@ class RpcChainExecutor:
         deadline_unix: float,
         decode_mode: DecodeMode = DecodeMode.PREFILL,
         include_sampling_fields: bool = False,
+        proposed_token_ids: Optional[Tuple[int, ...]] = None,
     ) -> Tuple[RunLayerSliceResponse, np.ndarray]:
         """Mint token → encode request → send → parse + verify response
         → decode output activation.
@@ -1570,6 +2078,7 @@ class RpcChainExecutor:
             dtype_str=dtype_str,
             decode_mode=decode_mode,
             include_sampling_fields=include_sampling_fields,
+            proposed_token_ids=proposed_token_ids,
         )
 
     # ── inline path ──────────────────────────────────────────────────
@@ -1588,6 +2097,7 @@ class RpcChainExecutor:
         dtype_str: str,
         decode_mode: DecodeMode = DecodeMode.PREFILL,
         include_sampling_fields: bool = False,
+        proposed_token_ids: Optional[Tuple[int, ...]] = None,
     ) -> Tuple[RunLayerSliceResponse, np.ndarray]:
         """v1 inline path: activation rides hex-encoded inside the JSON
         envelope; response activation rides the same way.
@@ -1599,6 +2109,11 @@ class RpcChainExecutor:
         Phase 3.x.10.x non-streaming-tail invariant (unary requests
         keep max_tokens/temperature absent on the wire — matches
         the existing TestStreamingSamplingPropagation pin).
+
+        ``proposed_token_ids`` (Phase 3.x.11.y) carries K draft
+        tokens on VERIFY dispatches. None on non-VERIFY paths
+        (the wire field omits-when-None to preserve byte-
+        equivalence with pre-3.x.11.y signed bytes).
         """
         max_tokens = (
             getattr(request, "max_tokens", None)
@@ -1622,6 +2137,7 @@ class RpcChainExecutor:
             decode_mode=decode_mode,
             max_tokens=max_tokens,
             temperature=temperature,
+            proposed_token_ids=proposed_token_ids,
         )
         request_bytes = encode_message(wire_request)
 

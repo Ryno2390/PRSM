@@ -823,6 +823,16 @@ class LayerStageServer:
                 decode_mode=request.decode_mode,
                 is_final_stage=is_final_stage,
                 request=request,
+                # Phase 3.x.11.y — pass proposed_token_ids through
+                # to the runner. None on non-VERIFY dispatches; on
+                # VERIFY, carries the K draft tokens the executor's
+                # speculation loop produced. Tail uses them to
+                # compute accepted_count.
+                proposed_token_ids=(
+                    list(request.proposed_token_ids)
+                    if request.proposed_token_ids is not None
+                    else None
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
@@ -830,10 +840,13 @@ class LayerStageServer:
                 "for request_id=%r",
                 request.request_id,
             )
-            # Map MalformedCacheStateError to MALFORMED_REQUEST so
-            # the executor can distinguish "your INCREMENTAL has no
-            # PREFILL" from "internal model crash".
-            if exc.__class__.__name__ == "MalformedCacheStateError":
+            # Map MalformedCacheStateError + MissingVerifyCapabilityError
+            # to MALFORMED_REQUEST so the executor can distinguish
+            # caller bug from internal crash.
+            if exc.__class__.__name__ in (
+                "MalformedCacheStateError",
+                "MissingVerifyCapabilityError",
+            ):
                 return self._error(
                     request.request_id,
                     StageErrorCode.MALFORMED_REQUEST,
@@ -865,6 +878,12 @@ class LayerStageServer:
         # Python process); the response's tee_attestation is the
         # stage's local attestation bytes.
         tee_attestation = self._tee_runtime.get_attestation_bytes()
+        # Phase 3.x.11.y — propagate VERIFY tail signals through the
+        # signed response. The runner's LayerSliceResult carries
+        # ``verified_token_ids`` + ``accepted_count`` only on tail
+        # VERIFY dispatches; non-tail / non-VERIFY paths leave them
+        # None and the response signing payload omits-when-default
+        # (preserves byte-equivalence with pre-3.x.11.y signed bytes).
         response = RunLayerSliceResponse.sign(
             identity=self._identity,
             request_id=request.request_id,
@@ -877,6 +896,8 @@ class LayerStageServer:
             epsilon_spent=0.0,
             next_token_id=result.next_token_id,
             is_terminal=result.is_terminal,
+            verified_token_ids=getattr(result, "verified_token_ids", None),
+            accepted_count=getattr(result, "accepted_count", None),
         )
         return encode_message(response)
 
