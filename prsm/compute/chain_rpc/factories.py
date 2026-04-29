@@ -192,6 +192,9 @@ def make_layer_stage_server(
     clock: Optional[Callable[[], float]] = None,
     chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
     streaming_runner: Optional[Any] = None,
+    tier_c_streaming_decorator: Optional[
+        Callable[[Any], Any]
+    ] = None,
 ) -> LayerStageServer:
     """Build a ``LayerStageServer`` for a node hosting one or more
     chain stages.
@@ -242,4 +245,6 @@ def make_layer_stage_server(
         kwargs["clock"] = clock
     if streaming_runner is not None:
         kwargs["streaming_runner"] = streaming_runner
+    if tier_c_streaming_decorator is not None:
+        kwargs["tier_c_streaming_decorator"] = tier_c_streaming_decorator
     return LayerStageServer(**kwargs)

@@ -241,6 +241,9 @@ class LayerStageServer:
         chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
         max_streamed_payload_bytes: int = DEFAULT_MAX_STREAMED_PAYLOAD_BYTES,
         streaming_runner: Optional[Any] = None,
+        tier_c_streaming_decorator: Optional[
+            Callable[[Any], Any]
+        ] = None,
     ) -> None:
         if identity is None or not hasattr(identity, "node_id"):
             raise RuntimeError(
@@ -284,6 +287,29 @@ class LayerStageServer:
                 "LayerStageServer: streaming_runner must expose "
                 ".run_layer_slice_streaming(...) if provided"
             )
+        # Phase 3.x.10.y Task 4: tier_c_streaming_decorator is
+        # operator-supplied callable that wraps the streaming
+        # runner per-request when the request is Tier C content.
+        # When set, it MUST be callable; we can't fully validate
+        # what it returns at construction (decorator may close
+        # over operator state and only fail when invoked), but
+        # the per-dispatch wrap result IS validated structurally
+        # (must expose ``run_layer_slice_streaming``) before
+        # invocation.
+        # When unset + Tier C streaming dispatch arrives, the
+        # token-stream handler rejects with INTERNAL_ERROR
+        # ("Tier C streaming requires constant-time padding
+        # decorator") — operators must opt in to Tier C
+        # streaming explicitly per the timing-sidechannel memo
+        # §6 default-deny invariant.
+        if (
+            tier_c_streaming_decorator is not None
+            and not callable(tier_c_streaming_decorator)
+        ):
+            raise RuntimeError(
+                "LayerStageServer: tier_c_streaming_decorator must "
+                "be callable if provided"
+            )
 
         self._identity = identity
         self._registry = registry
@@ -294,6 +320,7 @@ class LayerStageServer:
         self._chunk_bytes = int(chunk_bytes)
         self._max_streamed_payload_bytes = int(max_streamed_payload_bytes)
         self._streaming_runner = streaming_runner
+        self._tier_c_streaming_decorator = tier_c_streaming_decorator
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -847,9 +874,58 @@ class LayerStageServer:
             max_tokens=request.max_tokens,
             temperature=request.temperature,
         )
+
+        # Phase 3.x.10.y Task 4 — Tier C dispatch-layer gate.
+        # Tier C content (encrypted/private inference) requires
+        # constant-time padding to mask the per-token
+        # inter-token-latency side-channel characterized in the
+        # timing-sidechannel memo. Default-deny: a Tier C
+        # streaming request without ``tier_c_streaming_decorator``
+        # configured rejects with INTERNAL_ERROR rather than
+        # silently leaking timing. Operators opt in by passing a
+        # decorator (typically ``BatchedTrailingStreamingRunner``
+        # or ``FixedRateStreamingRunner``) at server construction.
+        from prsm.compute.inference.models import ContentTier
+        active_runner = self._streaming_runner
+        if request.content_tier == ContentTier.C:
+            if self._tier_c_streaming_decorator is None:
+                yield self._error(
+                    request.request_id,
+                    StageErrorCode.INTERNAL_ERROR,
+                    "Tier C streaming requires constant-time "
+                    "padding decorator (tier_c_streaming_decorator "
+                    "not configured at server construction)",
+                )
+                return
+            try:
+                active_runner = self._tier_c_streaming_decorator(
+                    self._streaming_runner,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "LayerStageServer: tier_c_streaming_decorator "
+                    "raised during Tier C wrap for request_id=%r",
+                    request.request_id,
+                )
+                yield self._error(
+                    request.request_id,
+                    StageErrorCode.INTERNAL_ERROR,
+                    f"tier_c_streaming_decorator failure: "
+                    f"{exc.__class__.__name__}",
+                )
+                return
+            if not hasattr(active_runner, "run_layer_slice_streaming"):
+                yield self._error(
+                    request.request_id,
+                    StageErrorCode.INTERNAL_ERROR,
+                    "tier_c_streaming_decorator returned an object "
+                    "without .run_layer_slice_streaming",
+                )
+                return
+
         chunk_iter = None
         try:
-            chunk_iter = self._streaming_runner.run_layer_slice_streaming(
+            chunk_iter = active_runner.run_layer_slice_streaming(
                 model=model,
                 layer_range=request.layer_range,
                 activation=activation,

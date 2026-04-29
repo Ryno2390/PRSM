@@ -600,3 +600,301 @@ class TestSamplingShimBackCompatWithRunnerProtocol:
         joined = "".join(t.text_delta for t in tokens)
         assert joined == "hello synthetic world"
         assert final.response.activation_blob == joined.encode("utf-8")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.10.y Task 4 — Tier C dispatch-layer gate
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _build_server_with_tier_c_decorator(
+    *, emit_ids: List[int], id_to_piece: Dict[int, str],
+    tier_c_streaming_decorator=None,
+) -> Tuple[LayerStageServer, Any, Any]:
+    """Same as ``_build_server`` but with optional
+    tier_c_streaming_decorator. Used for the Tier C dispatch-gate
+    tests below."""
+    stage_identity = generate_node_identity(display_name="stage")
+    settler_identity = generate_node_identity(display_name="settler")
+    anchor = _Anchor()
+    anchor.register(stage_identity)
+    anchor.register(settler_identity)
+    registry = _Registry()
+    registry.models["test-model"] = _Model.linear_chain("test-model")
+
+    tok = _FakeTokenizer(id_to_piece=id_to_piece, eos_token_id=None)
+    mdl = _FakeModel(emit_ids=emit_ids)
+    streaming_runner = AutoregressiveStreamingRunner(
+        model=mdl,
+        tokenizer=tok,
+        tee_attestation=b"\x09" * 32,
+        tee_type=TEEType.SOFTWARE,
+        sampling_defaults=SamplingDefaults(max_tokens=16),
+        prompt_provider=lambda lr, act, pt: "fixed-prompt",
+    )
+
+    kwargs: Dict[str, Any] = dict(
+        identity=stage_identity,
+        registry=registry,
+        runner=_UnaryRunner(),
+        tee_runtime=_TEERuntime(),
+        anchor=anchor,
+        clock=lambda: 1000.0,
+        streaming_runner=streaming_runner,
+    )
+    if tier_c_streaming_decorator is not None:
+        kwargs["tier_c_streaming_decorator"] = (
+            tier_c_streaming_decorator
+        )
+    server = LayerStageServer(**kwargs)
+    return server, settler_identity, stage_identity
+
+
+def _make_streaming_request_tier(
+    *, settler_identity, content_tier: ContentTier,
+) -> RunLayerSliceRequest:
+    activation = np.array([[1.0, 2.0, 3.0, 4.0]], dtype=np.float32)
+    blob = activation.tobytes()
+    deadline = 2000.0
+    token = HandoffToken.sign(
+        identity=settler_identity,
+        request_id="req-tier-1",
+        chain_stage_index=0,
+        chain_total_stages=2,
+        deadline_unix=deadline,
+    )
+    return RunLayerSliceRequest(
+        request_id="req-tier-1",
+        model_id="test-model",
+        layer_range=(0, 4),
+        privacy_tier=PrivacyLevel.NONE,
+        content_tier=content_tier,
+        activation_blob=blob,
+        activation_shape=tuple(activation.shape),
+        activation_dtype=str(activation.dtype),
+        upstream_token=token,
+        deadline_unix=deadline,
+        streaming=True,
+    )
+
+
+class TestTierCDispatchGate:
+    def test_tier_a_unchanged_no_decorator_required(self):
+        # Tier A streaming request — server invokes the
+        # streaming_runner directly without any decorator wrap.
+        # Pre-3.x.10.y back-compat preserved.
+        server, settler_identity, _ = (
+            _build_server_with_tier_c_decorator(
+                emit_ids=[1, 2, 3],
+                id_to_piece={1: "a", 2: "b", 3: "c"},
+                tier_c_streaming_decorator=None,
+            )
+        )
+        req = _make_streaming_request_tier(
+            settler_identity=settler_identity,
+            content_tier=ContentTier.A,
+        )
+        tokens, final, err = _decode(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is None
+        assert final is not None
+        assert "".join(t.text_delta for t in tokens) == "abc"
+
+    def test_tier_b_unchanged_no_decorator_required(self):
+        server, settler_identity, _ = (
+            _build_server_with_tier_c_decorator(
+                emit_ids=[1, 2, 3],
+                id_to_piece={1: "a", 2: "b", 3: "c"},
+                tier_c_streaming_decorator=None,
+            )
+        )
+        req = _make_streaming_request_tier(
+            settler_identity=settler_identity,
+            content_tier=ContentTier.B,
+        )
+        tokens, final, err = _decode(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is None
+        assert final is not None
+        assert "".join(t.text_delta for t in tokens) == "abc"
+
+    def test_tier_c_without_decorator_rejects_internal_error(self):
+        # Default-deny: Tier C streaming with no decorator
+        # configured rejects with INTERNAL_ERROR. The
+        # timing-sidechannel memo's M1/M2 mitigation is required
+        # before the timing leak is acceptable for Tier C.
+        server, settler_identity, _ = (
+            _build_server_with_tier_c_decorator(
+                emit_ids=[1, 2, 3],
+                id_to_piece={1: "a", 2: "b", 3: "c"},
+                tier_c_streaming_decorator=None,
+            )
+        )
+        req = _make_streaming_request_tier(
+            settler_identity=settler_identity,
+            content_tier=ContentTier.C,
+        )
+        tokens, final, err = _decode(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is not None
+        assert err.code == "INTERNAL_ERROR"
+        assert "Tier C streaming requires" in err.message
+        assert final is None
+        assert tokens == []
+
+    def test_tier_c_with_decorator_applies_it(self):
+        # When the decorator is configured, the server wraps the
+        # streaming runner per-request before invocation. Use
+        # M2 (BatchedTrailingStreamingRunner) which collapses
+        # the inner stream into a single wire frame — easy to
+        # observe.
+        from prsm.compute.inference import (
+            BatchedTrailingStreamingRunner,
+        )
+
+        wrap_calls: List[Any] = []
+
+        def make_decorator(inner):
+            wrap_calls.append(inner)
+            return BatchedTrailingStreamingRunner(inner)
+
+        server, settler_identity, _ = (
+            _build_server_with_tier_c_decorator(
+                emit_ids=[1, 2, 3],
+                id_to_piece={1: "a", 2: "b", 3: "c"},
+                tier_c_streaming_decorator=make_decorator,
+            )
+        )
+        req = _make_streaming_request_tier(
+            settler_identity=settler_identity,
+            content_tier=ContentTier.C,
+        )
+        tokens, final, err = _decode(
+            server.handle_token_stream(encode_message(req))
+        )
+        # Decorator was invoked exactly once with the
+        # streaming_runner as the wrap target.
+        assert len(wrap_calls) == 1
+        assert wrap_calls[0] is server._streaming_runner  # noqa: SLF001
+        # M2 collapses to single wire frame — proves the
+        # decorator's wrap took effect (without it, the inner
+        # autoregressive runner would have emitted ≥1 per-token
+        # frames).
+        assert err is None
+        assert final is not None
+        assert len(tokens) == 1
+
+    def test_tier_c_with_misbehaving_decorator_returns_internal_error(self):
+        # Decorator returns an object without
+        # run_layer_slice_streaming → server emits INTERNAL_ERROR
+        # at the structural-validation step rather than crashing
+        # at dispatch.
+        server, settler_identity, _ = (
+            _build_server_with_tier_c_decorator(
+                emit_ids=[1, 2, 3],
+                id_to_piece={1: "a", 2: "b", 3: "c"},
+                tier_c_streaming_decorator=lambda inner: object(),
+            )
+        )
+        req = _make_streaming_request_tier(
+            settler_identity=settler_identity,
+            content_tier=ContentTier.C,
+        )
+        _, final, err = _decode(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is not None
+        assert err.code == "INTERNAL_ERROR"
+        assert (
+            "tier_c_streaming_decorator returned an object without"
+            in err.message
+        )
+        assert final is None
+
+    def test_tier_c_with_raising_decorator_returns_internal_error(self):
+        # Decorator raises during wrap → server catches and
+        # surfaces as INTERNAL_ERROR. NEVER raises through wire.
+        def boom_decorator(inner):
+            raise RuntimeError("decorator-boom")
+
+        server, settler_identity, _ = (
+            _build_server_with_tier_c_decorator(
+                emit_ids=[1, 2, 3],
+                id_to_piece={1: "a", 2: "b", 3: "c"},
+                tier_c_streaming_decorator=boom_decorator,
+            )
+        )
+        req = _make_streaming_request_tier(
+            settler_identity=settler_identity,
+            content_tier=ContentTier.C,
+        )
+        _, final, err = _decode(
+            server.handle_token_stream(encode_message(req))
+        )
+        assert err is not None
+        assert err.code == "INTERNAL_ERROR"
+        assert "tier_c_streaming_decorator failure" in err.message
+        assert final is None
+
+    def test_constructor_rejects_non_callable_decorator(self):
+        from prsm.compute.chain_rpc import LayerStageServer
+        from prsm.node.identity import generate_node_identity
+        identity = generate_node_identity("stage")
+        anchor = _Anchor()
+        anchor.register(identity)
+        with pytest.raises(
+            RuntimeError, match="tier_c_streaming_decorator",
+        ):
+            LayerStageServer(
+                identity=identity,
+                registry=_Registry(),
+                runner=_UnaryRunner(),
+                tee_runtime=_TEERuntime(),
+                anchor=anchor,
+                tier_c_streaming_decorator="not-callable",  # type: ignore[arg-type]
+            )
+
+    def test_make_layer_stage_server_forwards_decorator(self):
+        # Factory-side: make_layer_stage_server passes the kwarg
+        # through to LayerStageServer. Pinning the operator-
+        # facing surface that 3.x.10.x's M5 closure exposed.
+        from prsm.compute.chain_rpc import make_layer_stage_server
+        identity = generate_node_identity("stage")
+        anchor = _Anchor()
+        anchor.register(identity)
+
+        def my_decorator(inner):
+            return inner
+
+        server = make_layer_stage_server(
+            identity=identity,
+            registry=_Registry(),
+            runner=_UnaryRunner(),
+            tee_runtime=_TEERuntime(),
+            anchor=anchor,
+            tier_c_streaming_decorator=my_decorator,
+        )
+        assert (
+            server._tier_c_streaming_decorator  # noqa: SLF001
+            is my_decorator
+        )
+
+    def test_factory_default_no_decorator_back_compat(self):
+        # Default: no decorator → server's
+        # _tier_c_streaming_decorator is None. Operators that
+        # don't opt into Tier C streaming see no behavior change.
+        from prsm.compute.chain_rpc import make_layer_stage_server
+        identity = generate_node_identity("stage")
+        anchor = _Anchor()
+        anchor.register(identity)
+        server = make_layer_stage_server(
+            identity=identity,
+            registry=_Registry(),
+            runner=_UnaryRunner(),
+            tee_runtime=_TEERuntime(),
+            anchor=anchor,
+        )
+        assert server._tier_c_streaming_decorator is None  # noqa: SLF001
