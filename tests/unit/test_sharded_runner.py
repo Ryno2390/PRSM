@@ -1585,3 +1585,345 @@ class TestVerifyTail:
         assert model.batch_sample_calls[0]["temperature"] == 0.0
         assert model.batch_sample_calls[0]["top_k"] == 40
         assert model.batch_sample_calls[0]["top_p"] == 0.9
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.y.x Task 4 — v2 stochastic VERIFY routing
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _FakeV2VerifyTailShardedModel(_FakeVerifyTailShardedModel):
+    """Tail-capable v2 VERIFY model. Adds
+    ``apply_lm_head_and_sample_batch_with_rejection`` driven by a
+    scripted ``(verified_token_ids, accepted_count)`` per round.
+    Tests inject scripts that exercise specific accept/reject
+    paths deterministically.
+    """
+
+    def __init__(
+        self,
+        *,
+        sample_script: List[int],
+        verify_batch_script: List[List[int]],
+        rejection_script: Optional[
+            List[Tuple[List[int], int]]
+        ] = None,
+    ) -> None:
+        super().__init__(
+            sample_script=sample_script,
+            verify_batch_script=verify_batch_script,
+        )
+        self._rejection_script = list(rejection_script or [])
+        self._rejection_cursor = 0
+        self.rejection_calls: List[dict] = []
+
+    def apply_lm_head_and_sample_batch_with_rejection(
+        self,
+        *,
+        hidden_state_batch: np.ndarray,
+        proposed_token_ids: List[int],
+        proposed_token_probs: List[float],
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> Tuple[List[int], int]:
+        self.rejection_calls.append({
+            "hidden_state_batch": hidden_state_batch,
+            "proposed_token_ids": list(proposed_token_ids),
+            "proposed_token_probs": list(proposed_token_probs),
+            "temperature": temperature,
+            "top_k": top_k,
+            "top_p": top_p,
+        })
+        if self._rejection_cursor >= len(self._rejection_script):
+            raise AssertionError(
+                "_FakeV2VerifyTailShardedModel: rejection_script "
+                "exhausted (test bug)"
+            )
+        out = self._rejection_script[self._rejection_cursor]
+        self._rejection_cursor += 1
+        ids, ac = out
+        return list(ids), int(ac)
+
+
+def _make_v2_tail_runner(
+    *,
+    rejection_script: List[Tuple[List[int], int]],
+    verify_batch_script: List[List[int]] = None,
+    sample_script: List[int] = None,
+    layer_range: Tuple[int, int] = (0, 6),
+    eos_token_id: int = 999,
+    sampling_defaults: SamplingDefaults = None,
+) -> Tuple[
+    ShardedAutoregressiveRunner,
+    _FakeV2VerifyTailShardedModel,
+    KVCacheManager,
+]:
+    model = _FakeV2VerifyTailShardedModel(
+        sample_script=sample_script or [42],
+        verify_batch_script=verify_batch_script or [],
+        rejection_script=rejection_script,
+    )
+    cache = KVCacheManager()
+    runner = ShardedAutoregressiveRunner(
+        model=model,
+        layer_range=layer_range,
+        kv_cache_manager=cache,
+        tee_attestation=b"x" * 32,
+        tee_type=TEEType.SOFTWARE,
+        sampling_defaults=sampling_defaults or SamplingDefaults(
+            max_tokens=512, temperature=0.7, top_k=50, top_p=0.95,
+        ),
+        eos_token_id=eos_token_id,
+    )
+    return runner, model, cache
+
+
+class TestV2StochasticVerifyRouting:
+    """Phase 3.x.11.y.x Task 4 — v2 stochastic routing tests.
+
+    Routing rule: probs set + temperature > 0 → v2 stochastic
+    (Leviathan-2023). Either alone falls back to v1 greedy.
+    """
+
+    def test_v1_greedy_path_unchanged_when_probs_unset(self):
+        # No probs → v1 greedy (apply_lm_head_and_sample_batch)
+        # regardless of temperature value. K+1 verified tokens.
+        runner, model, _ = _make_v2_tail_runner(
+            rejection_script=[],   # never invoked
+            verify_batch_script=[[10, 20, 30]],  # K+1 = 3 → K=2
+            sample_script=[42],
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+            proposed_token_ids=[100, 101],
+            # NOTE: no proposed_token_probs → v1 greedy path
+        )
+        # v1 greedy: K+1=3 verified tokens.
+        assert result.verified_token_ids == (10, 20, 30)
+        assert result.accepted_count == 0  # 10 != 100
+        # v1 path used apply_lm_head_and_sample_batch, NOT
+        # apply_lm_head_and_sample_batch_with_rejection.
+        assert len(model.batch_sample_calls) == 1
+        assert len(model.rejection_calls) == 0
+
+    def test_v2_stochastic_path_when_probs_and_temperature_set(self):
+        # probs set + temperature > 0 → v2 stochastic. Tail
+        # returns (ids, accepted_count) directly.
+        runner, model, _ = _make_v2_tail_runner(
+            rejection_script=[
+                # K=2 partial accept: accept 1, then correction.
+                ([100, 999], 1),
+            ],
+            sample_script=[42],
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+            proposed_token_ids=[100, 101],
+            proposed_token_probs=[0.6, 0.5],
+        )
+        # v2: verified has accepted_count + 1 = 2 entries.
+        assert result.verified_token_ids == (100, 999)
+        assert result.accepted_count == 1
+        # v2 path used apply_lm_head_and_sample_batch_with_rejection.
+        assert len(model.rejection_calls) == 1
+        assert len(model.batch_sample_calls) == 0
+        # Probs threaded through to the model.
+        assert model.rejection_calls[0]["proposed_token_probs"] == [0.6, 0.5]
+
+    def test_v1_path_when_probs_set_but_temperature_zero(self):
+        # Probs set but temperature == 0 → falls back to v1
+        # greedy. Defends against legacy callers that send probs
+        # for forward-compat but use temp=0 (degenerate).
+        runner, model, _ = _make_v2_tail_runner(
+            rejection_script=[],
+            verify_batch_script=[[100, 200, 300]],
+            sample_script=[42],
+            sampling_defaults=SamplingDefaults(
+                max_tokens=100, temperature=0.0,  # default temp=0
+                top_k=50, top_p=0.95,
+            ),
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+            proposed_token_ids=[100, 101],
+            proposed_token_probs=[0.5, 0.5],   # set but ignored
+        )
+        # v1 path fired (temperature=0 forces greedy).
+        assert len(model.batch_sample_calls) == 1
+        assert len(model.rejection_calls) == 0
+        # K+1 = 3 verified entries.
+        assert len(result.verified_token_ids) == 3
+
+    def test_v2_full_accept_K_plus_one_emit(self):
+        # All K accepted → emit accepted_count + 1 = K + 1 tokens
+        # (last is the bonus from p_K).
+        runner, model, _ = _make_v2_tail_runner(
+            rejection_script=[
+                ([100, 101, 99], 2),  # K=2 all accepted + bonus 99
+            ],
+            sample_script=[42],
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+            proposed_token_ids=[100, 101],
+            proposed_token_probs=[0.6, 0.6],
+        )
+        assert result.verified_token_ids == (100, 101, 99)
+        assert result.accepted_count == 2
+        assert result.next_token_id == 99  # last emitted (bonus)
+
+    def test_v2_zero_accept_emits_one_correction(self):
+        # accepted_count=0 → emit 1 token (correction).
+        runner, _, _ = _make_v2_tail_runner(
+            rejection_script=[
+                ([777], 0),  # K=2; correction = 777 at position 0.
+            ],
+            sample_script=[42],
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+            proposed_token_ids=[100, 101],
+            proposed_token_probs=[0.5, 0.5],
+        )
+        assert result.verified_token_ids == (777,)
+        assert result.accepted_count == 0
+        assert result.next_token_id == 777
+
+    def test_v2_path_missing_method_raises_missing_verify_capability(self):
+        # Model lacks apply_lm_head_and_sample_batch_with_rejection;
+        # v2 dispatch should map to MissingVerifyCapabilityError.
+        # Use the v1-only fake (no rejection method).
+        runner, _, _ = _make_verify_tail_runner(
+            sample_script=[42],
+            verify_batch_script=[[100, 101]],
+            sampling_defaults=SamplingDefaults(
+                max_tokens=100, temperature=0.7,
+                top_k=50, top_p=0.95,
+            ),
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+        )
+        with pytest.raises(
+            MissingVerifyCapabilityError,
+            match="with_rejection",
+        ):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=[42, 100],
+                request_id="req-1",
+                decode_mode=DecodeMode.VERIFY,
+                is_final_stage=True,
+                request=_FakeRequest(
+                    max_tokens=100, temperature=0.7,
+                ),
+                proposed_token_ids=[100],
+                proposed_token_probs=[0.5],
+            )
+
+    def test_probs_without_ids_rejected(self):
+        # proposed_token_probs without proposed_token_ids = caller bug.
+        runner, _, _ = _make_v2_tail_runner(
+            rejection_script=[],
+            verify_batch_script=[[100]],
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+        )
+        with pytest.raises(
+            RuntimeError, match="proposed_token_probs",
+        ):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=[42, 100],
+                request_id="req-1",
+                decode_mode=DecodeMode.VERIFY,
+                is_final_stage=True,
+                request=_FakeRequest(temperature=0.7),
+                proposed_token_probs=[0.5],
+                # ids missing
+            )
+
+    def test_probs_length_mismatch_rejected(self):
+        runner, _, _ = _make_v2_tail_runner(rejection_script=[])
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.7),
+        )
+        with pytest.raises(
+            RuntimeError, match="length",
+        ):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=[42, 100, 101],
+                request_id="req-1",
+                decode_mode=DecodeMode.VERIFY,
+                is_final_stage=True,
+                request=_FakeRequest(temperature=0.7),
+                proposed_token_ids=[100, 101],
+                proposed_token_probs=[0.5],   # |probs|=1 vs |ids|=2
+            )

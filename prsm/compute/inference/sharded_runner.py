@@ -630,6 +630,7 @@ class ShardedAutoregressiveRunner:
         is_final_stage: bool = False,
         request: Any = None,
         proposed_token_ids: Optional[List[int]] = None,
+        proposed_token_probs: Optional[List[float]] = None,
     ) -> LayerSliceResult:
         """Dispatch one PREFILL / INCREMENTAL / VERIFY forward
         through ``layer_range``.
@@ -708,6 +709,28 @@ class ShardedAutoregressiveRunner:
                 "proposed_token_ids is only meaningful for "
                 "decode_mode=VERIFY"
             )
+        # Phase 3.x.11.y.x — proposed_token_probs co-set with
+        # proposed_token_ids; only meaningful on VERIFY tail dispatch.
+        # When set, routes to v2 stochastic rejection sampling;
+        # when None (v1 greedy callers), routes to v1
+        # apply_lm_head_and_sample_batch with prefix-match.
+        if proposed_token_probs is not None:
+            if proposed_token_ids is None:
+                raise RuntimeError(
+                    "ShardedAutoregressiveRunner.run_layer_slice_unary: "
+                    "proposed_token_probs is only meaningful when "
+                    "proposed_token_ids is also set (v2 stochastic "
+                    "speculation requires both per-draft probs AND "
+                    "the proposed token ids)"
+                )
+            if len(proposed_token_probs) != len(proposed_token_ids):
+                raise RuntimeError(
+                    f"ShardedAutoregressiveRunner.run_layer_slice_unary: "
+                    f"proposed_token_probs length "
+                    f"{len(proposed_token_probs)} must equal "
+                    f"proposed_token_ids length "
+                    f"{len(proposed_token_ids)}"
+                )
 
         start_ts = time.time()
         if decode_mode == DecodeMode.PREFILL:
@@ -802,6 +825,7 @@ class ShardedAutoregressiveRunner:
                     handle=handle,
                     request=request,
                     proposed_token_ids=proposed_token_ids,
+                    proposed_token_probs=proposed_token_probs,
                 )
             else:
                 next_token_id, is_terminal = self._sample_tail(
@@ -937,34 +961,42 @@ class ShardedAutoregressiveRunner:
         handle: Any,  # KVCacheHandle
         request: Any,
         proposed_token_ids: Optional[List[int]],
+        proposed_token_probs: Optional[List[float]] = None,
     ) -> Tuple[int, bool, Tuple[int, ...], int]:
-        """Tail-only VERIFY sampling. Sample K+1 logits from the
-        batched hidden state, compute ``accepted_count`` as the
-        longest matching prefix between ``proposed_token_ids``
-        and the verified argmaxes, bump
-        ``handle.tokens_generated`` by ``accepted_count + 1``
-        (only emitted tokens count against ``max_tokens``),
-        return the per-iteration outcome.
+        """Tail-only VERIFY sampling. Routes to v1 greedy (prefix-
+        match) or v2 stochastic (Leviathan-2023 rejection sampling)
+        based on whether ``proposed_token_probs`` is set AND the
+        request's effective temperature is > 0.
+
+        v1 greedy path (Phase 3.x.11.y, default):
+          - Calls ``model.apply_lm_head_and_sample_batch``.
+          - Computes ``accepted_count`` as longest matching prefix
+            between proposed and verified argmaxes.
+          - Returns ``verified_token_ids`` of length K+1 (per
+            position; the bonus is verified_token_ids[K]).
+
+        v2 stochastic path (Phase 3.x.11.y.x, opt-in):
+          - Routes when ``proposed_token_probs is not None`` AND
+            ``temperature > 0.0``.
+          - Calls ``model.apply_lm_head_and_sample_batch_with_rejection``.
+          - The model performs the rejection sampling internally
+            and returns ``(verified_token_ids, accepted_count)``
+            with ``len(verified_token_ids) == accepted_count + 1``
+            (narrowed semantic vs v1's K+1).
+          - Output marginal distribution equals the verifier's
+            target distribution exactly under the Option C.1
+            point-mass-on-d_i approximation.
 
         Returns
         ``(next_token_id, is_terminal, verified_token_ids, accepted_count)``.
-        ``next_token_id`` is the LAST emitted token —
-        ``verified_token_ids[accepted_count]`` — the seed for the
-        next speculation round. ``is_terminal`` triggers on EOS
-        in any emitted position OR
-        ``tokens_generated >= max_tokens``.
+        ``next_token_id`` is the LAST emitted token; ``is_terminal``
+        triggers on EOS in any emitted position OR
+        ``tokens_generated >= max_tokens``. ``handle.tokens_generated``
+        bumped by ``len(emitted) == accepted_count + 1`` —
+        speculatively-cached-but-rejected positions don't count.
         """
         defaults = self._sampling_defaults
         assert defaults is not None  # tail_capable guarantees this
-        if not callable(
-            getattr(self._model, "apply_lm_head_and_sample_batch", None),
-        ):
-            raise MissingVerifyCapabilityError(
-                "ShardedAutoregressiveRunner: tail-stage VERIFY "
-                "dispatch requires "
-                "model.apply_lm_head_and_sample_batch(...) per "
-                "ShardedLayerForward Protocol — this model omits it"
-            )
         if proposed_token_ids is None:
             raise RuntimeError(
                 "ShardedAutoregressiveRunner: tail-stage VERIFY "
@@ -991,43 +1023,43 @@ class ShardedAutoregressiveRunner:
         top_k = defaults.top_k
         top_p = defaults.top_p
 
-        sampled = self._model.apply_lm_head_and_sample_batch(
-            hidden_state_batch=hidden_state_batch,
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
+        # Routing decision: v2 stochastic path requires BOTH
+        # probs set AND temperature > 0. Either alone falls back
+        # to v1 greedy. This keeps the v1 greedy invariant intact
+        # for legacy callers AND for v2 callers that send probs
+        # but use temperature=0 (degenerate equivalent of v1).
+        use_stochastic = (
+            proposed_token_probs is not None
+            and float(temperature) > 0.0
         )
-        if not isinstance(sampled, list):
-            raise RuntimeError(
-                f"ShardedAutoregressiveRunner: "
-                f"apply_lm_head_and_sample_batch must return list, "
-                f"got {type(sampled).__name__}"
+
+        if use_stochastic:
+            verified_token_ids, accepted_count = (
+                self._sample_tail_verify_stochastic(
+                    hidden_state_batch=hidden_state_batch,
+                    proposed_token_ids=proposed_token_ids,
+                    proposed_token_probs=proposed_token_probs,
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
+                )
             )
-        verified_token_ids = tuple(int(t) for t in sampled)
-        # K+1 verified positions; K proposed.
-        k = len(proposed_token_ids)
-        if len(verified_token_ids) != k + 1:
-            raise RuntimeError(
-                f"ShardedAutoregressiveRunner: VERIFY tail expected "
-                f"{k + 1} verified token ids (K+1 with K="
-                f"{k}), got {len(verified_token_ids)}"
+        else:
+            verified_token_ids, accepted_count = (
+                self._sample_tail_verify_greedy(
+                    hidden_state_batch=hidden_state_batch,
+                    proposed_token_ids=proposed_token_ids,
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
+                )
             )
 
-        # accepted_count = longest matching prefix between
-        # proposed and verified[:K]. verified[i] is the model's
-        # argmax for the position FOLLOWING input i; verified[0]
-        # is what comes after parent (should match proposed[0]
-        # = d_1 if accepted). verified[K] is the bonus token
-        # emitted when all drafts accept.
-        accepted_count = 0
-        for i in range(k):
-            if verified_token_ids[i] == proposed_token_ids[i]:
-                accepted_count += 1
-            else:
-                break
-
-        # Emitted = verified_token_ids[: accepted_count + 1] —
-        # accepted draft positions plus one correction/bonus.
+        # Emitted = verified_token_ids[: accepted_count + 1].
+        # Under v1 greedy, verified_token_ids has K+1 entries
+        # and emitted is the accept-prefix + correction/bonus.
+        # Under v2 stochastic, verified_token_ids ALREADY has
+        # accepted_count+1 entries; the slice is a no-op.
         emitted = verified_token_ids[: accepted_count + 1]
 
         # Bump tokens_generated by emitted count (only emitted
@@ -1048,6 +1080,154 @@ class ShardedAutoregressiveRunner:
 
         next_token_id = int(emitted[-1])
         return next_token_id, is_terminal, verified_token_ids, accepted_count
+
+    def _sample_tail_verify_greedy(
+        self,
+        *,
+        hidden_state_batch: np.ndarray,
+        proposed_token_ids: List[int],
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> Tuple[Tuple[int, ...], int]:
+        """v1 greedy VERIFY tail (Phase 3.x.11.y unchanged).
+        Calls ``model.apply_lm_head_and_sample_batch`` to get K+1
+        argmax-sampled tokens, computes ``accepted_count`` as
+        longest matching prefix between proposed and verified
+        argmaxes. Returns ``(verified_token_ids, accepted_count)``
+        with ``len(verified_token_ids) == K + 1``.
+        """
+        if not callable(
+            getattr(self._model, "apply_lm_head_and_sample_batch", None),
+        ):
+            raise MissingVerifyCapabilityError(
+                "ShardedAutoregressiveRunner: tail-stage VERIFY "
+                "dispatch requires "
+                "model.apply_lm_head_and_sample_batch(...) per "
+                "ShardedLayerForward Protocol — this model omits it"
+            )
+        sampled = self._model.apply_lm_head_and_sample_batch(
+            hidden_state_batch=hidden_state_batch,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+        )
+        if not isinstance(sampled, list):
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: "
+                f"apply_lm_head_and_sample_batch must return list, "
+                f"got {type(sampled).__name__}"
+            )
+        verified_token_ids = tuple(int(t) for t in sampled)
+        k = len(proposed_token_ids)
+        if len(verified_token_ids) != k + 1:
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: VERIFY tail expected "
+                f"{k + 1} verified token ids (K+1 with K="
+                f"{k}), got {len(verified_token_ids)}"
+            )
+        # accepted_count = longest matching prefix between
+        # proposed and verified[:K]. verified[K] is the bonus
+        # emitted when all K drafts accept.
+        accepted_count = 0
+        for i in range(k):
+            if verified_token_ids[i] == proposed_token_ids[i]:
+                accepted_count += 1
+            else:
+                break
+        return verified_token_ids, accepted_count
+
+    def _sample_tail_verify_stochastic(
+        self,
+        *,
+        hidden_state_batch: np.ndarray,
+        proposed_token_ids: List[int],
+        proposed_token_probs: List[float],
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> Tuple[Tuple[int, ...], int]:
+        """Phase 3.x.11.y.x v2 stochastic VERIFY tail. Calls
+        ``model.apply_lm_head_and_sample_batch_with_rejection``
+        with the draft probabilities; the model runs Leviathan-
+        2023 rejection sampling internally and returns
+        ``(verified_token_ids, accepted_count)`` with
+        ``len(verified_token_ids) == accepted_count + 1`` —
+        narrowed semantic vs greedy K+1.
+
+        Output marginal distribution equals the verifier's
+        target distribution exactly under the Option C.1
+        residual-sampling approximation (see
+        ``rejection_sample_speculation`` docstring).
+        """
+        if not callable(
+            getattr(
+                self._model,
+                "apply_lm_head_and_sample_batch_with_rejection",
+                None,
+            ),
+        ):
+            raise MissingVerifyCapabilityError(
+                "ShardedAutoregressiveRunner: v2 stochastic VERIFY "
+                "dispatch (proposed_token_probs set + "
+                "temperature > 0) requires "
+                "model.apply_lm_head_and_sample_batch_with_rejection(...) "
+                "per ShardedLayerForward Protocol — this model "
+                "omits it. Either configure the chain with a v2-"
+                "capable adapter, or call with temperature=0.0 / "
+                "proposed_token_probs=None to fall back to greedy."
+            )
+        result = self._model.apply_lm_head_and_sample_batch_with_rejection(
+            hidden_state_batch=hidden_state_batch,
+            proposed_token_ids=list(proposed_token_ids),
+            proposed_token_probs=list(proposed_token_probs),
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+        )
+        if (
+            not isinstance(result, tuple)
+            or len(result) != 2
+        ):
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: "
+                f"apply_lm_head_and_sample_batch_with_rejection "
+                f"must return (verified_token_ids, accepted_count) "
+                f"tuple, got {type(result).__name__}"
+            )
+        sampled, accepted_count = result
+        if not isinstance(sampled, list):
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: "
+                f"apply_lm_head_and_sample_batch_with_rejection's "
+                f"first element must be list, got "
+                f"{type(sampled).__name__}"
+            )
+        if (
+            isinstance(accepted_count, bool)
+            or not isinstance(accepted_count, int)
+            or accepted_count < 0
+        ):
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: "
+                f"apply_lm_head_and_sample_batch_with_rejection's "
+                f"second element must be non-negative int, got "
+                f"{accepted_count!r}"
+            )
+        verified_token_ids = tuple(int(t) for t in sampled)
+        k = len(proposed_token_ids)
+        if accepted_count > k:
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: v2 accepted_count "
+                f"{accepted_count} exceeds K={k}"
+            )
+        if len(verified_token_ids) != accepted_count + 1:
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: v2 stochastic tail "
+                f"expected {accepted_count + 1} verified token ids "
+                f"(accepted_count + 1), got {len(verified_token_ids)}"
+            )
+        return verified_token_ids, accepted_count
 
     # ── eviction passthrough ──────────────────────────────────────────
 
