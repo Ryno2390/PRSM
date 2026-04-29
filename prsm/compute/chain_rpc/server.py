@@ -53,6 +53,7 @@ from prsm.compute.chain_rpc.protocol import (
     ChainRpcProtocolError,
     ChainRpcUnknownTypeError,
     ChainRpcVersionMismatchError,
+    DecodeMode,
     EvictCacheRequest,
     EvictCacheResponse,
     HandoffToken,
@@ -248,6 +249,7 @@ class LayerStageServer:
             Callable[[Any], Any]
         ] = None,
         kv_cache_manager: Optional[KVCacheManager] = None,
+        sharded_runner: Optional[Any] = None,
     ) -> None:
         if identity is None or not hasattr(identity, "node_id"):
             raise RuntimeError(
@@ -328,6 +330,21 @@ class LayerStageServer:
                 "LayerStageServer: kv_cache_manager must be a "
                 "KVCacheManager instance if provided"
             )
+        # Phase 3.x.11 — sharded_runner is opt-in. When wired,
+        # the server routes ALL RunLayerSliceRequests to it via
+        # ``run_layer_slice_unary`` (sharded autoregressive
+        # decode); the regular ``runner`` becomes the back-compat
+        # path for non-sharded operators. A node that wants to
+        # serve sharded decode wires ``sharded_runner`` +
+        # ``kv_cache_manager`` together.
+        if sharded_runner is not None and not callable(
+            getattr(sharded_runner, "run_layer_slice_unary", None),
+        ):
+            raise RuntimeError(
+                "LayerStageServer: sharded_runner must expose "
+                ".run_layer_slice_unary(...) if provided "
+                "(see ShardedAutoregressiveRunner)"
+            )
 
         self._identity = identity
         self._registry = registry
@@ -340,6 +357,7 @@ class LayerStageServer:
         self._streaming_runner = streaming_runner
         self._tier_c_streaming_decorator = tier_c_streaming_decorator
         self._kv_cache_manager = kv_cache_manager
+        self._sharded_runner = sharded_runner
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -644,6 +662,24 @@ class LayerStageServer:
                 "(use handle_streamed() for streamed requests)",
             )
 
+        # Phase 3.x.11 — sharded-decode dispatch. When the operator
+        # wired a sharded_runner, route here regardless of decode_mode
+        # (sharded operators don't co-host the regular non-sharded
+        # path on the same node). When NO sharded_runner is wired
+        # but the request has decode_mode != PREFILL, reject —
+        # back-compat regular runners can't honor sharded semantics.
+        if self._sharded_runner is not None:
+            return self._dispatch_sharded(request)
+        if request.decode_mode != DecodeMode.PREFILL:
+            return self._error(
+                request.request_id,
+                StageErrorCode.MALFORMED_REQUEST,
+                f"server has no sharded_runner wired but request "
+                f"carries decode_mode={request.decode_mode.value!r}; "
+                f"sharded decode requires sharded_runner= at "
+                f"server construction",
+            )
+
         # Steps 2-6: shared validation gates.
         gate_result = self._run_validation_gates(request)
         if gate_result.error is not None:
@@ -706,6 +742,141 @@ class LayerStageServer:
             tee_attestation=result.tee_attestation,
             tee_type=result.tee_type,
             epsilon_spent=result.epsilon_spent,
+        )
+        return encode_message(response)
+
+    # ── Phase 3.x.11 sharded dispatch ─────────────────────────────────
+
+    def _dispatch_sharded(
+        self, request: RunLayerSliceRequest,
+    ) -> bytes:
+        """Sharded-decode unary dispatch. Routes to
+        ``self._sharded_runner.run_layer_slice_unary``.
+
+        Validation gates (model lookup, layer-range, content tier,
+        deadline) reuse the regular ``_run_validation_gates`` —
+        sharded decode honors all the same operator-side
+        constraints. Tier C is currently NOT supported on the
+        sharded path (per design plan §2 honest scope); the
+        gate here rejects Tier C dispatches with INTERNAL_ERROR
+        until Phase 3.x.11.q lands.
+
+        ``is_final_stage`` is inferred from the chain context via
+        ``upstream_token.chain_total_stages`` —
+        the tail is always the highest stage_index.
+        """
+        # Reuse the standard validation gates.
+        gate_result = self._run_validation_gates(request)
+        if gate_result.error is not None:
+            return self._error(
+                request.request_id,
+                gate_result.error[0], gate_result.error[1],
+            )
+
+        # Honest-scope Tier C deny on sharded path. Mirrors
+        # Phase 3.x.10.y Task 4's tier-c-streaming default-deny;
+        # sharded per-token wire dispatch has its own timing
+        # surface that the existing constant-time decorators
+        # don't cover.
+        from prsm.compute.inference.content_tier_gate import ContentTier
+        if request.content_tier == ContentTier.C:
+            return self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                "sharded decode does not yet support Tier C "
+                "(per-token wire dispatch creates a new timing "
+                "surface; see Phase 3.x.11.q honest scope)",
+            )
+
+        # Decode the inline activation_blob.
+        try:
+            activation = decode_activation(
+                request.activation_blob,
+                request.activation_shape,
+                request.activation_dtype,
+            )
+        except ActivationCodecError as exc:
+            return self._error(
+                request.request_id,
+                StageErrorCode.ACTIVATION_INVALID,
+                str(exc),
+            )
+
+        # Determine tail role from the handoff token. The chain
+        # tail's stage_index == chain_total_stages - 1.
+        token = request.upstream_token
+        is_final_stage = (
+            token.chain_stage_index
+            == token.chain_total_stages - 1
+        )
+
+        # Run the sharded forward.
+        start_ts = self._clock()
+        try:
+            result = self._sharded_runner.run_layer_slice_unary(
+                activation_or_input_ids=(
+                    activation.tolist()
+                    if activation.dtype.kind in ("i", "u")
+                    else activation
+                ),
+                request_id=request.request_id,
+                decode_mode=request.decode_mode,
+                is_final_stage=is_final_stage,
+                request=request,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "LayerStageServer._dispatch_sharded: runner raised "
+                "for request_id=%r",
+                request.request_id,
+            )
+            # Map MalformedCacheStateError to MALFORMED_REQUEST so
+            # the executor can distinguish "your INCREMENTAL has no
+            # PREFILL" from "internal model crash".
+            if exc.__class__.__name__ == "MalformedCacheStateError":
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    str(exc),
+                )
+            return self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                f"sharded runner raised: {exc.__class__.__name__}: "
+                f"{exc}",
+            )
+
+        # Encode the boundary hidden state for the wire.
+        try:
+            output_blob, output_shape, output_dtype = encode_activation(
+                result.hidden_state,
+            )
+        except ActivationCodecError as exc:
+            return self._error(
+                request.request_id,
+                StageErrorCode.ACTIVATION_INVALID,
+                f"output encode failure: {exc}",
+            )
+
+        duration = self._clock() - start_ts
+        # Sharded servers commit to the runner's TEE state via
+        # the stage's identity. The activation isn't routed
+        # through the TEE runtime in v1 (HF model loaded in plain
+        # Python process); the response's tee_attestation is the
+        # stage's local attestation bytes.
+        tee_attestation = self._tee_runtime.get_attestation_bytes()
+        response = RunLayerSliceResponse.sign(
+            identity=self._identity,
+            request_id=request.request_id,
+            activation_blob=output_blob,
+            activation_shape=output_shape,
+            activation_dtype=output_dtype,
+            duration_seconds=float(duration),
+            tee_attestation=tee_attestation,
+            tee_type=self._tee_runtime.tee_type,
+            epsilon_spent=0.0,
+            next_token_id=result.next_token_id,
+            is_terminal=result.is_terminal,
         )
         return encode_message(response)
 
