@@ -502,24 +502,28 @@ class TestSpeculativeConstructionValidation:
                 rollback_cache_send_message="not callable",  # type: ignore[arg-type]
             )
 
-    def test_temperature_nonzero_rejected_at_dispatch(self):
-        # v1 greedy-only — request.temperature > 0 raises at the
-        # first chain pass.
+    def test_temperature_nonzero_without_v2_capability_rejected(self):
+        # Phase 3.x.11.y.x Task 5: greedy-only gate is LIFTED — v2
+        # stochastic path now permitted IFF draft_model exposes
+        # propose_with_probs. Drafts without v2 capability still
+        # raise at temperature > 0 (graceful capability error,
+        # not a hard "greedy-only" rejection).
         settler, anchor, transport, _, chain = _build_single_stage(
             sample_script=[(42, False)],
             verify_script=[],
         )
         executor = _make_spec_executor(
             transport=transport, settler=settler, anchor=anchor,
+            # _FakeDraft only implements v1 propose; no
+            # propose_with_probs attribute.
             draft=_FakeDraft(propose_script=[[100]]),
         )
-        # Generator is lazy — pull once to trigger.
         gen = executor.execute_chain_streaming(
             request=_make_request(max_tokens=4, temperature=0.7),
             chain=chain,
         )
         with pytest.raises(
-            ChainExecutionError, match="greedy-only"
+            ChainExecutionError, match="propose_with_probs"
         ):
             next(gen)
 
@@ -867,3 +871,423 @@ class TestSpeculationLoop:
         assert [t.token_id for t in tokens] == [7, 10, 20, 30]
         # Only one propose round despite generous max_tokens.
         assert len(draft.propose_calls) == 1
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.y.x Task 5 — v2 (Leviathan-2023 stochastic) routing
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _FakeDraftV2(_FakeDraft):
+    """v2-capable draft. Adds ``propose_with_probs`` returning
+    ``(ids, probs)`` from a parallel script. Falls back to v1
+    propose for the v1 path (not exercised when temperature > 0)."""
+
+    def __init__(
+        self,
+        *,
+        propose_script: List[List[int]],
+        probs_script: List[List[float]],
+    ) -> None:
+        super().__init__(propose_script=propose_script)
+        if len(probs_script) != len(propose_script):
+            raise AssertionError(
+                "_FakeDraftV2: probs_script must align 1:1 with "
+                "propose_script"
+            )
+        self._probs_script = list(probs_script)
+        self._probs_cursor = 0
+        self.propose_with_probs_calls: List[dict] = []
+
+    def propose_with_probs(
+        self,
+        *,
+        request_id: str,
+        parent_token_id: int,
+        k: int,
+        temperature: float,
+    ) -> Tuple[List[int], List[float]]:
+        self.propose_with_probs_calls.append({
+            "request_id": request_id,
+            "parent_token_id": parent_token_id,
+            "k": k,
+            "temperature": temperature,
+        })
+        if self._propose_cursor >= len(self._propose_script):
+            raise AssertionError(
+                f"_FakeDraftV2: script exhausted (cursor="
+                f"{self._propose_cursor})"
+            )
+        ids = list(self._propose_script[self._propose_cursor])
+        probs = list(self._probs_script[self._probs_cursor])
+        self._propose_cursor += 1
+        self._probs_cursor += 1
+        return ids, probs
+
+
+class TestV2StochasticRoutingExecutor:
+    """v1 stays bit-identical (regression covered above by
+    TestSpeculationLoop). These tests cover the new v2 (temperature
+    > 0) path: propose_with_probs is called, probs ride the wire,
+    accepted_count + 1 verified entries are emitted, rollback math
+    accounts for the K+1 cached vs accepted+1 emitted asymmetry,
+    and adaptive K halves/doubles on the rolling accept-rate."""
+
+    def test_v2_partial_accept_emits_accepted_plus_one(self):
+        # K=2; v2 returns accepted_count=1 with verified=(11, 50)
+        # — the second draft was rejected, 50 is the rejection-
+        # sampled correction. Length is 2 (= ac + 1), NOT K+1=3.
+        settler, anchor, transport, sim, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((11, 50), 1, False)],  # v2 shape
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraftV2(
+            propose_script=[[10, 20]],
+            probs_script=[[0.6, 0.4]],
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            rollback_send=rollback_log,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=3, temperature=0.7),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 11, 50]
+        # propose_with_probs invoked, NOT propose.
+        assert len(draft.propose_with_probs_calls) == 1
+        assert draft.propose_with_probs_calls[0]["temperature"] == 0.7
+        assert len(draft.propose_calls) == 0
+        # Rollback: K+1 cached - len(emitted) = 3 - 2 = 1. The
+        # critical correctness check vs v1 — len(verified)=2 in v2,
+        # if rollback math used len(verified) it would compute 0
+        # and miss the rejected draft's stale cache entry.
+        assert len(rollback_log.calls) == 1
+        assert rollback_log.calls[0][1].n_positions_to_drop == 1
+        # Wire-side: probs rode through to the stage.
+        verify_req = next(
+            r for r in sim.requests
+            if r.decode_mode == DecodeMode.VERIFY
+        )
+        assert verify_req.proposed_token_ids == (10, 20)
+        assert verify_req.proposed_token_probs == (0.6, 0.4)
+
+    def test_v2_full_accept_no_rollback(self):
+        # accepted_count == K → verified has K+1 entries (last is
+        # bonus). Rollback math: 3 - 3 = 0, no broadcast.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 99), 2, False)],
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraftV2(
+            propose_script=[[10, 20]],
+            probs_script=[[0.9, 0.9]],
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            rollback_send=rollback_log,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=4, temperature=0.7),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 10, 20, 99]
+        assert rollback_log.calls == []
+
+    def test_v2_zero_accepted_one_correction(self):
+        # accepted_count == 0 → verified=(corr,) length 1.
+        # Rollback: K+1 - 1 = K positions stale.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((50,), 0, False)],
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraftV2(
+            propose_script=[[10, 20, 30]],
+            probs_script=[[0.5, 0.5, 0.5]],
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=3,
+            rollback_send=rollback_log,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=2, temperature=0.7),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 50]
+        assert rollback_log.calls[0][1].n_positions_to_drop == 3
+
+    def test_v2_max_tokens_cap_mid_emit(self):
+        # max_tokens=2: PREFILL emits 1; round 1 v2 emits up to 2
+        # but cap allows only 1 more → emitted = [11], rollback
+        # = K+1 - 1 = 2.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((11, 12, 99), 2, False)],  # full accept
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraftV2(
+            propose_script=[[11, 12]],
+            probs_script=[[0.9, 0.9]],
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            rollback_send=rollback_log,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=2, temperature=0.7),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 11]
+        assert tokens[-1].finish_reason == "max_tokens"
+        # K+1 cached = 3; emitted = 1; rollback = 2.
+        assert rollback_log.calls[0][1].n_positions_to_drop == 2
+
+    def test_v2_temperature_zero_keeps_v1_path(self):
+        # Even when draft has propose_with_probs, temperature=0.0
+        # MUST take the v1 (greedy) path — preserves bit-identical
+        # greedy regression.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 99), 2, False)],  # K+1 v1 shape
+        )
+        draft = _FakeDraftV2(
+            propose_script=[[10, 20]],
+            probs_script=[[0.9, 0.9]],
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=4, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 10, 20, 99]
+        # v1 path → propose called, propose_with_probs NOT.
+        assert len(draft.propose_calls) == 1
+        assert len(draft.propose_with_probs_calls) == 0
+
+    def test_v2_rejects_malformed_probs_length(self):
+        # propose_with_probs returns mismatched lengths → raise
+        # MALFORMED_RESPONSE.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[],
+        )
+        draft = _FakeDraftV2(
+            propose_script=[[10, 20]],
+            probs_script=[[0.5]],   # length 1 vs 2 ids
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+        )
+        gen = executor.execute_chain_streaming(
+            request=_make_request(max_tokens=4, temperature=0.7),
+            chain=chain,
+        )
+        with pytest.raises(
+            ChainExecutionError, match="co-set with equal length"
+        ):
+            list(gen)
+
+    def test_v2_tail_v1_shape_at_temp_gt_zero_raises(self):
+        # Server speaking v1 (returning K+1 entries) under v2
+        # request → reject as MALFORMED_RESPONSE. Catches a
+        # backwards-compat hole: a stale tail must not silently
+        # interpret v2 stochastic dispatch as v1 greedy.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 99), 1, False)],  # ac=1 but K+1=3 entries
+        )
+        draft = _FakeDraftV2(
+            propose_script=[[10, 20]],
+            probs_script=[[0.6, 0.4]],
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+        )
+        gen = executor.execute_chain_streaming(
+            request=_make_request(max_tokens=4, temperature=0.7),
+            chain=chain,
+        )
+        with pytest.raises(
+            ChainExecutionError, match="v2 stochastic"
+        ):
+            list(gen)
+
+
+class TestAdaptiveK:
+    """Phase 3.x.11.y.x Task 5 — rolling-window adaptive K."""
+
+    def test_adaptive_k_doubles_on_high_accept_rate(self):
+        # 4 rounds of full accept (K=2, ac=2 each → rate = 1.0).
+        # After window fills (round 4), next-round K should
+        # double from 2 → 4. Round 5 propose call must request
+        # k=4. Each full-accept round emits ac+1=3 tokens, so
+        # max_tokens=20 keeps loop running long enough for at
+        # least one post-adapt round.
+        sample_script = [(7, False)]
+        verify_script = [
+            ((10, 20, 99), 2, False),
+            ((30, 40, 98), 2, False),
+            ((50, 60, 97), 2, False),
+            ((70, 80, 96), 2, False),
+            # Round 5 must use k=4 (verified has 5 = K+1 entries).
+            ((90, 91, 92, 93, 94), 4, True),
+        ]
+        propose_script = [
+            [10, 20], [30, 40], [50, 60], [70, 80],
+            [90, 91, 92, 93],
+        ]
+        probs_script = [[0.9] * len(p) for p in propose_script]
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=sample_script,
+            verify_script=verify_script,
+        )
+        draft = _FakeDraftV2(
+            propose_script=propose_script,
+            probs_script=probs_script,
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+        )
+        list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=20, temperature=0.7),
+            chain=chain,
+        ))
+        # First 4 rounds at K=2; round 5 at K=4 (doubled).
+        ks = [c["k"] for c in draft.propose_with_probs_calls]
+        assert ks == [2, 2, 2, 2, 4]
+
+    def test_adaptive_k_halves_on_low_accept_rate(self):
+        # 4 rounds K=4 with ac=0 each (rate 0%). Round 5 K = 4//2
+        # = 2.
+        sample_script = [(7, False)]
+        verify_script = [
+            ((50,), 0, False),
+            ((51,), 0, False),
+            ((52,), 0, False),
+            ((53,), 0, False),
+            ((54,), 0, True),
+        ]
+        propose_script = [
+            [1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12],
+            [13, 14, 15, 16],
+            [17, 18],   # K halved to 2
+        ]
+        probs_script = [[0.5] * len(p) for p in propose_script]
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=sample_script,
+            verify_script=verify_script,
+        )
+        draft = _FakeDraftV2(
+            propose_script=propose_script,
+            probs_script=probs_script,
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=4,
+        )
+        list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=20, temperature=0.7),
+            chain=chain,
+        ))
+        ks = [c["k"] for c in draft.propose_with_probs_calls]
+        assert ks == [4, 4, 4, 4, 2]
+
+    def test_adaptive_k_holds_in_neutral_band(self):
+        # 4 rounds K=4 with ac=2 each (rate 50%). K stays at 4.
+        sample_script = [(7, False)]
+        verify_script = [
+            ((10, 20, 50), 2, False),
+            ((30, 40, 51), 2, False),
+            ((60, 70, 52), 2, False),
+            ((80, 90, 53), 2, False),
+            ((100, 110, 54), 2, True),
+        ]
+        # Each round: K=4 drafts but only 2 accepted; verified is
+        # ac+1 = 3 entries. Round 5 must still use K=4.
+        propose_script = [
+            [10, 20, 30, 40], [30, 40, 41, 42],
+            [60, 70, 71, 72], [80, 90, 91, 92],
+            [100, 110, 111, 112],
+        ]
+        probs_script = [[0.5] * 4 for _ in propose_script]
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=sample_script,
+            verify_script=verify_script,
+        )
+        draft = _FakeDraftV2(
+            propose_script=propose_script,
+            probs_script=probs_script,
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=4,
+        )
+        list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=20, temperature=0.7),
+            chain=chain,
+        ))
+        ks = [c["k"] for c in draft.propose_with_probs_calls]
+        assert ks == [4, 4, 4, 4, 4]
+
+    def test_adaptive_k_caps_at_max_verify_batch(self):
+        # K = MAX-1 already; high accept rate → wants to double,
+        # but stays capped at MAX_VERIFY_BATCH_TOKENS - 1.
+        from prsm.compute.chain_rpc.protocol import (
+            MAX_VERIFY_BATCH_TOKENS,
+        )
+        k_max = MAX_VERIFY_BATCH_TOKENS - 1
+        # Use modest k_max (cap won't blow test runtime — verified
+        # tuples scale with K). For tractable test, run K=4 with
+        # speculation_depth=k_max-1, force doubling to hit cap.
+        # Simpler: speculation_depth=k_max and run 4 full-accept
+        # rounds; round 5 should still be k_max.
+        sample_script = [(7, False)]
+        verify_script = []
+        propose_script = []
+        probs_script = []
+        for _ in range(5):
+            verified = tuple(range(100, 100 + k_max + 1))
+            verify_script.append((verified, k_max, False))
+            propose_script.append([200 + i for i in range(k_max)])
+            probs_script.append([0.99] * k_max)
+        # Final round terminate.
+        verify_script[-1] = (verify_script[-1][0], k_max, True)
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=sample_script,
+            verify_script=verify_script,
+        )
+        draft = _FakeDraftV2(
+            propose_script=propose_script,
+            probs_script=probs_script,
+        )
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=k_max,
+        )
+        list(executor.execute_chain_streaming(
+            request=_make_request(
+                max_tokens=k_max * 10, temperature=0.7,
+            ),
+            chain=chain,
+        ))
+        ks = [c["k"] for c in draft.propose_with_probs_calls]
+        # All five rounds at k_max — capped, no overshoot.
+        assert ks == [k_max] * 5

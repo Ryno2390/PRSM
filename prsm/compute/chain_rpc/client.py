@@ -50,8 +50,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Iterator, List, Optional, Protocol, Tuple, Union
+from typing import Any, Callable, Deque, Iterable, Iterator, List, Optional, Protocol, Tuple, Union
 
 import numpy as np
 
@@ -1026,41 +1027,62 @@ class RpcChainExecutor:
              rejected suffix).
           6. Continue with last emitted token as next parent.
 
-        v1 honest scope (mirrors design plan §3.6):
-          - **Greedy-only.** Speculation correctness under
-            ``temperature > 0`` requires the Leviathan-2023
-            sampling-correction; v1 raises if the request
-            specifies positive temperature. Sampling-correct
-            speculation is Phase 3.x.11.y.x.
-          - **Output equivalence with non-speculative greedy.**
-            For ``temperature == 0``, the emitted token sequence
-            is bit-identical to Phase 3.x.11 single-token
-            INCREMENTAL decode against the same chain. Speculation
-            is a perf optimization, not a sampling change.
+        Routing (Phase 3.x.11.y.x):
+          - ``temperature == 0.0`` (or unset) → v1 (greedy)
+            path. Calls ``draft.propose`` (no probs); chain
+            VERIFY returns K+1 verified ids; tail's
+            ``apply_lm_head_and_sample_batch`` argmaxes; emits
+            longest accepted prefix + greedy correction/bonus.
+            Bit-identical to non-speculative greedy.
+          - ``temperature > 0`` → v2 (Leviathan-2023 stochastic)
+            path. Requires ``draft.propose_with_probs`` capability
+            (raised if absent). Chain VERIFY carries
+            ``proposed_token_probs``; tail's
+            ``apply_lm_head_and_sample_batch_with_rejection``
+            performs §2.2 rejection-sampling and returns
+            ``accepted_count + 1`` verified ids (last is
+            correction OR bonus). Marginal output distribution
+            matches the non-speculative softmax(p/T) sampling.
+
+        Adaptive K (Phase 3.x.11.y.x §Task 5):
+          - Per-request rolling-window of last 4 rounds'
+            ``(accepted_count, K)`` pairs. Once the window is
+            full, every round recomputes the smoothed accept-
+            rate ``Σ ac / Σ K`` and adapts K for the NEXT round:
+              · rate < 0.25 → K //= 2 (floor 1)
+              · rate > 0.75 → K *= 2 (cap MAX_VERIFY_BATCH_TOKENS - 1)
+            K stays unchanged in the [0.25, 0.75] band. Initial
+            K is the constructor's ``speculation_depth``.
+
+        v1+v2 shared honest scope:
           - **Per-iteration accept-rate timing surface.**
             ``accepted_count`` is observable on the wire — the
             operator/network observer learns the acceptance-rate
             distribution. Tier C remains structurally denied for
             sharded decode (Phase 3.x.11.q deferred).
         """
-        # Greedy-only at v1. Surface as PROMPT_ENCODE_ERROR — the
-        # request shape is rejected at the executor boundary
-        # before any stage dispatch (closest existing code; full
-        # MALFORMED_REQUEST is a follow-up enum addition if other
-        # client-side validations land).
+        # Routing decision. v1 (greedy) preserved bit-identical
+        # via temp == 0.0 path; v2 (stochastic) requires
+        # propose_with_probs capability + tail-side v2 routing.
         request_temp = getattr(request, "temperature", None)
-        if request_temp is not None and float(request_temp) != 0.0:
+        use_stochastic = (
+            request_temp is not None and float(request_temp) > 0.0
+        )
+        if use_stochastic and not callable(
+            getattr(self._draft_model, "propose_with_probs", None),
+        ):
             raise ChainExecutionError(
                 stage_index=-1,
                 stage_node_id="",
                 code=ExecutorErrorCode.PROMPT_ENCODE_ERROR,
                 message=(
-                    f"speculative decoding (Phase 3.x.11.y) is greedy-"
-                    f"only at v1; request.temperature must be 0.0 "
-                    f"or unset, got {request_temp}. Sampling-correct "
-                    f"speculation under temperature > 0 requires the "
-                    f"Leviathan-2023 rejection-sampling correction "
-                    f"(deferred to Phase 3.x.11.y.x)."
+                    f"speculative decoding at temperature={request_temp} "
+                    f"requires DraftModel.propose_with_probs(...) "
+                    f"capability (Phase 3.x.11.y.x §Task 2); the "
+                    f"configured draft_model does not implement it. "
+                    f"Either set temperature=0.0 (v1 greedy path) or "
+                    f"upgrade the draft model — see "
+                    f"prsm.compute.inference.draft_model.HFDraftModel."
                 ),
             )
 
@@ -1098,6 +1120,11 @@ class RpcChainExecutor:
             or self._sharded_default_max_tokens
         )
         k = self._speculation_depth
+        # Adaptive K rolling-window state. Each entry is
+        # (accepted_count, K_at_that_round). Once full (4 rounds),
+        # smoothed accept-rate Σ ac / Σ K drives next-round K.
+        accept_history: Deque[Tuple[int, int]] = deque(maxlen=4)
+        k_max = MAX_VERIFY_BATCH_TOKENS - 1
 
         # Initialize draft model BEFORE PREFILL dispatch. Caller
         # cancellation between PREFILL and the first yield is rare
@@ -1136,13 +1163,32 @@ class RpcChainExecutor:
 
             # Step 2: speculative VERIFY loop.
             while not is_terminal and tokens_emitted < max_tokens:
-                # Step 2a: draft proposes K tokens.
-                proposed = self._draft_model.propose(
-                    request_id=request.request_id,
-                    parent_token_id=next_token_id,
-                    k=k,
-                    temperature=0.0,
-                )
+                # Step 2a: draft proposes K tokens. v1 path uses
+                # propose (greedy, probs implicit); v2 path uses
+                # propose_with_probs and forwards q(d_i) on the
+                # wire so the tail can run §2.2 rejection-sampling.
+                proposed_probs: Optional[List[float]] = None
+                if use_stochastic:
+                    propose_with_probs = (
+                        self._draft_model.propose_with_probs
+                    )
+                    proposed, probs_out = propose_with_probs(
+                        request_id=request.request_id,
+                        parent_token_id=next_token_id,
+                        k=k,
+                        temperature=float(request_temp),
+                    )
+                    proposed_probs = (
+                        [float(p) for p in probs_out]
+                        if probs_out is not None else None
+                    )
+                else:
+                    proposed = self._draft_model.propose(
+                        request_id=request.request_id,
+                        parent_token_id=next_token_id,
+                        k=k,
+                        temperature=0.0,
+                    )
                 if not isinstance(proposed, list) or not proposed:
                     raise ChainExecutionError(
                         stage_index=-1,
@@ -1154,7 +1200,27 @@ class RpcChainExecutor:
                             f"non-empty list of int token ids"
                         ),
                     )
+                if (
+                    use_stochastic
+                    and (
+                        proposed_probs is None
+                        or len(proposed_probs) != len(proposed)
+                    )
+                ):
+                    raise ChainExecutionError(
+                        stage_index=-1,
+                        stage_node_id="",
+                        code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                        message=(
+                            f"draft_model.propose_with_probs returned "
+                            f"probs of length "
+                            f"{None if proposed_probs is None else len(proposed_probs)} "
+                            f"but proposed K={len(proposed)}; the two "
+                            f"must be co-set with equal length"
+                        ),
+                    )
                 # Step 2b: chain VERIFY.
+                k_round = len(proposed)
                 (
                     verified,
                     accepted_count,
@@ -1165,6 +1231,7 @@ class RpcChainExecutor:
                     chain=chain,
                     parent_token_id=next_token_id,
                     proposed_token_ids=proposed,
+                    proposed_token_probs=proposed_probs,
                     deadline_unix=deadline_unix,
                 )
                 per_iteration_outcomes.append(verify_outcomes)
@@ -1224,20 +1291,45 @@ class RpcChainExecutor:
                     )
 
                 # Step 2e: rollback the rejected suffix on every
-                # chain stage. ``cached_extra`` is the count of
-                # K+1 verified positions that were cached but
-                # NOT actually emitted. cap_hit_mid_emit case:
-                # we emitted FEWER than accepted_count + 1, so the
-                # extra-cached count grows.
-                cached_extra = (
-                    len(verified) - len(emitted)
-                )
+                # chain stage. Stages cached K+1 positions during
+                # the verify forward (regardless of v1 vs v2 — the
+                # K+1 batched forward populates K+1 KV positions).
+                # ``cached_extra`` is K+1 minus what we actually
+                # kept (= len(emitted)). NOTE: in v2, len(verified)
+                # == accepted_count + 1 (NOT K+1), so we MUST NOT
+                # use len(verified) as the cached count — it would
+                # under-count the rollback in the v2 partial-accept
+                # case. Compute against k_round (this round's K)
+                # instead. cap_hit_mid_emit case: emitted shorter
+                # than accepted_count + 1, so cached_extra grows.
+                cached_extra = (k_round + 1) - len(emitted)
                 if cached_extra > 0:
                     self._rollback_cache_on_stages(
                         chain=chain,
                         request_id=request.request_id,
                         n_positions_to_drop=cached_extra,
                     )
+
+                # Step 2g: adaptive K — record this round's
+                # (accepted_count, K) and once the rolling window
+                # is full, recompute smoothed accept-rate and
+                # adjust K for the NEXT round. Halve below 25%,
+                # double above 75%, hold in [25%, 75%]. Cap at
+                # MAX_VERIFY_BATCH_TOKENS - 1; floor at 1. K is
+                # an executor-side parameter; the chain stages
+                # adapt naturally to the new batch size on the
+                # next VERIFY dispatch.
+                accept_history.append((accepted_count, k_round))
+                if len(accept_history) == accept_history.maxlen:
+                    total_ac = sum(a for a, _ in accept_history)
+                    total_k = sum(kk for _, kk in accept_history)
+                    rate = (
+                        (total_ac / total_k) if total_k > 0 else 0.0
+                    )
+                    if rate < 0.25:
+                        k = max(1, k // 2)
+                    elif rate > 0.75:
+                        k = min(k_max, k * 2)
 
                 # Step 2f: terminal logic. Chain reports terminal
                 # iff EOS in emitted OR tokens_generated reached
@@ -1286,6 +1378,7 @@ class RpcChainExecutor:
         chain: GPUChain,
         parent_token_id: int,
         proposed_token_ids: List[int],
+        proposed_token_probs: Optional[List[float]],
         deadline_unix: float,
     ) -> Tuple[Tuple[int, ...], int, bool, List[StageOutcome]]:
         """One VERIFY pass through the chain.
@@ -1317,6 +1410,10 @@ class RpcChainExecutor:
         proposed_tuple: Tuple[int, ...] = tuple(
             int(t) for t in proposed_token_ids
         )
+        proposed_probs_tuple: Optional[Tuple[float, ...]] = (
+            tuple(float(p) for p in proposed_token_probs)
+            if proposed_token_probs is not None else None
+        )
         last_response: Optional[RunLayerSliceResponse] = None
 
         for stage_index in range(chain_total):
@@ -1333,6 +1430,7 @@ class RpcChainExecutor:
                 decode_mode=DecodeMode.VERIFY,
                 include_sampling_fields=True,
                 proposed_token_ids=proposed_tuple,
+                proposed_token_probs=proposed_probs_tuple,
             )
             outcomes.append(StageOutcome(
                 stage_index=stage_index,
@@ -1364,19 +1462,47 @@ class RpcChainExecutor:
                 ),
             )
         verified = tuple(int(t) for t in last_response.verified_token_ids)
-        if len(verified) != len(proposed_token_ids) + 1:
-            tail_node = chain.stages[-1]
-            raise ChainExecutionError(
-                stage_index=chain_total - 1,
-                stage_node_id=tail_node,
-                code=ExecutorErrorCode.MALFORMED_RESPONSE,
-                message=(
-                    f"sharded VERIFY: tail returned "
-                    f"{len(verified)} verified tokens but expected "
-                    f"K+1={len(proposed_token_ids) + 1}"
-                ),
-            )
         accepted_count = int(last_response.accepted_count)
+        # v1 (greedy / proposed_token_probs is None): expect K+1
+        # verified entries (longest-prefix match + correction or
+        # bonus). v2 (Leviathan-2023 stochastic): expect
+        # accepted_count + 1 entries (rejection-sampled correction
+        # OR bonus is the last entry; the rejected proposals are
+        # NOT echoed back). Validate the right invariant per path.
+        if proposed_token_probs is None:
+            expected_len = len(proposed_token_ids) + 1
+            if len(verified) != expected_len:
+                tail_node = chain.stages[-1]
+                raise ChainExecutionError(
+                    stage_index=chain_total - 1,
+                    stage_node_id=tail_node,
+                    code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                    message=(
+                        f"sharded VERIFY (v1 greedy): tail returned "
+                        f"{len(verified)} verified tokens but expected "
+                        f"K+1={expected_len}"
+                    ),
+                )
+        else:
+            expected_len = accepted_count + 1
+            if (
+                accepted_count < 0
+                or accepted_count > len(proposed_token_ids)
+                or len(verified) != expected_len
+            ):
+                tail_node = chain.stages[-1]
+                raise ChainExecutionError(
+                    stage_index=chain_total - 1,
+                    stage_node_id=tail_node,
+                    code=ExecutorErrorCode.MALFORMED_RESPONSE,
+                    message=(
+                        f"sharded VERIFY (v2 stochastic): tail returned "
+                        f"accepted_count={accepted_count} with "
+                        f"{len(verified)} verified tokens; expected "
+                        f"accepted_count in [0, K={len(proposed_token_ids)}] "
+                        f"and len(verified) == accepted_count + 1"
+                    ),
+                )
         is_terminal = bool(last_response.is_terminal)
         return verified, accepted_count, is_terminal, outcomes
 
@@ -2004,6 +2130,7 @@ class RpcChainExecutor:
         decode_mode: DecodeMode = DecodeMode.PREFILL,
         include_sampling_fields: bool = False,
         proposed_token_ids: Optional[Tuple[int, ...]] = None,
+        proposed_token_probs: Optional[Tuple[float, ...]] = None,
     ) -> Tuple[RunLayerSliceResponse, np.ndarray]:
         """Mint token → encode request → send → parse + verify response
         → decode output activation.
@@ -2091,6 +2218,7 @@ class RpcChainExecutor:
             decode_mode=decode_mode,
             include_sampling_fields=include_sampling_fields,
             proposed_token_ids=proposed_token_ids,
+            proposed_token_probs=proposed_token_probs,
         )
 
     # ── inline path ──────────────────────────────────────────────────
@@ -2110,6 +2238,7 @@ class RpcChainExecutor:
         decode_mode: DecodeMode = DecodeMode.PREFILL,
         include_sampling_fields: bool = False,
         proposed_token_ids: Optional[Tuple[int, ...]] = None,
+        proposed_token_probs: Optional[Tuple[float, ...]] = None,
     ) -> Tuple[RunLayerSliceResponse, np.ndarray]:
         """v1 inline path: activation rides hex-encoded inside the JSON
         envelope; response activation rides the same way.
@@ -2150,6 +2279,7 @@ class RpcChainExecutor:
             max_tokens=max_tokens,
             temperature=temperature,
             proposed_token_ids=proposed_token_ids,
+            proposed_token_probs=proposed_token_probs,
         )
         request_bytes = encode_message(wire_request)
 
