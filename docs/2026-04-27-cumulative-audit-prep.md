@@ -955,7 +955,13 @@ tokens from a real model rather than synthetic word splits.
   Phase 3.x.10.x.
 - Round-2: APPROVED-FOR-TAG.
 
-**Production wiring caveats deferred to Phase 3.x.10.x.**
+**Production wiring caveats — CLOSED by Phase 3.x.10.x (see §7.7).**
+
+Both caveats below were live deferrals at the
+``phase3.x.10-merge-ready-20260428`` tag. Phase 3.x.10.x
+(``phase3.x.10.x-merge-ready-20260428`` — see §7.7) closes
+both. They are documented here as historical context for
+auditors comparing the two tags.
 
   1. **No production caller constructs the runner yet.** The
      runner is exported at the package surface but no code path
@@ -964,9 +970,9 @@ tokens from a real model rather than synthetic word splits.
      The runtime guarantees in this section are exercised only
      by the test suite. This is analogous to the dormant
      scaffolding pattern Phase 3.x.8 left for Phase 3.x.8.1 to
-     close. A Phase 3.x.10.x follow-up will wire the runner into
-     the operator's node-startup path so end users typing into
-     ``prsm_inference`` actually hit the new runner.
+     close. **Closed by Phase 3.x.10.x §7.7:**
+     ``make_autoregressive_streaming_runner(...)`` factory +
+     ``make_layer_stage_server(streaming_runner=...)`` extension.
 
   2. **Sampling overrides via ``request=`` are bypassed in the
      production server path.** The runner accepts an optional
@@ -979,6 +985,13 @@ tokens from a real model rather than synthetic word splits.
      dispatch falls back to the runner's construction-time
      defaults. Plumbing the wire-format extension to carry
      sampling params end-to-end is Phase 3.x.10.x scope.
+     **Closed by Phase 3.x.10.x §7.7:** wire-format extension
+     adds ``RunLayerSliceRequest.max_tokens`` +
+     ``.temperature`` (omit-when-None canonical encoding for
+     byte-equivalence); ``LayerStageServer.handle_token_stream``
+     constructs ``StreamingSamplingShim`` and forwards as
+     ``request=`` to the runner; ``RpcChainExecutor`` populates
+     the new wire fields from ``InferenceRequest``.
 
 **Auditor prompts:** start with the runner's class docstring in
 ``prsm/compute/inference/autoregressive_runner.py:232-272`` for
@@ -1002,6 +1015,164 @@ real distilgpt2 output. The timing-side-channel memo
 (``docs/2026-04-28-phase3.x.10-timing-sidechannel-memo.md``) is
 the disclosed residual; Tier C is structurally blocked until
 Phase 3.x.10.x.
+
+---
+
+## 7.7 Production Wiring + Sampling-Param Plumbing (Phase 3.x.10.x)
+
+Phase 3.x.10.x is a 6-task point release on Phase 3.x.10 that
+closes the round-1 M4 + M5 honest-scope deferrals (see §7.6
+"Production wiring caveats — CLOSED by Phase 3.x.10.x"
+subsection above). The slice makes the
+``AutoregressiveStreamingRunner`` user-visible: operators can
+construct a streaming-capable ``LayerStageServer`` with two
+factory calls, and end-user
+``InferenceRequest.max_tokens`` / ``.temperature`` overrides
+now reach the runner instead of dead-lettering at the wire
+boundary.
+
+**Tag:** ``phase3.x.10.x-merge-ready-20260428`` at commit
+``[applied at tag time]``.
+
+**Headline guarantees.**
+
+  1. **Wire-format extension (M4 closure).** ``RunLayerSliceRequest``
+     gains optional ``max_tokens: Optional[int]`` +
+     ``temperature: Optional[float]`` fields with
+     omit-when-None canonical encoding. Pre-3.x.10.x signed
+     bytes remain verifiable (mirrors the Phase 3.x.8
+     ``streaming`` flag pattern). No protocol-version bump —
+     additive optional fields under v2. Bool-rejection guards
+     prevent ``True`` / ``False`` slipping through Python's
+     ``bool ⊂ int`` subclass relationship. Range validation:
+     ``max_tokens > 0``, ``temperature ∈ [0.0, 2.0]`` with
+     ``0.0`` accepted as the runner's greedy-decode signal.
+
+  2. **Server ``request=`` plumbing (M4 closure).**
+     ``LayerStageServer.handle_token_stream`` constructs a
+     ``StreamingSamplingShim(max_tokens, temperature)`` from
+     the parsed wire fields and forwards as ``request=`` to
+     the streaming runner. ``StreamingLayerRunner`` Protocol
+     formalized with ``request: Any = None`` (was a soft
+     extension in 3.x.10). ``SyntheticStreamingRunner``
+     accepts + ignores the kwarg.
+
+  3. **Executor populates wire fields (M4 closure).**
+     ``RpcChainExecutor._dispatch_streaming_tail`` propagates
+     ``InferenceRequest.max_tokens`` + ``.temperature`` into
+     the streaming ``RunLayerSliceRequest``. Streaming-only:
+     unary ``RunLayerSliceRequest`` construction sites stay
+     untouched (non-tail stages have no autoregressive decode
+     to override; sampling overrides on those messages would
+     be dead metadata).
+
+  4. **Production factories (M5 closure).** New
+     ``make_autoregressive_streaming_runner(model, tokenizer,
+     tee_attestation, prompt_provider, ...)`` factory in
+     ``prsm/compute/inference/factories.py`` builds a
+     production-ready runner with operator-friendly RuntimeError
+     validation. ``make_layer_stage_server`` gains optional
+     ``streaming_runner=`` kwarg; default ``None`` preserves
+     back-compat (server rejects token-stream requests with
+     INTERNAL_ERROR "not configured for streaming") for
+     operators not opting in. SDK callers can wire a streaming
+     node in ~5 lines:
+     ``from prsm.compute.inference import make_autoregressive_streaming_runner``.
+
+  5. **Byte-equivalence pinned by golden bytes.** Round-1
+     review M-TEST-1 remediation: a hardcoded canonical-bytes
+     baseline (deterministic across runs) is asserted in
+     ``test_golden_canonical_bytes_pre_3_x_10_x_baseline``.
+     Any future patch breaking pre-3.x.10.x signature
+     verification fails this assertion explicitly.
+
+**Trust seams added by 3.x.10.x.**
+
+  1. ``StreamingSamplingShim`` (streaming_runner.py:51-77) —
+     minimal frozen dataclass; runner reads via
+     ``getattr(request, "max_tokens", None)``. Decouples the
+     runner from the chain_rpc protocol's full envelope.
+
+  2. ``make_autoregressive_streaming_runner`` (factories.py)
+     — operator-facing construction with clear RuntimeError
+     messages on misconfig (model, tokenizer, tee_attestation,
+     prompt_provider). ``tee_attestation`` stays
+     operator-sourced (their TEE runtime produces it; the
+     factory does not derive from identity material to keep
+     TEE platform decisions where they belong).
+
+**v1 honest scope (carries forward).**
+
+  - Tier C constant-time padding still gated until Phase
+    3.x.10.y.
+  - Sharded autoregressive still gated until Phase 3.x.11.
+  - Stop sequences not implemented; only EOS + ``max_tokens``.
+  - HF generate buffering: tokens reach the wire only after
+    ``.generate()`` returns. Async-during-generate is Phase
+    3.x.10.y perf upgrade.
+  - Streaming + chunked-input composition still rejected.
+  - **NEW for 3.x.10.x — HF prompt-echo behavior.** With
+    GPT-2-family byte-level BPE tokenizers, HF's TextStreamer
+    emits the prompt back as the first wire chunk before the
+    generated tokens. This is observable in the full-stack E2E
+    (``test_max_tokens_propagates_end_to_end`` asserts
+    cap propagation via ``finish_reason="max_tokens"`` rather
+    than chunk count). The ``skip_prompt`` toggle on
+    HF TextStreamer would address it; tracked for Phase
+    3.x.10.y.
+
+**Test coverage at the tag.**
+
+  - 18 wire-format unit tests in ``test_chain_rpc_protocol.py``
+    (TestSamplingOverridesByteEquivalence × 5 incl. golden-bytes
+    pin; TestSamplingOverridesValidation × 9;
+    TestSamplingOverridesRoundTrip × 5).
+  - 6 server-shim plumbing tests in
+    ``test_autoregressive_runner_server_wire.py`` — wire
+    max_tokens reaches model.generate; temperature=0.0
+    triggers greedy; both unset falls back to defaults;
+    SyntheticStreamingRunner Protocol back-compat preserved.
+  - 4 executor propagation tests in ``test_chain_rpc_client.py``
+    — fields propagate to streaming wire request; unset
+    InferenceRequest sends None; temperature=0.0 propagates
+    as real value; unary path stays untouched.
+  - 11 factory tests in ``test_inference_factories.py`` —
+    factory builds runner; smoke 1-token decode; rejects each
+    misconfig; passes through sampling_defaults + tee_type;
+    make_layer_stage_server back-compat preserved on None;
+    autoregressive + synthetic runners both wire through.
+  - 4 slow-marked HF distilgpt2 full-stack E2E tests in
+    ``test_phase3_x_10_x_full_stack_e2e.py`` — max_tokens=4
+    cap propagates end-to-end; greedy bit-identical across
+    independent server constructions; no-overrides falls back
+    to defaults; signed response verifies under stage identity.
+
+**Round-1 → round-2 surface.**
+
+  - Round-1: APPROVED-WITH-PRE-TAG-REMEDIATIONS. 0 HIGH; 2
+    MEDIUM (M-DOC-1: §7.7 missing + §7.6 stale; M-TEST-1:
+    byte-equivalence test tautological — needed golden-bytes
+    pin); LOW findings deferred or no-op verified.
+    Implementation technically sound; protocol formalization
+    safe; bool-rejection + range validation + None
+    distinguishability + lazy-import correctness all verified.
+  - Both MEDIUMs remediated pre-tag.
+  - Round-2: APPROVED-FOR-TAG.
+
+**Auditor prompts:** start with the byte-equivalence golden
+test (``tests/unit/test_chain_rpc_protocol.py``,
+``test_golden_canonical_bytes_pre_3_x_10_x_baseline``). It's
+the load-bearing pre-3.x.10.x signed-traffic compatibility
+guarantee. Then read ``LayerStageServer.handle_token_stream``
+shim construction (``prsm/compute/chain_rpc/server.py:829-855``)
+for the wire-to-runner forward. The factory pair
+(``prsm/compute/inference/factories.py`` +
+``prsm/compute/chain_rpc/factories.py``'s ``streaming_runner=``
+kwarg) is the operator-facing surface. Full-stack E2E
+(``tests/integration/test_phase3_x_10_x_full_stack_e2e.py``)
+proves the chain end-to-end against real distilgpt2; the
+``finish_reason="max_tokens"`` assertion is the load-bearing
+cap-propagation invariant.
 
 ---
 

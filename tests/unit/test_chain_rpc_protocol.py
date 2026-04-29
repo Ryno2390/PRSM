@@ -1723,6 +1723,66 @@ class TestSamplingOverridesByteEquivalence:
         )
         assert encode_message(req_a) == encode_message(req_b)
 
+    def test_golden_canonical_bytes_pre_3_x_10_x_baseline(self):
+        # Pre-tag round-1 review M-TEST-1: the test above is
+        # tautological (both sides constructed by post-3.x.10.x
+        # code, so a regression in to_dict that emitted
+        # ``"max_tokens": null`` instead of omitting would slip
+        # past undetected). Pin the canonical-JSON bytes against
+        # a hardcoded baseline captured BEFORE 3.x.10.x landed —
+        # any future patch that breaks omit-when-None
+        # byte-equivalence with pre-3.x.10.x signed traffic fails
+        # this assertion explicitly.
+        # Token signature is hand-fixed to avoid ed25519
+        # randomness; the canonical bytes are deterministic
+        # across runs.
+        fixed_token = HandoffToken(
+            request_id="golden-req",
+            settler_node_id="golden-settler",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=1000.0,
+            signature_b64="golden-sig",
+        )
+        req = RunLayerSliceRequest(
+            request_id="golden-req",
+            model_id="golden-model",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"\x01\x02",
+            activation_shape=(1, 2),
+            activation_dtype="f32",
+            upstream_token=fixed_token,
+            deadline_unix=1000.0,
+        )
+        expected = (
+            b'{"activation_blob_hex": "0102", '
+            b'"activation_dtype": "f32", '
+            b'"activation_shape": [1, 2], '
+            b'"content_tier": "A", '
+            b'"deadline_unix": 1000.0, '
+            b'"layer_range": [0, 4], '
+            b'"model_id": "golden-model", '
+            b'"privacy_tier": "none", '
+            b'"protocol_version": 2, '
+            b'"request_id": "golden-req", '
+            b'"type": "run_layer_slice_request", '
+            b'"upstream_token": {'
+            b'"chain_stage_index": 0, '
+            b'"chain_total_stages": 1, '
+            b'"deadline_unix": 1000.0, '
+            b'"request_id": "golden-req", '
+            b'"settler_node_id": "golden-settler", '
+            b'"signature_b64": "golden-sig"}}'
+        )
+        assert encode_message(req) == expected, (
+            "byte-equivalence broken with pre-3.x.10.x signed bytes "
+            "— a pre-3.x.10.x signed RunLayerSliceRequest with these "
+            "exact field values would no longer verify under the "
+            "post-3.x.10.x serializer"
+        )
+
     def test_set_fields_appear_in_wire_dict(self):
         identity = generate_node_identity("settler")
         req = RunLayerSliceRequest(
