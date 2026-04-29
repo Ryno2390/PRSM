@@ -56,7 +56,10 @@ from typing import Any, List, Optional, Protocol, Tuple, Union
 import numpy as np
 
 from prsm.compute.chain_rpc.kv_cache import KVCacheManager
-from prsm.compute.chain_rpc.protocol import DecodeMode
+from prsm.compute.chain_rpc.protocol import (
+    MAX_VERIFY_BATCH_TOKENS,
+    DecodeMode,
+)
 from prsm.compute.inference.autoregressive_runner import SamplingDefaults
 from prsm.compute.tee.models import TEEType
 
@@ -65,6 +68,7 @@ __all__ = [
     "LayerSliceResult",
     "MalformedCacheStateError",
     "MissingTailCapabilityError",
+    "MissingVerifyCapabilityError",
     "ShardedAutoregressiveRunner",
     "ShardedLayerForward",
 ]
@@ -83,6 +87,15 @@ class MissingTailCapabilityError(RuntimeError):
     ``sampling_defaults`` / no ``apply_lm_head_and_sample`` on the
     model). Caller bug — operators must construct the runner with
     tail args set when the stage is the chain tail."""
+
+
+class MissingVerifyCapabilityError(RuntimeError):
+    """Raised on ``decode_mode == VERIFY`` dispatch when the runner's
+    model does not implement ``forward_verify`` (or, for tail
+    dispatch, does not also implement ``apply_lm_head_and_sample_batch``).
+    Caller bug — operators must wire a verify-capable model when
+    serving speculative-decoding chains. Maps to
+    ``MALFORMED_REQUEST`` at the wire layer."""
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -146,6 +159,54 @@ class ShardedLayerForward(Protocol):
         opted-in."""
         ...
 
+    def forward_verify(
+        self,
+        *,
+        input_or_hidden: Any,
+        layer_range: Tuple[int, int],
+        kv_cache_payload: Any,
+    ) -> Tuple[np.ndarray, Any]:
+        """Phase 3.x.11.y — speculative-decoding VERIFY forward.
+        Batched K+1-position forward through ``layer_range`` with
+        cached KV (the cache covers positions before the K+1
+        speculative tokens). ``input_or_hidden`` is
+        ``List[int]`` of length K+1 for Stage 1 or
+        ``np.ndarray`` shaped ``[K+1, hidden]`` (or
+        ``[1, K+1, hidden]``) for Stage > 1. Returns
+        ``(hidden_at_exit, updated_kv_cache_payload)`` where
+        ``hidden_at_exit`` is shaped ``[K+1, hidden]`` (one
+        position per input). Cache is mutated to cover all K+1
+        new positions; the caller (executor) issues
+        ``RollbackCacheRequest`` to drop the rejected suffix.
+
+        Models that don't support speculation can omit this
+        method; the runner guards it at dispatch time per
+        decode_mode."""
+        ...
+
+    def apply_lm_head_and_sample_batch(
+        self,
+        *,
+        hidden_state_batch: np.ndarray,
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> List[int]:
+        """Phase 3.x.11.y — tail-only — project K+1 hidden states
+        through the LM head + sample one token per position.
+        ``hidden_state_batch`` shape is ``[K+1, hidden]``;
+        returns ``[K+1]`` token ids (one per position;
+        ``verified[i]`` is the model's argmax/sample for the
+        token following input position i). Greedy under
+        ``temperature == 0`` (used by v1 — sampling-correct
+        speculation under temperature > 0 requires the
+        Leviathan-2023 correction, deferred to Phase 3.x.11.y.x).
+
+        Non-tail / non-speculation models can omit this method;
+        the runner guards it at dispatch time per
+        decode_mode/is_final_stage."""
+        ...
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # LayerSliceResult — runner return type
@@ -159,7 +220,10 @@ class LayerSliceResult:
     The caller (server's unary handler) maps these into a
     ``RunLayerSliceResponse`` — ``hidden_state`` becomes the wire
     activation; ``next_token_id`` + ``is_terminal`` populate
-    tail-only fields (None / False on non-tail responses).
+    tail-only fields (None / False on non-tail responses);
+    ``verified_token_ids`` + ``accepted_count`` populate
+    Phase 3.x.11.y speculative-decoding tail-only fields (None on
+    PREFILL / INCREMENTAL / non-tail VERIFY).
 
     ``n_layers_run`` is the size of the layer range this dispatch
     actually executed; useful for receipt + metrics.
@@ -171,6 +235,8 @@ class LayerSliceResult:
     n_layers_run: int
     next_token_id: Optional[int] = None
     is_terminal: bool = False
+    verified_token_ids: Optional[Tuple[int, ...]] = None
+    accepted_count: Optional[int] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -339,10 +405,11 @@ class ShardedAutoregressiveRunner:
         request_id: str,
         decode_mode: DecodeMode,
         is_final_stage: bool = False,
-        request: Any = None,  # noqa: ARG002 — Task 4 wires sampling
+        request: Any = None,
+        proposed_token_ids: Optional[List[int]] = None,
     ) -> LayerSliceResult:
-        """Dispatch one PREFILL or INCREMENTAL forward through
-        ``layer_range``.
+        """Dispatch one PREFILL / INCREMENTAL / VERIFY forward
+        through ``layer_range``.
 
         PREFILL:
           - Allocate fresh cache handle via the manager (LRU-evicts
@@ -361,9 +428,30 @@ class ShardedAutoregressiveRunner:
             back).
           - Return the single-position hidden state.
 
-        Tail (Task 4) extends this with LM-head + sampling. v1
-        non-tail returns ``next_token_id=None`` +
-        ``is_terminal=False`` always.
+        VERIFY (Phase 3.x.11.y — speculative decoding):
+          - Look up the existing handle (must exist; raises
+            ``MalformedCacheStateError`` if absent — VERIFY is
+            never the first dispatch).
+          - Validate the K+1-position input (Stage 1: list of
+            K+1 ints; Stage > 1: ndarray with K+1 batch dim).
+            Cap K+1 at ``MAX_VERIFY_BATCH_TOKENS`` (defends
+            against malformed peer claiming a huge speculation
+            depth that explodes server-side memory).
+          - Drive ``model.forward_verify(kv_cache_payload=...)``;
+            cache is extended with K+1 new positions (executor
+            issues ``RollbackCacheRequest`` afterward to drop
+            the rejected suffix).
+          - If tail: sample K+1 logits via
+            ``model.apply_lm_head_and_sample_batch``; compute
+            ``accepted_count`` as the longest matching prefix
+            between ``proposed_token_ids`` and the verified
+            argmaxes; bump ``handle.tokens_generated`` by
+            ``accepted_count + 1`` (only emitted tokens count
+            against ``max_tokens``); set ``next_token_id`` to
+            the LAST emitted (``verified_token_ids[accepted_count]``).
+          - Tail-stage termination: ``is_terminal=True`` if any
+            emitted token equals ``eos_token_id`` OR
+            ``handle.tokens_generated >= max_tokens``.
         """
         if not isinstance(request_id, str) or not request_id:
             raise RuntimeError(
@@ -389,6 +477,14 @@ class ShardedAutoregressiveRunner:
                 "(sampling_defaults + model.apply_lm_head_and_sample) "
                 "— this runner was constructed non-tail-only"
             )
+        # ``proposed_token_ids`` is meaningful only on tail VERIFY
+        # dispatch; reject as caller bug if set on any other path.
+        if proposed_token_ids is not None and decode_mode != DecodeMode.VERIFY:
+            raise RuntimeError(
+                "ShardedAutoregressiveRunner.run_layer_slice_unary: "
+                "proposed_token_ids is only meaningful for "
+                "decode_mode=VERIFY"
+            )
 
         start_ts = time.time()
         if decode_mode == DecodeMode.PREFILL:
@@ -400,8 +496,7 @@ class ShardedAutoregressiveRunner:
                 layer_range=self._layer_range,
             )
             handle.payload = payload
-        else:
-            # INCREMENTAL
+        elif decode_mode == DecodeMode.INCREMENTAL:
             handle = self._cache.get(request_id)
             if handle is None:
                 raise MalformedCacheStateError(
@@ -417,15 +512,68 @@ class ShardedAutoregressiveRunner:
                 kv_cache_payload=handle.payload,
             )
             handle.payload = updated_payload
+        else:
+            # VERIFY — Phase 3.x.11.y
+            handle = self._cache.get(request_id)
+            if handle is None:
+                raise MalformedCacheStateError(
+                    f"ShardedAutoregressiveRunner: VERIFY dispatch "
+                    f"for request_id={request_id!r} but no prior "
+                    f"PREFILL cache exists (caller must run PREFILL "
+                    f"first or cache was evicted by TTL/LRU)"
+                )
+            if not callable(getattr(self._model, "forward_verify", None)):
+                raise MissingVerifyCapabilityError(
+                    "ShardedAutoregressiveRunner: decode_mode=VERIFY "
+                    "requires model.forward_verify(...) per "
+                    "ShardedLayerForward Protocol — this model omits it"
+                )
+            n_positions = self._verify_input_n_positions(
+                activation_or_input_ids,
+            )
+            if n_positions < 2:
+                raise RuntimeError(
+                    f"ShardedAutoregressiveRunner: VERIFY input must "
+                    f"contain at least 2 positions (parent + at "
+                    f"least one draft), got {n_positions}"
+                )
+            if n_positions > MAX_VERIFY_BATCH_TOKENS:
+                raise RuntimeError(
+                    f"ShardedAutoregressiveRunner: VERIFY input "
+                    f"length {n_positions} exceeds cap "
+                    f"{MAX_VERIFY_BATCH_TOKENS} — defends against "
+                    f"malformed peer claiming huge speculation depth"
+                )
+            hidden, updated_payload = self._model.forward_verify(
+                input_or_hidden=activation_or_input_ids,
+                layer_range=self._layer_range,
+                kv_cache_payload=handle.payload,
+            )
+            handle.payload = updated_payload
 
         next_token_id: Optional[int] = None
         is_terminal = False
+        verified_token_ids: Optional[Tuple[int, ...]] = None
+        accepted_count: Optional[int] = None
         if is_final_stage:
-            next_token_id, is_terminal = self._sample_tail(
-                hidden_state=hidden,
-                handle=handle,
-                request=request,
-            )
+            if decode_mode == DecodeMode.VERIFY:
+                (
+                    next_token_id,
+                    is_terminal,
+                    verified_token_ids,
+                    accepted_count,
+                ) = self._sample_tail_verify(
+                    hidden_state_batch=hidden,
+                    handle=handle,
+                    request=request,
+                    proposed_token_ids=proposed_token_ids,
+                )
+            else:
+                next_token_id, is_terminal = self._sample_tail(
+                    hidden_state=hidden,
+                    handle=handle,
+                    request=request,
+                )
 
         duration = time.time() - start_ts
         return LayerSliceResult(
@@ -435,7 +583,29 @@ class ShardedAutoregressiveRunner:
             n_layers_run=self._n_layers,
             next_token_id=next_token_id,
             is_terminal=is_terminal,
+            verified_token_ids=verified_token_ids,
+            accepted_count=accepted_count,
         )
+
+    @staticmethod
+    def _verify_input_n_positions(
+        activation_or_input_ids: Union[np.ndarray, List[int]],
+    ) -> int:
+        """Extract K+1 (the position count) from a VERIFY input.
+        Stage 1 input is ``List[int]`` of length K+1; Stage > 1
+        input is an ndarray whose seq-len axis is K+1 (shape
+        ``[K+1, hidden]`` or ``[1, K+1, hidden]``)."""
+        if isinstance(activation_or_input_ids, list):
+            return len(activation_or_input_ids)
+        arr = np.asarray(activation_or_input_ids)
+        if arr.ndim < 2:
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: VERIFY ndarray input "
+                f"must have ndim >= 2, got shape {arr.shape}"
+            )
+        # [K+1, hidden] or [1, K+1, hidden] — K+1 is always the
+        # second-to-last axis (per the streaming runner convention).
+        return int(arr.shape[-2])
 
     # ── tail-only sampling ────────────────────────────────────────────
 
@@ -492,6 +662,127 @@ class ShardedAutoregressiveRunner:
             is_terminal = True
 
         return next_token_id, is_terminal
+
+    # ── tail-only VERIFY sampling ─────────────────────────────────────
+
+    def _sample_tail_verify(
+        self,
+        *,
+        hidden_state_batch: np.ndarray,
+        handle: Any,  # KVCacheHandle
+        request: Any,
+        proposed_token_ids: Optional[List[int]],
+    ) -> Tuple[int, bool, Tuple[int, ...], int]:
+        """Tail-only VERIFY sampling. Sample K+1 logits from the
+        batched hidden state, compute ``accepted_count`` as the
+        longest matching prefix between ``proposed_token_ids``
+        and the verified argmaxes, bump
+        ``handle.tokens_generated`` by ``accepted_count + 1``
+        (only emitted tokens count against ``max_tokens``),
+        return the per-iteration outcome.
+
+        Returns
+        ``(next_token_id, is_terminal, verified_token_ids, accepted_count)``.
+        ``next_token_id`` is the LAST emitted token —
+        ``verified_token_ids[accepted_count]`` — the seed for the
+        next speculation round. ``is_terminal`` triggers on EOS
+        in any emitted position OR
+        ``tokens_generated >= max_tokens``.
+        """
+        defaults = self._sampling_defaults
+        assert defaults is not None  # tail_capable guarantees this
+        if not callable(
+            getattr(self._model, "apply_lm_head_and_sample_batch", None),
+        ):
+            raise MissingVerifyCapabilityError(
+                "ShardedAutoregressiveRunner: tail-stage VERIFY "
+                "dispatch requires "
+                "model.apply_lm_head_and_sample_batch(...) per "
+                "ShardedLayerForward Protocol — this model omits it"
+            )
+        if proposed_token_ids is None:
+            raise RuntimeError(
+                "ShardedAutoregressiveRunner: tail-stage VERIFY "
+                "dispatch requires proposed_token_ids — caller "
+                "(executor's speculation loop) must pass the K "
+                "draft tokens for accepted_count comparison"
+            )
+        if not isinstance(proposed_token_ids, list):
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: proposed_token_ids "
+                f"must be list, got {type(proposed_token_ids).__name__}"
+            )
+        for tok in proposed_token_ids:
+            if isinstance(tok, bool) or not isinstance(tok, int):
+                raise RuntimeError(
+                    f"ShardedAutoregressiveRunner: proposed_token_ids "
+                    f"entries must be int, got {type(tok).__name__}"
+                )
+        # Resolve sampling params (mirrors _sample_tail).
+        rmax = getattr(request, "max_tokens", None) if request is not None else None
+        max_tokens = int(rmax) if rmax is not None else defaults.max_tokens
+        rtemp = getattr(request, "temperature", None) if request is not None else None
+        temperature = float(rtemp) if rtemp is not None else defaults.temperature
+        top_k = defaults.top_k
+        top_p = defaults.top_p
+
+        sampled = self._model.apply_lm_head_and_sample_batch(
+            hidden_state_batch=hidden_state_batch,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+        )
+        if not isinstance(sampled, list):
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: "
+                f"apply_lm_head_and_sample_batch must return list, "
+                f"got {type(sampled).__name__}"
+            )
+        verified_token_ids = tuple(int(t) for t in sampled)
+        # K+1 verified positions; K proposed.
+        k = len(proposed_token_ids)
+        if len(verified_token_ids) != k + 1:
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: VERIFY tail expected "
+                f"{k + 1} verified token ids (K+1 with K="
+                f"{k}), got {len(verified_token_ids)}"
+            )
+
+        # accepted_count = longest matching prefix between
+        # proposed and verified[:K]. verified[i] is the model's
+        # argmax for the position FOLLOWING input i; verified[0]
+        # is what comes after parent (should match proposed[0]
+        # = d_1 if accepted). verified[K] is the bonus token
+        # emitted when all drafts accept.
+        accepted_count = 0
+        for i in range(k):
+            if verified_token_ids[i] == proposed_token_ids[i]:
+                accepted_count += 1
+            else:
+                break
+
+        # Emitted = verified_token_ids[: accepted_count + 1] —
+        # accepted draft positions plus one correction/bonus.
+        emitted = verified_token_ids[: accepted_count + 1]
+
+        # Bump tokens_generated by emitted count (only emitted
+        # tokens count against max_tokens; speculatively-cached-
+        # then-rejected positions don't).
+        handle.tokens_generated += len(emitted)
+
+        # Termination: EOS in any emitted position OR
+        # tokens_generated reached max_tokens.
+        is_terminal = False
+        if self._eos_token_id is not None:
+            for tok in emitted:
+                if tok == self._eos_token_id:
+                    is_terminal = True
+                    break
+        if handle.tokens_generated >= max_tokens:
+            is_terminal = True
+
+        next_token_id = int(emitted[-1])
+        return next_token_id, is_terminal, verified_token_ids, accepted_count
 
     # ── eviction passthrough ──────────────────────────────────────────
 

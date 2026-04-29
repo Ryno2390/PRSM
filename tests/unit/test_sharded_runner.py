@@ -29,6 +29,7 @@ from prsm.compute.inference.sharded_runner import (
     LayerSliceResult,
     MalformedCacheStateError,
     MissingTailCapabilityError,
+    MissingVerifyCapabilityError,
     ShardedAutoregressiveRunner,
 )
 from prsm.compute.tee.models import TEEType
@@ -974,3 +975,613 @@ class TestTailConstructorValidation:
                 sampling_defaults=SamplingDefaults(),
                 eos_token_id=True,  # type: ignore[arg-type]
             )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.y Task 4 — VERIFY (speculative-decoding) variant
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _FakeVerifyShardedModel(_FakeShardedModel):
+    """``_FakeShardedModel`` extended with the VERIFY-only
+    ``forward_verify`` method. Records every VERIFY call.
+    Forward semantics: returns hidden = an ndarray shaped
+    ``[K+1, hidden=3]`` with deterministic content; appends K+1
+    cache entries per layer to the kv_cache_payload."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.verify_calls: List[dict] = []
+
+    def forward_verify(
+        self,
+        *,
+        input_or_hidden: Any,
+        layer_range: Tuple[int, int],
+        kv_cache_payload: List[str],
+    ) -> Tuple[np.ndarray, List[str]]:
+        self.verify_calls.append({
+            "input_or_hidden": input_or_hidden,
+            "layer_range": layer_range,
+            "incoming_payload_len": len(kv_cache_payload),
+            "incoming_payload_id": id(kv_cache_payload),
+        })
+        # Resolve K+1 from input shape.
+        if isinstance(input_or_hidden, list):
+            n_positions = len(input_or_hidden)
+        else:
+            arr = np.asarray(input_or_hidden)
+            n_positions = arr.shape[-2]
+        start, end = layer_range
+        # Append K+1 cache entries per layer.
+        for layer in range(start, end):
+            for j in range(n_positions):
+                kv_cache_payload.append(
+                    f"L{layer}_VRF{len(self.verify_calls)}_P{j}",
+                )
+        # Hidden state shape [K+1, 3] — distinct per position.
+        hidden = np.array(
+            [
+                [len(self.verify_calls), end - start, p]
+                for p in range(n_positions)
+            ],
+            dtype=np.float32,
+        )
+        return hidden, kv_cache_payload
+
+
+class _FakeVerifyTailShardedModel(_FakeVerifyShardedModel):
+    """Tail-capable VERIFY model. Adds ``apply_lm_head_and_sample``
+    (for non-VERIFY tail dispatches in mixed tests) +
+    ``apply_lm_head_and_sample_batch`` (the VERIFY-tail batch
+    sampler). Both driven by configurable scripts of token ids."""
+
+    def __init__(
+        self,
+        *,
+        sample_script: List[int],
+        verify_batch_script: List[List[int]],
+    ) -> None:
+        super().__init__()
+        self._sample_script = list(sample_script)
+        self._sample_cursor = 0
+        self._verify_batch_script = [list(b) for b in verify_batch_script]
+        self._verify_batch_cursor = 0
+        self.sample_calls: List[dict] = []
+        self.batch_sample_calls: List[dict] = []
+
+    def apply_lm_head_and_sample(
+        self,
+        *,
+        hidden_state: np.ndarray,
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> int:
+        self.sample_calls.append({
+            "hidden_state": hidden_state,
+            "temperature": temperature,
+            "top_k": top_k,
+            "top_p": top_p,
+        })
+        if self._sample_cursor >= len(self._sample_script):
+            raise AssertionError(
+                "_FakeVerifyTailShardedModel: sample script "
+                "exhausted (test bug)"
+            )
+        tok = self._sample_script[self._sample_cursor]
+        self._sample_cursor += 1
+        return tok
+
+    def apply_lm_head_and_sample_batch(
+        self,
+        *,
+        hidden_state_batch: np.ndarray,
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> List[int]:
+        self.batch_sample_calls.append({
+            "hidden_state_batch": hidden_state_batch,
+            "temperature": temperature,
+            "top_k": top_k,
+            "top_p": top_p,
+        })
+        if self._verify_batch_cursor >= len(self._verify_batch_script):
+            raise AssertionError(
+                "_FakeVerifyTailShardedModel: verify batch script "
+                "exhausted (test bug)"
+            )
+        out = self._verify_batch_script[self._verify_batch_cursor]
+        self._verify_batch_cursor += 1
+        return list(out)
+
+
+def _make_verify_runner(
+    *,
+    layer_range: Tuple[int, int] = (0, 6),
+) -> Tuple[
+    ShardedAutoregressiveRunner, _FakeVerifyShardedModel, KVCacheManager,
+]:
+    """Helper: spin up a non-tail VERIFY-capable runner."""
+    model = _FakeVerifyShardedModel()
+    cache = KVCacheManager()
+    runner = ShardedAutoregressiveRunner(
+        model=model,
+        layer_range=layer_range,
+        kv_cache_manager=cache,
+        tee_attestation=b"x" * 32,
+        tee_type=TEEType.SOFTWARE,
+    )
+    return runner, model, cache
+
+
+def _make_verify_tail_runner(
+    *,
+    sample_script: List[int],
+    verify_batch_script: List[List[int]],
+    layer_range: Tuple[int, int] = (0, 6),
+    eos_token_id: int = 999,
+    sampling_defaults: SamplingDefaults = None,
+) -> Tuple[
+    ShardedAutoregressiveRunner,
+    _FakeVerifyTailShardedModel,
+    KVCacheManager,
+]:
+    model = _FakeVerifyTailShardedModel(
+        sample_script=sample_script,
+        verify_batch_script=verify_batch_script,
+    )
+    cache = KVCacheManager()
+    runner = ShardedAutoregressiveRunner(
+        model=model,
+        layer_range=layer_range,
+        kv_cache_manager=cache,
+        tee_attestation=b"x" * 32,
+        tee_type=TEEType.SOFTWARE,
+        sampling_defaults=sampling_defaults or SamplingDefaults(
+            max_tokens=512, temperature=0.0, top_k=50, top_p=0.95,
+        ),
+        eos_token_id=eos_token_id,
+    )
+    return runner, model, cache
+
+
+class TestVerifyNonTail:
+    def test_verify_requires_prior_prefill(self):
+        runner, _, _ = _make_verify_runner()
+        with pytest.raises(MalformedCacheStateError, match="VERIFY"):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=[1, 2, 3, 4, 5],
+                request_id="req-no-prefill",
+                decode_mode=DecodeMode.VERIFY,
+            )
+
+    def test_verify_happy_path_appends_cache_and_returns_batch(self):
+        runner, model, cache = _make_verify_runner(layer_range=(0, 2))
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[10, 20, 30],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+        )
+        prefill_payload_len = len(cache.get("req-1").payload)
+        # VERIFY with parent + 4 drafts (K=4, K+1=5).
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101, 102, 103],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+        )
+        assert result.decode_mode == DecodeMode.VERIFY
+        # K+1 hidden states returned.
+        assert result.hidden_state.shape == (5, 3)
+        # Non-tail leaves verify-only response fields None.
+        assert result.next_token_id is None
+        assert result.is_terminal is False
+        assert result.verified_token_ids is None
+        assert result.accepted_count is None
+        # Cache extended with K+1 positions per layer (2 layers, 5
+        # positions = 10 new entries).
+        new_payload_len = len(cache.get("req-1").payload)
+        assert new_payload_len == prefill_payload_len + 2 * 5
+        # forward_verify called with the prior payload.
+        assert len(model.verify_calls) == 1
+        assert (
+            model.verify_calls[0]["incoming_payload_len"]
+            == prefill_payload_len
+        )
+
+    def test_verify_rejects_input_below_two_positions(self):
+        # K+1 must be >= 2 (parent + at least one draft).
+        runner, _, _ = _make_verify_runner()
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+        )
+        with pytest.raises(RuntimeError, match="at least 2"):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=[42],
+                request_id="req-1",
+                decode_mode=DecodeMode.VERIFY,
+            )
+
+    def test_verify_rejects_input_above_cap(self):
+        from prsm.compute.chain_rpc.protocol import (
+            MAX_VERIFY_BATCH_TOKENS,
+        )
+        runner, _, _ = _make_verify_runner()
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+        )
+        # K+1 == cap+1 is rejected.
+        too_long = list(range(MAX_VERIFY_BATCH_TOKENS + 1))
+        with pytest.raises(RuntimeError, match="exceeds cap"):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=too_long,
+                request_id="req-1",
+                decode_mode=DecodeMode.VERIFY,
+            )
+
+    def test_verify_accepts_ndarray_batch_input(self):
+        # Stage > 1 input — ndarray of shape [K+1, hidden].
+        runner, model, _ = _make_verify_runner(layer_range=(2, 4))
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=np.zeros(
+                (3, 8), dtype=np.float32,
+            ),
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+        )
+        # K+1 = 5 positions, hidden = 8.
+        batch_in = np.ones((5, 8), dtype=np.float32)
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=batch_in,
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+        )
+        assert result.hidden_state.shape == (5, 3)
+        assert model.verify_calls[0]["input_or_hidden"] is batch_in
+
+    def test_verify_missing_forward_verify_method_raises(self):
+        # Plain non-VERIFY model. PREFILL ok (model has
+        # forward_prefill). VERIFY raises
+        # MissingVerifyCapabilityError.
+        cache = KVCacheManager()
+        runner = ShardedAutoregressiveRunner(
+            model=_FakeShardedModel(),
+            layer_range=(0, 6),
+            kv_cache_manager=cache,
+            tee_attestation=b"x" * 32,
+            tee_type=TEEType.SOFTWARE,
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+        )
+        with pytest.raises(
+            MissingVerifyCapabilityError,
+            match="forward_verify",
+        ):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=[42, 100, 101],
+                request_id="req-1",
+                decode_mode=DecodeMode.VERIFY,
+            )
+
+    def test_proposed_token_ids_rejected_outside_verify(self):
+        runner, _, _ = _make_verify_runner()
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+        )
+        with pytest.raises(
+            RuntimeError, match="proposed_token_ids"
+        ):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=np.array([[1.0, 2.0, 3.0]]),
+                request_id="req-1",
+                decode_mode=DecodeMode.INCREMENTAL,
+                proposed_token_ids=[5, 6],
+            )
+
+
+class TestVerifyTail:
+    def test_tail_verify_all_accepted_emits_k_plus_one_tokens(self):
+        # Drafts = [100, 101, 102, 103]; verifier returns
+        # [100, 101, 102, 103, 999_bonus] — all 4 match → emit
+        # 5 tokens (the K+1 batch verifies fully + bonus).
+        runner, model, cache = _make_verify_tail_runner(
+            sample_script=[42],
+            verify_batch_script=[[100, 101, 102, 103, 50]],
+        )
+        # PREFILL.
+        r1 = runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+        )
+        assert r1.next_token_id == 42
+        assert cache.get("req-1").tokens_generated == 1
+        # VERIFY. parent=42; drafts=[100,101,102,103] (K=4).
+        r2 = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101, 102, 103],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+            proposed_token_ids=[100, 101, 102, 103],
+        )
+        assert r2.decode_mode == DecodeMode.VERIFY
+        assert r2.verified_token_ids == (100, 101, 102, 103, 50)
+        assert r2.accepted_count == 4  # all 4 drafts accepted
+        # Last emitted = verified[4] = 50 (bonus).
+        assert r2.next_token_id == 50
+        assert r2.is_terminal is False
+        # tokens_generated bumped by 5 (K+1 emitted).
+        assert cache.get("req-1").tokens_generated == 1 + 5
+        # Sampling params reached the model.
+        assert len(model.batch_sample_calls) == 1
+        assert model.batch_sample_calls[0]["temperature"] == 0.0
+
+    def test_tail_verify_zero_accepted_emits_one_correction(self):
+        # Drafts = [100, 101]; verifier returns [200, 201, 202] —
+        # 0 match → emit 1 token (the verifier's correction at
+        # position 0).
+        runner, _, cache = _make_verify_tail_runner(
+            sample_script=[42],
+            verify_batch_script=[[200, 201, 202]],
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+        )
+        r2 = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+            proposed_token_ids=[100, 101],
+        )
+        assert r2.accepted_count == 0
+        assert r2.next_token_id == 200  # correction
+        assert r2.verified_token_ids == (200, 201, 202)
+        assert r2.is_terminal is False
+        # Only 1 token emitted (the correction).
+        assert cache.get("req-1").tokens_generated == 1 + 1
+
+    def test_tail_verify_partial_accept_two_of_four(self):
+        # Drafts = [100, 101, 102, 103]; verifier returns
+        # [100, 101, 999, 998, 997] — first 2 match, then
+        # divergence → emit 3 tokens (verified[0..2]).
+        runner, _, cache = _make_verify_tail_runner(
+            sample_script=[42],
+            verify_batch_script=[[100, 101, 999, 998, 997]],
+            eos_token_id=12345,  # not 999
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+        )
+        r2 = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101, 102, 103],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+            proposed_token_ids=[100, 101, 102, 103],
+        )
+        assert r2.accepted_count == 2
+        # Emitted = verified[0..2] = (100, 101, 999); last = 999.
+        assert r2.next_token_id == 999
+        assert r2.is_terminal is False
+        assert cache.get("req-1").tokens_generated == 1 + 3
+
+    def test_tail_verify_eos_in_emitted_terminates(self):
+        # eos=999. verifier returns [100, 999, 102, 103, 104];
+        # drafts [100, 999, 102, 103] match all → all accepted,
+        # and 999 is in emitted → is_terminal=True.
+        runner, _, _ = _make_verify_tail_runner(
+            sample_script=[42],
+            verify_batch_script=[[100, 999, 102, 103, 104]],
+            eos_token_id=999,
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+        )
+        r2 = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 999, 102, 103],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+            proposed_token_ids=[100, 999, 102, 103],
+        )
+        assert r2.accepted_count == 4  # all match
+        assert r2.is_terminal is True
+
+    def test_tail_verify_max_tokens_cap_terminates(self):
+        # max_tokens=3. PREFILL emits token 1. VERIFY emits 2
+        # more (accepted_count=1, K=2 drafts, partial accept) →
+        # tokens_generated = 1 + 2 = 3 → is_terminal=True.
+        runner, _, cache = _make_verify_tail_runner(
+            sample_script=[42],
+            # Drafts will be [100, 101]. Verifier returns
+            # [100, 999, 998] — first matches, then divergence.
+            verify_batch_script=[[100, 999, 998]],
+            eos_token_id=12345,  # not in emitted
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=3, temperature=0.0),
+        )
+        r2 = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=3, temperature=0.0),
+            proposed_token_ids=[100, 101],
+        )
+        assert r2.accepted_count == 1
+        assert cache.get("req-1").tokens_generated == 3
+        assert r2.is_terminal is True
+
+    def test_tail_verify_missing_proposed_raises(self):
+        runner, _, _ = _make_verify_tail_runner(
+            sample_script=[42],
+            verify_batch_script=[[1, 2, 3]],
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+        )
+        with pytest.raises(
+            RuntimeError, match="proposed_token_ids"
+        ):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=[42, 100, 101],
+                request_id="req-1",
+                decode_mode=DecodeMode.VERIFY,
+                is_final_stage=True,
+                request=_FakeRequest(
+                    max_tokens=100, temperature=0.0,
+                ),
+                # proposed_token_ids omitted
+            )
+
+    def test_tail_verify_proposed_length_mismatch_raises(self):
+        # Verifier returns 5 tokens (K+1=5 → K=4) but
+        # proposed_token_ids is length 3. Length mismatch is
+        # caller bug.
+        runner, _, _ = _make_verify_tail_runner(
+            sample_script=[42],
+            verify_batch_script=[[100, 101, 102, 103, 104]],
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+        )
+        with pytest.raises(
+            RuntimeError, match="K\\+1"
+        ):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=[42, 100, 101, 102, 103],
+                request_id="req-1",
+                decode_mode=DecodeMode.VERIFY,
+                is_final_stage=True,
+                request=_FakeRequest(
+                    max_tokens=100, temperature=0.0,
+                ),
+                proposed_token_ids=[100, 101, 102],  # wrong K
+            )
+
+    def test_tail_verify_rejects_bool_in_proposed(self):
+        runner, _, _ = _make_verify_tail_runner(
+            sample_script=[42],
+            verify_batch_script=[[100, 101]],
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+        )
+        with pytest.raises(RuntimeError, match="proposed_token_ids"):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=[42, 100],
+                request_id="req-1",
+                decode_mode=DecodeMode.VERIFY,
+                is_final_stage=True,
+                request=_FakeRequest(
+                    max_tokens=100, temperature=0.0,
+                ),
+                proposed_token_ids=[True],  # type: ignore[list-item]
+            )
+
+    def test_tail_verify_no_eos_token_id_only_max_tokens_terminates(self):
+        # eos_token_id=None — emitted tokens that look like EOS
+        # don't trigger termination; only max_tokens does.
+        runner, _, cache = _make_verify_tail_runner(
+            sample_script=[42],
+            verify_batch_script=[[999, 998, 997]],
+            eos_token_id=None,
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+        )
+        r2 = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=100, temperature=0.0),
+            proposed_token_ids=[100, 101],
+        )
+        # 0 accepted; emitted = (999,); 999 not treated as EOS.
+        assert r2.accepted_count == 0
+        assert r2.next_token_id == 999
+        assert r2.is_terminal is False
+        assert cache.get("req-1").tokens_generated == 2
+
+    def test_tail_verify_request_temperature_override(self):
+        # Default temperature is 0.0 in _make_verify_tail_runner;
+        # request supplies 0.0 explicitly. Both reach the model
+        # via the batch sampler — NOT the per-token sampler.
+        runner, model, _ = _make_verify_tail_runner(
+            sample_script=[42],
+            verify_batch_script=[[100, 101]],
+            sampling_defaults=SamplingDefaults(
+                max_tokens=100, temperature=1.0,
+                top_k=40, top_p=0.9,
+            ),
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(temperature=0.0),
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(temperature=0.0),
+            proposed_token_ids=[100],
+        )
+        # request.temperature override reaches batch sampler.
+        assert model.batch_sample_calls[0]["temperature"] == 0.0
+        assert model.batch_sample_calls[0]["top_k"] == 40
+        assert model.batch_sample_calls[0]["top_p"] == 0.9
