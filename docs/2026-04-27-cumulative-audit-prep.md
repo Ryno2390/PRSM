@@ -1745,6 +1745,315 @@ current contract (LOW-3 deferral).
 
 ---
 
+## 7.11 Speculative Decoding (Phase 3.x.11.y)
+
+Phase 3.x.11.y is a 9-task slice closing the remaining honest-
+scope deferral from Phase 3.x.11.x: compute-level pipelining via
+speculative decoding. A co-located draft model proposes K=4
+candidate tokens per round; the sharded chain verifies them in a
+single batched K+1-position forward; the executor accepts the
+longest matching prefix and broadcasts ``RollbackCacheRequest``
+for the rejected suffix. Under perfect-accept (matched draft +
+verifier under greedy), this delivers up to 5× per-round token
+amortization.
+
+**Tag:** ``phase3.x.11.y-merge-ready-20260XXX`` at commit
+``XXXX`` (pending Task 9 review).
+
+**Headline guarantees.**
+
+  1. **Wire-format extension (Task 1).** ``DecodeMode.VERIFY``
+     enum value + ``RunLayerSliceResponse.verified_token_ids``
+     (Tuple[int, ...] capped at ``MAX_VERIFY_BATCH_TOKENS=65``)
+     + ``accepted_count`` (co-set with verified_token_ids;
+     setting one without the other raises malformed at parse
+     time) + ``RollbackCacheRequest`` / ``RollbackCacheResponse``
+     wire envelopes. ``signing_payload`` extended to commit
+     verified_token_ids + accepted_count when set — without
+     it, a malicious relay could swap verified tokens without
+     invalidating the response signature (mirrors Phase 3.x.11
+     Task 5 critical-fix pattern). Pre-3.x.11.y signed bytes
+     preserve byte-equivalence (omit-when-default canonical
+     encoding pinned by the existing 26-test verify-wire suite).
+
+  2. **KVCacheManager.rollback (Task 2).** New method takes a
+     caller-injected ``truncate_fn`` — keeps the manager
+     payload-opaque (matches existing allocate/get/evict
+     pattern). Lock-held truncation prevents read-stale-cache
+     races. Idempotent over-drop semantics (clamp to
+     tokens_generated; unknown id / n<=0 / 0-tokens-generated
+     all return rolled_back=False without raising).
+
+  3. **DraftModel Protocol + HFDraftModel (Task 3).** New
+     ``prsm/compute/inference/draft_model.py``. Reset/propose/
+     commit/evict lifecycle. v1 ships greedy-only (raises on
+     ``temperature != 0.0``; sampling-correct speculation under
+     temperature > 0 requires the Leviathan-2023 rejection-
+     sampling correction, deferred to Phase 3.x.11.y.x).
+     ``HFDraftModel`` is stateless w.r.t. the model's KV cache —
+     each propose re-runs ``model.generate()`` from canonical
+     history. Documented as v1 simplification; a stateful-
+     KVCache impl is a drop-in Protocol replacement.
+
+  4. **ShardedAutoregressiveRunner VERIFY support (Task 4).**
+     Three new optional ``ShardedLayerForward`` Protocol methods:
+     ``forward_verify`` (batched K+1-position forward with
+     cached KV, payload-opaque to runner),
+     ``apply_lm_head_and_sample_batch`` (tail-only, projects
+     K+1 hidden states + greedy argmax per position), and
+     ``truncate_cache`` (drops last N positions in-place).
+     Tail's ``_sample_tail_verify`` computes accepted_count via
+     standard speculative-decoding longest-prefix match;
+     ``handle.tokens_generated`` bumped by emitted count only
+     (speculatively-cached-then-rejected positions don't count
+     against ``max_tokens``). 17 unit tests (TestVerifyNonTail
+     7 + TestVerifyTail 10) cover all-accepted / zero-accepted /
+     partial / EOS-mid-emitted / max_tokens-cap-mid-round /
+     proposed-length-mismatch / non-tail-hidden-state-passthrough.
+
+  5. **Executor speculation loop (Task 5).** New
+     ``_execute_chain_streaming_sharded_speculative`` branches
+     when ``draft_model`` is wired. PREFILL same as Phase
+     3.x.11; speculation loop drives draft.propose → chain
+     VERIFY → emit verified[:accepted_count + 1] →
+     ``RollbackCacheRequest`` broadcast for K+1 - emitted
+     positions → draft.commit on actually-emitted prefix →
+     continue with last-emitted as next parent. Greedy-only
+     gate at entry rejects ``request.temperature > 0`` with
+     PROMPT_ENCODE_ERROR. Mid-emit max_tokens truncation:
+     when emitting accepted_count+1 would overshoot, truncate
+     the emit and bump cached_extra so rollback drops both
+     verifier-rejected and cap-truncated tail. Wire-format
+     ``RunLayerSliceRequest.proposed_token_ids`` (Optional
+     Tuple, omit-when-None) carries K drafts to the tail for
+     accepted_count comparison; cross-validated as VERIFY-
+     mode-only. ``IterationAttestation`` (Phase 3.x.11.x)
+     extended to permit ``decode_mode in {INCREMENTAL, VERIFY}``
+     for ``iteration_index > 0`` — speculative iterations
+     carry per-stage attestations the same way INCREMENTAL
+     iterations do.
+
+  6. **RollbackCacheRequest server handler (Task 6).** New
+     ``_handle_rollback_cache`` routes through the runner's
+     new ``rollback_cache`` wrapper to
+     ``KVCacheManager.rollback``. Runner's wrapper is the
+     model-coupling layer — it provides
+     ``model.truncate_cache`` as the manager's ``truncate_fn``,
+     keeping the server generic.
+     ``MissingVerifyCapabilityError`` (raised when model omits
+     truncate_cache) maps to MALFORMED_REQUEST so the executor
+     can distinguish caller bug from internal crash. Server-
+     without-manager / server-without-runner / runner-without-
+     rollback_cache paths all return INTERNAL_ERROR.
+
+  7. **Real-distilgpt2 + HFDraftModel E2E (Task 7).**
+     ``tests/integration/test_phase3_x_11_y_speculative_e2e.py``
+     loads HF distilgpt2, splits 6 layers across 2 stages
+     (alice 0-2, bob 3-5), wires HFDraftModel as the draft
+     using the SAME distilgpt2 (perfect-accept oracle under
+     greedy: every draft proposal matches the verifier's
+     argmax). Drives 8-token speculative decode. **Bit-
+     identical to single-host greedy proven** — speculation
+     is a perf optimization, not a sampling change. Receipt's
+     per-iteration envelope confirms ≥1 VERIFY iteration
+     fired (vs falling back to single-token decode). Tokens
+     emitted > chain iterations (proves amortization).
+     Cancellation evicts both server caches AND draft state.
+
+     **Critical adapter remediation during E2E bring-up.**
+     The K+1 batched forward in HF GPT2's eager attention path
+     defaults to FULL attention across new tokens (the
+     auto-mask logic only kicks in for q_len=1 with cached
+     past). Without an explicit 4D additive causal mask, each
+     new query attends to all K+1 keys (including future
+     positions), breaking greedy-equivalence vs single-token
+     INCREMENTAL. The fix in the test adapter is an explicit
+     mask of shape ``[1, 1, K+1, kv_len]`` with -inf in
+     non-attendable positions. **This is GPT2-specific** —
+     operators wiring other HF model adapters (Llama, Mistral,
+     etc.) need to verify their attention impl handles K+1
+     batched cached forward correctly under their attention
+     path (sdpa / flash_attention_2 / eager). Documented in
+     the adapter docstring.
+
+**Trust seams + auditor focus.**
+
+  1. **VERIFY response signing.** Tail's ``verified_token_ids``
+     + ``accepted_count`` are committed in the response signing
+     payload (Task 1 wire-format extension). Without this
+     commitment, a downstream relay between the tail and the
+     executor could swap verified tokens, causing the executor
+     to emit wrong content or accept different tokens than the
+     tail's actual sampling. The omit-when-default canonical
+     encoding ensures pre-3.x.11.y signed bytes are preserved
+     bit-equivalent (so legacy receipts continue to verify).
+     **Mirrors Phase 3.x.11 Task 5's same-class fix for
+     next_token_id + is_terminal.**
+
+  2. **Greedy-only invariant at executor boundary.** v1
+     speculation rejects ``temperature > 0`` at executor
+     dispatch entry with PROMPT_ENCODE_ERROR. This is BOTH a
+     correctness gate (no Leviathan-2023 sampling correction
+     yet) AND a threat-model-containment gate (greedy
+     speculation produces output bit-identical to non-
+     speculative greedy, keeping the threat-surface comparison
+     crisp — see threat-model addendum §3.5).
+
+  3. **Rollback as best-effort.** ``RollbackCacheRequest``
+     is sent best-effort with no executor-side ack-failure
+     remediation; ``KVCacheManager.rollback`` is idempotent
+     so duplicate / lost broadcasts don't corrupt cache state;
+     server-side TTL sweeper bounds the leak window if a
+     broadcast is dropped. **DoS-not-privacy concern**: a
+     network adversary dropping rollback broadcasts grows
+     stage caches but doesn't leak content. Authenticated
+     rollback envelope deferred to Phase 3.x.11.y.x if
+     telemetry warrants.
+
+  4. **Per-iteration receipt VERIFY attestation.**
+     ``IterationAttestation`` was extended (Task 5) to permit
+     ``decode_mode in {INCREMENTAL, VERIFY}`` for
+     ``iteration_index > 0``. Speculative iterations are
+     committed in the receipt envelope just like INCREMENTAL
+     iterations were under Phase 3.x.11.x. The
+     iteration_index 0 → PREFILL invariant carries forward
+     (pure addition; no breaking change).
+
+  5. **Co-set invariant on response.** ``verified_token_ids``
+     and ``accepted_count`` MUST be co-set on
+     RunLayerSliceResponse — setting one without the other
+     raises ``ChainRpcMalformedError`` at parse time. Defends
+     against a malformed peer constructing a partial-VERIFY
+     response that confuses the executor.
+
+  6. **K+1 cap defense.**
+     ``MAX_VERIFY_BATCH_TOKENS = 65`` caps the K+1 batch size
+     at the wire layer (response.verified_token_ids len cap)
+     AND at the request layer
+     (request.proposed_token_ids len cap = K = 64). Defends
+     against a hostile peer claiming a huge speculation depth
+     that would explode server-side memory in
+     forward_verify's K+1 batched attention computation.
+
+**Honest scope (carries forward).**
+
+  - **Sampling-correct speculation under temperature > 0** —
+    Phase 3.x.11.y.x (Leviathan-2023 rejection-sampling
+    correction). Greedy-only at v1.
+
+  - **Adaptive K tuning** — auto-adjust speculation depth
+    based on observed accept-rate. v1 ships with operator-
+    configured K. Phase 3.x.11.y.x.
+
+  - **Constant-time speculation for Tier C** — speculation's
+    per-iteration accepted_count adds a NEW timing surface
+    (threat-model addendum §3.5) that Phase 3.x.10.y M1/M2
+    decorators don't cover. Tier C remains structurally
+    denied for sharded decode (Phase 3.x.11.q deferred);
+    Tier-C-compatible speculation is Phase 3.x.11.q.y
+    bundle.
+
+  - **Authenticated rollback envelope** — current rollback
+    is best-effort + unauthenticated. Phase 3.x.11.y.x if
+    operator telemetry shows DoS exploitation.
+
+  - **Multi-draft consensus** — propose K candidates per
+    draft × multiple drafts → consensus. Research direction;
+    Phase 3.x.11.y' (apostrophe).
+
+  - **Cross-request draft caching** — share draft KV across
+    same-prefix requests. Phase 3.x.11.y''.
+
+  - **Cache swap-out / paging** — Phase 3.x.11.z.
+
+  - **Mid-stream re-routing** — Phase 3.x.12.
+
+**Critical security carry-overs.**
+
+  - Phase 3.x.11 Task 5's response-signing-payload commitment
+    pattern (next_token_id + is_terminal) extends to
+    verified_token_ids + accepted_count via the same
+    omit-when-default canonical encoding mechanism.
+    Speculative responses retain the "downstream relays can't
+    swap output without invalidating signature" invariant.
+
+  - Phase 3.x.10.y's Tier C structural deny carries forward
+    unchanged; speculation runs entirely on Tier A/B paths.
+    The deny gate fires at ``_dispatch_sharded`` BEFORE any
+    VERIFY decoding, so the new accept-rate timing surface
+    is structurally never exposed on Tier C.
+
+**Test coverage at the tag.**
+
+  - 17 ``ShardedAutoregressiveRunner`` VERIFY unit tests in
+    ``tests/unit/test_sharded_runner.py::TestVerifyNonTail`` +
+    ``TestVerifyTail``
+    (constructor / non-tail dispatch / tail dispatch with
+    full-accept / zero-accept / partial-accept / EOS-mid-
+    emitted / max_tokens-cap-mid-round / missing
+    proposed_token_ids / K+1 length mismatch / bool token
+    rejection / no-EOS-when-eos_token_id-None / temperature
+    override propagation).
+
+  - 17 executor speculation unit tests in
+    ``tests/unit/test_chain_rpc_client_speculative.py::TestSpeculativeConstructionValidation`` + ``TestSpeculationLoop``
+    (draft requires sharded / draft missing methods / K bounds /
+    rollback callable / temperature > 0 rejected / full-accept
+    K+1 emit / zero-accept correction / partial-accept /
+    EOS-terminate / max_tokens-cap-truncate / rollback only on
+    partial / 2-stage proposed-token threading / cancellation
+    eviction / greedy-equivalence / chain-terminal-overrides).
+
+  - 10 ``RollbackCacheRequest`` server-handler tests in
+    ``tests/unit/test_rollback_cache.py::TestRollbackCacheHandler`` + ``TestMultiStageBroadcast``
+    (happy path / drop-past-clamps / zero-drop idempotent /
+    unknown-id / no-manager-rejects / no-runner-rejects /
+    no-truncate-method-malformed / request-id propagation /
+    no-leak-other-requests / multi-stage broadcast).
+
+  - 32 ``DraftModel`` / ``HFDraftModel`` unit tests in
+    ``tests/unit/test_draft_model.py`` (constructor / reset /
+    propose / commit / evict / multi-request lifecycle).
+
+  - 26 VERIFY wire-format tests in
+    ``tests/unit/test_verify_wire_format.py`` (round-trip /
+    omit-when-default byte-equivalence / signature verification /
+    co-set invariant / range validation / cap enforcement).
+
+  - 12 ``KVCacheManager.rollback`` tests in
+    ``tests/unit/test_kv_cache.py::TestRollback`` (happy path /
+    idempotent paths / payload-storage / validation / concurrent
+    thread safety).
+
+  - 5 slow real-distilgpt2 E2E tests in
+    ``tests/integration/test_phase3_x_11_y_speculative_e2e.py``
+    (greedy-equivalence / VERIFY-iteration-in-receipt /
+    tokens > iterations amortization / terminal eviction /
+    cancellation eviction).
+
+**Auditor reading path.** Start with the bit-identical greedy
+E2E test
+(``tests/integration/test_phase3_x_11_y_speculative_e2e.py::TestSpeculativeE2EGreedyEquivalence``)
+— that's the load-bearing correctness proof for the
+speculation. Then read the threat-model addendum §3.5 for the
+new accept-rate timing surface, and §3.5's final paragraph for
+the rollback-broadcast best-effort scope-honesty point. Then
+``prsm/compute/chain_rpc/client.py:_execute_chain_streaming_sharded_speculative``
+for the executor's speculation loop with the greedy-only gate
+at entry. Then
+``prsm/compute/inference/sharded_runner.py:_sample_tail_verify``
+for the tail's accepted_count computation — the standard
+speculative-decoding longest-prefix-match algorithm with
+``handle.tokens_generated += len(emitted)`` (only emitted
+counts against max_tokens). Then
+``prsm/compute/chain_rpc/server.py:_handle_rollback_cache`` for
+the rollback handler — note the
+``MissingVerifyCapabilityError → MALFORMED_REQUEST`` mapping
+preserves the executor's caller-bug-vs-internal-crash
+distinguishability invariant.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
@@ -1767,3 +2076,4 @@ When the Foundation signs the auditor contract:
 - **0.6 (2026-04-28)** — added §7.5 "Streaming HTTP Endpoint" covering Phase 3.x.8.1 SSE-framed POST /compute/inference/stream. 6 trust seams including design plan §3.4 settle-on-tokens-emitted billing policy (closes a real griefing vector caught at round-1 review), wire-side receipt re-sign on job_id rebind (Task 5 caught + fixed bug invisible to mocked tests), W3C-compliant SSE framing with chunk-boundary buffering, operator-misconfig 503s, InferenceError structured error surface, request-time privacy-budget gating. Round-1 M1+M2+L1 closed pre-tag; 2 LOWs deferred. Phase 3.x.8.1 tag: phase3.x.8.1-merge-ready-20260428 at 67fe8863.
 - **0.7 (2026-04-30)** — added §7.9 "Sharded Autoregressive Decode" covering Phase 3.x.11. 9 headline guarantees including wire-format extension (decode_mode + next_token_id + is_terminal with omit-when-default byte-equivalence), KVCacheManager (LRU+TTL+thread-safe lifecycle), ShardedAutoregressiveRunner (non-tail + tail variants), executor per-token chain loop with eviction broadcast on every exit path, EvictCacheRequest wire envelope + handler, server-side sharded dispatch with Tier C structural deny, and bit-identical real-distilgpt2 E2E correctness proof. Critical security fix: ``RunLayerSliceResponse.signing_payload`` extended to commit ``next_token_id`` + ``is_terminal`` (without it, downstream relays could swap sampled tokens without invalidating signatures). Threat-model addendum at ``docs/2026-04-30-phase3.x.11-threat-model-addendum.md`` characterizes the new per-token wire timing surface, KV-cache state privacy on stages, cross-stage activation handoff magnification (`1 + max_tokens` observations per request), and Tier C structural incompat. R3 threat model cross-references the addendum. Phase 3.x.11 tag: phase3.x.11-merge-ready-20260430 (pending Task 9 review).
 - **0.8 (2026-04-30)** — added §7.10 "Pipelining + Per-Token Receipt Attestation" covering Phase 3.x.11.x. 5 headline guarantees: IterationAttestation wire-format extension (under separate `PRSM-MI-ATT-V1:` magic prefix; discriminator at magic-prefix level preserves non-sharded-receipt byte-equivalence with golden-bytes pin); executor per-iteration accumulation closing the threat-model addendum §3.2 "no per-iteration cryptographic commitment" gap; server-side `_dispatch_streamed_sharded` lifting the Phase 3.x.11 Task 9 M1 unary-only guard for PREFILL only (INCREMENTAL stays unary-only); executor-side guard mirroring; bit-identical real-distilgpt2 E2E through the chunked path. Pipelining is wire-level only in this slice (chunked PREFILL transport); compute-level pipelining (overlapping consecutive-token decode) requires speculation, deferred to Phase 3.x.11.y. Round-1 LOW-2 remediated pre-tag (defensive `decode_mode == PREFILL` assert at `_dispatch_streamed_sharded` entry, preventing Phase 3.x.11 Task 9 M1-class seam-bugs from a future refactor). Phase 3.x.11.x tag: phase3.x.11.x-merge-ready-20260430.
+- **0.9 (2026-04-29)** — added §7.11 "Speculative Decoding" covering Phase 3.x.11.y. 7 headline guarantees: VERIFY wire-format extension (verified_token_ids + accepted_count co-set invariant + RollbackCacheRequest/Response envelopes + signing-payload commitment mirroring Phase 3.x.11 Task 5 critical-fix pattern); KVCacheManager.rollback with caller-injected truncate_fn (payload-opaque); DraftModel Protocol + HFDraftModel reference impl (greedy-only at v1); ShardedAutoregressiveRunner VERIFY support (forward_verify + apply_lm_head_and_sample_batch + truncate_cache); executor speculation loop with greedy-only-at-temperature-0 invariant (PROMPT_ENCODE_ERROR on positive temp; both correctness gate AND threat-model-containment gate); RollbackCacheRequest server handler (MissingVerifyCapabilityError → MALFORMED_REQUEST mapping preserves caller-bug-vs-internal-crash invariant); real-distilgpt2 + HFDraftModel E2E with bit-identical greedy proof. Critical adapter remediation during E2E bring-up: HF GPT2's eager attention defaults to FULL attention across new tokens for K+1 batched cached forward — explicit 4D additive causal mask required. Threat-model addendum §3.5 added covering the new per-iteration accept-rate timing surface (directly observable via accepted_count, indirectly via RollbackCacheRequest.n_positions_to_drop); operator advisory + Tier C structural deny carry-over + greedy-only invariant are the v1 mitigations. Sampling-correct speculation under temperature > 0 deferred to Phase 3.x.11.y.x (Leviathan-2023); constant-time speculation for Tier C deferred to Phase 3.x.11.q.y bundle; authenticated rollback envelope deferred to Phase 3.x.11.y.x if telemetry warrants. Phase 3.x.11.y tag: phase3.x.11.y-merge-ready-20260XXX (pending Task 9 review).
