@@ -12,6 +12,7 @@
 - `docs/2026-04-12-phase2-remote-compute-plan.md` §Line-item-B (topology randomization) + §Line-item-C (TEE attestation) — defenses currently in the stack.
 - Phase 2 Rings 7-10 (tensor-parallel model sharding + Ring 9 DP noise) — architecture R3 attacks and defends against.
 - `PRSM_Vision.md` §7 "Honest limits" — vision-doc framing of activation-inversion concerns.
+- `docs/2026-04-30-phase3.x.11-threat-model-addendum.md` — **sharded autoregressive decode addendum.** Sharded decode multiplies the per-request activation observation surface by `1 + max_tokens` and introduces a NEW per-token wire timing surface. Read in conjunction with this baseline when evaluating sharded-mode operators.
 
 ---
 

@@ -1342,6 +1342,242 @@ prompt-leak.
 
 ---
 
+## 7.9 Sharded Autoregressive Decode (Phase 3.x.11)
+
+Phase 3.x.11 is a 9-task slice closing the load-bearing
+tail-only contract that's accumulated since Phase 3.x.8: each
+chain stage now runs its layers ONCE PER GENERATED TOKEN, with
+KV-cache state surviving locally between iterations and
+activations crossing the wire at every per-token boundary. The
+load-bearing capability for PRSM's distributed-inference value
+prop — an operator with a single 24GB GPU can participate in
+serving a 70B-parameter inference by hosting one or two layers
+of the chain.
+
+**Tag:** ``phase3.x.11-merge-ready-20260430`` at commit
+``[applied at tag time]``.
+
+**Headline guarantees.**
+
+  1. **Wire-format extension (Task 1).** ``RunLayerSliceRequest``
+     gains ``decode_mode: DecodeMode`` (PREFILL/INCREMENTAL,
+     omit-when-PREFILL canonical encoding). ``RunLayerSliceResponse``
+     gains ``next_token_id: Optional[int]`` + ``is_terminal: bool``
+     (omit-when-default). Both fields preserve byte-equivalence
+     with pre-3.x.11 signed bytes — golden-bytes pin in
+     ``test_chain_rpc_protocol.py`` enforces this. Validation
+     guards bool-rejection on enum + non-negative int range on
+     token id.
+
+  2. **Server-side KV-cache manager (Task 2).** New
+     ``prsm/compute/chain_rpc/kv_cache.py`` with
+     ``KVCacheManager`` + ``KVCacheHandle``. Allocate / get /
+     evict / evict_idle / evict_all lifecycle. LRU cap (default
+     64) + TTL sweeper (default 300s). Thread-safe via
+     ``threading.Lock``; ``OrderedDict`` for O(1) LRU bookkeeping.
+     Handle's ``payload`` is opaque to the manager — runner-defined
+     (typically per-layer K/V tensors); ``tokens_generated``
+     counter (Task 4 addition) tracks per-request token count for
+     ``max_tokens`` cap enforcement.
+
+  3. **ShardedAutoregressiveRunner non-tail variant (Task 3).**
+     New ``prsm/compute/inference/sharded_runner.py``. Per-stage
+     layer-range runner with KV-cache lifecycle. Drives the
+     duck-typed ``ShardedLayerForward`` Protocol
+     (``forward_prefill`` + ``forward_incremental``). PREFILL
+     allocates fresh cache via manager + drives full-prompt
+     forward; INCREMENTAL looks up existing handle + drives
+     single-position forward with cached KV. Raises
+     ``MalformedCacheStateError`` (mapped to MALFORMED_REQUEST
+     at wire boundary) when INCREMENTAL arrives with no prior
+     PREFILL handle.
+
+  4. **Tail variant (Task 4).** Same runner extended with
+     ``apply_lm_head_and_sample`` model method + ``sampling_defaults``
+     + ``eos_token_id`` constructor args. Tail dispatch
+     (``is_final_stage=True``) projects boundary hidden state
+     through LM head, samples per request's sampling params,
+     bumps handle's ``tokens_generated``, sets ``is_terminal``
+     on EOS detection OR ``tokens_generated >= max_tokens``.
+     Non-tail-only construction (no sampling_defaults) preserves
+     Task 3's contract: tail dispatch raises
+     ``MissingTailCapabilityError``.
+
+  5. **Executor per-token chain loop (Task 5).** New
+     ``RpcChainExecutor`` constructor args:
+     ``enable_sharded_decode`` + ``tokenizer`` +
+     ``cache_evict_send_message`` +
+     ``sharded_default_max_tokens``. When enabled,
+     ``execute_chain_streaming`` branches to
+     ``_execute_chain_streaming_sharded`` —
+     tokenizer.encode(prompt) → input_ids → PREFILL chain pass
+     → INCREMENTAL decode loop → terminal yields
+     ``ChainExecutionResult`` with multi-stage receipt + ``finally``
+     block broadcasts ``EvictCacheRequest`` to every stage.
+     ``include_sampling_fields=True`` opt-in flag preserves the
+     Phase 3.x.10.x non-streaming-tail invariant (existing
+     ``test_unary_request_path_unchanged_no_sampling_fields``
+     pin).
+
+     **Critical security fix.**
+     ``RunLayerSliceResponse.signing_payload`` extended with
+     ``next_token_id`` + ``is_terminal`` kwargs (omit-when-default).
+     Without this, a malicious downstream relay could swap the
+     sampled token without invalidating the stage's signature.
+     Pre-3.x.11 signed bytes preserve byte-equivalence (both
+     fields default-omitted match pre-3.x.11 canonical JSON).
+
+  6. **EvictCacheRequest wire message + handler (Task 6).** New
+     ``EvictCacheRequest`` + ``EvictCacheResponse`` envelopes in
+     ``ChainRpcMessageType``. ``LayerStageServer.kv_cache_manager``
+     opt-in arg routes ``EvictCacheRequest`` to
+     ``_handle_evict_cache`` → ``manager.evict``. Honest scope:
+     no signature on the eviction signal — non-load-bearing for
+     correctness because the server-side TTL sweeper closes the
+     same hole. Idempotent (duplicate broadcasts safe).
+
+  7. **Server-side sharded dispatch (Task 7).**
+     ``LayerStageServer.sharded_runner`` opt-in arg routes ALL
+     ``RunLayerSliceRequest``s to ``_dispatch_sharded``. When
+     NOT wired but request carries ``decode_mode != PREFILL``,
+     rejects with MALFORMED_REQUEST (back-compat regular runners
+     can't honor sharded semantics). ``is_final_stage`` inferred
+     from handoff token's ``chain_stage_index ==
+     chain_total_stages - 1``.
+
+  8. **Tier C structural deny (Task 7 honest scope).**
+     ``_dispatch_sharded`` rejects ``ContentTier.C`` with
+     INTERNAL_ERROR. Sharded decode introduces a NEW timing
+     surface (per-token wire dispatch) that Phase 3.x.10.y's
+     constant-time padding decorators don't cover. Phase
+     3.x.11.q is the placeholder for sharded constant-time
+     work; until then, Tier C operators MUST keep
+     ``enable_sharded_decode=False``. The dispatch gate is the
+     load-bearing enforcement.
+
+  9. **Bit-identical real-distilgpt2 E2E (Task 7).** 4-token
+     greedy decode through 2-stage sharded chain (alice: layers
+     0-2 + embeddings; bob: layers 3-5 + LM head) produces
+     token_ids matching ``model.generate(do_sample=False)``
+     bit-identically. Load-bearing correctness proof via real
+     HF transformers 5.x ``DynamicCache`` + ``GPT2Block.forward``
+     with ``cache_position``.
+
+**Honest scope (carries forward).**
+
+  - **Per-token wire latency tax.** T network round-trips per
+    token. WAN deployments: ~150ms minimum per token at 50ms
+    RTT × 3 hops. LAN: negligible. Operators serving over WAN
+    should keep ``enable_sharded_decode=False``. Pipelining
+    (Phase 3.x.11.x) overlaps consecutive-token forward passes
+    to amortize.
+  - **Tier C incompat.** Sharded decode is Tier-A/B-only at v1
+    (per §3.4 of the threat-model addendum). Phase 3.x.11.q.
+  - **No memory wipe of evicted KV-cache.** Eviction drops the
+    handle reference; Python GC eventually reclaims, but bytes
+    may remain in heap until reused. Operator mitigation:
+    TEE / user namespaces. Threat-model addendum §3.2.
+  - **No KV-cache commitment in receipt.** Signed receipt
+    commits to wire activation bytes (per Phase 3.x.7 Task 5
+    envelope) but NOT to in-stage cache state. Phase 3.x.11.x
+    receipt-format extension (per-token attestation chain).
+  - **Cross-stage activation handoff magnification.** Each
+    stage observes ``1 + max_tokens`` boundary hidden states
+    per request (vs. 1 in the unary/streaming-tail path).
+    R3 baseline mitigations (topology randomization, DP noise,
+    TEE) carry forward but their per-request privacy budget
+    consumes faster. Threat-model addendum §3.3.
+  - **No pipelining.** Phase 3.x.11.x.
+  - **No speculative decoding.** Phase 3.x.11.y.
+  - **No KV-cache compression for cross-host bandwidth.** R7
+    benchmark plan §9 covers data-oblivious KV/activation
+    compression as research; engineering deferred to Phase
+    3.x.11.x.
+  - **No cache swap-out / paging.** Long-context workloads that
+    exceed per-stage memory caps are rejected. Phase 3.x.11.z.
+  - **No mid-stream re-routing.** Once a request's chain is
+    committed, all incremental dispatches go to the same stages.
+    Phase 3.x.12.
+
+**Threat-model coverage.**
+
+The new threat surfaces introduced by sharded decode are
+explicitly characterized in
+``docs/2026-04-30-phase3.x.11-threat-model-addendum.md``:
+
+  - §3.1 Per-token wire timing surface — `N × T` timing
+    observations per request (vs. 1 in unary, N in streaming-
+    tail). Tier C structural deny is the v1 mitigation.
+  - §3.2 KV-cache state privacy on stages — temporal coverage
+    extends across the full decode (vs. one snapshot per
+    request). Eviction + TTL + LRU cap bound the residue
+    window. No memory wipe / no encryption-at-rest in v1.
+  - §3.3 Cross-stage activation handoff magnification — per-
+    request observation surface multiplies by `1 + max_tokens`.
+    R3 baseline mitigations carry forward; effective strength
+    against scale changes (S2/S3 attacker accumulates
+    `(1+max_tokens) × R` activations vs. R).
+  - §3.4 Tier C structural incompat — default-deny at dispatch.
+    Phase 3.x.11.q deferred.
+
+The R3 threat model
+(``docs/2026-04-22-r3-threat-model.md``) cross-references the
+addendum in its "Related documents" header — auditors evaluating
+sharded-mode operators read both in conjunction.
+
+**Test coverage at the tag.**
+
+  - 28 ``KVCacheManager`` unit tests in
+    ``tests/unit/test_kv_cache.py`` (allocate / get / evict /
+    evict_idle / LRU / TTL / concurrent allocation).
+  - 46 ``ShardedAutoregressiveRunner`` unit tests in
+    ``tests/unit/test_sharded_runner.py`` (constructor
+    validation, prefill, incremental, layer_range respected,
+    cache survival, eviction, tail variant sampling +
+    determinism + EOS + max_tokens, tail constructor
+    validation).
+  - 19 sharded executor tests in
+    ``tests/unit/test_chain_rpc_client_sharded.py``
+    (construction validation, single-stage smoke + decode_mode
+    threading, two-stage autoregressive, max_tokens cap, EOS,
+    cancellation eviction broadcast, sampling propagation).
+  - 15 ``EvictCacheRequest`` tests in
+    ``tests/unit/test_evict_cache.py`` (round-trip, validation,
+    server handler happy path / idempotent / unknown id /
+    no-manager rejection / cross-request isolation).
+  - 5 real-distilgpt2 E2E tests in
+    ``tests/integration/test_phase3_x_11_sharded_e2e.py``
+    (slow-marked) — bit-identical sharded vs single-host
+    greedy + autoregressive non-trivial output + token id is
+    real int + cache lifecycle survives + evicted on terminal
+    + evicted on caller close.
+
+**Round-1 → round-2 surface.** Pending Task 9 review.
+
+**Auditor prompts:** start with the threat-model addendum
+(``docs/2026-04-30-phase3.x.11-threat-model-addendum.md``) §1 +
+§3.1 + §3.4 — the new timing + content-tier story. Then read
+the bit-identical E2E test
+(``tests/integration/test_phase3_x_11_sharded_e2e.py::TestShardedE2EBitIdentical``)
+— that's the load-bearing correctness proof. The sharded
+dispatch gate at
+``prsm/compute/chain_rpc/server.py:_dispatch_sharded`` is the
+Tier C default-deny enforcement + role inference from the
+handoff token. The per-token executor loop at
+``prsm/compute/chain_rpc/client.py:_execute_chain_streaming_sharded``
+is the new dispatch surface; the ``finally`` block + eviction
+broadcast are the cleanup contract. The signing-payload
+extension at
+``prsm/compute/chain_rpc/protocol.py:RunLayerSliceResponse.signing_payload``
+is the load-bearing security fix (without it, downstream
+relays could swap ``next_token_id`` without invalidating the
+stage's signature). The cache lifecycle at
+``prsm/compute/chain_rpc/kv_cache.py:KVCacheManager`` is
+straightforward LRU/TTL/lock; the threading model is one
+short-held lock around the OrderedDict.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
@@ -1362,3 +1598,4 @@ When the Foundation signs the auditor contract:
 - **0.4 (2026-04-28)** — added §7.3 "Chunked Activation Streaming" covering Phase 3.x.7.1 v2 wire-format extension. 6 trust seams including pre-consumption envelope gate, full-envelope response signing payload, v1↔v2 byte-equivalent inline encoding, and bounded chunk iterators (client + server). Round-1 H1+H2+M3+L1 + round-2 I1 closed pre-tag. Phase 3.x.7.1 tag: phase3.x.7.1-merge-ready-20260428 at 339957ee.
 - **0.5 (2026-04-28)** — added §7.4 "Streaming-Token Output" covering Phase 3.x.8 chat-style incremental output path. 6 trust seams including conditional `streaming` flag encoding (byte-identity preservation), three-layer joined-text invariant enforcement, downgrade-resistant `streamed_output` receipt flag, server-side validation gates BEFORE runner dispatch, M1 round-1 sole-error-frame ordering remediation, and cancellation cleanup propagation. v1 honest-scope notes (SyntheticStreamingRunner placeholder + Python GeneratorExit cancellation limit) explicitly documented for auditor focus. Round-1 M1 closed pre-tag; 3 LOWs deferred. Phase 3.x.8 tag: phase3.x.8-merge-ready-20260428 at 391b92b0.
 - **0.6 (2026-04-28)** — added §7.5 "Streaming HTTP Endpoint" covering Phase 3.x.8.1 SSE-framed POST /compute/inference/stream. 6 trust seams including design plan §3.4 settle-on-tokens-emitted billing policy (closes a real griefing vector caught at round-1 review), wire-side receipt re-sign on job_id rebind (Task 5 caught + fixed bug invisible to mocked tests), W3C-compliant SSE framing with chunk-boundary buffering, operator-misconfig 503s, InferenceError structured error surface, request-time privacy-budget gating. Round-1 M1+M2+L1 closed pre-tag; 2 LOWs deferred. Phase 3.x.8.1 tag: phase3.x.8.1-merge-ready-20260428 at 67fe8863.
+- **0.7 (2026-04-30)** — added §7.9 "Sharded Autoregressive Decode" covering Phase 3.x.11. 9 headline guarantees including wire-format extension (decode_mode + next_token_id + is_terminal with omit-when-default byte-equivalence), KVCacheManager (LRU+TTL+thread-safe lifecycle), ShardedAutoregressiveRunner (non-tail + tail variants), executor per-token chain loop with eviction broadcast on every exit path, EvictCacheRequest wire envelope + handler, server-side sharded dispatch with Tier C structural deny, and bit-identical real-distilgpt2 E2E correctness proof. Critical security fix: ``RunLayerSliceResponse.signing_payload`` extended to commit ``next_token_id`` + ``is_terminal`` (without it, downstream relays could swap sampled tokens without invalidating signatures). Threat-model addendum at ``docs/2026-04-30-phase3.x.11-threat-model-addendum.md`` characterizes the new per-token wire timing surface, KV-cache state privacy on stages, cross-stage activation handoff magnification (`1 + max_tokens` observations per request), and Tier C structural incompat. R3 threat model cross-references the addendum. Phase 3.x.11 tag: phase3.x.11-merge-ready-20260430 (pending Task 9 review).
