@@ -207,6 +207,29 @@ class ShardedLayerForward(Protocol):
         decode_mode/is_final_stage."""
         ...
 
+    def truncate_cache(
+        self,
+        payload: Any,
+        n_positions: int,
+    ) -> Any:
+        """Phase 3.x.11.y — drop the LAST ``n_positions`` from the
+        KV-cache payload and return the updated payload. Called
+        under ``KVCacheManager``'s lock during rollback (the
+        executor's RollbackCacheRequest broadcast routes here via
+        ``ShardedAutoregressiveRunner.rollback_cache``).
+
+        ``n_positions > 0`` is guaranteed; the manager passes the
+        already-clamped count (capped at the cache's
+        ``tokens_generated``). The model is free to mutate the
+        payload in place + return the same reference, or return
+        a fresh payload — the manager just stores what comes
+        back.
+
+        Models that don't support speculation can omit this
+        method; the runner guards it at dispatch time per
+        decode_mode/operation."""
+        ...
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # LayerSliceResult — runner return type
@@ -785,6 +808,43 @@ class ShardedAutoregressiveRunner:
         return next_token_id, is_terminal, verified_token_ids, accepted_count
 
     # ── eviction passthrough ──────────────────────────────────────────
+
+    def rollback_cache(
+        self,
+        request_id: str,
+        n_positions: int,
+    ) -> Tuple[bool, int]:
+        """Phase 3.x.11.y — public rollback entrypoint. Wraps the
+        manager's ``rollback`` with this runner's ``model.truncate_cache``
+        as the ``truncate_fn``. Wired by ``LayerStageServer``'s
+        ``_handle_rollback_cache``.
+
+        Returns ``(rolled_back, actual_dropped)``:
+          - ``rolled_back=True`` iff at least one position was
+            dropped.
+          - ``actual_dropped`` is the count actually removed (may
+            be less than ``n_positions`` if the cache had fewer
+            generated tokens; idempotent over-drop semantics
+            mirror ``KVCacheManager.rollback``'s contract).
+
+        Raises ``MissingVerifyCapabilityError`` if the model
+        doesn't expose ``truncate_cache`` — server maps this to
+        ``MALFORMED_REQUEST`` so the executor can distinguish
+        caller bug from internal crash.
+        """
+        if not callable(getattr(self._model, "truncate_cache", None)):
+            raise MissingVerifyCapabilityError(
+                "ShardedAutoregressiveRunner: rollback requires "
+                "model.truncate_cache(...) per ShardedLayerForward "
+                "Protocol — this model omits it (typically signals "
+                "a non-speculation-capable model wired into a "
+                "speculation-enabled chain)"
+            )
+        return self._cache.rollback(
+            request_id=request_id,
+            n_positions=n_positions,
+            truncate_fn=self._model.truncate_cache,
+        )
 
     def evict(self, request_id: str) -> bool:
         """Explicit cache eviction. Idempotent (returns ``False``

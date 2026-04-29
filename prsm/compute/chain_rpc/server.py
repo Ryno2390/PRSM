@@ -56,6 +56,8 @@ from prsm.compute.chain_rpc.protocol import (
     DecodeMode,
     EvictCacheRequest,
     EvictCacheResponse,
+    RollbackCacheRequest,
+    RollbackCacheResponse,
     HandoffToken,
     RunLayerSliceRequest,
     RunLayerSliceResponse,
@@ -413,6 +415,27 @@ class LayerStageServer:
                     request.request_id,
                     StageErrorCode.INTERNAL_ERROR,
                     f"internal error during evict_cache: "
+                    f"{exc.__class__.__name__}",
+                )
+
+        # Phase 3.x.11.y Task 6: RollbackCacheRequest — speculative-
+        # decoding rollback after rejected suffix. Routes to
+        # ``KVCacheManager.rollback`` via the runner's
+        # ``rollback_cache`` wrapper (which provides the model's
+        # ``truncate_cache`` as the manager's truncate_fn).
+        if isinstance(request, RollbackCacheRequest):
+            try:
+                return self._handle_rollback_cache(request)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "LayerStageServer.handle: unexpected rollback "
+                    "failure for request_id=%r",
+                    request.request_id,
+                )
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.INTERNAL_ERROR,
+                    f"internal error during rollback_cache: "
                     f"{exc.__class__.__name__}",
                 )
 
@@ -1912,6 +1935,78 @@ class LayerStageServer:
             EvictCacheResponse(
                 request_id=request.request_id,
                 evicted=bool(evicted),
+            )
+        )
+
+    # ── Phase 3.x.11.y — speculative-decoding rollback handler ───────
+
+    def _handle_rollback_cache(
+        self, request: RollbackCacheRequest,
+    ) -> bytes:
+        """Route a ``RollbackCacheRequest`` to the bound
+        ``ShardedAutoregressiveRunner.rollback_cache``. Returns a
+        ``RollbackCacheResponse`` with ``rolled_back=True/False``
+        and ``actual_dropped`` (the count actually removed; may be
+        less than ``n_positions_to_drop`` per the manager's
+        idempotent over-drop semantics).
+
+        Sharded-decode + speculation requires both
+        ``kv_cache_manager`` (for cache lifecycle) AND
+        ``sharded_runner`` (for the model's ``truncate_cache``
+        delegate). When either is missing, returns INTERNAL_ERROR
+        — the server can't honor speculative rollback without
+        both wired.
+
+        ``MissingVerifyCapabilityError`` (raised by the runner
+        when the model omits ``truncate_cache``) maps to
+        MALFORMED_REQUEST so the executor can distinguish caller
+        bug from internal crash.
+        """
+        if self._kv_cache_manager is None:
+            return self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                "rollback_cache: server has no kv_cache_manager "
+                "wired (operator must pass kv_cache_manager= when "
+                "speculative decode is enabled)",
+            )
+        if self._sharded_runner is None:
+            return self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                "rollback_cache: server has no sharded_runner wired "
+                "(operator must pass sharded_runner= when "
+                "speculative decode is enabled — the runner provides "
+                "the model's truncate_cache delegate)",
+            )
+        if not callable(getattr(self._sharded_runner, "rollback_cache", None)):
+            return self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                "rollback_cache: sharded_runner does not expose "
+                ".rollback_cache(...) — operator wired a non-"
+                "Phase-3.x.11.y-capable runner",
+            )
+        try:
+            rolled_back, actual_dropped = (
+                self._sharded_runner.rollback_cache(
+                    request.request_id,
+                    int(request.n_positions_to_drop),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            if exc.__class__.__name__ == "MissingVerifyCapabilityError":
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    str(exc),
+                )
+            raise
+        return encode_message(
+            RollbackCacheResponse(
+                request_id=request.request_id,
+                rolled_back=bool(rolled_back),
+                actual_dropped=int(actual_dropped),
             )
         )
 
