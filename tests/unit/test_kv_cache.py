@@ -359,3 +359,205 @@ class TestConcurrentAllocation:
             t.join()
         assert errors == []
         assert len(mgr) == 0
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.y Task 2 — KVCacheManager.rollback
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestRollback:
+    def _setup_handle_with_tokens(
+        self, mgr, request_id="req-1", tokens=4,
+    ):
+        """Helper: allocate handle + simulate that N tokens have
+        been generated. Payload is a list of strings tagged by
+        position so tests can verify truncation."""
+        handle = mgr.allocate(request_id, n_layers=2)
+        handle.payload = [f"pos_{i}" for i in range(tokens)]
+        handle.tokens_generated = tokens
+        return handle
+
+    def test_rollback_happy_path_drops_n(self):
+        mgr = KVCacheManager()
+        handle = self._setup_handle_with_tokens(mgr, tokens=5)
+
+        def truncate_fn(payload, n):
+            return payload[:-n]
+
+        rolled, dropped = mgr.rollback("req-1", 2, truncate_fn)
+        assert rolled is True
+        assert dropped == 2
+        assert handle.payload == ["pos_0", "pos_1", "pos_2"]
+        assert handle.tokens_generated == 3
+
+    def test_rollback_unknown_request_id_returns_false_zero(self):
+        mgr = KVCacheManager()
+        rolled, dropped = mgr.rollback(
+            "never-allocated", 4, lambda p, n: p[:-n],
+        )
+        assert rolled is False
+        assert dropped == 0
+
+    def test_rollback_zero_n_is_noop(self):
+        mgr = KVCacheManager()
+        handle = self._setup_handle_with_tokens(mgr, tokens=4)
+        truncate_calls = []
+
+        def truncate_fn(payload, n):
+            truncate_calls.append(n)
+            return payload[:-n]
+
+        rolled, dropped = mgr.rollback("req-1", 0, truncate_fn)
+        assert rolled is False
+        assert dropped == 0
+        # truncate_fn MUST NOT be called for the no-op path.
+        assert truncate_calls == []
+        # Handle state unchanged.
+        assert handle.tokens_generated == 4
+        assert handle.payload == ["pos_0", "pos_1", "pos_2", "pos_3"]
+
+    def test_rollback_negative_n_is_noop(self):
+        mgr = KVCacheManager()
+        self._setup_handle_with_tokens(mgr, tokens=4)
+        rolled, dropped = mgr.rollback("req-1", -3, lambda p, n: p)
+        assert rolled is False
+        assert dropped == 0
+
+    def test_rollback_past_tokens_generated_drops_all(self):
+        # Asking to drop 100 when only 4 tokens generated → drops
+        # all 4, returns dropped=4.
+        mgr = KVCacheManager()
+        handle = self._setup_handle_with_tokens(mgr, tokens=4)
+
+        def truncate_fn(payload, n):
+            return payload[:-n] if n < len(payload) else []
+
+        rolled, dropped = mgr.rollback("req-1", 100, truncate_fn)
+        assert rolled is True
+        assert dropped == 4
+        assert handle.payload == []
+        assert handle.tokens_generated == 0
+
+    def test_rollback_when_tokens_generated_zero_is_noop(self):
+        # PREFILL alone hasn't generated any tokens — rollback
+        # is a no-op even though the handle exists.
+        mgr = KVCacheManager()
+        handle = mgr.allocate("req-1", n_layers=2)
+        handle.payload = ["pos_0", "pos_1"]
+        handle.tokens_generated = 0
+        truncate_calls = []
+        rolled, dropped = mgr.rollback(
+            "req-1", 4, lambda p, n: truncate_calls.append(n) or p,
+        )
+        assert rolled is False
+        assert dropped == 0
+        assert truncate_calls == []
+
+    def test_rollback_truncate_fn_returned_payload_stored(self):
+        # Manager stores whatever truncate_fn returns — the
+        # payload may be the same reference (mutated in place)
+        # or a new object. Test verifies the manager doesn't
+        # silently drop the returned payload.
+        mgr = KVCacheManager()
+        handle = self._setup_handle_with_tokens(mgr, tokens=3)
+        new_payload_marker = ["FRESH_PAYLOAD"]
+
+        def truncate_fn(payload, n):
+            return new_payload_marker
+
+        mgr.rollback("req-1", 1, truncate_fn)
+        assert handle.payload is new_payload_marker
+
+    def test_rollback_validation_rejects_empty_request_id(self):
+        mgr = KVCacheManager()
+        with pytest.raises(RuntimeError, match="request_id"):
+            mgr.rollback("", 2, lambda p, n: p)
+
+    def test_rollback_validation_rejects_non_int_n(self):
+        mgr = KVCacheManager()
+        with pytest.raises(RuntimeError, match="n_positions"):
+            mgr.rollback("req-1", "two", lambda p, n: p)
+
+    def test_rollback_validation_rejects_bool_n(self):
+        # bool is a subclass of int; explicitly rejected
+        # (mirrors allocate's bool-rejection pattern).
+        mgr = KVCacheManager()
+        with pytest.raises(RuntimeError, match="n_positions"):
+            mgr.rollback("req-1", True, lambda p, n: p)
+
+    def test_rollback_validation_rejects_non_callable_truncate_fn(self):
+        mgr = KVCacheManager()
+        with pytest.raises(RuntimeError, match="truncate_fn"):
+            mgr.rollback("req-1", 2, "not callable")
+
+    def test_rollback_concurrent_with_get_thread_safety(self):
+        # Concurrent rollback + get-incremental contention test.
+        # 4 threads rollback the same handle while 4 threads call
+        # get(). Manager's lock guarantees atomic rollback (no
+        # torn read of handle.payload between truncate_fn return
+        # and tokens_generated decrement). After all threads
+        # finish, the payload+tokens_generated MUST be consistent.
+        mgr = KVCacheManager()
+        handle = self._setup_handle_with_tokens(mgr, tokens=20)
+
+        def truncate_fn(payload, n):
+            # Return a payload of length (current - n). Simulates
+            # the actual truncation; thread-safe because we're
+            # called inside the manager's lock.
+            return payload[:-n] if n < len(payload) else []
+
+        errors = []
+        rollback_total = [0]
+        rollback_lock = threading.Lock()
+
+        def rollback_worker():
+            try:
+                for _ in range(5):
+                    rolled, dropped = mgr.rollback(
+                        "req-1", 1, truncate_fn,
+                    )
+                    if rolled:
+                        with rollback_lock:
+                            rollback_total[0] += dropped
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        def get_worker():
+            try:
+                for _ in range(5):
+                    h = mgr.get("req-1")
+                    if h is not None:
+                        # Read tokens_generated + payload length;
+                        # they MUST be consistent (manager's lock
+                        # holds during rollback's payload+counter
+                        # update).
+                        n_pay = len(h.payload)
+                        n_tok = h.tokens_generated
+                        # Loose invariant: payload length + dropped
+                        # so far should always equal initial 20.
+                        # (Tight check would require atomic snapshot
+                        # of (payload, tokens_generated, dropped).)
+                        # For this test, just confirm both fields
+                        # are well-formed ints/lists.
+                        assert isinstance(n_pay, int) and n_pay >= 0
+                        assert isinstance(n_tok, int) and n_tok >= 0
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = (
+            [threading.Thread(target=rollback_worker) for _ in range(4)]
+            + [threading.Thread(target=get_worker) for _ in range(4)]
+        )
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        # Total dropped + remaining payload length == 20.
+        final_payload_len = len(handle.payload)
+        final_tokens = handle.tokens_generated
+        assert rollback_total[0] + final_payload_len == 20
+        # Counter consistent with payload state.
+        assert final_tokens == final_payload_len

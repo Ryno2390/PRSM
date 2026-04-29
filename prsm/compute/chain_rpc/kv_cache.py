@@ -52,7 +52,16 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Tuple
+
+
+# Phase 3.x.11.y — speculative-decoding cache truncation hook.
+# Called by ``KVCacheManager.rollback`` with the handle's payload +
+# the requested drop count; returns the truncated payload (typically
+# the same reference, mutated in place — matches the
+# forward_incremental contract). Caller (the runner) injects this
+# at rollback time; the manager is payload-opaque.
+TruncateCacheFn = Callable[[Any, int], Any]
 
 
 __all__ = [
@@ -60,6 +69,7 @@ __all__ = [
     "KVCacheManager",
     "CacheAlreadyAllocatedError",
     "CacheNotFoundError",
+    "TruncateCacheFn",
 ]
 
 
@@ -246,6 +256,74 @@ class KVCacheManager:
         with self._lock:
             handle = self._handles.pop(request_id, None)
             return handle is not None
+
+    def rollback(
+        self,
+        request_id: str,
+        n_positions: int,
+        truncate_fn: TruncateCacheFn,
+    ) -> Tuple[bool, int]:
+        """Phase 3.x.11.y — truncate the LAST ``n_positions`` from
+        the cache. Used by the speculative-decoding executor
+        loop on rejected speculative suffix.
+
+        ``truncate_fn(payload, actual_n) -> updated_payload`` is
+        invoked under the manager's lock with the actual drop
+        count; the returned payload is stored on the handle.
+        Lock-held truncation prevents races where another thread
+        reads the handle between truncation and the
+        ``tokens_generated`` decrement (catches a read-stale-cache
+        bug pattern).
+
+        Idempotent paths:
+          - unknown request_id → ``(False, 0)``
+          - n_positions <= 0 → ``(False, 0)``
+          - handle has zero generated tokens → ``(False, 0)``
+          - n_positions > tokens_generated → drops everything
+            generated; returns ``(True, prior_tokens_generated)``
+
+        Returns ``(rolled_back, actual_dropped)``. ``rolled_back``
+        True iff at least one position was dropped;
+        ``actual_dropped`` is the count actually removed (may be
+        less than ``n_positions`` if cache had fewer generated
+        tokens).
+
+        ``truncate_fn`` MUST NOT raise — exceptions propagate to
+        the caller and the handle is left in a torn state. The
+        runner-side ``model.truncate_cache`` is the typical
+        impl; tests inject a mock.
+        """
+        if not isinstance(request_id, str) or not request_id:
+            raise RuntimeError(
+                "KVCacheManager.rollback: request_id must be "
+                "non-empty string"
+            )
+        if (
+            isinstance(n_positions, bool)
+            or not isinstance(n_positions, int)
+        ):
+            raise RuntimeError(
+                f"KVCacheManager.rollback: n_positions must be "
+                f"int, got {type(n_positions).__name__}"
+            )
+        if not callable(truncate_fn):
+            raise RuntimeError(
+                "KVCacheManager.rollback: truncate_fn must be "
+                "callable (typically model.truncate_cache)"
+            )
+        with self._lock:
+            handle = self._handles.get(request_id)
+            if handle is None:
+                return (False, 0)
+            if n_positions <= 0:
+                return (False, 0)
+            actual = min(n_positions, handle.tokens_generated)
+            if actual == 0:
+                return (False, 0)
+            updated_payload = truncate_fn(handle.payload, actual)
+            handle.payload = updated_payload
+            handle.tokens_generated -= actual
+            return (True, actual)
 
     def evict_idle(self) -> List[str]:
         """Drop handles past ``ttl_seconds`` since their last
