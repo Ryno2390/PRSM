@@ -1578,6 +1578,173 @@ short-held lock around the OrderedDict.
 
 ---
 
+## 7.10 Pipelining + Per-Token Receipt Attestation (Phase 3.x.11.x)
+
+Phase 3.x.11.x is a 6-task slice closing two Phase 3.x.11
+honest-scope deferrals: chunked + sharded PREFILL composition
++ per-token receipt attestation envelope. Compute-level
+pipelining + speculative decoding remain in Phase 3.x.11.y;
+Tier C sharded support remains Phase 3.x.11.q.
+
+**Tag:** ``phase3.x.11.x-merge-ready-20260430``.
+
+**Headline guarantees.**
+
+  1. **IterationAttestation wire-format extension (Task 1).**
+     New ``IterationAttestation`` dataclass + ``encode_multi_iteration_attestation``
+     + ``decode_multi_iteration_attestation`` under separate
+     magic prefix ``PRSM-MI-ATT-V1:`` (vs. legacy
+     ``PRSM-MS-ATT-V1:``). Discriminator at the magic-prefix
+     level rather than JSON-key-level: old decoders return
+     None on the new envelope (back-compat fall-through) +
+     new decoder rejects legacy envelope (no cross-confusion).
+     Validation: PREFILL/INCREMENTAL coupled to iteration_index
+     (0=PREFILL, >0=INCREMENTAL); contiguous iteration_index
+     0..N-1; uniform stage counts across iterations; contiguous
+     stage_index 0..M-1 within each iteration. Golden-bytes
+     pin on the existing multi-stage envelope reconstructs
+     canonical JSON from first principles (non-sharded
+     receipts byte-equivalent with pre-3.x.11.x).
+
+  2. **Executor per-iteration accumulation (Task 2).**
+     ``_execute_chain_streaming_sharded`` replaces flat
+     ``cumulative_outcomes: List[StageOutcome]`` (Phase 3.x.11)
+     with ``per_iteration_outcomes: List[List[StageOutcome]]``
+     + parallel ``per_iteration_decode_modes: List[DecodeMode]``.
+     New ``_build_sharded_chain_result`` helper builds one
+     IterationAttestation per chain pass, encodes via
+     ``encode_multi_iteration_attestation``, aggregates
+     duration_seconds + epsilon_spent across ALL iterations,
+     uses ``worst_case_tee_type_across_iterations`` for the
+     receipt-level tee_type (one SOFTWARE stage in any
+     iteration drags the whole receipt to SOFTWARE).
+     Closes Phase 3.x.11 threat-model addendum §3.2's "no
+     per-iteration cryptographic commitment in receipt" gap.
+
+  3. **Server-side chunked + sharded PREFILL composition (Task 3).**
+     New ``_dispatch_streamed_sharded`` lifts the Phase 3.x.11
+     Task 9 M1 unary-only guard for PREFILL when sharded_runner
+     is wired. INCREMENTAL streamed stays rejected (single-
+     position activations don't benefit from chunking).
+     Reuses Phase 3.x.7.1 chunked-streaming substrate
+     (``_run_validation_gates`` + ``_validate_streamed_envelope``
+     for the Phase 3.x.7.1 H1+M1 inflated-payload-bytes
+     defence + ``_reassemble_inbound_chunks`` + ``reassemble_chunked``
+     + ``chunk_activation``). Tier C structural deny carries
+     forward (mirrors ``_dispatch_sharded``). Response signed
+     with ``next_token_id`` + ``is_terminal`` (Phase 3.x.11
+     Task 5 critical-fix coverage extends to this path).
+
+  4. **Executor lifts chunked + sharded PREFILL guard (Task 4).**
+     ``_dispatch_stage`` opens ``should_chunk + enable_sharded_decode``
+     branch for PREFILL only. INCREMENTAL chunked still
+     raises ACTIVATION_TOO_LARGE with refined "INCREMENTAL is
+     unary-only ... single-position" message. Pairs with
+     Task 3 server-side opening.
+
+  5. **Real-distilgpt2 chunked-PREFILL E2E (Task 5).**
+     ``test_chunked_prefill_path_exercised`` verifies streamed
+     transport hit during PREFILL with ~30+ token prompt at
+     chunk_threshold=10 KiB (Stage 1 → Stage 2 hidden state
+     at distilgpt2's 768 hidden_dim × 4 bytes/fp32 × 30+
+     positions ≈ 92+ KiB > threshold). Bit-identical greedy
+     output vs single-host (Phase 3.x.11 Task 7 invariant
+     carries through chunked path). Receipt's tee_attestation
+     decodes as multi-iteration envelope with 1 PREFILL + 2
+     INCREMENTALs entries × 2 stage records each.
+
+**Honest scope (carries forward).**
+
+  - **Compute-level pipelining** — overlapping consecutive-
+    token decode forward passes requires speculation; ships
+    as Phase 3.x.11.y. v1 "pipelining" framing in this slice
+    is wire-level only (chunked PREFILL transport overlaps
+    Stage K chunk emission with Stage K+1 chunk consumption).
+  - **Speculative decoding** — Phase 3.x.11.y.
+  - **Per-token KV-cache Merkle commitment in receipt** —
+    Phase 3.x.11.x' (apostrophe; not in this slice).
+    Receipt commits to per-iteration *attestations* (proves
+    the stage was on-watch); does NOT commit to the K/V
+    tensors themselves. Adding a Merkle root per iteration is
+    significant compute overhead, deferred.
+  - **Tier C sharded compat** — Phase 3.x.11.q. Sharded path
+    introduces new timing surface that Phase 3.x.10.y M1/M2
+    decorators don't cover.
+  - **Cache swap-out / paging** — Phase 3.x.11.z.
+  - **Mid-stream re-routing** — Phase 3.x.12.
+
+**Critical security carry-over.** Phase 3.x.11 Task 5's
+``RunLayerSliceResponse.signing_payload`` extension (committing
+``next_token_id`` + ``is_terminal``) covers this path too —
+chunked-sharded responses are signed with the same envelope as
+inline-sharded responses, so a malicious downstream relay
+can't swap the sampled token without invalidating the
+signature regardless of which transport path was used.
+
+**Test coverage at the tag.**
+
+  - 33 ``IterationAttestation`` unit tests in
+    ``tests/unit/test_multi_iteration_attestation.py``
+    (construction validation, round-trip, discriminator,
+    structural validation, worst-case TEE, golden-bytes pin
+    on legacy envelope).
+  - 5 per-iteration receipt tests in
+    ``tests/unit/test_chain_rpc_client_sharded.py::TestShardedPerIterationAttestation``
+    (1-iteration / 4-iteration shape; duration + epsilon
+    aggregation; non-sharded receipt unchanged byte-equivalence;
+    cancellation no partial receipt).
+  - 4 executor-guard tests in
+    ``tests/unit/test_chain_rpc_client_sharded.py::TestShardedChunkedPrefillExecutorGuard``
+    (INCREMENTAL still rejected; non-sharded chunked unchanged;
+    non-chunked sharded unchanged; PREFILL chunked routes to
+    streamed transport).
+  - 8 server-side dispatch tests in
+    ``tests/unit/test_dispatch_streamed_sharded.py``
+    (happy-path PREFILL non-tail + tail; INCREMENTAL/Tier C
+    rejections; envelope validation; chunk corruption; runner
+    exception mapping; non-sharded back-compat).
+  - 3 slow real-distilgpt2 E2E tests in
+    ``tests/integration/test_phase3_x_11_sharded_e2e.py::TestShardedE2EChunkedPrefill``
+    (chunked path exercised; bit-identical greedy; receipt
+    carries iteration envelope).
+
+**Round-1 → round-2 surface.**
+
+  - Round-1: APPROVED-FOR-TAG with 3 LOW findings.
+    LOW-2 (defensive ``decode_mode == PREFILL`` assert at
+    ``_dispatch_streamed_sharded`` entry — prevents the same
+    class of seam-bug as Phase 3.x.11 Task 9 M1) remediated
+    pre-tag.
+    LOW-1 (golden-bytes pin reconstructs canonical bytes via
+    json.dumps rather than hardcoded hex) deferred — current
+    pin catches all realistic regression vectors; hardcoded
+    hex is belt-and-braces audit-prep.
+    LOW-3 (``_build_sharded_chain_result`` empty-iterations
+    dead-code path) deferred — non-load-bearing under the
+    Phase 3.x.11 Task 5 cancellation-no-receipt contract.
+
+**Auditor prompts.** Start with the bit-identical chunked E2E
+test (``tests/integration/test_phase3_x_11_sharded_e2e.py::TestShardedE2EChunkedPrefill::test_chunked_prefill_output_matches_single_host_greedy``)
+— that's the load-bearing correctness proof for the
+chunked-PREFILL composition. Then read
+``prsm/compute/inference/multi_stage_attestation.py`` for the
+new envelope shape; the discriminator pattern (separate magic
+prefixes) is the load-bearing back-compat enabler. The
+``_dispatch_streamed_sharded`` method at
+``prsm/compute/chain_rpc/server.py:1038-1217`` is the new
+server-side dispatch path; mirrors ``_dispatch_sharded`` for
+the inline path with the same Tier C deny + envelope-validation
+ordering + runner-exception mapping. The defensive PREFILL
+assert at the top of ``_dispatch_streamed_sharded`` (LOW-2
+remediation) prevents future-refactor seam-bugs of the
+same class as Phase 3.x.11 Task 9 M1. The
+``_build_sharded_chain_result`` helper at
+``prsm/compute/chain_rpc/client.py:930-1000`` is straightforward
+reduction; the empty-iterations branch is dead code under the
+current contract (LOW-3 deferral).
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
@@ -1599,3 +1766,4 @@ When the Foundation signs the auditor contract:
 - **0.5 (2026-04-28)** — added §7.4 "Streaming-Token Output" covering Phase 3.x.8 chat-style incremental output path. 6 trust seams including conditional `streaming` flag encoding (byte-identity preservation), three-layer joined-text invariant enforcement, downgrade-resistant `streamed_output` receipt flag, server-side validation gates BEFORE runner dispatch, M1 round-1 sole-error-frame ordering remediation, and cancellation cleanup propagation. v1 honest-scope notes (SyntheticStreamingRunner placeholder + Python GeneratorExit cancellation limit) explicitly documented for auditor focus. Round-1 M1 closed pre-tag; 3 LOWs deferred. Phase 3.x.8 tag: phase3.x.8-merge-ready-20260428 at 391b92b0.
 - **0.6 (2026-04-28)** — added §7.5 "Streaming HTTP Endpoint" covering Phase 3.x.8.1 SSE-framed POST /compute/inference/stream. 6 trust seams including design plan §3.4 settle-on-tokens-emitted billing policy (closes a real griefing vector caught at round-1 review), wire-side receipt re-sign on job_id rebind (Task 5 caught + fixed bug invisible to mocked tests), W3C-compliant SSE framing with chunk-boundary buffering, operator-misconfig 503s, InferenceError structured error surface, request-time privacy-budget gating. Round-1 M1+M2+L1 closed pre-tag; 2 LOWs deferred. Phase 3.x.8.1 tag: phase3.x.8.1-merge-ready-20260428 at 67fe8863.
 - **0.7 (2026-04-30)** — added §7.9 "Sharded Autoregressive Decode" covering Phase 3.x.11. 9 headline guarantees including wire-format extension (decode_mode + next_token_id + is_terminal with omit-when-default byte-equivalence), KVCacheManager (LRU+TTL+thread-safe lifecycle), ShardedAutoregressiveRunner (non-tail + tail variants), executor per-token chain loop with eviction broadcast on every exit path, EvictCacheRequest wire envelope + handler, server-side sharded dispatch with Tier C structural deny, and bit-identical real-distilgpt2 E2E correctness proof. Critical security fix: ``RunLayerSliceResponse.signing_payload`` extended to commit ``next_token_id`` + ``is_terminal`` (without it, downstream relays could swap sampled tokens without invalidating signatures). Threat-model addendum at ``docs/2026-04-30-phase3.x.11-threat-model-addendum.md`` characterizes the new per-token wire timing surface, KV-cache state privacy on stages, cross-stage activation handoff magnification (`1 + max_tokens` observations per request), and Tier C structural incompat. R3 threat model cross-references the addendum. Phase 3.x.11 tag: phase3.x.11-merge-ready-20260430 (pending Task 9 review).
+- **0.8 (2026-04-30)** — added §7.10 "Pipelining + Per-Token Receipt Attestation" covering Phase 3.x.11.x. 5 headline guarantees: IterationAttestation wire-format extension (under separate `PRSM-MI-ATT-V1:` magic prefix; discriminator at magic-prefix level preserves non-sharded-receipt byte-equivalence with golden-bytes pin); executor per-iteration accumulation closing the threat-model addendum §3.2 "no per-iteration cryptographic commitment" gap; server-side `_dispatch_streamed_sharded` lifting the Phase 3.x.11 Task 9 M1 unary-only guard for PREFILL only (INCREMENTAL stays unary-only); executor-side guard mirroring; bit-identical real-distilgpt2 E2E through the chunked path. Pipelining is wire-level only in this slice (chunked PREFILL transport); compute-level pipelining (overlapping consecutive-token decode) requires speculation, deferred to Phase 3.x.11.y. Round-1 LOW-2 remediated pre-tag (defensive `decode_mode == PREFILL` assert at `_dispatch_streamed_sharded` entry, preventing Phase 3.x.11 Task 9 M1-class seam-bugs from a future refactor). Phase 3.x.11.x tag: phase3.x.11.x-merge-ready-20260430.
