@@ -207,6 +207,79 @@ class ShardedLayerForward(Protocol):
         decode_mode/is_final_stage."""
         ...
 
+    def apply_lm_head_and_sample_batch_with_rejection(
+        self,
+        *,
+        hidden_state_batch: np.ndarray,
+        proposed_token_ids: List[int],
+        proposed_token_probs: List[float],
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> Tuple[List[int], int]:
+        """Phase 3.x.11.y.x — tail-only — Leviathan-2023
+        sampling-correct rejection-sampling speculation.
+
+        Inputs:
+          ``hidden_state_batch`` : ``[K+1, hidden]`` — K+1
+            verified positions (one per ``[parent, d_1, ..., d_K]``
+            input position).
+          ``proposed_token_ids`` : K draft tokens d_1..d_K.
+          ``proposed_token_probs`` : K draft probabilities
+            ``q(d_i)`` from the draft model.
+          ``temperature``, ``top_k``, ``top_p`` : sampling
+            parameters applied to the verifier's logits before
+            computing target distribution ``p``.
+
+        Returns ``(verified_token_ids, accepted_count)``:
+          - For i in 0..accepted_count-1:
+              ``verified_token_ids[i] == proposed_token_ids[i]``
+              (accepted draft).
+          - ``verified_token_ids[accepted_count]`` is either:
+              * the verifier's correction sampled from residual
+                distribution (rejection at position
+                ``accepted_count`` < K), OR
+              * the bonus token sampled from p_K (if all K
+                drafts accepted, ``accepted_count == K``).
+          - ``len(verified_token_ids) == accepted_count + 1``
+            ALWAYS (narrowed semantic vs greedy v1 which returned
+            K+1 entries).
+
+        Algorithm — for each i in 0..K-1:
+          ``p_i = softmax(scaled_logits_i / temperature)``
+            (then top-k / top-p filtered + renormalized).
+          ``u ~ U(0, 1)``;
+          accept if ``u < min(1, p_i[d_i] / q(d_i))``;
+          else reject + sample correction from residual
+          ``r(t) = max(0, p_i(t) - q_i(t))`` where ``q_i`` is
+          the Option C.1 point-mass approximation
+          (``q_i(d_i) = q(d_i)`` and ``q_i(t) = 0`` for
+          ``t != d_i``); renormalize r and sample.
+
+        If all K accepted: sample bonus token from p_K.
+
+        Output distribution invariant: the marginal distribution
+        of emitted tokens equals the verifier's target
+        distribution p exactly (proof in Leviathan-2023 §2.2).
+        Speculation remains a perf optimization, not a sampling
+        change — even under temperature > 0.
+
+        Numerical edges:
+          - ``q(d_i) == 0`` → ``accept_prob = 1.0`` (always
+            accept; division-by-zero defended at the helper
+            boundary).
+          - If residual ``sum(r) == 0`` (the rejection-sampling
+            edge where p and q happen to coincide on d_i and
+            sum to 1.0 elsewhere — practically impossible
+            under finite floating-point, but defended): sample
+            from p_i directly as a fallback.
+
+        Non-tail / non-stochastic-speculation models can omit
+        this method; the runner guards it at dispatch time per
+        decode_mode/is_final_stage AND
+        proposed_token_probs-is-set."""
+        ...
+
     def truncate_cache(
         self,
         payload: Any,
@@ -264,6 +337,133 @@ class LayerSliceResult:
 
 # ──────────────────────────────────────────────────────────────────────────
 # ShardedAutoregressiveRunner
+# ──────────────────────────────────────────────────────────────────────────
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.y.x — Leviathan-2023 rejection-sampling helper
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def rejection_sample_speculation(
+    *,
+    target_distributions: List[np.ndarray],
+    proposed_token_ids: List[int],
+    proposed_token_probs: List[float],
+    rng: Any,
+) -> Tuple[List[int], int]:
+    """Pure-NumPy implementation of the Leviathan-2023
+    rejection-sampling speculation algorithm. Adapter
+    implementations of
+    ``ShardedLayerForward.apply_lm_head_and_sample_batch_with_rejection``
+    compute the K+1 target distributions ``p_0..p_K`` from the
+    boundary hidden states and call this helper for the
+    accept/reject/correction logic.
+
+    Inputs:
+      ``target_distributions`` : List of K+1 NumPy 1-D arrays,
+        each of length ``vocab_size``. ``target_distributions[i]``
+        is the verifier's distribution ``p_i`` over the next
+        token after consuming input position i (post temperature/
+        top-k/top-p filter, renormalized to sum to 1.0). Indices
+        0..K-1 are used for the accept-check; index K is used
+        for the bonus token if all K accepted.
+      ``proposed_token_ids`` : K draft token ids ``d_1..d_K``.
+      ``proposed_token_probs`` : K draft probabilities
+        ``q(d_1)..q(d_K)``.
+      ``rng`` : a ``numpy.random.Generator`` (or a duck-typed
+        object exposing ``random()`` returning a float in
+        [0, 1) and ``choice(n, p=arr)`` returning an int in
+        [0, n)). Adapters typically pass
+        ``np.random.default_rng(seed)`` for deterministic
+        testing or the implicit global generator in production.
+
+    Returns ``(verified_token_ids, accepted_count)`` per the
+    contract on
+    ``ShardedLayerForward.apply_lm_head_and_sample_batch_with_rejection``:
+      - First ``accepted_count`` entries match the corresponding
+        draft tokens; the last entry is the verifier's
+        correction (rejection case) or the bonus (all-accept
+        case).
+      - ``len(verified_token_ids) == accepted_count + 1``.
+
+    Algorithm references Leviathan-2023 §2.2. Output marginal
+    distribution equals the target distribution p exactly under
+    the Option C.1 residual-sampling approximation (q treated as
+    a point mass on ``d_i``).
+
+    Numerical edges:
+      - ``q(d_i) == 0.0`` : accept-prob clamped to 1.0 (avoids
+        division-by-zero). Equivalent to "if the draft assigned
+        zero probability to its own emit, just accept the
+        verifier's view of the world."
+      - Residual sum ``sum(r) <= 0`` after clamping
+        ``r[d_i] = max(0, p[d_i] - q(d_i))`` : fall back to
+        sampling the correction from ``p_i`` directly. This
+        edge is mathematically rare (would require q and p to
+        coincide on d_i AND p to be a point mass on d_i)
+        but defended for FP-safety.
+    """
+    K = len(proposed_token_ids)
+    if len(proposed_token_probs) != K:
+        raise RuntimeError(
+            f"rejection_sample_speculation: proposed_token_ids "
+            f"length {K} must equal proposed_token_probs length "
+            f"{len(proposed_token_probs)}"
+        )
+    if len(target_distributions) != K + 1:
+        raise RuntimeError(
+            f"rejection_sample_speculation: target_distributions "
+            f"length {len(target_distributions)} must equal K+1 "
+            f"= {K + 1}"
+        )
+
+    accepted: List[int] = []
+    for i in range(K):
+        p_i = target_distributions[i]
+        d_i = int(proposed_token_ids[i])
+        q_d_i = float(proposed_token_probs[i])
+        p_d_i = float(p_i[d_i])
+
+        # Accept-prob = min(1, p / q). q == 0 → accept (avoid
+        # div-by-zero).
+        if q_d_i <= 0.0:
+            accept_prob = 1.0
+        else:
+            accept_prob = min(1.0, p_d_i / q_d_i)
+
+        u = float(rng.random())
+        if u < accept_prob:
+            accepted.append(d_i)
+            continue
+
+        # Reject d_i. Sample correction from residual:
+        # r(t) = max(0, p_i(t) - q_i(t)) where q_i is point-mass
+        # at d_i (Option C.1). r(t) = p_i(t) for t != d_i;
+        # r(d_i) = max(0, p_i(d_i) - q(d_i)).
+        residual = p_i.copy()
+        residual[d_i] = max(0.0, p_d_i - q_d_i)
+        r_sum = float(residual.sum())
+        if r_sum <= 0.0:
+            # Numerical edge: residual all-zero. Fall back to
+            # sampling from p_i directly.
+            correction = int(rng.choice(len(p_i), p=p_i))
+        else:
+            residual = residual / r_sum
+            correction = int(rng.choice(len(residual), p=residual))
+        accepted.append(correction)
+        return accepted, i
+
+    # All K accepted — sample bonus from p_K.
+    p_K = target_distributions[K]
+    bonus = int(rng.choice(len(p_K), p=p_K))
+    accepted.append(bonus)
+    return accepted, K
+
+
+__all__.append("rejection_sample_speculation")
+
+
 # ──────────────────────────────────────────────────────────────────────────
 
 
