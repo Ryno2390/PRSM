@@ -25,6 +25,7 @@ from prsm.compute.chain_rpc.protocol import (
     ChainRpcMessageType,
     ChainRpcUnknownTypeError,
     ChainRpcVersionMismatchError,
+    DecodeMode,
     HandoffToken,
     RunLayerSliceRequest,
     RunLayerSliceResponse,
@@ -1999,3 +2000,393 @@ class TestSamplingOverridesRoundTrip:
         }
         with pytest.raises(ChainRpcMalformedError, match="temperature"):
             RunLayerSliceRequest.from_dict(wire)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11 — RunLayerSliceRequest decode_mode + RunLayerSliceResponse
+# next_token_id + is_terminal (sharded autoregressive sentinels)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestDecodeModeByteEquivalence:
+    """The headline invariant: a RunLayerSliceRequest constructed
+    without specifying decode_mode (the pre-3.x.11 status quo)
+    produces byte-identical canonical wire bytes to a request
+    with decode_mode=PREFILL explicitly set. Pre-3.x.11 signed
+    traffic stays verifiable under post-3.x.11 servers."""
+
+    def test_prefill_default_omitted_from_wire_dict(self):
+        identity = generate_node_identity("settler")
+        req = _valid_request(identity=identity)
+        # Default DecodeMode is PREFILL.
+        assert req.decode_mode == DecodeMode.PREFILL
+        wire = req.to_dict()
+        # Omit-when-default: PREFILL must not appear in wire.
+        assert "decode_mode" not in wire
+
+    def test_prefill_explicit_canonical_bytes_match_unset(self):
+        # Two equivalent constructions: one omits the kwarg
+        # (default PREFILL), one passes DecodeMode.PREFILL
+        # explicitly. Byte-identical encoding required.
+        identity = generate_node_identity("settler")
+        req_a = _valid_request(identity=identity)
+        req_b = RunLayerSliceRequest(
+            request_id=req_a.request_id,
+            model_id=req_a.model_id,
+            layer_range=req_a.layer_range,
+            privacy_tier=req_a.privacy_tier,
+            content_tier=req_a.content_tier,
+            activation_blob=req_a.activation_blob,
+            activation_shape=req_a.activation_shape,
+            activation_dtype=req_a.activation_dtype,
+            upstream_token=req_a.upstream_token,
+            deadline_unix=req_a.deadline_unix,
+            decode_mode=DecodeMode.PREFILL,
+        )
+        assert encode_message(req_a) == encode_message(req_b)
+
+    def test_golden_canonical_bytes_pre_3_x_11_baseline(self):
+        # Pin canonical bytes against a hardcoded baseline
+        # captured BEFORE 3.x.11 landed — any future patch that
+        # breaks omit-when-PREFILL byte-equivalence with
+        # pre-3.x.11 signed bytes fails this assertion explicitly.
+        # Hand-fixed token signature avoids ed25519 randomness;
+        # canonical bytes are deterministic across runs.
+        # Same fixture pattern as the Phase 3.x.10.x golden test.
+        fixed_token = HandoffToken(
+            request_id="golden-req",
+            settler_node_id="golden-settler",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=1000.0,
+            signature_b64="golden-sig",
+        )
+        req = RunLayerSliceRequest(
+            request_id="golden-req",
+            model_id="golden-model",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"\x01\x02",
+            activation_shape=(1, 2),
+            activation_dtype="f32",
+            upstream_token=fixed_token,
+            deadline_unix=1000.0,
+        )
+        expected = (
+            b'{"activation_blob_hex": "0102", '
+            b'"activation_dtype": "f32", '
+            b'"activation_shape": [1, 2], '
+            b'"content_tier": "A", '
+            b'"deadline_unix": 1000.0, '
+            b'"layer_range": [0, 4], '
+            b'"model_id": "golden-model", '
+            b'"privacy_tier": "none", '
+            b'"protocol_version": 2, '
+            b'"request_id": "golden-req", '
+            b'"type": "run_layer_slice_request", '
+            b'"upstream_token": {'
+            b'"chain_stage_index": 0, '
+            b'"chain_total_stages": 1, '
+            b'"deadline_unix": 1000.0, '
+            b'"request_id": "golden-req", '
+            b'"settler_node_id": "golden-settler", '
+            b'"signature_b64": "golden-sig"}}'
+        )
+        assert encode_message(req) == expected, (
+            "byte-equivalence broken with pre-3.x.11 signed bytes "
+            "— a pre-3.x.11 signed RunLayerSliceRequest with "
+            "these exact field values would no longer verify "
+            "under the post-3.x.11 serializer"
+        )
+
+    def test_incremental_appears_in_wire(self):
+        identity = generate_node_identity("settler")
+        token = _valid_token(identity)
+        req = RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="m",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"x",
+            activation_shape=(1,),
+            activation_dtype="f32",
+            upstream_token=token,
+            deadline_unix=1000.0,
+            decode_mode=DecodeMode.INCREMENTAL,
+        )
+        wire = req.to_dict()
+        assert wire["decode_mode"] == "incremental"
+
+    def test_incremental_changes_canonical_bytes(self):
+        identity = generate_node_identity("settler")
+        prefill = _valid_request(identity=identity)
+        incremental = RunLayerSliceRequest(
+            request_id=prefill.request_id,
+            model_id=prefill.model_id,
+            layer_range=prefill.layer_range,
+            privacy_tier=prefill.privacy_tier,
+            content_tier=prefill.content_tier,
+            activation_blob=prefill.activation_blob,
+            activation_shape=prefill.activation_shape,
+            activation_dtype=prefill.activation_dtype,
+            upstream_token=prefill.upstream_token,
+            deadline_unix=prefill.deadline_unix,
+            decode_mode=DecodeMode.INCREMENTAL,
+        )
+        assert encode_message(prefill) != encode_message(incremental)
+
+
+class TestDecodeModeValidation:
+    def _base_kwargs(self, identity):
+        return dict(
+            request_id="req-1",
+            model_id="m",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"x",
+            activation_shape=(1,),
+            activation_dtype="f32",
+            upstream_token=_valid_token(identity),
+            deadline_unix=1000.0,
+        )
+
+    def test_string_decode_mode_rejected_at_construction(self):
+        identity = generate_node_identity("s")
+        with pytest.raises(ChainRpcMalformedError, match="decode_mode"):
+            RunLayerSliceRequest(
+                **self._base_kwargs(identity),
+                decode_mode="prefill",  # type: ignore[arg-type]
+            )
+
+    def test_int_decode_mode_rejected_at_construction(self):
+        identity = generate_node_identity("s")
+        with pytest.raises(ChainRpcMalformedError, match="decode_mode"):
+            RunLayerSliceRequest(
+                **self._base_kwargs(identity),
+                decode_mode=0,  # type: ignore[arg-type]
+            )
+
+    def test_from_dict_rejects_unknown_decode_mode_string(self):
+        identity = generate_node_identity("settler")
+        token = _valid_token(identity)
+        wire = {
+            "type": ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value,
+            "protocol_version": CHAIN_RPC_PROTOCOL_VERSION,
+            "request_id": "req-1",
+            "model_id": "m",
+            "layer_range": [0, 4],
+            "privacy_tier": PrivacyLevel.NONE.value,
+            "content_tier": ContentTier.A.value,
+            "activation_blob_hex": b"x".hex(),
+            "activation_shape": [1],
+            "activation_dtype": "f32",
+            "upstream_token": token.to_dict(),
+            "deadline_unix": 1000.0,
+            "decode_mode": "speculative",  # not a real mode
+        }
+        with pytest.raises(ChainRpcMalformedError, match="decode_mode"):
+            RunLayerSliceRequest.from_dict(wire)
+
+    def test_from_dict_rejects_non_string_decode_mode(self):
+        identity = generate_node_identity("settler")
+        token = _valid_token(identity)
+        wire = {
+            "type": ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value,
+            "protocol_version": CHAIN_RPC_PROTOCOL_VERSION,
+            "request_id": "req-1",
+            "model_id": "m",
+            "layer_range": [0, 4],
+            "privacy_tier": PrivacyLevel.NONE.value,
+            "content_tier": ContentTier.A.value,
+            "activation_blob_hex": b"x".hex(),
+            "activation_shape": [1],
+            "activation_dtype": "f32",
+            "upstream_token": token.to_dict(),
+            "deadline_unix": 1000.0,
+            "decode_mode": 1,
+        }
+        with pytest.raises(ChainRpcMalformedError, match="decode_mode"):
+            RunLayerSliceRequest.from_dict(wire)
+
+
+class TestDecodeModeRoundTrip:
+    def test_round_trip_prefill_default(self):
+        identity = generate_node_identity("settler")
+        original = _valid_request(identity=identity)
+        recovered = parse_message(encode_message(original))
+        assert isinstance(recovered, RunLayerSliceRequest)
+        assert recovered.decode_mode == DecodeMode.PREFILL
+
+    def test_round_trip_incremental(self):
+        identity = generate_node_identity("settler")
+        original = RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="m",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"x",
+            activation_shape=(1,),
+            activation_dtype="f32",
+            upstream_token=_valid_token(identity),
+            deadline_unix=1000.0,
+            decode_mode=DecodeMode.INCREMENTAL,
+        )
+        recovered = parse_message(encode_message(original))
+        assert recovered.decode_mode == DecodeMode.INCREMENTAL
+
+
+class TestResponseShardedTailFieldsByteEquivalence:
+    """Pre-3.x.11 RunLayerSliceResponse (no next_token_id, no
+    is_terminal) produces byte-identical canonical wire bytes to
+    a post-3.x.11 response with both fields at default."""
+
+    def test_default_response_omits_sharded_fields(self):
+        response = _signed_response_for_text("hi")
+        wire = response.to_dict()
+        assert "next_token_id" not in wire
+        assert "is_terminal" not in wire
+
+    def test_set_next_token_id_appears_in_wire(self):
+        # Build a response with the field set; verify it
+        # appears in the canonical wire dict.
+        identity = generate_node_identity("alice")
+        signed = RunLayerSliceResponse.sign(
+            identity=identity,
+            request_id="req-1",
+            activation_blob=b"hi",
+            activation_shape=(2,),
+            activation_dtype="uint8",
+            duration_seconds=0.05,
+            tee_attestation=b"\x01" * 32,
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
+        )
+        with_token = type(signed)(
+            **{
+                **signed.__dict__,
+                "next_token_id": 42,
+                "is_terminal": True,
+            }
+        )
+        wire = with_token.to_dict()
+        assert wire["next_token_id"] == 42
+        assert wire["is_terminal"] is True
+
+
+class TestResponseShardedTailFieldsValidation:
+    def test_negative_next_token_id_rejected(self):
+        identity = generate_node_identity("alice")
+        signed = RunLayerSliceResponse.sign(
+            identity=identity,
+            request_id="req-1",
+            activation_blob=b"hi",
+            activation_shape=(2,),
+            activation_dtype="uint8",
+            duration_seconds=0.05,
+            tee_attestation=b"\x01" * 32,
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match="next_token_id"
+        ):
+            type(signed)(
+                **{**signed.__dict__, "next_token_id": -1},
+            )
+
+    def test_bool_next_token_id_rejected(self):
+        identity = generate_node_identity("alice")
+        signed = RunLayerSliceResponse.sign(
+            identity=identity,
+            request_id="req-1",
+            activation_blob=b"hi",
+            activation_shape=(2,),
+            activation_dtype="uint8",
+            duration_seconds=0.05,
+            tee_attestation=b"\x01" * 32,
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match="next_token_id"
+        ):
+            type(signed)(
+                **{**signed.__dict__, "next_token_id": True},
+            )
+
+    def test_non_bool_is_terminal_rejected(self):
+        identity = generate_node_identity("alice")
+        signed = RunLayerSliceResponse.sign(
+            identity=identity,
+            request_id="req-1",
+            activation_blob=b"hi",
+            activation_shape=(2,),
+            activation_dtype="uint8",
+            duration_seconds=0.05,
+            tee_attestation=b"\x01" * 32,
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match="is_terminal"
+        ):
+            type(signed)(
+                **{**signed.__dict__, "is_terminal": 1},  # int, not bool
+            )
+
+    def test_from_dict_rejects_bool_next_token_id(self):
+        # Hostile-peer scenario: wire dict has bool where int
+        # expected. Reject at parse time.
+        response = _signed_response_for_text("hi")
+        wire = response.to_dict()
+        wire["next_token_id"] = True
+        with pytest.raises(
+            ChainRpcMalformedError, match="next_token_id"
+        ):
+            RunLayerSliceResponse.from_dict(wire)
+
+    def test_from_dict_rejects_non_bool_is_terminal(self):
+        response = _signed_response_for_text("hi")
+        wire = response.to_dict()
+        wire["is_terminal"] = "true"
+        with pytest.raises(
+            ChainRpcMalformedError, match="is_terminal"
+        ):
+            RunLayerSliceResponse.from_dict(wire)
+
+
+class TestResponseShardedTailFieldsRoundTrip:
+    def test_default_round_trip(self):
+        original = _signed_response_for_text("hi")
+        recovered = parse_message(encode_message(original))
+        assert isinstance(recovered, RunLayerSliceResponse)
+        assert recovered.next_token_id is None
+        assert recovered.is_terminal is False
+
+    def test_set_fields_round_trip(self):
+        identity = generate_node_identity("alice")
+        signed = RunLayerSliceResponse.sign(
+            identity=identity,
+            request_id="req-1",
+            activation_blob=b"hi",
+            activation_shape=(2,),
+            activation_dtype="uint8",
+            duration_seconds=0.05,
+            tee_attestation=b"\x01" * 32,
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
+        )
+        with_token = type(signed)(
+            **{
+                **signed.__dict__,
+                "next_token_id": 42,
+                "is_terminal": True,
+            }
+        )
+        recovered = parse_message(encode_message(with_token))
+        assert recovered.next_token_id == 42
+        assert recovered.is_terminal is True

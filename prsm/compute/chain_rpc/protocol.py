@@ -111,6 +111,28 @@ class ChainRpcMessageType(str, Enum):
     STREAM_FINAL_FRAME = "stream_final_frame"  # terminal frame; embeds signed response
 
 
+class DecodeMode(str, Enum):
+    """Phase 3.x.11 — sharded autoregressive decode mode.
+
+    A sharded autoregressive request runs the chain twice in
+    distinct modes:
+
+    - ``PREFILL`` — first dispatch in a request; full prompt
+      forward through the stage's layers; allocates fresh
+      KV-cache keyed on ``request_id``.
+    - ``INCREMENTAL`` — per-token dispatch; single-position
+      forward with cached KV; mutates existing cache.
+
+    Default ``PREFILL`` preserves byte-equivalence with
+    pre-3.x.11 messages (omit-when-default canonical
+    encoding, mirroring Phase 3.x.10.x's max_tokens /
+    temperature optionality pattern).
+    """
+
+    PREFILL = "prefill"
+    INCREMENTAL = "incremental"
+
+
 class StageErrorCode(str, Enum):
     """Structured error codes for cross-host stage failures.
 
@@ -513,6 +535,17 @@ class RunLayerSliceRequest:
     # unary path ignores them at the server side.
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
+    # Phase 3.x.11 — sharded autoregressive decode mode.
+    # ``PREFILL`` (default) is the first dispatch in a request,
+    # full prompt forward, fresh KV-cache allocation.
+    # ``INCREMENTAL`` is a per-token dispatch with cached KV,
+    # single-position forward, mutates existing cache. Pre-
+    # 3.x.11 messages omit the field; the canonical signing
+    # payload OMITS the key when ``decode_mode == PREFILL``,
+    # preserving byte-equivalence with pre-3.x.11 signed bytes
+    # (same omit-when-default pattern Phase 3.x.10.x used for
+    # ``max_tokens`` / ``temperature``).
+    decode_mode: DecodeMode = DecodeMode.PREFILL
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value
@@ -642,6 +675,16 @@ class RunLayerSliceRequest:
                     f"temperature must satisfy 0.0 <= t <= 2.0, "
                     f"got {self.temperature}"
                 )
+        # Phase 3.x.11 — decode_mode must be a real DecodeMode
+        # enum member. Bool / string / arbitrary-int passes
+        # would slip through the JSON-string layer; explicit
+        # type-check defends against malformed peer input
+        # (mirrors ``streaming`` bool-rejection at line 631).
+        if not isinstance(self.decode_mode, DecodeMode):
+            raise ChainRpcMalformedError(
+                f"decode_mode must be DecodeMode, got "
+                f"{type(self.decode_mode).__name__}"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         # activation_blob → hex for JSON-safety. For streamed (v2)
@@ -677,6 +720,11 @@ class RunLayerSliceRequest:
             out["max_tokens"] = int(self.max_tokens)
         if self.temperature is not None:
             out["temperature"] = float(self.temperature)
+        # Phase 3.x.11 — decode_mode. Omit-when-PREFILL
+        # (default) preserves byte-equivalence with pre-3.x.11
+        # signed bytes.
+        if self.decode_mode != DecodeMode.PREFILL:
+            out["decode_mode"] = self.decode_mode.value
         return out
 
     @classmethod
@@ -760,6 +808,25 @@ class RunLayerSliceRequest:
                     f"{type(temperature_raw).__name__}"
                 )
             temperature_raw = float(temperature_raw)
+        # Phase 3.x.11 — decode_mode. Default PREFILL when absent
+        # (preserves byte-equivalence with pre-3.x.11 messages).
+        # When present, must be a string matching a DecodeMode
+        # member; bool/int/unknown-string rejected.
+        decode_mode_raw = data.get("decode_mode")
+        if decode_mode_raw is None:
+            decode_mode = DecodeMode.PREFILL
+        else:
+            if not isinstance(decode_mode_raw, str):
+                raise ChainRpcMalformedError(
+                    f"decode_mode must be string, got "
+                    f"{type(decode_mode_raw).__name__}"
+                )
+            try:
+                decode_mode = DecodeMode(decode_mode_raw)
+            except ValueError as exc:
+                raise ChainRpcMalformedError(
+                    f"decode_mode invalid: {exc}"
+                ) from exc
         return cls(
             request_id=_required_str(data, "request_id"),
             model_id=_required_str(data, "model_id"),
@@ -775,6 +842,7 @@ class RunLayerSliceRequest:
             streaming=streaming_raw,
             max_tokens=max_tokens_raw,
             temperature=temperature_raw,
+            decode_mode=decode_mode,
             protocol_version=_required_int(data, "protocol_version"),
         )
 
@@ -796,6 +864,18 @@ class RunLayerSliceResponse:
     # v2 streaming: when present, ``activation_blob`` MUST be empty
     # and the bytes ride out-of-band as ActivationChunk frames.
     activation_manifest: Optional[ShardManifest] = None
+    # Phase 3.x.11 — sharded autoregressive tail-stage signal.
+    # ``next_token_id`` is the token sampled by the chain tail
+    # for this iteration; the executor feeds it back as Stage 1's
+    # input on the next ``INCREMENTAL`` chain pass. Non-tail
+    # stages leave it None. ``is_terminal`` is True iff the
+    # tail's sampling hit EOS or the request's max_tokens cap;
+    # signals the executor to stop the per-token chain loop.
+    # Both default to None/False so pre-3.x.11 responses
+    # produce byte-identical signed bytes (omit-when-default
+    # canonical encoding pattern).
+    next_token_id: Optional[int] = None
+    is_terminal: bool = False
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_RESPONSE.value
@@ -861,6 +941,29 @@ class RunLayerSliceResponse:
                 "response has neither inline activation_blob nor "
                 "activation_manifest — exactly one payload path is "
                 "required"
+            )
+        # Phase 3.x.11 — sharded autoregressive tail signals.
+        # ``next_token_id`` (when set) must be non-negative int;
+        # ``is_terminal`` must be a real bool (mirrors
+        # ``streaming`` / ``decode_mode`` bool-rejection on the
+        # request side).
+        if self.next_token_id is not None:
+            if isinstance(self.next_token_id, bool) or not isinstance(
+                self.next_token_id, int
+            ):
+                raise ChainRpcMalformedError(
+                    f"next_token_id must be int, got "
+                    f"{type(self.next_token_id).__name__}"
+                )
+            if self.next_token_id < 0:
+                raise ChainRpcMalformedError(
+                    f"next_token_id must be non-negative, got "
+                    f"{self.next_token_id}"
+                )
+        if not isinstance(self.is_terminal, bool):
+            raise ChainRpcMalformedError(
+                f"is_terminal must be bool, got "
+                f"{type(self.is_terminal).__name__}"
             )
 
     @staticmethod
@@ -1050,6 +1153,14 @@ class RunLayerSliceResponse:
             out["activation_manifest"] = _shard_manifest_to_dict(
                 self.activation_manifest
             )
+        # Phase 3.x.11 — sharded autoregressive tail signals.
+        # Omit-when-default canonical encoding: pre-3.x.11
+        # responses (next_token_id=None, is_terminal=False)
+        # produce byte-identical signed bytes.
+        if self.next_token_id is not None:
+            out["next_token_id"] = int(self.next_token_id)
+        if self.is_terminal:
+            out["is_terminal"] = True
         return out
 
     @classmethod
@@ -1082,6 +1193,26 @@ class RunLayerSliceResponse:
         manifest: Optional[ShardManifest] = None
         if manifest_raw is not None:
             manifest = _shard_manifest_from_dict(manifest_raw)
+        # Phase 3.x.11 — sharded autoregressive tail signals.
+        # Default None / False when absent (preserves byte-
+        # equivalence with pre-3.x.11 responses). Type-checked
+        # tightly here so a hostile peer can't smuggle bool-
+        # as-int or unknown types through.
+        next_token_id_raw = data.get("next_token_id")
+        if next_token_id_raw is not None:
+            if isinstance(next_token_id_raw, bool) or not isinstance(
+                next_token_id_raw, int
+            ):
+                raise ChainRpcMalformedError(
+                    f"next_token_id must be int, got "
+                    f"{type(next_token_id_raw).__name__}"
+                )
+        is_terminal_raw = data.get("is_terminal", False)
+        if not isinstance(is_terminal_raw, bool):
+            raise ChainRpcMalformedError(
+                f"is_terminal must be bool, got "
+                f"{type(is_terminal_raw).__name__}"
+            )
         return cls(
             request_id=_required_str(data, "request_id"),
             activation_blob=blob_bytes,
@@ -1094,6 +1225,8 @@ class RunLayerSliceResponse:
             stage_signature_b64=_required_str(data, "stage_signature_b64"),
             stage_node_id=_required_str(data, "stage_node_id"),
             activation_manifest=manifest,
+            next_token_id=next_token_id_raw,
+            is_terminal=is_terminal_raw,
             protocol_version=_required_int(data, "protocol_version"),
         )
 
