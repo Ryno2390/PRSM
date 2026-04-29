@@ -248,3 +248,64 @@ def make_layer_stage_server(
     if tier_c_streaming_decorator is not None:
         kwargs["tier_c_streaming_decorator"] = tier_c_streaming_decorator
     return LayerStageServer(**kwargs)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.q — Tier C chain-level constant-time decorator factory
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def make_tier_c_sharded_executor(
+    inner: Any,
+    *,
+    mode: str,
+    cadence_seconds: Optional[float] = None,
+):
+    """Wrap an inner chain executor in one of the Phase 3.x.11.q
+    constant-time decorators. Mirrors Phase 3.x.10.y's pattern of
+    selecting M1 vs M2 by mode string.
+
+    Args:
+      inner:           Object exposing
+                       ``execute_chain_streaming(request=, chain=)`` —
+                       typically an ``RpcChainExecutor``.
+      mode:            ``"m2"`` (BatchedTrailing — single trailing
+                       frame) or ``"m1"`` (FixedRate — cadence-driven
+                       per-token yield).
+      cadence_seconds: required for ``mode="m1"``; rejected for
+                       ``mode="m2"`` (M2 has no cadence concept).
+
+    Returns:
+      A ``BatchedTrailingShardedExecutor`` or
+      ``FixedRateShardedExecutor`` instance.
+
+    Raises:
+      ValueError: unknown mode; cadence misconfig.
+    """
+    from prsm.compute.chain_rpc.tier_c_sharded_executors import (
+        BatchedTrailingShardedExecutor,
+        FixedRateShardedExecutor,
+    )
+
+    if mode == "m2":
+        if cadence_seconds is not None:
+            raise ValueError(
+                "make_tier_c_sharded_executor: cadence_seconds is "
+                "not applicable for mode='m2' (BatchedTrailing has "
+                "no per-token cadence concept)"
+            )
+        return BatchedTrailingShardedExecutor(inner=inner)
+    if mode == "m1":
+        if cadence_seconds is None:
+            raise ValueError(
+                "make_tier_c_sharded_executor: cadence_seconds is "
+                "required for mode='m1' (FixedRate cadence-driven "
+                "yield)"
+            )
+        return FixedRateShardedExecutor(
+            inner=inner, cadence_seconds=cadence_seconds,
+        )
+    raise ValueError(
+        f"make_tier_c_sharded_executor: unknown mode {mode!r}; "
+        f"expected 'm2' or 'm1'"
+    )

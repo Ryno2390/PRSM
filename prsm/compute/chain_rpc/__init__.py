@@ -70,6 +70,7 @@ from prsm.compute.chain_rpc.client import (
 from prsm.compute.chain_rpc.factories import (
     make_layer_stage_server,
     make_rpc_chain_executor,
+    make_tier_c_sharded_executor,
     utf8_output_decoder,
     utf8_prompt_encoder,
 )
@@ -77,6 +78,10 @@ from prsm.compute.chain_rpc.server import (
     LayerSliceResult,
     LayerSliceRunner,
     LayerStageServer,
+)
+from prsm.compute.chain_rpc.tier_c_sharded_executors import (
+    BatchedTrailingShardedExecutor,
+    FixedRateShardedExecutor,
 )
 
 __all__ = [
@@ -128,4 +133,8 @@ __all__ = [
     "make_rpc_chain_executor",
     "utf8_output_decoder",
     "utf8_prompt_encoder",
+    # Phase 3.x.11.q — chain-level Tier C decorators
+    "BatchedTrailingShardedExecutor",
+    "FixedRateShardedExecutor",
+    "make_tier_c_sharded_executor",
 ]

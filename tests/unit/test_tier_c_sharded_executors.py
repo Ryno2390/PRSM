@@ -359,3 +359,54 @@ class TestFixedRateShardedExecutor:
             request="my-request", chain="my-chain",
         ))
         assert inner.call_log == [("my-request", "my-chain")]
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Task 3 — make_tier_c_sharded_executor factory
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestMakeTierCShardedExecutor:
+    def test_mode_m2_returns_batched_trailing(self):
+        from prsm.compute.chain_rpc import make_tier_c_sharded_executor
+        inner = _FakeChainExecutor([_result()])
+        decorator = make_tier_c_sharded_executor(inner, mode="m2")
+        assert isinstance(decorator, BatchedTrailingShardedExecutor)
+
+    def test_mode_m1_returns_fixed_rate(self):
+        from prsm.compute.chain_rpc import make_tier_c_sharded_executor
+        inner = _FakeChainExecutor([_result()])
+        decorator = make_tier_c_sharded_executor(
+            inner, mode="m1", cadence_seconds=0.05,
+        )
+        assert isinstance(decorator, FixedRateShardedExecutor)
+
+    def test_mode_m1_requires_cadence(self):
+        from prsm.compute.chain_rpc import make_tier_c_sharded_executor
+        inner = _FakeChainExecutor([_result()])
+        with pytest.raises(ValueError, match="cadence_seconds is required"):
+            make_tier_c_sharded_executor(inner, mode="m1")
+
+    def test_mode_m2_rejects_cadence(self):
+        from prsm.compute.chain_rpc import make_tier_c_sharded_executor
+        inner = _FakeChainExecutor([_result()])
+        with pytest.raises(
+            ValueError, match="not applicable for mode='m2'",
+        ):
+            make_tier_c_sharded_executor(
+                inner, mode="m2", cadence_seconds=0.05,
+            )
+
+    def test_unknown_mode_raises(self):
+        from prsm.compute.chain_rpc import make_tier_c_sharded_executor
+        inner = _FakeChainExecutor([_result()])
+        with pytest.raises(ValueError, match="unknown mode"):
+            make_tier_c_sharded_executor(inner, mode="bogus")
+
+    def test_top_level_chain_rpc_exports(self):
+        # Module-level smoke: the three names are exported under
+        # prsm.compute.chain_rpc.
+        import prsm.compute.chain_rpc as mod
+        assert "BatchedTrailingShardedExecutor" in mod.__all__
+        assert "FixedRateShardedExecutor" in mod.__all__
+        assert "make_tier_c_sharded_executor" in mod.__all__
