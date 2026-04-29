@@ -833,30 +833,77 @@ class LayerStageServer:
             == token.chain_total_stages - 1
         )
 
-        # Run the sharded forward.
+        # Run the sharded forward. Phase 3.x.11.y.x backwards-compat:
+        # only pass proposed_token_probs when the wire field is
+        # actually set. Pre-3.x.11.y.x runners predate the kwarg
+        # and would TypeError on it; v1 (greedy) traffic from a new
+        # executor leaves the field None, so the legacy call shape
+        # carries forward unchanged. When probs ARE set, we require
+        # a v2-capable runner — TypeError surfaces as
+        # MALFORMED_REQUEST so the executor learns the tail can't
+        # route stochastic traffic.
+        runner_kwargs = dict(
+            activation_or_input_ids=(
+                activation.tolist()
+                if activation.dtype.kind in ("i", "u")
+                else activation
+            ),
+            request_id=request.request_id,
+            decode_mode=request.decode_mode,
+            is_final_stage=is_final_stage,
+            request=request,
+            # Phase 3.x.11.y — pass proposed_token_ids through
+            # to the runner. None on non-VERIFY dispatches; on
+            # VERIFY, carries the K draft tokens the executor's
+            # speculation loop produced. Tail uses them to
+            # compute accepted_count.
+            proposed_token_ids=(
+                list(request.proposed_token_ids)
+                if request.proposed_token_ids is not None
+                else None
+            ),
+        )
+        if request.proposed_token_probs is not None:
+            # Phase 3.x.11.y.x — v2 stochastic dispatch. Runner
+            # routes to apply_lm_head_and_sample_batch_with_rejection
+            # (Leviathan-2023 §2.2) when probs co-set with ids AND
+            # temperature > 0. Server forwards faithfully; routing
+            # decision lives on the runner side (Task 4).
+            runner_kwargs["proposed_token_probs"] = list(
+                request.proposed_token_probs,
+            )
+
         start_ts = self._clock()
         try:
             result = self._sharded_runner.run_layer_slice_unary(
-                activation_or_input_ids=(
-                    activation.tolist()
-                    if activation.dtype.kind in ("i", "u")
-                    else activation
-                ),
-                request_id=request.request_id,
-                decode_mode=request.decode_mode,
-                is_final_stage=is_final_stage,
-                request=request,
-                # Phase 3.x.11.y — pass proposed_token_ids through
-                # to the runner. None on non-VERIFY dispatches; on
-                # VERIFY, carries the K draft tokens the executor's
-                # speculation loop produced. Tail uses them to
-                # compute accepted_count.
-                proposed_token_ids=(
-                    list(request.proposed_token_ids)
-                    if request.proposed_token_ids is not None
-                    else None
-                ),
+                **runner_kwargs,
             )
+        except TypeError as exc:
+            # Most-likely cause: stale runner that doesn't accept
+            # proposed_token_probs= (pre-3.x.11.y.x). Surface as
+            # MALFORMED_REQUEST so the executor knows the tail
+            # can't honor v2 stochastic dispatch.
+            if (
+                "proposed_token_probs" in str(exc)
+                or "unexpected keyword argument" in str(exc)
+            ):
+                logger.warning(
+                    "LayerStageServer._dispatch_sharded: runner "
+                    "rejected proposed_token_probs= for "
+                    "request_id=%r — stale runner predates v2 "
+                    "speculation; returning MALFORMED_REQUEST so "
+                    "the executor falls back to v1 or fails loud",
+                    request.request_id,
+                )
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    f"sharded runner does not support v2 stochastic "
+                    f"speculation (Phase 3.x.11.y.x); upgrade the "
+                    f"runner or set request.temperature=0.0. "
+                    f"Underlying: {exc}",
+                )
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "LayerStageServer._dispatch_sharded: runner raised "
