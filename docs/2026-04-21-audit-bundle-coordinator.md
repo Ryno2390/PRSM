@@ -1,12 +1,12 @@
 # PRSM Mainnet Audit — Bundle Coordinator
 
-**Date:** 2026-04-30 (refreshed for cumulative tag — adds Phase 3.x.10.y Tier C constant-time padding + HF prompt-echo fix on top of the 2026-04-29 baseline)
-**Bundle tag reference:** `cumulative-audit-prep-20260430` — extends `cumulative-audit-prep-20260429` with one additional phase (3.x.10.y) covering Tier C streaming enablement.
+**Date:** 2026-04-30 (refreshed for cumulative tag — adds Phase 3.x.11 sharded autoregressive decode on top of the same-day 3.x.10.y baseline; tag moved forward at HEAD)
+**Bundle tag reference:** `cumulative-audit-prep-20260430` — now covers Phase 3.x.10.y + Phase 3.x.11 cumulatively. Sharded autoregressive decode closes the load-bearing tail-only contract that's accumulated since Phase 3.x.8; each chain stage now runs ONCE PER GENERATED TOKEN with KV-cache state surviving locally between iterations.
 **Engagement model:** single auditor, one remediation cycle, one Base mainnet deploy ceremony.
 
 This is the first document an external auditor should read. It frames the full audit tree as one coherent engagement, points to the per-phase scope bundles that drill into each surface, and surfaces the cross-phase seams that an auditor should focus on first.
 
-> **📌 For auditors starting here:** the most recent audit-prep bundle is **`docs/2026-04-27-cumulative-audit-prep.md`** at tag `cumulative-audit-prep-20260430` — it now stacks the original 2026-04-22 economic-layer baseline + 2026-04-27 multi-phase additions + the eight streaming-inference phases (§7.1-§7.8 of the cumulative-audit-prep doc). All round-1 review HIGH/MEDIUM findings across all phases are **RESOLVED pre-audit**. The 2026-04-22 baseline (`docs/2026-04-22-phase7.1x-audit-prep.md`) remains authoritative for the 7/7.1/7.1x economic substrate; this refresh ADDS to it rather than replacing.
+> **📌 For auditors starting here:** the most recent audit-prep bundle is **`docs/2026-04-27-cumulative-audit-prep.md`** at tag `cumulative-audit-prep-20260430` — it now stacks the original 2026-04-22 economic-layer baseline + 2026-04-27 multi-phase additions + the nine streaming-inference phases (§7.1-§7.9 of the cumulative-audit-prep doc). All round-1 review HIGH/MEDIUM findings across all phases are **RESOLVED pre-audit**. The 2026-04-22 baseline (`docs/2026-04-22-phase7.1x-audit-prep.md`) remains authoritative for the 7/7.1/7.1x economic substrate; this refresh ADDS to it rather than replacing. **New for this refresh:** sharded autoregressive decode introduces a per-token wire timing surface and KV-cache state on stages — auditors should read `docs/2026-04-30-phase3.x.11-threat-model-addendum.md` alongside `docs/2026-04-22-r3-threat-model.md` when evaluating sharded-mode operators (R3 cross-references the addendum in its Related-documents header).
 
 ---
 
@@ -27,6 +27,7 @@ Three phases ship the core PRSM economic layer and must be reviewed together bec
 | **Phase 3.x.10** | A | `phase3.x.10-merge-ready-20260428` | AutoregressiveStreamingRunner (real HF generate; replaces SyntheticStreamingRunner placeholder) + per-token timing side-channel memo |
 | **Phase 3.x.10.x** | A | `phase3.x.10.x-merge-ready-20260428` | Production wiring: max_tokens + temperature wire fields + StreamingSamplingShim + make_autoregressive_streaming_runner factory |
 | **Phase 3.x.10.y** | A | `phase3.x.10.y-merge-ready-20260429` | Tier C constant-time padding decorators (M2 BatchedTrailing + M1 FixedRate at cadence) + Tier C dispatch-layer gate (default-deny) + HF prompt-echo fix |
+| **Phase 3.x.11** | A/B (Tier C structurally denied at v1) | `phase3.x.11-merge-ready-20260430` | Sharded autoregressive decode: per-token chain redispatch with KV-cache handoff. ShardedAutoregressiveRunner + KVCacheManager + executor per-token chain loop + EvictCacheRequest wire envelope + RunLayerSliceResponse signing-payload extension to commit next_token_id + is_terminal. Bit-identical real-distilgpt2 sharded vs single-host greedy. |
 
 **Why bundled:**
 - Phase 7's `stakeBond.slash(...)` call sits inside Phase 3.1's `challengeReceipt` flow.
@@ -49,6 +50,7 @@ Splitting the audits would risk seam-crossing findings falling between engagemen
    - §7.6 — Real Autoregressive Streaming Runner (Phase 3.x.10).
    - §7.7 — Production Wiring + Sampling-Param Plumbing (Phase 3.x.10.x).
    - §7.8 — Tier C Constant-Time Padding + HF Prompt-Echo Fix (Phase 3.x.10.y).
+   - §7.9 — Sharded Autoregressive Decode (Phase 3.x.11). **NEW. Read alongside `docs/2026-04-30-phase3.x.11-threat-model-addendum.md` for the per-token timing surface + KV-cache privacy threat model.**
 2. **`docs/2026-04-21-phase7.1-audit-prep.md`** — covers the CONSENSUS_MISMATCH extension.
 3. **`docs/2026-04-21-phase7-audit-prep.md`** — covers StakeBond + slash hook into Phase 3.1.
 4. **Phase 3.1 surface** — covered by the Phase 7 bundle's §1.2 "out of scope" (Phase 3.1 was already merge-ready and forms the unchanged substrate Phase 7 and 7.1 build on).
