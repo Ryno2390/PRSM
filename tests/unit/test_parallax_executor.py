@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import pytest
 
@@ -181,6 +181,7 @@ def _make_executor(
     sample_rate: float = 0.0,
     submitter: Optional[RecordingSubmitter] = None,
     cost_per_layer: Decimal = Decimal("0.01"),
+    tier_c_chain_executor: Optional[Any] = None,
 ):
     if registered is None:
         registered = {g.node_id: "pk-" + g.node_id for g in pool}
@@ -219,6 +220,7 @@ def _make_executor(
         chain_executor=chain_executor or RecordingChainExecutor(),
         node_identity=generate_node_identity("test-settler"),
         cost_per_layer=cost_per_layer,
+        tier_c_chain_executor=tier_c_chain_executor,
     )
     return executor, pool_holder, trust
 
@@ -930,3 +932,149 @@ class TestExecuteStreamingMidStreamErrors:
         assert len(finals) == 1
         assert finals[0].success is False
         assert "without yielding a terminal" in finals[0].error
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.q Task 4 — Tier C routing-layer integration
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _RecordingTierCExecutor:
+    """Records that it was invoked + delegates to an inner Tier A/B
+    executor. Tests assert (a) Tier C requests reach this decorator,
+    (b) Tier A/B requests do NOT."""
+
+    def __init__(
+        self, inner: StreamingChainExecutor,
+        tag: str = "tier-c",
+    ) -> None:
+        self._inner = inner
+        self._tag = tag
+        self.invocations: List[GPUChain] = []
+
+    def execute_chain_streaming(self, *, request, chain):
+        self.invocations.append(chain)
+        for ev in self._inner.execute_chain_streaming(
+            request=request, chain=chain,
+        ):
+            yield ev
+
+
+class TestTierCRoutingIntegration:
+    def test_tier_a_uses_default_executor(self):
+        # Tier A request should NOT touch the Tier C decorator.
+        primary = StreamingChainExecutor()
+        tier_c = _RecordingTierCExecutor(StreamingChainExecutor())
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=tier_c,
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.A),
+        ))
+        # primary saw the request, tier_c did not.
+        assert len(primary.streaming_calls) == 1
+        assert tier_c.invocations == []
+        # Final terminal is success.
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1 and finals[0].success is True
+
+    def test_tier_b_uses_default_executor(self):
+        primary = StreamingChainExecutor()
+        tier_c = _RecordingTierCExecutor(StreamingChainExecutor())
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=tier_c,
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.B),
+        ))
+        assert len(primary.streaming_calls) == 1
+        assert tier_c.invocations == []
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1 and finals[0].success is True
+
+    def test_tier_c_routes_to_decorator_when_wired(self):
+        primary = StreamingChainExecutor()
+        # Tier C decorator wraps its own inner streaming executor —
+        # that's the production pattern (decorator owns the inner).
+        tier_c = _RecordingTierCExecutor(
+            StreamingChainExecutor(deltas=["t1", "t2"]),
+        )
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=tier_c,
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.C),
+        ))
+        # primary did NOT see the request; tier_c did.
+        assert primary.streaming_calls == []
+        assert len(tier_c.invocations) == 1
+        # Stream completed successfully through the tier_c path.
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1 and finals[0].success is True
+
+    def test_tier_c_without_decorator_surfaces_failure(self):
+        # Operator misconfigured: Tier C request but no decorator
+        # wired. Expected: structured failure pointing at the fix.
+        primary = StreamingChainExecutor()
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=None,
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.C),
+        ))
+        # No tokens emitted; sole terminal is the failure.
+        token_events = [
+            x for x in items if isinstance(x, InferenceTokenEvent)
+        ]
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert token_events == []
+        assert len(finals) == 1
+        assert finals[0].success is False
+        assert "Tier C streaming requires" in finals[0].error
+        assert "make_tier_c_sharded_executor" in finals[0].error
+        # Importantly, the primary chain executor was NOT invoked.
+        assert primary.streaming_calls == []
+
+    def test_construction_rejects_decorator_without_streaming_method(self):
+        # Defense-in-depth: decorator without execute_chain_streaming
+        # should be caught at constructor time, not at runtime.
+        class _Bogus:
+            pass
+        with pytest.raises(
+            RuntimeError, match="execute_chain_streaming",
+        ):
+            _make_executor(
+                pool=[_gpu("a"), _gpu("b")],
+                tier_c_chain_executor=_Bogus(),
+            )
+
+    def test_factory_wired_decorator_routes_correctly(self):
+        # Smoke: the production-shape wiring through
+        # make_tier_c_sharded_executor + ParallaxScheduledExecutor
+        # routes Tier C to the decorator end-to-end.
+        from prsm.compute.chain_rpc import make_tier_c_sharded_executor
+        primary = StreamingChainExecutor()
+        # Use M2 (BatchedTrailing) for a smoke test — the exact
+        # decorator type doesn't matter here; only that the
+        # routing fires.
+        tier_c_exec = make_tier_c_sharded_executor(
+            primary, mode="m2",
+        )
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=tier_c_exec,
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.C),
+        ))
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1 and finals[0].success is True

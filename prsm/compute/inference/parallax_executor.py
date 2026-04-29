@@ -58,6 +58,7 @@ from prsm.compute.inference.executor import (
     UnsupportedModelError,
 )
 from prsm.compute.inference.models import (
+    ContentTier,
     InferenceReceipt,
     InferenceRequest,
     InferenceResult,
@@ -242,6 +243,7 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         cost_per_layer: Decimal = Decimal("0.01"),
         privacy_overhead: Optional[Mapping[PrivacyLevel, Decimal]] = None,
         allow_partial_regions: bool = False,
+        tier_c_chain_executor: Optional[Any] = None,
     ) -> None:
         if gpu_pool_provider is None or not callable(gpu_pool_provider):
             raise RuntimeError(
@@ -261,11 +263,33 @@ class ParallaxScheduledExecutor(InferenceExecutor):
                 "ParallaxScheduledExecutor requires a NodeIdentity for "
                 "receipt signing"
             )
+        # Phase 3.x.11.q — Tier C chain executor is the constant-time
+        # routing target for Tier C streaming requests. When None,
+        # Tier C streaming surfaces a structured failure (operator
+        # opt-in: only Tier A/B streaming is enabled by default).
+        # The decorator MUST expose execute_chain_streaming; we
+        # enforce that at construction so a misconfig is caught
+        # before any request lands.
+        if (
+            tier_c_chain_executor is not None
+            and not hasattr(
+                tier_c_chain_executor, "execute_chain_streaming",
+            )
+        ):
+            raise RuntimeError(
+                "ParallaxScheduledExecutor: tier_c_chain_executor "
+                "must expose execute_chain_streaming(request=, chain=) "
+                "— wrap RpcChainExecutor in a Phase 3.x.11.q decorator "
+                "(BatchedTrailingShardedExecutor / "
+                "FixedRateShardedExecutor) or use "
+                "make_tier_c_sharded_executor(...)"
+            )
 
         self._pool_provider = gpu_pool_provider
         self._trust = trust_stack
         self._catalog = dict(model_catalog)
         self._chain_executor = chain_executor
+        self._tier_c_chain_executor = tier_c_chain_executor
         self._identity = node_identity
         self._cost_per_layer = Decimal(cost_per_layer)
         self._privacy_overhead = dict(
@@ -387,6 +411,27 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         chain = gate_outcome.chain
         cost = gate_outcome.cost
 
+        # Phase 3.x.11.q — Tier C streaming routes through the
+        # constant-time chain decorator when wired. Tier A/B
+        # continues to use the default chain_executor. When Tier C
+        # is requested but no decorator is wired, surface a
+        # structured failure so operators learn the deploy needs
+        # the decorator (rather than silently falling back to the
+        # leaky path).
+        chain_executor = self._chain_executor
+        if request.content_tier == ContentTier.C:
+            if self._tier_c_chain_executor is None:
+                yield InferenceResult.failure(
+                    request.request_id,
+                    "Tier C streaming requires Phase 3.x.11.q "
+                    "constant-time decorator — wire "
+                    "tier_c_chain_executor= via "
+                    "make_tier_c_sharded_executor(...) at "
+                    "ParallaxScheduledExecutor construction",
+                )
+                return
+            chain_executor = self._tier_c_chain_executor
+
         # Drive the chain executor's streaming generator. Each
         # ``StreamToken`` becomes an ``InferenceTokenEvent``; the
         # terminal ``ChainExecutionResult`` drives the signed receipt.
@@ -397,7 +442,7 @@ class ParallaxScheduledExecutor(InferenceExecutor):
 
         outcome: Optional[ChainExecutionResult] = None
         try:
-            for item in self._chain_executor.execute_chain_streaming(
+            for item in chain_executor.execute_chain_streaming(
                 request=request, chain=chain,
             ):
                 if isinstance(item, StreamToken):
