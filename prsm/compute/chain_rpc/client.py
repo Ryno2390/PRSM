@@ -71,6 +71,7 @@ from prsm.compute.chain_rpc.protocol import (
     ChainRpcProtocolError,
     ChainRpcUnknownTypeError,
     ChainRpcVersionMismatchError,
+    DecodeMode,
     HandoffToken,
     RunLayerSliceRequest,
     RunLayerSliceResponse,
@@ -246,6 +247,10 @@ class ExecutorErrorCode:
     # token_stream_send_message= was wired. Caller fix: provide a
     # streaming transport at executor construction time.
     STREAMING_NOT_WIRED = "STREAMING_NOT_WIRED"
+    # Phase 3.x.11: tail stage in sharded mode returned a response
+    # missing next_token_id (caller bug — tail server-side runner
+    # not tail-capable, or response signing predates 3.x.11).
+    TAIL_TOKEN_MISSING = "TAIL_TOKEN_MISSING"
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -320,6 +325,11 @@ class RpcChainExecutor:
         max_streamed_payload_bytes: int = 1 * 1024 * 1024 * 1024,
         default_deadline_seconds: float = 30.0,
         clock: Callable[[], float] = time.time,
+        # ── Phase 3.x.11 sharded-decode opt-in ─────────────────────────
+        enable_sharded_decode: bool = False,
+        tokenizer: Optional[object] = None,
+        cache_evict_send_message: Optional[SendMessage] = None,
+        sharded_default_max_tokens: int = 512,
     ) -> None:
         if settler_identity is None or not hasattr(settler_identity, "node_id"):
             raise RuntimeError(
@@ -372,6 +382,47 @@ class RpcChainExecutor:
                 f"max_streamed_payload_bytes must be positive, got "
                 f"{max_streamed_payload_bytes}"
             )
+        # Phase 3.x.11 sharded-decode validation. Tail-only sharded
+        # decode opt-in requires a tokenizer at the executor boundary
+        # (encode prompt → input_ids; decode token_id → text_delta).
+        # ``cache_evict_send_message`` is optional — when wired, the
+        # executor broadcasts EvictCacheRequest (Task 6 wire format)
+        # to every chain stage on terminal/cancellation; when not
+        # wired, eviction is a no-op + the operator-side TTL sweeper
+        # bounds the leak window.
+        if enable_sharded_decode:
+            if tokenizer is None:
+                raise RuntimeError(
+                    "RpcChainExecutor: enable_sharded_decode=True "
+                    "requires tokenizer= (used to encode prompt → "
+                    "input_ids + decode token_id → text_delta)"
+                )
+            if (
+                not hasattr(tokenizer, "encode")
+                or not callable(getattr(tokenizer, "encode", None))
+                or not hasattr(tokenizer, "decode")
+                or not callable(getattr(tokenizer, "decode", None))
+            ):
+                raise RuntimeError(
+                    "RpcChainExecutor: tokenizer must expose .encode + "
+                    ".decode (HF AutoTokenizer-shaped)"
+                )
+        if cache_evict_send_message is not None and not callable(
+            cache_evict_send_message,
+        ):
+            raise RuntimeError(
+                "RpcChainExecutor: cache_evict_send_message must be "
+                "callable if provided"
+            )
+        if (
+            isinstance(sharded_default_max_tokens, bool)
+            or not isinstance(sharded_default_max_tokens, int)
+            or sharded_default_max_tokens <= 0
+        ):
+            raise ValueError(
+                f"sharded_default_max_tokens must be positive int, "
+                f"got {sharded_default_max_tokens!r}"
+            )
 
         self._settler = settler_identity
         self._send = send_message
@@ -386,6 +437,10 @@ class RpcChainExecutor:
         self._max_streamed_payload_bytes = int(max_streamed_payload_bytes)
         self._default_deadline_seconds = float(default_deadline_seconds)
         self._clock = clock
+        self._enable_sharded_decode = bool(enable_sharded_decode)
+        self._tokenizer = tokenizer
+        self._cache_evict_send = cache_evict_send_message
+        self._sharded_default_max_tokens = int(sharded_default_max_tokens)
 
     # ── ChainExecutor Protocol ────────────────────────────────────────
 
@@ -560,6 +615,15 @@ class RpcChainExecutor:
                     f"layer_ranges count ({len(chain.layer_ranges)})"
                 ),
             )
+        # Phase 3.x.11 sharded-decode branch — per-token chain
+        # redispatch with KV-cache handoff. Skips the
+        # token_stream_send_message wire entirely (sharded uses
+        # only unary dispatches).
+        if self._enable_sharded_decode:
+            yield from self._execute_chain_streaming_sharded(
+                request=request, chain=chain,
+            )
+            return
         if self._token_stream_send is None:
             raise ChainExecutionError(
                 stage_index=-1,
@@ -627,6 +691,301 @@ class RpcChainExecutor:
             deadline_unix=deadline_unix,
             outcomes_so_far=outcomes,
         )
+
+    # ── Phase 3.x.11 sharded-decode path ─────────────────────────────
+
+    def _execute_chain_streaming_sharded(
+        self,
+        *,
+        request: InferenceRequest,
+        chain: GPUChain,
+    ) -> Iterator[Union[StreamToken, ChainExecutionResult]]:
+        """Sharded-decode streaming. Per-token chain redispatch with
+        KV-cache handoff: each chain pass produces one new token.
+
+        Wire flow per token:
+          - Stage 1 input  = input_ids (np.int64; full prompt on
+                             PREFILL, single previous token on
+                             INCREMENTAL)
+          - Stages 2..T    = hidden state (np.float* per the model)
+          - Tail response  = activation (residual hidden state for
+                             the receipt) + ``next_token_id`` +
+                             ``is_terminal``
+
+        The executor:
+          1. Encodes prompt → input_ids (tokenizer at executor
+             boundary; the model on each stage operates on
+             tensors).
+          2. PREFILL pass: walks the chain once; tail returns the
+             FIRST generated token id.
+          3. Decode loop: repeats unary chain passes with
+             ``decode_mode=INCREMENTAL`` and the last token as
+             input; stops on ``is_terminal=True`` from the tail or
+             when ``request.max_tokens`` is reached.
+          4. Yields ``StreamToken`` per token, ``ChainExecutionResult``
+             with the signed multi-stage receipt at terminal.
+          5. ``finally`` block broadcasts ``EvictCacheRequest`` to
+             every chain stage on terminal/cancellation. Eviction
+             is best-effort — if the wire isn't wired
+             (``cache_evict_send_message=None``), it's a no-op and
+             operators rely on the server-side TTL sweeper for
+             leaked-handle cleanup.
+
+        Honest scope:
+          - Per-token wire tax: T network round-trips per token.
+            Pipelining is Phase 3.x.11.x.
+          - Tier C: not yet supported (each per-token dispatch is
+            a fresh timing surface). Phase 3.x.11.q.
+        """
+        # Encode prompt → input_ids.
+        try:
+            initial_input_ids = self._tokenizer.encode(request.prompt)
+        except Exception as exc:  # noqa: BLE001
+            raise ChainExecutionError(
+                stage_index=-1,
+                stage_node_id="",
+                code=ExecutorErrorCode.PROMPT_ENCODE_ERROR,
+                message=(
+                    f"tokenizer.encode raised: "
+                    f"{exc.__class__.__name__}: {exc}"
+                ),
+            ) from exc
+        if not isinstance(initial_input_ids, list) or not initial_input_ids:
+            raise ChainExecutionError(
+                stage_index=-1,
+                stage_node_id="",
+                code=ExecutorErrorCode.PROMPT_ENCODE_ERROR,
+                message=(
+                    f"tokenizer.encode must return a non-empty list of "
+                    f"int token ids; got "
+                    f"{type(initial_input_ids).__name__}"
+                ),
+            )
+
+        deadline_unix = self._clock() + self._default_deadline_seconds
+        chain_total = len(chain.stages)
+        cumulative_outcomes: List[StageOutcome] = []
+        output_text_parts: List[str] = []
+        max_tokens = (
+            int(getattr(request, "max_tokens", None) or 0)
+            or self._sharded_default_max_tokens
+        )
+
+        try:
+            # Step 1: PREFILL pass — produces token #1.
+            next_token_id, is_terminal, prefill_outcomes = (
+                self._run_chain_iteration_sharded(
+                    request=request,
+                    chain=chain,
+                    decode_mode=DecodeMode.PREFILL,
+                    input_ids=initial_input_ids,
+                    deadline_unix=deadline_unix,
+                )
+            )
+            cumulative_outcomes.extend(prefill_outcomes)
+            text_delta = self._decode_token_to_text(next_token_id)
+            output_text_parts.append(text_delta)
+            yield StreamToken(
+                sequence_index=0,
+                text_delta=text_delta,
+                token_id=next_token_id,
+                finish_reason=("stop" if is_terminal else None),
+            )
+
+            # Step 2: INCREMENTAL decode loop.
+            sequence_idx = 1
+            while not is_terminal and sequence_idx < max_tokens:
+                next_token_id, is_terminal, inc_outcomes = (
+                    self._run_chain_iteration_sharded(
+                        request=request,
+                        chain=chain,
+                        decode_mode=DecodeMode.INCREMENTAL,
+                        input_ids=[next_token_id],
+                        deadline_unix=deadline_unix,
+                    )
+                )
+                cumulative_outcomes.extend(inc_outcomes)
+                text_delta = self._decode_token_to_text(next_token_id)
+                output_text_parts.append(text_delta)
+                yield StreamToken(
+                    sequence_index=sequence_idx,
+                    text_delta=text_delta,
+                    token_id=next_token_id,
+                    finish_reason=(
+                        "stop" if is_terminal
+                        else (
+                            "max_tokens"
+                            if sequence_idx + 1 >= max_tokens
+                            else None
+                        )
+                    ),
+                )
+                sequence_idx += 1
+
+            # Step 3: aggregate per-stage outcomes — the receipt
+            # commits to ONE attestation record per stage (the
+            # final iteration's). Per-iteration attestations are
+            # NOT aggregated separately at v1; operators wanting
+            # per-token attestation chains add it via Phase
+            # 3.x.11.x receipt-format extension.
+            last_per_stage: dict = {}
+            total_duration = 0.0
+            total_epsilon = 0.0
+            for outcome in cumulative_outcomes:
+                last_per_stage[outcome.stage_index] = outcome
+                total_duration += outcome.duration_seconds
+                total_epsilon += outcome.epsilon_spent
+            ordered = [
+                last_per_stage[i]
+                for i in sorted(last_per_stage.keys())
+            ]
+            stage_attestations = [
+                StageAttestation(
+                    stage_index=outcome.stage_index,
+                    stage_node_id=outcome.stage_node_id,
+                    tee_type=outcome.tee_type,
+                    attestation=outcome.tee_attestation,
+                )
+                for outcome in ordered
+            ]
+            yield ChainExecutionResult(
+                output="".join(output_text_parts),
+                duration_seconds=total_duration,
+                tee_attestation=encode_multi_stage_attestation(
+                    stage_attestations,
+                ),
+                tee_type=worst_case_tee_type(stage_attestations),
+                epsilon_spent=total_epsilon,
+            )
+        finally:
+            # Broadcast eviction on EVERY exit path (terminal or
+            # caller GeneratorExit). Best-effort — never fail the
+            # main flow. Operator-side TTL sweeper bounds the
+            # leak window if eviction misses.
+            self._evict_cache_on_stages(
+                chain=chain, request_id=request.request_id,
+            )
+
+    def _run_chain_iteration_sharded(
+        self,
+        *,
+        request: InferenceRequest,
+        chain: GPUChain,
+        decode_mode: DecodeMode,
+        input_ids: List[int],
+        deadline_unix: float,
+    ) -> Tuple[int, bool, List[StageOutcome]]:
+        """One forward pass of the chain. Stage 1 receives
+        ``input_ids`` (encoded as ``np.int64``); stages 2..T
+        receive the prior stage's hidden state.
+
+        Returns ``(next_token_id, is_terminal, per_stage_outcomes)``.
+        Tail must populate ``next_token_id`` — TAIL_TOKEN_MISSING
+        if it doesn't (server-side runner wasn't tail-capable).
+        """
+        chain_total = len(chain.stages)
+        outcomes: List[StageOutcome] = []
+        # Stage 1 input: input_ids as np.int64 array. The model
+        # adapter on the server side detects "dtype=int64 +
+        # decode_mode=PREFILL/INCREMENTAL" and routes to the
+        # token-embedding path before the layer slice; downstream
+        # stages see floating-point hidden states.
+        activation = np.array(input_ids, dtype=np.int64)
+        next_token_id: int = -1
+        is_terminal = False
+        last_response: Optional[RunLayerSliceResponse] = None
+
+        for stage_index in range(chain_total):
+            stage_node_id = chain.stages[stage_index]
+            layer_range = tuple(chain.layer_ranges[stage_index])
+            response, activation = self._dispatch_stage(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                layer_range=layer_range,
+                activation=activation,
+                request=request,
+                chain_total=chain_total,
+                deadline_unix=deadline_unix,
+                decode_mode=decode_mode,
+                include_sampling_fields=True,
+            )
+            outcomes.append(StageOutcome(
+                stage_index=stage_index,
+                stage_node_id=stage_node_id,
+                duration_seconds=response.duration_seconds,
+                tee_attestation=response.tee_attestation,
+                tee_type=response.tee_type,
+                epsilon_spent=response.epsilon_spent,
+            ))
+            last_response = response
+
+        # Tail must populate next_token_id. Non-tail responses
+        # leave it None — that's expected; only the TAIL is
+        # required to fill it. We check after the loop because the
+        # tail is by definition the LAST stage.
+        if last_response is None or last_response.next_token_id is None:
+            tail_node = chain.stages[-1]
+            raise ChainExecutionError(
+                stage_index=chain_total - 1,
+                stage_node_id=tail_node,
+                code=ExecutorErrorCode.TAIL_TOKEN_MISSING,
+                message=(
+                    f"sharded decode: tail stage {tail_node!r} "
+                    f"returned a response with next_token_id=None; "
+                    f"server-side runner must be tail-capable "
+                    f"(see ShardedAutoregressiveRunner sampling_defaults)"
+                ),
+            )
+        next_token_id = int(last_response.next_token_id)
+        is_terminal = bool(last_response.is_terminal)
+        return next_token_id, is_terminal, outcomes
+
+    def _decode_token_to_text(self, token_id: int) -> str:
+        """tokenizer.decode([token_id], skip_special_tokens=True)
+        with a defensive fallback. v1: decode each token in
+        isolation — sufficient for ASCII / single-token whole-
+        word output. Multi-byte (emoji / CJK) cumulative-decode
+        ordering is a Phase 3.x.11.x follow-up; production
+        operators serving such workloads should keep tokenizer
+        state via a wrapper that tracks the cumulative-decode
+        cursor (mirrors AutoregressiveStreamingRunner's
+        _HFStreamerAdapter pattern)."""
+        try:
+            return self._tokenizer.decode(
+                [int(token_id)], skip_special_tokens=True,
+            )
+        except TypeError:
+            # Tokenizers that don't accept skip_special_tokens kwarg.
+            return self._tokenizer.decode([int(token_id)])
+
+    def _evict_cache_on_stages(
+        self,
+        *,
+        chain: GPUChain,
+        request_id: str,
+    ) -> None:
+        """Best-effort eviction broadcast. Task 6 wires the
+        ``EvictCacheRequest`` wire message; until then, the
+        callable receives ``(address, request_id)`` so operators
+        can wire a custom transport (e.g., reuse ``send_message``
+        with a synthetic envelope) until Task 6 lands.
+
+        Never raises — eviction is best-effort by design (server-
+        side TTL sweeper bounds the leak window).
+        """
+        if self._cache_evict_send is None:
+            return
+        for stage_node_id in chain.stages:
+            try:
+                address = self._resolve_address(stage_node_id)
+                self._cache_evict_send(address, request_id.encode("utf-8"))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "RpcChainExecutor: cache eviction broadcast to "
+                    "stage_node_id=%r raised %s: %s — relying on "
+                    "server-side TTL sweeper",
+                    stage_node_id, exc.__class__.__name__, exc,
+                )
 
     # ── streaming tail dispatch (Phase 3.x.8) ────────────────────────
 
@@ -1024,6 +1383,8 @@ class RpcChainExecutor:
         request: InferenceRequest,
         chain_total: int,
         deadline_unix: float,
+        decode_mode: DecodeMode = DecodeMode.PREFILL,
+        include_sampling_fields: bool = False,
     ) -> Tuple[RunLayerSliceResponse, np.ndarray]:
         """Mint token → encode request → send → parse + verify response
         → decode output activation.
@@ -1068,6 +1429,8 @@ class RpcChainExecutor:
                 blob=blob,
                 shape=shape,
                 dtype_str=dtype_str,
+                decode_mode=decode_mode,
+                include_sampling_fields=include_sampling_fields,
             )
         return self._dispatch_inline(
             stage_index=stage_index,
@@ -1079,6 +1442,8 @@ class RpcChainExecutor:
             blob=blob,
             shape=shape,
             dtype_str=dtype_str,
+            decode_mode=decode_mode,
+            include_sampling_fields=include_sampling_fields,
         )
 
     # ── inline path ──────────────────────────────────────────────────
@@ -1095,9 +1460,28 @@ class RpcChainExecutor:
         blob: bytes,
         shape: tuple,
         dtype_str: str,
+        decode_mode: DecodeMode = DecodeMode.PREFILL,
+        include_sampling_fields: bool = False,
     ) -> Tuple[RunLayerSliceResponse, np.ndarray]:
         """v1 inline path: activation rides hex-encoded inside the JSON
-        envelope; response activation rides the same way."""
+        envelope; response activation rides the same way.
+
+        ``include_sampling_fields`` opt-in bridges Phase 3.x.10.x's
+        streaming-tail-only sampling pattern to Phase 3.x.11
+        sharded decode where every chain stage's response carries
+        the request's sampling params. Default False preserves the
+        Phase 3.x.10.x non-streaming-tail invariant (unary requests
+        keep max_tokens/temperature absent on the wire — matches
+        the existing TestStreamingSamplingPropagation pin).
+        """
+        max_tokens = (
+            getattr(request, "max_tokens", None)
+            if include_sampling_fields else None
+        )
+        temperature = (
+            getattr(request, "temperature", None)
+            if include_sampling_fields else None
+        )
         wire_request = RunLayerSliceRequest(
             request_id=request.request_id,
             model_id=request.model_id,
@@ -1109,6 +1493,9 @@ class RpcChainExecutor:
             activation_dtype=dtype_str,
             upstream_token=token,
             deadline_unix=deadline_unix,
+            decode_mode=decode_mode,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
         request_bytes = encode_message(wire_request)
 
@@ -1162,6 +1549,8 @@ class RpcChainExecutor:
         blob: bytes,
         shape: tuple,
         dtype_str: str,
+        decode_mode: DecodeMode = DecodeMode.PREFILL,
+        include_sampling_fields: bool = False,
     ) -> Tuple[RunLayerSliceResponse, np.ndarray]:
         """v2 streamed path: activation chunked via Phase 6
         ``ShardChunker``; chunks ride out-of-band over the streaming
@@ -1213,6 +1602,15 @@ class RpcChainExecutor:
             upstream_token=token,
             deadline_unix=deadline_unix,
             activation_manifest=chunked.manifest,
+            decode_mode=decode_mode,
+            max_tokens=(
+                getattr(request, "max_tokens", None)
+                if include_sampling_fields else None
+            ),
+            temperature=(
+                getattr(request, "temperature", None)
+                if include_sampling_fields else None
+            ),
         )
         manifest_bytes = encode_message(wire_request)
 

@@ -978,6 +978,8 @@ class RunLayerSliceResponse:
         epsilon_spent: float,
         stage_node_id: str,
         activation_manifest: Optional[ShardManifest] = None,
+        next_token_id: Optional[int] = None,
+        is_terminal: bool = False,
     ) -> bytes:
         """Canonical bytes the stage signs over the response.
 
@@ -1025,6 +1027,18 @@ class RunLayerSliceResponse:
                 "total_chunks": activation_manifest.total_chunks,
                 "chunk_bytes": activation_manifest.chunk_bytes,
             }
+        # Phase 3.x.11 Task 5 — commit the tail-sample fields when
+        # set. Omit-when-default preserves pre-3.x.11 byte-equivalence:
+        # responses with next_token_id=None AND is_terminal=False
+        # produce the exact same signing payload as pre-3.x.11
+        # signed bytes. Sharded-mode tail responses gain commitment
+        # to the sampled token + terminal flag — without this, a
+        # malicious downstream relay could swap next_token_id
+        # without invalidating the signature.
+        if next_token_id is not None:
+            payload["next_token_id"] = int(next_token_id)
+        if is_terminal:
+            payload["is_terminal"] = True
         return json.dumps(payload, sort_keys=True).encode("utf-8")
 
     @classmethod
@@ -1040,13 +1054,23 @@ class RunLayerSliceResponse:
         tee_type: TEEType,
         epsilon_spent: float,
         activation_manifest: Optional[ShardManifest] = None,
+        next_token_id: Optional[int] = None,
+        is_terminal: bool = False,
     ) -> "RunLayerSliceResponse":
         """Construct + sign a fresh response under the stage ``identity``.
 
         For streamed responses, pass ``activation_manifest=manifest`` and
         ``activation_blob=b""``. The manifest's ``payload_sha256``
         commits the stage to the to-be-assembled bytes via the
-        signing payload."""
+        signing payload.
+
+        For Phase 3.x.11 sharded-decode tail responses, pass
+        ``next_token_id=<sampled>`` and ``is_terminal=<EOS or
+        max_tokens hit>``. Both fields are committed in the
+        signing payload (omit-when-default) — sharded-mode tails
+        prevent a malicious downstream relay from swapping the
+        sampled token without invalidating the signature.
+        """
         payload = cls.signing_payload(
             request_id,
             activation_blob,
@@ -1058,6 +1082,8 @@ class RunLayerSliceResponse:
             epsilon_spent,
             identity.node_id,
             activation_manifest=activation_manifest,
+            next_token_id=next_token_id,
+            is_terminal=is_terminal,
         )
         sig = identity.sign(payload)
         return cls(
@@ -1072,6 +1098,8 @@ class RunLayerSliceResponse:
             stage_signature_b64=sig,
             stage_node_id=identity.node_id,
             activation_manifest=activation_manifest,
+            next_token_id=next_token_id,
+            is_terminal=is_terminal,
         )
 
     def verify_with_anchor(
@@ -1129,6 +1157,8 @@ class RunLayerSliceResponse:
             self.epsilon_spent,
             self.stage_node_id,
             activation_manifest=self.activation_manifest,
+            next_token_id=self.next_token_id,
+            is_terminal=self.is_terminal,
         )
         return verify_signature(
             stage_pubkey_b64, payload, self.stage_signature_b64
