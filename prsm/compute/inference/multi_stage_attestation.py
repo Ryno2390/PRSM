@@ -51,6 +51,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from prsm.compute.tee.models import HARDWARE_TEE_TYPES, TEEType
 
 
+# DecodeMode imported lazily inside ``IterationAttestation`` to avoid
+# the circular import ``inference.__init__`` → ``multi_stage_attestation``
+# → ``chain_rpc.protocol`` → ``inference.models`` (chain_rpc imports
+# ContentTier from inference at module load).
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Constants
 # ──────────────────────────────────────────────────────────────────────────
@@ -66,6 +72,21 @@ stage attestations cannot start with this string by convention; if
 they do (vanishingly unlikely for real platform-vendor reports), the
 caller MUST add a randomization byte at the head — but no real TEE
 report we've inspected starts with PRSM-prefixed ASCII."""
+
+MULTI_ITERATION_ATTESTATION_VERSION = 1
+"""Phase 3.x.11.x — wire-format version for the multi-iteration
+envelope (per-token attestation chain for sharded autoregressive
+decode). Bump when any field shape changes."""
+
+MULTI_ITERATION_MAGIC_PREFIX = b"PRSM-MI-ATT-V1:"
+"""Phase 3.x.11.x — recognizable byte sequence marking a
+multi-iteration envelope. Distinct from MULTI_STAGE_MAGIC_PREFIX
+so receipts produced by the non-sharded path stay byte-equivalent
+with pre-3.x.11.x receipts (the discriminator at the magic-prefix
+level is more robust than at the JSON-key level — old decoders
+that read the existing PRSM-MS-ATT envelope return None on the
+new prefix rather than raising, which is the intentional
+back-compat path)."""
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -315,6 +336,302 @@ def is_hardware_tee(tee_type: TEEType) -> bool:
     """Convenience: True iff ``tee_type`` is in the hardware-backed
     set (matches Phase 3.x.6 ``TierGateAdapter`` policy)."""
     return tee_type.value in HARDWARE_TEE_TYPES
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.x — per-iteration attestation chain
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class IterationAttestation:
+    """Phase 3.x.11.x — one chain-iteration's worth of per-stage
+    attestations.
+
+    The Phase 3.x.7 single-iteration envelope (``StageAttestation[]``
+    flat list) commits the receipt to "one record per chain stage,
+    captured from the LAST iteration's per-stage outcomes". For
+    sharded autoregressive decode, this loses signal: a malicious
+    stage that swapped its KV-cache mid-stream would NOT be detected
+    by the receipt's signature chain (only by R7 challenge-and-verify
+    if the operator wires it).
+
+    The multi-iteration envelope commits the receipt to one record
+    per stage PER iteration. Verifiers reading the receipt can
+    confirm "stage K served EVERY incremental dispatch, not just
+    the last one".
+
+    Fields:
+      iteration_index   0-based; 0 = PREFILL, 1+ = INCREMENTALs.
+                        Receivers can detect missing / out-of-order
+                        iterations.
+      decode_mode       The ``DecodeMode`` for this iteration. Must
+                        match ``iteration_index == 0 → PREFILL``;
+                        else INCREMENTAL.
+      stage_records     Per-stage attestations for this iteration.
+                        Same shape as the existing single-iteration
+                        envelope's ``StageAttestation[]``.
+    """
+
+    iteration_index: int
+    decode_mode: Any  # DecodeMode — lazy import; runtime checked
+    stage_records: List[StageAttestation]
+
+    def __post_init__(self) -> None:
+        from prsm.compute.chain_rpc.protocol import DecodeMode
+        if (
+            isinstance(self.iteration_index, bool)
+            or not isinstance(self.iteration_index, int)
+            or self.iteration_index < 0
+        ):
+            raise MultiStageMalformedError(
+                f"iteration_index must be non-negative int, got "
+                f"{self.iteration_index!r}"
+            )
+        if not isinstance(self.decode_mode, DecodeMode):
+            raise MultiStageMalformedError(
+                f"decode_mode must be DecodeMode, got "
+                f"{type(self.decode_mode).__name__}"
+            )
+        if not isinstance(self.stage_records, list) or not self.stage_records:
+            raise MultiStageMalformedError(
+                "stage_records must be a non-empty list of "
+                "StageAttestation"
+            )
+        for s in self.stage_records:
+            if not isinstance(s, StageAttestation):
+                raise MultiStageMalformedError(
+                    f"stage_records entries must be StageAttestation, "
+                    f"got {type(s).__name__}"
+                )
+        # Iteration 0 must be PREFILL; subsequent iterations must be
+        # INCREMENTAL. Catches a settler bug where the decode_mode
+        # gets out of sync with the iteration index.
+        if self.iteration_index == 0 and self.decode_mode != DecodeMode.PREFILL:
+            raise MultiStageMalformedError(
+                f"iteration_index=0 requires decode_mode=PREFILL, "
+                f"got {self.decode_mode.value!r}"
+            )
+        if self.iteration_index > 0 and self.decode_mode != DecodeMode.INCREMENTAL:
+            raise MultiStageMalformedError(
+                f"iteration_index>{0} requires decode_mode=INCREMENTAL, "
+                f"got {self.decode_mode.value!r}"
+            )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "iteration_index": self.iteration_index,
+            "decode_mode": self.decode_mode.value,
+            "stage_records": [s.to_dict() for s in self.stage_records],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "IterationAttestation":
+        from prsm.compute.chain_rpc.protocol import DecodeMode
+        if not isinstance(data, dict):
+            raise MultiStageMalformedError(
+                f"iteration entry must be dict, got {type(data).__name__}"
+            )
+        try:
+            iteration_index = int(data["iteration_index"])
+            decode_mode = DecodeMode(data["decode_mode"])
+            raw_stages = data["stage_records"]
+        except (KeyError, ValueError, TypeError) as exc:
+            raise MultiStageMalformedError(
+                f"iteration entry parse failed: {exc}"
+            ) from exc
+        if not isinstance(raw_stages, list):
+            raise MultiStageMalformedError(
+                f"stage_records must be list, got {type(raw_stages).__name__}"
+            )
+        stage_records = [StageAttestation.from_dict(s) for s in raw_stages]
+        return cls(
+            iteration_index=iteration_index,
+            decode_mode=decode_mode,
+            stage_records=stage_records,
+        )
+
+
+def encode_multi_iteration_attestation(
+    iterations: List[IterationAttestation],
+) -> bytes:
+    """Encode a per-iteration list as a magic-prefixed JSON envelope.
+
+    Empty list raises — a sharded receipt with zero iterations is a
+    caller bug. Non-sharded callers (Phase 3.x.7+ unary, Phase
+    3.x.8+ streaming-tail) MUST keep using
+    ``encode_multi_stage_attestation`` — the existing envelope is
+    unchanged and byte-equivalent with pre-3.x.11.x receipts.
+    """
+    if not iterations:
+        raise MultiStageAttestationError(
+            "encode_multi_iteration_attestation requires at least "
+            "one iteration"
+        )
+    payload = {
+        "version": MULTI_ITERATION_ATTESTATION_VERSION,
+        "iterations": [it.to_dict() for it in iterations],
+    }
+    body = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return MULTI_ITERATION_MAGIC_PREFIX + body
+
+
+def is_multi_iteration_attestation(blob: bytes) -> bool:
+    """True iff ``blob`` carries the multi-iteration magic prefix."""
+    if not isinstance(blob, (bytes, bytearray)):
+        return False
+    return bytes(blob).startswith(MULTI_ITERATION_MAGIC_PREFIX)
+
+
+def decode_multi_iteration_attestation(
+    blob: bytes,
+    *,
+    expected_iteration_count: Optional[int] = None,
+    expected_stage_count: Optional[int] = None,
+) -> Optional[List[IterationAttestation]]:
+    """Decode a multi-iteration envelope into a list of iterations.
+
+    Returns ``None`` if ``blob`` doesn't carry the multi-iteration
+    magic prefix — indicates the receipt is non-sharded (or sharded
+    but produced by a pre-3.x.11.x settler). Callers handle the
+    None case by falling back to ``decode_multi_stage_attestation``.
+
+    Raises ``MultiStageMalformedError`` on a magic-prefixed but
+    structurally invalid envelope. The boundary is intentional:
+    "no envelope" is a normal back-compat path; "envelope present
+    but broken" is a corruption signal worth raising.
+
+    Structural validation enforced:
+      - ``iterations`` is a non-empty list
+      - ``iteration_index`` values are exactly 0..N-1 (contiguous,
+        no gaps, no duplicates) — defends against a settler omitting
+        an iteration to upgrade the apparent worst-case TEE type
+      - within each iteration, ``stage_records`` is a non-empty list
+        and ``stage_index`` values are exactly 0..M-1 (same
+        contract as ``decode_multi_stage_attestation``)
+      - all iterations have the SAME stage count (a sharded chain
+        doesn't change shape mid-stream)
+      - if ``expected_iteration_count`` is given, must match
+      - if ``expected_stage_count`` is given, every iteration's
+        stage count must match
+    """
+    if not is_multi_iteration_attestation(blob):
+        return None
+    body = bytes(blob)[len(MULTI_ITERATION_MAGIC_PREFIX):]
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise MultiStageMalformedError(
+            f"iteration envelope JSON parse failed: {exc}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise MultiStageMalformedError(
+            f"iteration envelope top-level must be dict, got "
+            f"{type(data).__name__}"
+        )
+    version = data.get("version")
+    if version != MULTI_ITERATION_ATTESTATION_VERSION:
+        raise MultiStageMalformedError(
+            f"iteration envelope version {version!r} != local "
+            f"{MULTI_ITERATION_ATTESTATION_VERSION}"
+        )
+    raw_iterations = data.get("iterations")
+    if not isinstance(raw_iterations, list) or not raw_iterations:
+        raise MultiStageMalformedError(
+            "iteration envelope must contain non-empty 'iterations' list"
+        )
+    iterations = [IterationAttestation.from_dict(it) for it in raw_iterations]
+
+    # Iteration_index values must be exactly 0..N-1 (contiguous,
+    # no gaps, no duplicates).
+    indices = [it.iteration_index for it in iterations]
+    if len(set(indices)) != len(indices):
+        raise MultiStageMalformedError(
+            f"iteration envelope contains duplicate iteration_index "
+            f"values: {sorted(indices)}"
+        )
+    if sorted(indices) != list(range(len(iterations))):
+        raise MultiStageMalformedError(
+            f"iteration envelope iteration_index values must be "
+            f"0..{len(iterations) - 1} (contiguous); "
+            f"got {sorted(indices)}"
+        )
+
+    # All iterations must have the same stage count.
+    stage_counts = {len(it.stage_records) for it in iterations}
+    if len(stage_counts) != 1:
+        raise MultiStageMalformedError(
+            f"iteration envelope stage counts must be uniform across "
+            f"iterations; got {sorted(stage_counts)}"
+        )
+    stage_count_actual = stage_counts.pop()
+
+    # Within each iteration, stage_index values must be exactly
+    # 0..M-1 (same contract as the single-iteration envelope).
+    for it in iterations:
+        si = [s.stage_index for s in it.stage_records]
+        if len(set(si)) != len(si):
+            raise MultiStageMalformedError(
+                f"iteration {it.iteration_index} contains duplicate "
+                f"stage_index values: {sorted(si)}"
+            )
+        if sorted(si) != list(range(len(it.stage_records))):
+            raise MultiStageMalformedError(
+                f"iteration {it.iteration_index} stage_index values "
+                f"must be 0..{len(it.stage_records) - 1} "
+                f"(contiguous); got {sorted(si)}"
+            )
+
+    if (
+        expected_iteration_count is not None
+        and len(iterations) != expected_iteration_count
+    ):
+        raise MultiStageMalformedError(
+            f"iteration envelope has {len(iterations)} iterations; "
+            f"caller expected {expected_iteration_count}"
+        )
+    if (
+        expected_stage_count is not None
+        and stage_count_actual != expected_stage_count
+    ):
+        raise MultiStageMalformedError(
+            f"iteration envelope has {stage_count_actual} stages "
+            f"per iteration; caller expected {expected_stage_count}"
+        )
+
+    # Return iterations sorted by iteration_index for deterministic
+    # iteration; within each iteration, stage_records are sorted
+    # by stage_index.
+    iterations_sorted = sorted(
+        iterations, key=lambda it: it.iteration_index,
+    )
+    return [
+        IterationAttestation(
+            iteration_index=it.iteration_index,
+            decode_mode=it.decode_mode,
+            stage_records=sorted(
+                it.stage_records, key=lambda s: s.stage_index,
+            ),
+        )
+        for it in iterations_sorted
+    ]
+
+
+def worst_case_tee_type_across_iterations(
+    iterations: List[IterationAttestation],
+) -> TEEType:
+    """Return the worst (lowest-confidentiality) TEE type across
+    ALL stages in ALL iterations. Sharded receipts use this to
+    populate the receipt's top-level ``tee_type`` — a single
+    SOFTWARE stage in any iteration drags the whole receipt to
+    SOFTWARE.
+
+    Empty list returns SOFTWARE (most conservative default).
+    """
+    if not iterations:
+        return TEEType.SOFTWARE
+    flat = [s for it in iterations for s in it.stage_records]
+    return worst_case_tee_type(flat)
 
 
 # ──────────────────────────────────────────────────────────────────────────
