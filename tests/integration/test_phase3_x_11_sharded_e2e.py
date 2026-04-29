@@ -958,3 +958,140 @@ class TestShardedE2EChunkedPrefill:
             assert len(it.stage_records) == 2
         # Streamed path was used during PREFILL (chunked).
         assert len(log["streamed"]) >= 1
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.q Task 5 — Tier C chain-level decorators E2E
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestTierCShardedDecoratorsE2E:
+    """Exercises the Phase 3.x.11.q chain-level decorators end-to-end
+    against a real distilgpt2 2-stage chain. Confirms:
+      - undecorated executor leaks per-token cadence (baseline)
+      - M2 decorator emits a single trailing StreamToken
+      - M1 decorator paces inter-frame intervals at ≥ cadence
+
+    The timing observer records the wall-clock time of each
+    StreamToken event; assertions are loose enough to handle CI
+    timing jitter (±5% on the M1 cadence test isn't tractable on
+    real distilgpt2 without longer cadences; we use ≥ cadence
+    instead, which is the load-bearing invariant — the decorator
+    must never YIELD faster than cadence)."""
+
+    def test_undecorated_executor_emits_per_token_cadence(
+        self, hf_model_and_tokenizer,
+    ):
+        # Baseline reference: without any decorator, each token
+        # emits as soon as the chain produces it. Mostly a
+        # smoke that the test scaffolding works; no timing
+        # assertion since real-distilgpt2 native rate varies.
+        from prsm.compute.chain_rpc.client import StreamToken
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = "The quick brown fox"
+        max_tokens = 3
+        (
+            executor, alice_id, bob_id, _, _, _,
+        ) = _build_two_stage_sharded(model, tokenizer)
+        chain = _make_chain(alice_id.node_id, bob_id.node_id)
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(
+                prompt=prompt, max_tokens=max_tokens,
+                temperature=0.0,
+            ),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        # Baseline: undecorated emits exactly max_tokens tokens.
+        assert len(tokens) == max_tokens
+
+    def test_m2_decorator_emits_single_trailing_frame(
+        self, hf_model_and_tokenizer,
+    ):
+        # M2 — BatchedTrailingShardedExecutor: regardless of how
+        # many tokens the inner chain produces, the executor →
+        # caller wire sees ONE StreamToken (joined text) + ONE
+        # ChainExecutionResult. This is the load-bearing M2
+        # invariant.
+        from prsm.compute.chain_rpc.client import StreamToken
+        from prsm.compute.chain_rpc import (
+            BatchedTrailingShardedExecutor,
+        )
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = "The quick brown fox"
+        max_tokens = 4
+        (
+            executor, alice_id, bob_id, _, _, _,
+        ) = _build_two_stage_sharded(model, tokenizer)
+        chain = _make_chain(alice_id.node_id, bob_id.node_id)
+        # Wrap the real executor with M2.
+        m2_executor = BatchedTrailingShardedExecutor(inner=executor)
+        events = list(m2_executor.execute_chain_streaming(
+            request=_make_request(
+                prompt=prompt, max_tokens=max_tokens,
+                temperature=0.0,
+            ),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        results = [
+            e for e in events if isinstance(e, ChainExecutionResult)
+        ]
+        # Load-bearing: exactly ONE StreamToken regardless of how
+        # many tokens the inner chain produced (max_tokens=4).
+        assert len(tokens) == 1
+        assert len(results) == 1
+        # Joined text contains the cumulative output.
+        assert len(tokens[0].text_delta) > 0
+        # finish_reason from the inner's last token propagates.
+        assert tokens[0].finish_reason is not None
+
+    def test_m1_decorator_paces_inter_frame_intervals(
+        self, hf_model_and_tokenizer,
+    ):
+        # M1 — FixedRateShardedExecutor: inter-StreamToken
+        # intervals on the executor → caller wire are clamped
+        # to ≥ cadence. We use a small cadence (50ms) and 4
+        # tokens; the inter-token wall-clock observation must
+        # satisfy interval >= cadence - small_tolerance for
+        # each gap.
+        import time as _time
+        from prsm.compute.chain_rpc.client import StreamToken
+        from prsm.compute.chain_rpc import FixedRateShardedExecutor
+
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = "The quick brown fox"
+        max_tokens = 4
+        cadence = 0.05  # 50ms — large enough to dominate chain native
+        (
+            executor, alice_id, bob_id, _, _, _,
+        ) = _build_two_stage_sharded(model, tokenizer)
+        chain = _make_chain(alice_id.node_id, bob_id.node_id)
+        m1_executor = FixedRateShardedExecutor(
+            inner=executor, cadence_seconds=cadence,
+        )
+
+        emit_times: list = []
+        for ev in m1_executor.execute_chain_streaming(
+            request=_make_request(
+                prompt=prompt, max_tokens=max_tokens,
+                temperature=0.0,
+            ),
+            chain=chain,
+        ):
+            if isinstance(ev, StreamToken):
+                emit_times.append(_time.monotonic())
+        assert len(emit_times) == max_tokens
+        # First token: no prior emit to gate against. Subsequent
+        # tokens: interval ≥ cadence - tolerance. Use 5ms
+        # tolerance to absorb scheduler jitter; the load-bearing
+        # invariant is "decorator never yields faster than cadence".
+        intervals = [
+            emit_times[i] - emit_times[i - 1]
+            for i in range(1, len(emit_times))
+        ]
+        for i, dt in enumerate(intervals):
+            assert dt >= cadence - 0.005, (
+                f"M1 decorator yielded faster than cadence at "
+                f"interval {i}: dt={dt:.4f}s vs cadence={cadence}s"
+            )
