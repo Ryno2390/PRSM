@@ -705,3 +705,256 @@ class TestShardedE2ECacheLifecycle:
         # finally → eviction broadcast → caches empty.
         assert "req-sharded-e2e" not in alice_cache
         assert "req-sharded-e2e" not in bob_cache
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.x Task 5 — chunked + sharded PREFILL E2E
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _build_two_stage_sharded_chunked(
+    model: Any,
+    tokenizer: Any,
+    *,
+    chunk_threshold_bytes: int = 10_000,
+):
+    """Phase 3.x.11.x: same as _build_two_stage_sharded but with
+    streamed_send_message wired (routing through
+    LayerStageServer.handle_streamed) and a low chunk_threshold
+    that forces chunking on a normal-length prompt's Stage 1 →
+    Stage 2 hidden-state handoff (768 hidden_dim × 4 bytes per
+    fp32 × ~30+ positions easily exceeds the threshold)."""
+    alice_identity = generate_node_identity("alice")
+    bob_identity = generate_node_identity("bob")
+    settler_identity = generate_node_identity("settler")
+    anchor = _Anchor()
+    anchor.register(alice_identity)
+    anchor.register(bob_identity)
+    anchor.register(settler_identity)
+
+    adapter = _DistilGPT2ShardedAdapter(model, tokenizer)
+    alice_cache = KVCacheManager()
+    bob_cache = KVCacheManager()
+    alice_runner = ShardedAutoregressiveRunner(
+        model=adapter, layer_range=(0, 3),
+        kv_cache_manager=alice_cache,
+        tee_attestation=b"\x07" * 32, tee_type=TEEType.SOFTWARE,
+    )
+    bob_runner = ShardedAutoregressiveRunner(
+        model=adapter, layer_range=(3, 6),
+        kv_cache_manager=bob_cache,
+        tee_attestation=b"\x07" * 32, tee_type=TEEType.SOFTWARE,
+        sampling_defaults=SamplingDefaults(
+            max_tokens=4, temperature=0.0, top_k=50, top_p=0.95,
+        ),
+        eos_token_id=tokenizer.eos_token_id,
+    )
+
+    alice_server = LayerStageServer(
+        identity=alice_identity,
+        registry=_Registry(
+            model_id="distilgpt2", shard_ranges=[(0, 3)],
+        ),
+        runner=_PassthroughUnaryRunner(),
+        tee_runtime=_TEERuntime(),
+        anchor=anchor, clock=lambda: 1000.0,
+        kv_cache_manager=alice_cache,
+        sharded_runner=alice_runner,
+    )
+    bob_server = LayerStageServer(
+        identity=bob_identity,
+        registry=_Registry(
+            model_id="distilgpt2", shard_ranges=[(3, 6)],
+        ),
+        runner=_PassthroughUnaryRunner(),
+        tee_runtime=_TEERuntime(),
+        anchor=anchor, clock=lambda: 1000.0,
+        kv_cache_manager=bob_cache,
+        sharded_runner=bob_runner,
+    )
+    servers = {
+        alice_identity.node_id: alice_server,
+        bob_identity.node_id: bob_server,
+    }
+
+    # Track every wire transport invocation so tests can assert
+    # that the chunked path was actually used.
+    delivery_log = {"unary": [], "streamed": []}
+
+    def send_message(address: str, request_bytes: bytes) -> bytes:
+        delivery_log["unary"].append(address)
+        srv = servers.get(address)
+        if srv is None:
+            raise ConnectionError(f"no server at {address}")
+        return srv.handle(request_bytes)
+
+    def streamed_send_message(
+        address: str,
+        manifest_bytes: bytes,
+        chunk_iter,
+    ):
+        delivery_log["streamed"].append(address)
+        srv = servers.get(address)
+        if srv is None:
+            raise ConnectionError(f"no server at {address}")
+        return srv.handle_streamed(manifest_bytes, chunk_iter)
+
+    def cache_evict_send(address: str, request_bytes: bytes) -> bytes:
+        srv = servers.get(address)
+        if srv is None:
+            raise ConnectionError(f"no server at {address}")
+        return srv.handle(request_bytes)
+
+    executor = RpcChainExecutor(
+        settler_identity=settler_identity,
+        send_message=send_message,
+        streamed_send_message=streamed_send_message,
+        anchor=anchor,
+        prompt_encoder=lambda p: np.array([0], dtype=np.int32),
+        output_decoder=lambda a: "",
+        enable_sharded_decode=True,
+        tokenizer=tokenizer,
+        cache_evict_send_message=cache_evict_send,
+        sharded_default_max_tokens=4,
+        chunk_threshold_bytes=chunk_threshold_bytes,
+    )
+    return (
+        executor, alice_identity, bob_identity,
+        alice_cache, bob_cache, servers, delivery_log,
+    )
+
+
+class TestShardedE2EChunkedPrefill:
+    """Phase 3.x.11.x Task 5 — chunked + sharded PREFILL
+    composition E2E. Drives the full server-side streamed path
+    against real distilgpt2 + verifies bit-identical output vs
+    the inline-PREFILL Phase 3.x.11 Task 7 baseline."""
+
+    def test_chunked_prefill_path_exercised(
+        self, hf_model_and_tokenizer,
+    ):
+        # Stage 1 → Stage 2 hidden state at distilgpt2's
+        # hidden_dim=768 fp32 = 3072 bytes/position.
+        # 30+ positions of a long prompt exceeds the 10 KB
+        # threshold and forces the chunked path.
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = (
+            "The quick brown fox jumps over the lazy dog. "
+            "Pack my box with five dozen liquor jugs. "
+            "How vexingly quick daft zebras jump in the field. "
+            "Sphinx of black quartz judge my vow swiftly today."
+        )
+        (
+            executor, alice_id, bob_id, _, _, _, log,
+        ) = _build_two_stage_sharded_chunked(
+            model, tokenizer, chunk_threshold_bytes=10_000,
+        )
+        chain = _make_chain(alice_id.node_id, bob_id.node_id)
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(
+                prompt=prompt, max_tokens=4, temperature=0.0,
+            ),
+            chain=chain,
+        ))
+        # Streamed transport hit at least once during PREFILL
+        # (Stage 2 input = Stage 1's hidden state → multi-KB).
+        assert len(log["streamed"]) >= 1, (
+            f"chunked PREFILL path NOT exercised; "
+            f"streamed deliveries: {log['streamed']}"
+        )
+        # Chain still completed (4 tokens + ChainExecutionResult).
+        stream_tokens = [
+            e for e in events if isinstance(e, StreamToken)
+        ]
+        results = [
+            e for e in events if isinstance(e, ChainExecutionResult)
+        ]
+        assert len(stream_tokens) == 4
+        assert len(results) == 1
+
+    def test_chunked_prefill_output_matches_single_host_greedy(
+        self, hf_model_and_tokenizer,
+    ):
+        # Bit-identical determinism check (Phase 3.x.11 Task 7
+        # invariant carries forward through the chunked path).
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = (
+            "The quick brown fox jumps over the lazy dog. "
+            "Pack my box with five dozen liquor jugs. "
+            "How vexingly quick daft zebras jump in the field."
+        )
+        max_tokens = 4
+        reference_ids = _single_host_greedy_token_ids(
+            model, tokenizer, prompt, max_new_tokens=max_tokens,
+        )
+        (
+            executor, alice_id, bob_id, _, _, _, log,
+        ) = _build_two_stage_sharded_chunked(
+            model, tokenizer, chunk_threshold_bytes=10_000,
+        )
+        chain = _make_chain(alice_id.node_id, bob_id.node_id)
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(
+                prompt=prompt, max_tokens=max_tokens,
+                temperature=0.0,
+            ),
+            chain=chain,
+        ))
+        sharded_ids = [
+            e.token_id for e in events
+            if isinstance(e, StreamToken)
+        ]
+        # Streamed path was actually used (sanity).
+        assert len(log["streamed"]) >= 1
+        # AND output is bit-identical to single-host greedy.
+        assert sharded_ids == reference_ids, (
+            f"chunked sharded output {sharded_ids} != "
+            f"single-host {reference_ids}"
+        )
+
+    def test_receipt_carries_iteration_attestation_envelope(
+        self, hf_model_and_tokenizer,
+    ):
+        # Phase 3.x.11.x Task 2 envelope — receipt's
+        # tee_attestation MUST decode as a multi-iteration
+        # attestation chain (one entry per chain pass), even
+        # when PREFILL went through the chunked path.
+        from prsm.compute.inference.multi_stage_attestation import (
+            decode_multi_iteration_attestation,
+            is_multi_iteration_attestation,
+        )
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = (
+            "The quick brown fox jumps over the lazy dog. "
+            "Sphinx of black quartz judge my vow swiftly today. "
+            "How vexingly quick daft zebras jump in the field."
+        )
+        (
+            executor, alice_id, bob_id, _, _, _, log,
+        ) = _build_two_stage_sharded_chunked(
+            model, tokenizer, chunk_threshold_bytes=10_000,
+        )
+        chain = _make_chain(alice_id.node_id, bob_id.node_id)
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(
+                prompt=prompt, max_tokens=3, temperature=0.0,
+            ),
+            chain=chain,
+        ))
+        result = next(
+            e for e in events if isinstance(e, ChainExecutionResult)
+        )
+        # Multi-iteration envelope (NOT the legacy multi-stage
+        # envelope).
+        assert is_multi_iteration_attestation(result.tee_attestation)
+        iterations = decode_multi_iteration_attestation(
+            result.tee_attestation,
+        )
+        assert iterations is not None
+        # 1 PREFILL + 2 INCREMENTALs = 3 iterations.
+        assert len(iterations) == 3
+        # Each iteration carries 2 stage records (alice + bob).
+        for it in iterations:
+            assert len(it.stage_records) == 2
+        # Streamed path was used during PREFILL (chunked).
+        assert len(log["streamed"]) >= 1
