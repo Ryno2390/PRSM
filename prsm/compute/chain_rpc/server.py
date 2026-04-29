@@ -782,7 +782,7 @@ class LayerStageServer:
         if request.content_tier == ContentTier.C:
             return self._error(
                 request.request_id,
-                StageErrorCode.INTERNAL_ERROR,
+                StageErrorCode.TIER_GATE,
                 "sharded decode does not yet support Tier C "
                 "(per-token wire dispatch creates a new timing "
                 "surface; see Phase 3.x.11.q honest scope)",
@@ -889,6 +889,30 @@ class LayerStageServer:
     ) -> Tuple[bytes, Iterable[bytes]]:
         """Streamed-path body. Validation BEFORE chunk consumption so
         rejected requests don't pay assembly cost."""
+        # Phase 3.x.11 Task 9 round-1 M1 remediation: sharded decode
+        # is unary-only by design (design plan §3.4: "sharded decode
+        # does NOT use the streaming wire path. Each per-token
+        # dispatch is a unary RunLayerSliceRequest"). When a
+        # sharded_runner is wired, reject streamed requests with
+        # MALFORMED_REQUEST + a clear error message that points
+        # operators at the unary-only design + the deferred
+        # composition follow-up. Without this guard, a sharded
+        # operator whose activation crosses the inline threshold
+        # would silently route through the regular non-sharded
+        # path; the executor surfaces TAIL_TOKEN_MISSING with no
+        # hint that the cause is wrong-path-routing rather than
+        # tail-runner-not-tail-capable.
+        if self._sharded_runner is not None:
+            return self._streamed_error(
+                request.request_id,
+                StageErrorCode.MALFORMED_REQUEST,
+                "sharded decode is unary-only (design plan §3.4); "
+                "streamed input is not yet supported on sharded "
+                "servers — chunked + sharded composition is a "
+                "Phase 3.x.11.x follow-up. Reduce activation size "
+                "below chunk_threshold_bytes or run on a non-sharded "
+                "server.",
+            )
         # Steps 2-6: shared validation gates (BEFORE consuming chunks).
         gate_result = self._run_validation_gates(request)
         if gate_result.error is not None:

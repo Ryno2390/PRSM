@@ -1462,6 +1462,30 @@ class RpcChainExecutor:
         )
 
         if should_chunk(blob, threshold=self._chunk_threshold_bytes):
+            # Phase 3.x.11 Task 9 round-1 M1 remediation: sharded
+            # decode is unary-only by design (design plan §3.4).
+            # When the sharded path produces an activation that
+            # would otherwise route through chunked transport,
+            # surface ACTIVATION_TOO_LARGE with a clear message
+            # rather than silently falling into the streamed wire
+            # path (where the server would route to the regular
+            # non-sharded runner and TAIL_TOKEN_MISSING would
+            # mis-attribute the cause).
+            if self._enable_sharded_decode:
+                raise ChainExecutionError(
+                    stage_index=stage_index,
+                    stage_node_id=stage_node_id,
+                    code=ExecutorErrorCode.ACTIVATION_TOO_LARGE,
+                    message=(
+                        f"sharded decode is unary-only (design plan §3.4); "
+                        f"activation {len(blob)} bytes exceeds inline "
+                        f"threshold {self._chunk_threshold_bytes} but "
+                        f"chunked + sharded composition is a Phase "
+                        f"3.x.11.x follow-up. Reduce prompt length or "
+                        f"max_tokens, or run a chain with smaller "
+                        f"per-stage hidden state."
+                    ),
+                )
             return self._dispatch_streamed(
                 stage_index=stage_index,
                 stage_node_id=stage_node_id,
