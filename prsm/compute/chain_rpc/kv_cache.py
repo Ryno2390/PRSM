@@ -1,0 +1,272 @@
+"""Phase 3.x.11 — server-side KV-cache lifecycle manager.
+
+The sharded autoregressive decode path keeps each stage's
+KV-cache **local** between tokens. The cache survives across
+multiple ``INCREMENTAL`` dispatches for the same ``request_id``
+so each per-token forward only computes one new attention
+position rather than recomputing the full prompt.
+
+This module owns the *handles* — the lifecycle metadata + LRU
+bookkeeping. The actual tensor payload is opaque to the
+manager: it's whatever the runner produces during its forward
+pass (per-layer K + V tensors of shape
+``[batch=1, n_heads, seq_len, head_dim]``). The runner attaches
+the payload via ``handle.payload``; the manager doesn't
+introspect it.
+
+Lifecycle:
+  - **Allocate** on PREFILL — fresh handle keyed on
+    ``request_id``. Raises ``CacheAlreadyAllocatedError`` if a
+    cache for this id already exists (caller bug — re-issuing
+    PREFILL without an explicit ``evict`` first).
+  - **Get** on INCREMENTAL — returns the existing handle and
+    touches its LRU position + ``last_touch_time``. Returns
+    ``None`` if no cache exists for this id (caller bug
+    or cache was evicted out-from-under the request).
+  - **Evict** on terminal (EOS / max_tokens) or on executor
+    cancellation. Idempotent — evicting an unknown id is a
+    no-op (matches the GeneratorExit cleanup path which may
+    race with TTL eviction).
+  - **Evict_idle** — periodic sweeper that drops handles past
+    ``ttl_seconds``. Returns the list of evicted ids so the
+    caller can log / metric.
+
+Eviction policies:
+  - **TTL** — bounds long-lived zombie-request memory if the
+    executor crashed without explicit eviction.
+  - **LRU cap** — when ``allocate`` is called and the pool is
+    full, the LRU handle is evicted to make room. Operator
+    config: ``max_cached_requests`` (default 64).
+
+Thread safety: all public methods take a lock. Multiple
+concurrent dispatches across different request_ids land on the
+same manager; allocate / get / evict are atomic w.r.t. each
+other. The lock is short-held — long operations on the handle
+(building the cache payload during forward) happen OUTSIDE
+the lock with the handle as a local reference.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from collections import OrderedDict
+from dataclasses import dataclass, field
+from typing import Any, Callable, List, Optional
+
+
+__all__ = [
+    "KVCacheHandle",
+    "KVCacheManager",
+    "CacheAlreadyAllocatedError",
+    "CacheNotFoundError",
+]
+
+
+class CacheAlreadyAllocatedError(RuntimeError):
+    """Raised by ``KVCacheManager.allocate`` when a cache for
+    the requested ``request_id`` already exists. This is a
+    caller bug — the caller should ``evict`` before re-allocating
+    or use ``get`` to access an existing handle."""
+
+
+class CacheNotFoundError(RuntimeError):
+    """Raised by ``KVCacheManager.evict`` when configured to
+    fail on unknown ids. The default behavior is idempotent
+    (no-op on unknown id), but tests + diagnostic paths can
+    opt into strict mode."""
+
+
+@dataclass
+class KVCacheHandle:
+    """Lifecycle metadata + opaque payload for one
+    request-scoped KV-cache.
+
+    The ``payload`` field is set by the runner during PREFILL
+    (initial allocation) and read+mutated during INCREMENTAL
+    dispatches. The manager doesn't introspect it — the payload
+    shape is runner-defined (typically
+    ``List[Tuple[k_tensor, v_tensor]]`` indexed by layer).
+
+    ``last_touch_time`` is updated by ``KVCacheManager.get``
+    and used by ``evict_idle`` to drop stale handles.
+
+    Mutable on purpose: the runner's incremental forward pass
+    needs to mutate ``payload`` in place. The dataclass is
+    NOT frozen.
+    """
+
+    request_id: str
+    n_layers: int
+    last_touch_time: float
+    payload: Any = None
+
+
+class KVCacheManager:
+    """Per-server cache lifecycle. Operator-config-driven LRU
+    + TTL eviction; thread-safe.
+
+    Constructor args:
+      max_cached_requests   Default 64. Concurrent-request
+                            ceiling. When ``allocate`` is
+                            called with the pool full, the LRU
+                            handle is evicted to make room.
+      ttl_seconds           Default 300.0 (5 minutes). Idle
+                            cache lifetime. ``evict_idle``
+                            drops handles whose
+                            ``last_touch_time`` is older than
+                            ``now - ttl_seconds``.
+      clock                 Defaults to ``time.monotonic``.
+                            Tests inject a controllable clock
+                            to drive TTL deterministically.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_cached_requests: int = 64,
+        ttl_seconds: float = 300.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if (
+            isinstance(max_cached_requests, bool)
+            or not isinstance(max_cached_requests, int)
+        ):
+            raise RuntimeError(
+                f"KVCacheManager: max_cached_requests must be int, "
+                f"got {type(max_cached_requests).__name__}"
+            )
+        if max_cached_requests <= 0:
+            raise RuntimeError(
+                f"KVCacheManager: max_cached_requests must be "
+                f"positive, got {max_cached_requests}"
+            )
+        if (
+            isinstance(ttl_seconds, bool)
+            or not isinstance(ttl_seconds, (int, float))
+        ):
+            raise RuntimeError(
+                f"KVCacheManager: ttl_seconds must be number, got "
+                f"{type(ttl_seconds).__name__}"
+            )
+        if ttl_seconds <= 0:
+            raise RuntimeError(
+                f"KVCacheManager: ttl_seconds must be positive, "
+                f"got {ttl_seconds}"
+            )
+        self._max = int(max_cached_requests)
+        self._ttl = float(ttl_seconds)
+        self._clock = clock
+        self._lock = threading.Lock()
+        # OrderedDict gives us O(1) LRU bookkeeping —
+        # ``move_to_end`` after each ``get`` puts the touched
+        # handle at the right side; the LRU is at the left.
+        self._handles: "OrderedDict[str, KVCacheHandle]" = OrderedDict()
+
+    # ── public API ────────────────────────────────────────────────────
+
+    def allocate(
+        self, request_id: str, n_layers: int,
+    ) -> KVCacheHandle:
+        """Create a fresh handle for ``request_id``. Called by
+        the runner on PREFILL. Raises
+        ``CacheAlreadyAllocatedError`` if a cache already
+        exists for this id. Evicts the LRU handle if the pool
+        is at ``max_cached_requests``."""
+        if not isinstance(request_id, str) or not request_id:
+            raise RuntimeError(
+                "KVCacheManager.allocate: request_id must be "
+                "non-empty string"
+            )
+        if (
+            isinstance(n_layers, bool)
+            or not isinstance(n_layers, int)
+            or n_layers <= 0
+        ):
+            raise RuntimeError(
+                f"KVCacheManager.allocate: n_layers must be "
+                f"positive int, got {n_layers!r}"
+            )
+        with self._lock:
+            if request_id in self._handles:
+                raise CacheAlreadyAllocatedError(
+                    f"KVCacheManager: cache already allocated for "
+                    f"request_id={request_id!r}; caller must evict "
+                    f"first or use get() to access existing handle"
+                )
+            # LRU eviction if we're at cap. Running BEFORE we
+            # insert the new handle so the cap is respected
+            # post-insert.
+            while len(self._handles) >= self._max:
+                _evicted_id, _evicted_handle = self._handles.popitem(
+                    last=False,
+                )
+                # The evicted handle's payload may hold GPU
+                # memory; releasing the local reference here
+                # invokes the runner-side cleanup at the next
+                # GC cycle. (Operators with strict-real-time
+                # cleanup needs can wrap KVCacheHandle.payload
+                # with explicit ``.close()`` — out of v1 scope.)
+            handle = KVCacheHandle(
+                request_id=request_id,
+                n_layers=n_layers,
+                last_touch_time=self._clock(),
+            )
+            self._handles[request_id] = handle
+            return handle
+
+    def get(self, request_id: str) -> Optional[KVCacheHandle]:
+        """Return the handle for ``request_id`` and touch its
+        LRU position + ``last_touch_time``. Returns ``None`` if
+        no cache exists (caller — typically the runner on
+        INCREMENTAL — should treat None as a request-state
+        error and surface MALFORMED_REQUEST)."""
+        with self._lock:
+            handle = self._handles.get(request_id)
+            if handle is None:
+                return None
+            self._handles.move_to_end(request_id, last=True)
+            handle.last_touch_time = self._clock()
+            return handle
+
+    def evict(self, request_id: str) -> bool:
+        """Drop the handle for ``request_id``. Idempotent:
+        returns ``True`` if a handle was evicted, ``False`` if
+        none existed. The False path is the common case for
+        TTL/LRU + explicit-evict races."""
+        with self._lock:
+            handle = self._handles.pop(request_id, None)
+            return handle is not None
+
+    def evict_idle(self) -> List[str]:
+        """Drop handles past ``ttl_seconds`` since their last
+        touch. Returns the list of evicted request_ids so the
+        caller can log / metric. Intended for periodic sweeper
+        threads — operators wire this to a background task at
+        node startup.
+        """
+        cutoff = self._clock() - self._ttl
+        evicted: List[str] = []
+        with self._lock:
+            # Iterate over a snapshot since we mutate the dict.
+            for request_id, handle in list(self._handles.items()):
+                if handle.last_touch_time < cutoff:
+                    self._handles.pop(request_id, None)
+                    evicted.append(request_id)
+        return evicted
+
+    def evict_all(self) -> List[str]:
+        """Drop ALL handles. Operator-shutdown helper; returns
+        the list of evicted ids."""
+        with self._lock:
+            evicted = list(self._handles.keys())
+            self._handles.clear()
+        return evicted
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._handles)
+
+    def __contains__(self, request_id: str) -> bool:
+        with self._lock:
+            return request_id in self._handles
