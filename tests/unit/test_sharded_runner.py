@@ -17,16 +17,18 @@ Covers:
 
 from __future__ import annotations
 
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 import pytest
 
 from prsm.compute.chain_rpc.kv_cache import KVCacheManager
 from prsm.compute.chain_rpc.protocol import DecodeMode
+from prsm.compute.inference.autoregressive_runner import SamplingDefaults
 from prsm.compute.inference.sharded_runner import (
     LayerSliceResult,
     MalformedCacheStateError,
+    MissingTailCapabilityError,
     ShardedAutoregressiveRunner,
 )
 from prsm.compute.tee.models import TEEType
@@ -575,9 +577,13 @@ class TestEviction:
 
 
 class TestTailRejected:
-    def test_is_final_stage_true_raises(self):
+    def test_non_tail_runner_rejects_is_final_stage_true(self):
+        # Non-tail-only construction (no sampling_defaults) ->
+        # tail dispatch raises MissingTailCapabilityError.
         runner, _, _ = _make_runner()
-        with pytest.raises(RuntimeError, match="is_final_stage"):
+        with pytest.raises(
+            MissingTailCapabilityError, match="tail-capable"
+        ):
             runner.run_layer_slice_unary(
                 activation_or_input_ids=[1, 2, 3],
                 request_id="req-1",
@@ -619,4 +625,352 @@ class TestDispatchValidation:
                 activation_or_input_ids=[1, 2, 3],
                 request_id="req-1",
                 decode_mode="prefill",  # type: ignore[arg-type]
+            )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Tail variant — Task 4
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _FakeTailShardedModel(_FakeShardedModel):
+    """``_FakeShardedModel`` extended with the tail-only
+    ``apply_lm_head_and_sample`` method. Drives sampling via
+    a configurable script of token ids returned in order; tests
+    inject specific scripts for greedy / EOS / max_tokens
+    coverage."""
+
+    def __init__(self, sample_script: List[int]) -> None:
+        super().__init__()
+        self._script = list(sample_script)
+        self._cursor = 0
+        self.sample_calls: List[dict] = []
+
+    def apply_lm_head_and_sample(
+        self,
+        *,
+        hidden_state: np.ndarray,
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> int:
+        self.sample_calls.append({
+            "hidden_state": hidden_state,
+            "temperature": temperature,
+            "top_k": top_k,
+            "top_p": top_p,
+        })
+        if self._cursor >= len(self._script):
+            raise AssertionError(
+                "_FakeTailShardedModel: sample script exhausted "
+                "(test bug — pad the script or shorten max_tokens)"
+            )
+        tok = self._script[self._cursor]
+        self._cursor += 1
+        return tok
+
+
+def _make_tail_runner(
+    *,
+    sample_script: List[int],
+    layer_range: Tuple[int, int] = (0, 6),
+    eos_token_id: int = 999,
+    sampling_defaults: SamplingDefaults = None,
+) -> Tuple[ShardedAutoregressiveRunner, _FakeTailShardedModel, KVCacheManager]:
+    model = _FakeTailShardedModel(sample_script)
+    cache = KVCacheManager()
+    runner = ShardedAutoregressiveRunner(
+        model=model,
+        layer_range=layer_range,
+        kv_cache_manager=cache,
+        tee_attestation=b"x" * 32,
+        tee_type=TEEType.SOFTWARE,
+        sampling_defaults=sampling_defaults or SamplingDefaults(
+            max_tokens=512, temperature=1.0, top_k=50, top_p=0.95,
+        ),
+        eos_token_id=eos_token_id,
+    )
+    return runner, model, cache
+
+
+class _FakeRequest:
+    """Minimal request shim — duck-typed for getattr access to
+    ``max_tokens`` + ``temperature``."""
+
+    def __init__(
+        self,
+        *,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> None:
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+
+
+class TestTailVariant:
+    def test_tail_samples_next_token_id_on_prefill(self):
+        runner, _, _ = _make_tail_runner(sample_script=[42])
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=10),
+        )
+        assert result.next_token_id == 42
+        assert result.is_terminal is False
+
+    def test_tail_passes_temperature_and_top_kp_to_model(self):
+        runner, model, _ = _make_tail_runner(
+            sample_script=[42],
+            sampling_defaults=SamplingDefaults(
+                max_tokens=10, temperature=0.7, top_k=40, top_p=0.9,
+            ),
+        )
+        runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(temperature=0.0),  # request override
+        )
+        assert len(model.sample_calls) == 1
+        call = model.sample_calls[0]
+        # Request override on temperature reaches the model.
+        assert call["temperature"] == 0.0
+        # Defaults reach the model for top_k/top_p (no wire field).
+        assert call["top_k"] == 40
+        assert call["top_p"] == 0.9
+
+    def test_tail_greedy_temperature_zero_deterministic(self):
+        # Greedy script: always returns 7. Two identical dispatches
+        # should produce identical token sequences.
+        runner_a, _, _ = _make_tail_runner(sample_script=[7, 7, 7])
+        runner_b, _, _ = _make_tail_runner(sample_script=[7, 7, 7])
+        req = _FakeRequest(max_tokens=3, temperature=0.0)
+        out_a = []
+        out_b = []
+        for runner, out, rid in [
+            (runner_a, out_a, "ra"),
+            (runner_b, out_b, "rb"),
+        ]:
+            r1 = runner.run_layer_slice_unary(
+                activation_or_input_ids=[1, 2, 3],
+                request_id=rid,
+                decode_mode=DecodeMode.PREFILL,
+                is_final_stage=True,
+                request=req,
+            )
+            out.append(r1.next_token_id)
+            for _ in range(2):
+                r = runner.run_layer_slice_unary(
+                    activation_or_input_ids=np.array([[r1.next_token_id]]),
+                    request_id=rid,
+                    decode_mode=DecodeMode.INCREMENTAL,
+                    is_final_stage=True,
+                    request=req,
+                )
+                out.append(r.next_token_id)
+        assert out_a == out_b == [7, 7, 7]
+
+    def test_tail_max_tokens_one_returns_terminal_on_prefill(self):
+        runner, _, _ = _make_tail_runner(sample_script=[42])
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=_FakeRequest(max_tokens=1),
+        )
+        assert result.next_token_id == 42
+        assert result.is_terminal is True
+
+    def test_tail_max_tokens_three_terminates_on_third_call(self):
+        # PREFILL produces token #1; INCREMENTAL #1 produces token
+        # #2; INCREMENTAL #2 produces token #3 — that one should
+        # be is_terminal=True.
+        runner, _, _ = _make_tail_runner(sample_script=[10, 20, 30])
+        req = _FakeRequest(max_tokens=3)
+        r1 = runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=req,
+        )
+        assert r1.next_token_id == 10
+        assert r1.is_terminal is False
+        r2 = runner.run_layer_slice_unary(
+            activation_or_input_ids=np.array([[10]]),
+            request_id="req-1",
+            decode_mode=DecodeMode.INCREMENTAL,
+            is_final_stage=True,
+            request=req,
+        )
+        assert r2.next_token_id == 20
+        assert r2.is_terminal is False
+        r3 = runner.run_layer_slice_unary(
+            activation_or_input_ids=np.array([[20]]),
+            request_id="req-1",
+            decode_mode=DecodeMode.INCREMENTAL,
+            is_final_stage=True,
+            request=req,
+        )
+        assert r3.next_token_id == 30
+        assert r3.is_terminal is True
+
+    def test_tail_eos_returns_terminal(self):
+        # EOS token 999. Sample script: token 50, then EOS.
+        runner, _, _ = _make_tail_runner(
+            sample_script=[50, 999], eos_token_id=999,
+        )
+        req = _FakeRequest(max_tokens=10)
+        r1 = runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=req,
+        )
+        assert r1.next_token_id == 50
+        assert r1.is_terminal is False
+        r2 = runner.run_layer_slice_unary(
+            activation_or_input_ids=np.array([[50]]),
+            request_id="req-1",
+            decode_mode=DecodeMode.INCREMENTAL,
+            is_final_stage=True,
+            request=req,
+        )
+        assert r2.next_token_id == 999
+        assert r2.is_terminal is True
+
+    def test_tail_no_eos_token_id_set_only_max_tokens_terminates(self):
+        # eos_token_id=None — runner ignores any matching id.
+        runner, _, _ = _make_tail_runner(
+            sample_script=[999, 5], eos_token_id=None,
+        )
+        req = _FakeRequest(max_tokens=2)
+        r1 = runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=req,
+        )
+        # Token "999" looks like EOS but EOS is disabled.
+        assert r1.next_token_id == 999
+        assert r1.is_terminal is False
+        r2 = runner.run_layer_slice_unary(
+            activation_or_input_ids=np.array([[999]]),
+            request_id="req-1",
+            decode_mode=DecodeMode.INCREMENTAL,
+            is_final_stage=True,
+            request=req,
+        )
+        # max_tokens=2 reached — terminates.
+        assert r2.is_terminal is True
+
+    def test_non_tail_dispatch_on_tail_capable_runner_leaves_token_none(self):
+        # Even a tail-capable runner, when dispatched with
+        # is_final_stage=False, behaves like the non-tail variant
+        # (no sampling, no token bump).
+        runner, model, cache = _make_tail_runner(
+            sample_script=[42],
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=False,
+            request=_FakeRequest(max_tokens=10),
+        )
+        assert result.next_token_id is None
+        assert result.is_terminal is False
+        # Sampling NOT invoked.
+        assert model.sample_calls == []
+        # tokens_generated stays 0 on the handle.
+        h = cache.get("req-1")
+        assert h is not None
+        assert h.tokens_generated == 0
+
+    def test_tail_falls_back_to_runner_defaults_when_request_none(self):
+        # request=None path — runner uses defaults exclusively.
+        # max_tokens default 1 means PREFILL is_terminal=True.
+        runner, model, _ = _make_tail_runner(
+            sample_script=[42],
+            sampling_defaults=SamplingDefaults(
+                max_tokens=1, temperature=0.0, top_k=50, top_p=0.95,
+            ),
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[1, 2, 3],
+            request_id="req-1",
+            decode_mode=DecodeMode.PREFILL,
+            is_final_stage=True,
+            request=None,
+        )
+        assert result.next_token_id == 42
+        assert result.is_terminal is True
+        # Defaults reach model.
+        assert model.sample_calls[0]["temperature"] == 0.0
+
+
+class TestTailConstructorValidation:
+    def test_tail_capable_requires_apply_lm_head_method(self):
+        # Non-tail _FakeShardedModel doesn't have
+        # apply_lm_head_and_sample; tail-capable construction
+        # rejects.
+        cache = KVCacheManager()
+        with pytest.raises(
+            RuntimeError, match="apply_lm_head_and_sample"
+        ):
+            ShardedAutoregressiveRunner(
+                model=_FakeShardedModel(),
+                layer_range=(0, 6),
+                kv_cache_manager=cache,
+                tee_attestation=b"x" * 32,
+                tee_type=TEEType.SOFTWARE,
+                sampling_defaults=SamplingDefaults(),
+                eos_token_id=0,
+            )
+
+    def test_rejects_non_sampling_defaults(self):
+        cache = KVCacheManager()
+        with pytest.raises(
+            RuntimeError, match="sampling_defaults"
+        ):
+            ShardedAutoregressiveRunner(
+                model=_FakeTailShardedModel([1]),
+                layer_range=(0, 6),
+                kv_cache_manager=cache,
+                tee_attestation=b"x" * 32,
+                tee_type=TEEType.SOFTWARE,
+                sampling_defaults={"max_tokens": 10},  # type: ignore[arg-type]
+                eos_token_id=0,
+            )
+
+    def test_rejects_negative_eos_token_id(self):
+        cache = KVCacheManager()
+        with pytest.raises(RuntimeError, match="eos_token_id"):
+            ShardedAutoregressiveRunner(
+                model=_FakeTailShardedModel([1]),
+                layer_range=(0, 6),
+                kv_cache_manager=cache,
+                tee_attestation=b"x" * 32,
+                tee_type=TEEType.SOFTWARE,
+                sampling_defaults=SamplingDefaults(),
+                eos_token_id=-1,
+            )
+
+    def test_rejects_bool_eos_token_id(self):
+        cache = KVCacheManager()
+        with pytest.raises(RuntimeError, match="eos_token_id"):
+            ShardedAutoregressiveRunner(
+                model=_FakeTailShardedModel([1]),
+                layer_range=(0, 6),
+                kv_cache_manager=cache,
+                tee_attestation=b"x" * 32,
+                tee_type=TEEType.SOFTWARE,
+                sampling_defaults=SamplingDefaults(),
+                eos_token_id=True,  # type: ignore[arg-type]
             )

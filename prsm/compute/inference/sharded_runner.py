@@ -57,12 +57,14 @@ import numpy as np
 
 from prsm.compute.chain_rpc.kv_cache import KVCacheManager
 from prsm.compute.chain_rpc.protocol import DecodeMode
+from prsm.compute.inference.autoregressive_runner import SamplingDefaults
 from prsm.compute.tee.models import TEEType
 
 
 __all__ = [
     "LayerSliceResult",
     "MalformedCacheStateError",
+    "MissingTailCapabilityError",
     "ShardedAutoregressiveRunner",
     "ShardedLayerForward",
 ]
@@ -73,6 +75,14 @@ class MalformedCacheStateError(RuntimeError):
     Maps to ``MALFORMED_REQUEST`` at the wire layer (the caller —
     typically the executor's per-token chain loop — must restart
     with a fresh PREFILL or surface the error to the user)."""
+
+
+class MissingTailCapabilityError(RuntimeError):
+    """Raised on tail dispatch (``is_final_stage=True``) when the
+    runner was constructed without tail capability (no
+    ``sampling_defaults`` / no ``apply_lm_head_and_sample`` on the
+    model). Caller bug — operators must construct the runner with
+    tail args set when the stage is the chain tail."""
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -114,6 +124,26 @@ class ShardedLayerForward(Protocol):
         returned payload may be the same reference as the input,
         mutated in place — the runner just stores whatever comes
         back."""
+        ...
+
+    def apply_lm_head_and_sample(
+        self,
+        *,
+        hidden_state: np.ndarray,
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> int:
+        """Tail-only — project hidden state through the LM head
+        to vocab logits + sample the next token id per sampling
+        params. ``temperature == 0`` triggers greedy
+        (``argmax``); positive triggers temperature-scaled
+        softmax with optional top-k / top-p filtering. Returns
+        the sampled token id.
+
+        Non-tail stage models can omit this method; the runner
+        guards it at construction time when tail capability is
+        opted-in."""
         ...
 
 
@@ -161,12 +191,22 @@ class ShardedAutoregressiveRunner:
                          runner.
       tee_type           ``TEEType``.
 
-    Tail-only contract: v1 of this class is the **non-tail**
-    variant — ``is_final_stage=True`` raises at dispatch. Task 4
-    extends to handle LM-head + sampling. Until Task 4 lands, the
-    tail keeps using ``AutoregressiveStreamingRunner`` over the
-    streaming wire path; sharded decode is opt-in via
-    ``enable_sharded_decode`` on the executor (Task 5).
+    Tail capability is opt-in at construction. When the stage is
+    the chain tail (``is_final_stage=True`` at dispatch), the
+    runner additionally:
+      - Calls ``model.apply_lm_head_and_sample`` to project the
+        boundary hidden state through the LM head + sample the
+        next token id per the request's sampling params.
+      - Tracks ``tokens_generated`` on the cache handle to detect
+        the ``max_tokens`` cap.
+      - Sets ``is_terminal=True`` on the result when EOS is
+        sampled OR ``tokens_generated >= max_tokens``.
+
+    Tail capability requires ``sampling_defaults`` AND a model
+    with ``apply_lm_head_and_sample``. ``eos_token_id`` is
+    optional — if ``None``, EOS detection is disabled and only
+    ``max_tokens`` triggers termination. Operators wire
+    ``eos_token_id`` from the tokenizer at the factory layer.
     """
 
     def __init__(
@@ -177,6 +217,8 @@ class ShardedAutoregressiveRunner:
         kv_cache_manager: KVCacheManager,
         tee_attestation: bytes,
         tee_type: TEEType,
+        sampling_defaults: Optional[SamplingDefaults] = None,
+        eos_token_id: Optional[int] = None,
     ) -> None:
         if model is None:
             raise RuntimeError(
@@ -226,6 +268,40 @@ class ShardedAutoregressiveRunner:
                 f"ShardedAutoregressiveRunner: tee_type must be "
                 f"TEEType, got {type(tee_type).__name__}"
             )
+        # Tail capability validation. Either both are wired (full
+        # tail-capable) or neither is (non-tail-only). A
+        # half-wired runner is a configuration bug.
+        if sampling_defaults is not None and not isinstance(
+            sampling_defaults, SamplingDefaults,
+        ):
+            raise RuntimeError(
+                "ShardedAutoregressiveRunner: sampling_defaults "
+                "must be a SamplingDefaults instance or None"
+            )
+        if eos_token_id is not None and (
+            isinstance(eos_token_id, bool)
+            or not isinstance(eos_token_id, int)
+            or eos_token_id < 0
+        ):
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: eos_token_id must "
+                f"be a non-negative int or None, got "
+                f"{eos_token_id!r}"
+            )
+        # Tail capability requires the model to expose
+        # ``apply_lm_head_and_sample``. Non-tail-only construction
+        # (``sampling_defaults=None``) skips the check — the model
+        # is allowed to omit the method.
+        self._tail_capable = sampling_defaults is not None
+        if self._tail_capable and not callable(
+            getattr(model, "apply_lm_head_and_sample", None),
+        ):
+            raise RuntimeError(
+                "ShardedAutoregressiveRunner: tail-capable "
+                "construction (sampling_defaults set) requires "
+                "model.apply_lm_head_and_sample(...) per "
+                "ShardedLayerForward Protocol"
+            )
 
         self._model = model
         self._layer_range = (int(start), int(end))
@@ -233,6 +309,8 @@ class ShardedAutoregressiveRunner:
         self._cache = kv_cache_manager
         self._tee_attestation = bytes(tee_attestation)
         self._tee_type = tee_type
+        self._sampling_defaults = sampling_defaults
+        self._eos_token_id = eos_token_id
 
     # ── public read-only accessors ────────────────────────────────────
 
@@ -304,18 +382,12 @@ class ShardedAutoregressiveRunner:
                 f"is_final_stage must be bool, got "
                 f"{type(is_final_stage).__name__}"
             )
-        if is_final_stage:
-            # Phase 3.x.11 Task 3 honest scope — non-tail variant
-            # only. Task 4 extends this with LM-head + sampling.
-            # Until then, the tail keeps using
-            # AutoregressiveStreamingRunner over the streaming
-            # wire path.
-            raise RuntimeError(
-                "ShardedAutoregressiveRunner: is_final_stage=True is "
-                "reserved for the Task 4 tail variant; v1 non-tail "
-                "rejects tail dispatch — operators must keep the "
-                "tail on AutoregressiveStreamingRunner until Task 4 "
-                "lands"
+        if is_final_stage and not self._tail_capable:
+            raise MissingTailCapabilityError(
+                "ShardedAutoregressiveRunner: is_final_stage=True "
+                "requires tail-capable construction "
+                "(sampling_defaults + model.apply_lm_head_and_sample) "
+                "— this runner was constructed non-tail-only"
             )
 
         start_ts = time.time()
@@ -346,13 +418,80 @@ class ShardedAutoregressiveRunner:
             )
             handle.payload = updated_payload
 
+        next_token_id: Optional[int] = None
+        is_terminal = False
+        if is_final_stage:
+            next_token_id, is_terminal = self._sample_tail(
+                hidden_state=hidden,
+                handle=handle,
+                request=request,
+            )
+
         duration = time.time() - start_ts
         return LayerSliceResult(
             hidden_state=hidden,
             duration_seconds=duration,
             decode_mode=decode_mode,
             n_layers_run=self._n_layers,
+            next_token_id=next_token_id,
+            is_terminal=is_terminal,
         )
+
+    # ── tail-only sampling ────────────────────────────────────────────
+
+    def _sample_tail(
+        self,
+        *,
+        hidden_state: np.ndarray,
+        handle: Any,  # KVCacheHandle — Any to keep imports clean
+        request: Any,
+    ) -> Tuple[int, bool]:
+        """Project the boundary hidden state through the LM head,
+        sample the next token id, bump the per-request token
+        counter on the cache handle, and decide ``is_terminal``
+        from EOS detection + ``max_tokens`` cap.
+
+        Returns ``(next_token_id, is_terminal)``. The runner
+        guarantees ``self._tail_capable`` before calling — caller
+        must check ``is_final_stage`` first.
+        """
+        defaults = self._sampling_defaults
+        assert defaults is not None  # tail_capable guarantees this
+        # Resolve sampling params from request, falling back to
+        # runner defaults. Mirrors AutoregressiveStreamingRunner's
+        # _effective_max_tokens / _effective_temperature pattern.
+        rmax = getattr(request, "max_tokens", None) if request is not None else None
+        max_tokens = int(rmax) if rmax is not None else defaults.max_tokens
+        rtemp = getattr(request, "temperature", None) if request is not None else None
+        temperature = float(rtemp) if rtemp is not None else defaults.temperature
+        # top_k / top_p are runner-level config (no wire field).
+        top_k = defaults.top_k
+        top_p = defaults.top_p
+
+        next_token_id = int(self._model.apply_lm_head_and_sample(
+            hidden_state=hidden_state,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+        ))
+
+        # Bump the per-request token counter on the cache handle.
+        # PREFILL produces token #1 (the first generated token);
+        # subsequent INCREMENTALs produce tokens #2, #3, ...
+        handle.tokens_generated += 1
+
+        # Termination: EOS sampled OR token count reached the
+        # request-level cap.
+        is_terminal = False
+        if (
+            self._eos_token_id is not None
+            and next_token_id == self._eos_token_id
+        ):
+            is_terminal = True
+        if handle.tokens_generated >= max_tokens:
+            is_terminal = True
+
+        return next_token_id, is_terminal
 
     # ── eviction passthrough ──────────────────────────────────────────
 

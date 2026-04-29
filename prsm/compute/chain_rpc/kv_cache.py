@@ -91,15 +91,24 @@ class KVCacheHandle:
     ``last_touch_time`` is updated by ``KVCacheManager.get``
     and used by ``evict_idle`` to drop stale handles.
 
+    ``tokens_generated`` is bumped by the tail variant of
+    ``ShardedAutoregressiveRunner`` (Phase 3.x.11 Task 4) on
+    each successful sample. The tail uses it to detect
+    ``max_tokens`` cap (sets ``is_terminal=True`` when the
+    counter reaches the request's ceiling). Non-tail stages
+    never read or write this field — it stays 0 on non-tail
+    runners.
+
     Mutable on purpose: the runner's incremental forward pass
-    needs to mutate ``payload`` in place. The dataclass is
-    NOT frozen.
+    needs to mutate ``payload`` in place + the tail bumps
+    ``tokens_generated`` per sample. The dataclass is NOT frozen.
     """
 
     request_id: str
     n_layers: int
     last_touch_time: float
     payload: Any = None
+    tokens_generated: int = 0
 
 
 class KVCacheManager:
