@@ -564,38 +564,39 @@ class TestFixedRateTerminalDrain:
 
 
 class TestFixedRateErrorPath:
-    def test_inner_raises_yields_terminal_error(self):
+    def test_inner_raises_yields_nothing(self):
+        # Round-1 H1 fix: when inner raises, decorator yields
+        # NOTHING. Server's handle_token_stream surfaces the
+        # exhausted-without-terminal path as INTERNAL_ERROR
+        # cleanly (rather than the decorator fabricating a
+        # synthesized terminal-error chunk with bogus
+        # tee_type / tee_attestation values it doesn't hold,
+        # which would fail the server's aggregate-fields gate
+        # with a misattributed error message).
         decorator = FixedRateStreamingRunner(
             _RaisingInner(RuntimeError("boom")),
             cadence_seconds=0.005,
         )
         chunks = _drive_fixed_rate(decorator)
-        assert len(chunks) >= 1
-        terminal = chunks[-1]
-        assert terminal.finish_reason == "error"
-        # Empty aggregates — server surfaces as StageError per
-        # the existing Phase 3.x.8 contract.
-        assert terminal.full_output_text == ""
-        assert terminal.text_delta == ""
+        # At most no-op pad frames — never a terminal.
+        for c in chunks:
+            assert c.finish_reason is None
+            assert c.text_delta == ""
+            assert c.full_output_text is None
 
-    def test_inner_error_does_not_leak_partial_text_via_pad_frames(self):
-        # All wire frames before the terminal MUST have empty
-        # text_delta (no-op pads). The decorator's error path
-        # MUST NOT leak any partial inner state.
+    def test_inner_error_no_partial_text_leak_via_pad_frames(self):
+        # All wire frames MUST have empty text_delta and no
+        # populated aggregate fields. The decorator's error
+        # path MUST NOT leak any partial inner state.
         decorator = FixedRateStreamingRunner(
             _RaisingInner(RuntimeError("secret-state")),
             cadence_seconds=0.005,
         )
         chunks = _drive_fixed_rate(decorator)
-        for c in chunks[:-1]:
+        for c in chunks:
             assert c.text_delta == ""
-        # Terminal also empty (no leak via aggregates).
-        assert "secret-state" not in (
-            chunks[-1].text_delta or ""
-        )
-        assert "secret-state" not in (
-            chunks[-1].full_output_text or ""
-        )
+            assert "secret-state" not in (c.text_delta or "")
+            assert "secret-state" not in (c.full_output_text or "")
 
 
 class TestFixedRateEmptyInner:

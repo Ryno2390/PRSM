@@ -1176,6 +1176,172 @@ cap-propagation invariant.
 
 ---
 
+## 7.8 Tier C Constant-Time Padding + HF Prompt-Echo Fix (Phase 3.x.10.y)
+
+Phase 3.x.10.y is a 6-task slice closing two open issues from
+Phase 3.x.10.x:
+- Tier C streaming was structurally blocked at the dispatch
+  layer per the timing-sidechannel memo §4 — operators serving
+  Tier C content fell back to the unary path.
+- HF TextStreamer's prompt-echo behavior leaked the prompt
+  back as the first wire chunk for byte-level BPE tokenizers
+  (observed in 3.x.10.x's full-stack E2E for distilgpt2).
+
+**Tag:** ``phase3.x.10.y-merge-ready-20260429`` at commit
+``[applied at tag time]``.
+
+**Headline guarantees.**
+
+  1. **HF prompt-echo fix.** ``_HFStreamerAdapter`` gains
+     ``prompt_id_count`` constructor kwarg. While in prompt
+     phase (cumulative token count ≤ ``prompt_id_count``),
+     ``put()`` accumulates ids without flushing. On the
+     boundary-crossing call, ``_print_offset`` is pinned to
+     the prompt's decoded length so subsequent
+     ``_maybe_flush`` only emits text from generated tokens
+     onward. ``end()`` no-ops while still in prompt phase
+     (zero-token generation MUST NOT leak prompt text).
+     Mirrors HF ``TextStreamer(skip_prompt=True)`` semantics.
+     ``AutoregressiveStreamingRunner`` constructs the adapter
+     with ``prompt_id_count=len(input_ids)``. Default
+     ``prompt_id_count=0`` preserves Phase 3.x.10 back-compat.
+
+  2. **Tier C constant-time padding decorators.** New
+     ``prsm/compute/inference/tier_c_decorators.py`` provides
+     two ``StreamingLayerRunner``-Protocol-conforming wrappers
+     per the timing-sidechannel memo §5:
+     - **M2 ``BatchedTrailingStreamingRunner``** — drains the
+       inner stream fully and emits ONE terminal chunk with
+       joined text. Per-token timing is structurally
+       unobservable (one wire frame, no inter-frame deltas).
+       Sacrifices streaming UX for paranoid Tier C.
+     - **M1 ``FixedRateStreamingRunner``** — daemon producer
+       thread iterates the inner runner; consumer-side
+       cadence loop sleeps ``cadence_seconds`` between yields,
+       drains at most ONE inner chunk per tick. No-op pad
+       frames (empty ``text_delta``) fill gaps when no inner
+       chunk is ready. Inner terminal stashed for cadence-
+       aligned emission after buffer drain. Inter-frame
+       wall-clock latency is the cadence (constant),
+       independent of inner runner's per-token decode time.
+
+  3. **Tier C dispatch-layer gate (default-deny).**
+     ``LayerStageServer.__init__`` accepts
+     ``tier_c_streaming_decorator: Optional[Callable[[Any], Any]]``.
+     ``handle_token_stream`` branches on
+     ``request.content_tier == ContentTier.C``:
+     - decorator unset → ``StageError(INTERNAL_ERROR,
+       "Tier C streaming requires constant-time padding
+       decorator")``;
+     - decorator set → wraps streaming_runner per-request,
+       validates structural shape (must expose
+       ``run_layer_slice_streaming``), invokes wrapped runner.
+       Decorator exceptions caught and surfaced as
+       INTERNAL_ERROR — NEVER raises through the wire boundary.
+     ``make_layer_stage_server`` exposes the kwarg.
+
+  4. **GeneratorExit-driven cleanup.** Round-1 review M1
+     remediation: M1's consumer ``finally`` sets a
+     ``threading.Event`` that the producer checks between
+     inner-iterator steps; producer breaks, calls
+     ``inner.close()`` to release accelerator state, exits.
+     Daemon-thread semantics handle process-level cleanup
+     if the producer is stuck mid-blocking-call in HF's sync
+     ``model.generate``. Module docstring at lines 195-204
+     documents this contract.
+
+  5. **No partial-state leak through error path.** Round-1
+     review H1 remediation: M1's inner-exception path now
+     yields NOTHING and lets the server's "exhausted without
+     terminal chunk" surface INTERNAL_ERROR cleanly. The
+     decorator no longer fabricates ``tee_type`` /
+     ``tee_attestation`` values it doesn't legitimately
+     hold (which would have failed the server's terminal-
+     aggregate-fields gate with a misattributed error).
+     Pad frames before error-exit also have empty
+     ``text_delta`` and unpopulated aggregate fields — no
+     partial inner state observable on the wire.
+
+**Honest scope (carries forward).**
+
+  - **Total stream duration leaks total token count.** Even
+    under M1 + M2: stream length still encodes one observation
+    of output size. M1 leak ceiling = ``cadence × frame_count``;
+    M2 leak ceiling = a single duration value. Operators
+    bound the leak by capping ``max_tokens`` for Tier C
+    requests.
+  - **No-op pad frames inflate wire frame count.** With M1
+    cadence=50ms over a 10-second decode, ~200 frames. A
+    future optimization could batch consecutive no-op pads;
+    deferred to Phase 3.x.10.z.
+  - **Async-during-generate** still deferred to Phase 3.x.10.z.
+    HF's ``generate()`` is synchronous; tokens reach the wire
+    only after the call returns. M1's cadence preserves the
+    illusion of streaming UX during decode but the underlying
+    timing is "all-at-once after generate returns".
+  - **Sharded autoregressive** still gated until Phase 3.x.11.
+
+**Test coverage at the tag.**
+
+  - 6 prompt-echo tests in
+    ``test_autoregressive_runner.py::TestHFPromptEchoSkip``
+    (skip-prompt semantics, back-compat at
+    ``prompt_id_count=0``, runner end-to-end wiring,
+    zero-generation edge case, EOS detection compatibility).
+  - 30 decorator unit tests in
+    ``tests/unit/test_tier_c_decorators.py`` (Protocol
+    conformance, happy paths, edge cases, constructor
+    validation, cadence timing-mask, error-path no-leak,
+    real-distilgpt2 compose smoke for both M1 + M2).
+  - 9 dispatch-gate tests in
+    ``test_autoregressive_runner_server_wire.py::TestTierCDispatchGate``
+    (Tier A/B back-compat, Tier C default-deny, decorator
+    apply, decorator misconfig paths, factory forwarding).
+  - 6 timing-observer E2E tests in
+    ``tests/integration/test_phase3_x_10_y_timing_observer.py``
+    (slow-marked) — the load-bearing proof that the timing-
+    mask invariant holds: undecorated baseline leaks
+    per-token timing (stdev ≥ 15ms with the
+    ``[5, 80, 5, 80]`` ms profile); M2 collapses to single
+    frame; M1 stdev < 10ms; cross-decorator comparison
+    asserts ``baseline_stdev > 3 × m1_stdev``.
+
+  Conftest interaction: two test files override
+  ``conftest.py``'s autouse ``time.sleep`` mock with a same-
+  named fixture that yields without patching, restoring real
+  wall-clock sleep for those files. Without the override, the
+  cadence + timing-mask assertions would silently pass with
+  every sleep collapsed to instant.
+
+**Round-1 → round-2 surface.**
+
+  - Round-1: APPROVED-WITH-PRE-TAG-REMEDIATIONS. 1 HIGH (M1
+    error-path field shape — terminal chunk with
+    ``tee_type=None`` failed server's aggregate-fields gate
+    and surfaced misattributed StageError). 2 MEDIUM (M1
+    docstring/impl mismatch on GeneratorExit cleanup; §7.8
+    missing). All three remediated pre-tag.
+  - Round-2: APPROVED-FOR-TAG.
+
+**Auditor prompts:** start with the timing-observer E2E
+``tests/integration/test_phase3_x_10_y_timing_observer.py::TestTimingMaskComparison``
+— that's the load-bearing proof of the mask invariant. Then
+read the dispatch-gate code at
+``prsm/compute/chain_rpc/server.py:891-924`` for the default-
+deny enforcement (Tier C without decorator → INTERNAL_ERROR).
+The two decorators in
+``prsm/compute/inference/tier_c_decorators.py`` are
+StreamingLayerRunner Protocol-conforming wrappers; the
+threading model in M1 (lines 153-272) is the only non-trivial
+concurrency surface, with GeneratorExit-driven cleanup
+documented inline. The HF prompt-echo fix at
+``prsm/compute/inference/autoregressive_runner.py:124-188``
+is the smaller surface — boundary-crossing semantics in
+``put()``, with ``end()`` guarded against zero-generation
+prompt-leak.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:

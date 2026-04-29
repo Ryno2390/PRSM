@@ -195,10 +195,14 @@ class FixedRateStreamingRunner:
     Threading model:
       The inner runner runs in a daemon background thread; the
       decorator's generator drives the cadence loop on the
-      caller's thread. Generator close (``GeneratorExit``)
-      signals the producer to stop via the queue's sentinel
-      pattern; the producer thread is daemon so process exit
-      is always clean.
+      caller's thread. On generator close (``GeneratorExit``)
+      the consumer's ``finally`` sets a ``threading.Event`` that
+      the producer checks between inner-iterator steps; on the
+      next step the producer breaks, calls ``inner.close()`` to
+      release accelerator state, and exits. We don't
+      ``thread.join()`` (the producer may be mid-blocking-call
+      in HF's sync ``model.generate``); daemon-thread semantics
+      handle process-level cleanup if the producer is stuck.
 
     Composes with any ``StreamingLayerRunner``. The server's
     ``handle_token_stream`` consumes it identically.
@@ -250,22 +254,42 @@ class FixedRateStreamingRunner:
         # pushes each chunk + sentinel onto the buffer queue.
         # Captures any exception in a holder so the consumer can
         # synthesize a terminal error chunk.
+        # Round-1 review M1 fix: ``stop_event`` is set by the
+        # consumer's ``finally`` block on GeneratorExit. The
+        # producer checks the event between iterations and
+        # explicitly closes the inner generator, which signals
+        # any held accelerator state (KV cache, pinned memory)
+        # to release rather than waiting for natural inner-
+        # generator termination.
         buffer: "queue.Queue[Any]" = queue.Queue()
         error_holder: list = []
+        stop_event = threading.Event()
 
         def producer() -> None:
+            inner_iter = self._inner.run_layer_slice_streaming(
+                model=model,
+                layer_range=layer_range,
+                activation=activation,
+                privacy_tier=privacy_tier,
+                is_final_stage=is_final_stage,
+                request=request,
+            )
             try:
-                for chunk in self._inner.run_layer_slice_streaming(
-                    model=model,
-                    layer_range=layer_range,
-                    activation=activation,
-                    privacy_tier=privacy_tier,
-                    is_final_stage=is_final_stage,
-                    request=request,
-                ):
+                for chunk in inner_iter:
+                    if stop_event.is_set():
+                        break
                     buffer.put(chunk)
             except Exception as exc:  # noqa: BLE001
                 error_holder.append(exc)
+            finally:
+                # Explicitly close the inner generator on every
+                # exit path (consumer cancel, inner exhaustion,
+                # inner exception). Generator.close() on an
+                # already-closed/exhausted generator is a no-op.
+                try:
+                    inner_iter.close()
+                except Exception:  # noqa: BLE001
+                    pass
             buffer.put(_PRODUCER_DONE)
 
         thread = threading.Thread(target=producer, daemon=True)
@@ -311,29 +335,20 @@ class FixedRateStreamingRunner:
 
                 if item is None:
                     if producer_done and inner_terminal is None:
-                        # Inner runner finished without emitting a
-                        # terminal chunk (possibly raised mid-
-                        # stream). Synthesize a terminal error.
-                        if error_holder:
-                            # Mid-decode exception. Yield a
-                            # terminal error chunk with empty
-                            # aggregates — server will surface as
-                            # StageError per Phase 3.x.8 contract.
-                            yield StreamingChunk(
-                                sequence_index=seq,
-                                text_delta="",
-                                finish_reason="error",
-                                full_output_text="",
-                                duration_seconds=0.0,
-                                tee_attestation=b"",
-                                tee_type=None,
-                                epsilon_spent=0.0,
-                            )
-                            return
-                        # Inner stream ended cleanly with no
-                        # chunks — nothing to forward (server
-                        # handles empty stream per Phase 3.x.8
-                        # contract).
+                        # Round-1 review H1 fix: inner runner
+                        # finished without emitting a terminal
+                        # chunk (raised mid-stream OR ran empty).
+                        # Either way, yield NOTHING — the server's
+                        # ``handle_token_stream`` exhausted-
+                        # without-terminal path surfaces
+                        # INTERNAL_ERROR cleanly. Synthesizing a
+                        # terminal-error chunk here would fail
+                        # the server's terminal-aggregate-fields
+                        # gate (we don't legitimately hold a
+                        # ``tee_type`` / ``tee_attestation`` to
+                        # populate) and result in a misattributed
+                        # StageError ("missing aggregate fields"
+                        # rather than the real cause).
                         return
                     if producer_done and inner_terminal is not None:
                         # Drain phase complete, queue empty.
@@ -384,9 +399,16 @@ class FixedRateStreamingRunner:
                 )
                 seq += 1
         finally:
-            # Generator close / exception unwound: signal the
-            # producer thread to stop. Daemon thread will die
-            # with the process if it's still iterating; we don't
-            # block here since the inner generator may not
-            # support clean cancellation.
-            pass
+            # Round-1 review M1 fix: signal the producer thread
+            # to stop iterating the inner generator. The
+            # producer's loop checks ``stop_event`` between
+            # iterations and exits + calls ``inner.close()``
+            # to release accelerator state promptly. We don't
+            # ``thread.join()`` here because the producer may
+            # be mid-blocking-call in ``inner.generate()`` (HF
+            # is sync); daemon-thread semantics handle process-
+            # level cleanup if the producer is stuck. For the
+            # common case (consumer iterates fully or cancels
+            # at a yield boundary), the producer wakes within
+            # one inner-iteration cycle and cleans up cleanly.
+            stop_event.set()
