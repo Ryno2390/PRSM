@@ -1065,6 +1065,23 @@ class LayerStageServer:
         Phase 3.x.10.y constant-time padding decorators don't
         cover; Phase 3.x.11.q deferred).
         """
+        # Phase 3.x.11.x Task 6 round-1 LOW-2 remediation:
+        # defensive guard against future-refactor seam-bugs.
+        # Caller (``_dispatch_streamed`` line 905-913) routes
+        # only PREFILL here; INCREMENTAL is rejected upstream.
+        # If a future caller wires INCREMENTAL into this path,
+        # the runner would attempt PREFILL semantics on a
+        # single-position INCREMENTAL input and produce wrong
+        # output. Enforce the contract at method entry.
+        if request.decode_mode != DecodeMode.PREFILL:
+            return self._streamed_error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                f"_dispatch_streamed_sharded invariant: caller "
+                f"must verify decode_mode=PREFILL upstream; got "
+                f"{request.decode_mode.value!r}",
+            )
+
         # Validation gates.
         gate_result = self._run_validation_gates(request)
         if gate_result.error is not None:
