@@ -889,29 +889,27 @@ class LayerStageServer:
     ) -> Tuple[bytes, Iterable[bytes]]:
         """Streamed-path body. Validation BEFORE chunk consumption so
         rejected requests don't pay assembly cost."""
-        # Phase 3.x.11 Task 9 round-1 M1 remediation: sharded decode
-        # is unary-only by design (design plan §3.4: "sharded decode
-        # does NOT use the streaming wire path. Each per-token
-        # dispatch is a unary RunLayerSliceRequest"). When a
-        # sharded_runner is wired, reject streamed requests with
-        # MALFORMED_REQUEST + a clear error message that points
-        # operators at the unary-only design + the deferred
-        # composition follow-up. Without this guard, a sharded
-        # operator whose activation crosses the inline threshold
-        # would silently route through the regular non-sharded
-        # path; the executor surfaces TAIL_TOKEN_MISSING with no
-        # hint that the cause is wrong-path-routing rather than
-        # tail-runner-not-tail-capable.
+        # Phase 3.x.11.x Task 3: sharded decode supports streamed
+        # PREFILL composition (the executor side allows chunked
+        # transport for PREFILL when enable_sharded_decode + the
+        # activation crosses the inline threshold). INCREMENTAL
+        # stays unary-only (single-position activations are tiny
+        # by construction; chunked INCREMENTAL is structurally
+        # pointless). Reject INCREMENTAL streamed requests when
+        # sharded_runner is wired; route PREFILL to the sharded
+        # streamed handler.
         if self._sharded_runner is not None:
+            if request.decode_mode == DecodeMode.PREFILL:
+                return self._dispatch_streamed_sharded(
+                    request, chunk_iter,
+                )
             return self._streamed_error(
                 request.request_id,
                 StageErrorCode.MALFORMED_REQUEST,
-                "sharded decode is unary-only (design plan §3.4); "
-                "streamed input is not yet supported on sharded "
-                "servers — chunked + sharded composition is a "
-                "Phase 3.x.11.x follow-up. Reduce activation size "
-                "below chunk_threshold_bytes or run on a non-sharded "
-                "server.",
+                "sharded INCREMENTAL is unary-only (design plan "
+                "§3.4); chunked transport is supported on PREFILL "
+                "only (Phase 3.x.11.x). Single-position INCREMENTAL "
+                "activations don't benefit from chunking.",
             )
         # Steps 2-6: shared validation gates (BEFORE consuming chunks).
         gate_result = self._run_validation_gates(request)
@@ -1023,6 +1021,206 @@ class LayerStageServer:
         # Encode each chunk as an ActivationChunk wire frame. Bind to
         # request.request_id (relay-defense — chunks can't be spliced
         # across streams).
+        response_chunk_frames: List[bytes] = []
+        for shard_chunk in chunked_out.chunks:
+            frame = ActivationChunk(
+                request_id=request.request_id,
+                sequence=shard_chunk.sequence,
+                data=shard_chunk.data,
+                chunk_sha256=shard_chunk.chunk_sha256,
+            )
+            response_chunk_frames.append(encode_message(frame))
+
+        return response_manifest_bytes, iter(response_chunk_frames)
+
+    # ── Phase 3.x.11.x sharded streamed dispatch ─────────────────────
+
+    def _dispatch_streamed_sharded(
+        self,
+        request: RunLayerSliceRequest,
+        chunk_iter: Iterable[bytes],
+    ) -> Tuple[bytes, Iterable[bytes]]:
+        """Phase 3.x.11.x — chunked + sharded PREFILL composition.
+
+        Mirrors ``_dispatch_streamed`` but routes to the sharded
+        runner. Caller (``_dispatch_streamed``) has already
+        verified ``self._sharded_runner is not None`` and
+        ``request.decode_mode == PREFILL`` — INCREMENTAL is
+        rejected upstream (single-position activations are tiny).
+
+        Reuses existing machinery:
+          - ``_run_validation_gates`` for token / deadline /
+            registry / shard / tier
+          - ``_validate_streamed_envelope`` for the
+            payload_bytes ceiling defence (Phase 3.x.7.1 H1+M1)
+          - ``_reassemble_inbound_chunks`` for bounded chunk
+            iteration
+          - ``reassemble_chunked`` for tensor reassembly
+          - ``chunk_activation`` for the response side
+          - ``RunLayerSliceResponse.sign`` with the Phase 3.x.11
+            ``next_token_id`` + ``is_terminal`` extension
+
+        Tier C structurally denied (mirrors ``_dispatch_sharded``;
+        sharded decode introduces a new timing surface that the
+        Phase 3.x.10.y constant-time padding decorators don't
+        cover; Phase 3.x.11.q deferred).
+        """
+        # Validation gates.
+        gate_result = self._run_validation_gates(request)
+        if gate_result.error is not None:
+            return self._streamed_error(
+                request.request_id,
+                gate_result.error[0], gate_result.error[1],
+            )
+
+        # Tier C structural deny (mirrors _dispatch_sharded line
+        # 783-789).
+        from prsm.compute.inference.content_tier_gate import ContentTier
+        if request.content_tier == ContentTier.C:
+            return self._streamed_error(
+                request.request_id,
+                StageErrorCode.TIER_GATE,
+                "sharded decode does not yet support Tier C "
+                "(per-token wire dispatch creates a new timing "
+                "surface; see Phase 3.x.11.q honest scope)",
+            )
+
+        # Envelope validation BEFORE chunk consumption (Phase
+        # 3.x.7.1 H1+M1 round-1 remediation — defends against
+        # hostile peers shipping inflated payload_bytes).
+        envelope_err = self._validate_streamed_envelope(request)
+        if envelope_err is not None:
+            return self._streamed_error(
+                request.request_id, envelope_err[0], envelope_err[1],
+            )
+
+        # Reassemble chunks → activation tensor.
+        try:
+            shard_chunks = self._reassemble_inbound_chunks(
+                chunk_iter,
+                expected_request_id=request.request_id,
+                manifest_shard_id=request.activation_manifest.shard_id,
+                expected_total_chunks=(
+                    request.activation_manifest.total_chunks
+                ),
+            )
+        except ActivationCodecError as exc:
+            return self._streamed_error(
+                request.request_id,
+                StageErrorCode.ACTIVATION_INVALID,
+                f"sharded streamed input chunk parse failed: {exc}",
+            )
+
+        from prsm.compute.chain_rpc.activation_codec import (
+            ChunkedActivation as _CA,
+        )
+        chunked_in = _CA(
+            manifest=request.activation_manifest,
+            chunks=shard_chunks,
+            shape=request.activation_shape,
+            dtype_str=request.activation_dtype,
+        )
+        try:
+            activation = reassemble_chunked(
+                chunked_in, chunks=shard_chunks,
+            )
+        except ActivationCodecError as exc:
+            return self._streamed_error(
+                request.request_id,
+                StageErrorCode.ACTIVATION_INVALID,
+                f"sharded streamed input reassembly failed: {exc}",
+            )
+
+        # Tail role inferred from the handoff token (settler-signed
+        # so non-forgeable). Mirrors _dispatch_sharded line 808-811.
+        token = request.upstream_token
+        is_final_stage = (
+            token.chain_stage_index == token.chain_total_stages - 1
+        )
+
+        # Run the sharded forward.
+        start_ts = self._clock()
+        try:
+            result = self._sharded_runner.run_layer_slice_unary(
+                activation_or_input_ids=(
+                    activation.tolist()
+                    if activation.dtype.kind in ("i", "u")
+                    else activation
+                ),
+                request_id=request.request_id,
+                decode_mode=request.decode_mode,
+                is_final_stage=is_final_stage,
+                request=request,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "LayerStageServer._dispatch_streamed_sharded: runner "
+                "raised for request_id=%r",
+                request.request_id,
+            )
+            if exc.__class__.__name__ == "MalformedCacheStateError":
+                return self._streamed_error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    str(exc),
+                )
+            return self._streamed_error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                f"sharded streamed runner raised: "
+                f"{exc.__class__.__name__}: {exc}",
+            )
+
+        # Chunk the boundary hidden state for streaming back.
+        # Streamed-request → streamed-response invariant carries
+        # forward (matches _dispatch_streamed line 980-981).
+        try:
+            chunked_out = chunk_activation(
+                result.hidden_state,
+                activation_id=f"{request.request_id}::resp",
+                chunk_bytes=self._chunk_bytes,
+            )
+        except ActivationCodecError as exc:
+            return self._streamed_error(
+                request.request_id,
+                StageErrorCode.ACTIVATION_INVALID,
+                f"sharded streamed output encode failed: {exc}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "LayerStageServer._dispatch_streamed_sharded: output "
+                "encode failed for request_id=%r",
+                request.request_id,
+            )
+            return self._streamed_error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                f"sharded streamed output encode failure: "
+                f"{exc.__class__.__name__}",
+            )
+
+        # Sign + emit. Signing payload commits to manifest.payload_sha256
+        # (v2 conditional encoding) AND to next_token_id + is_terminal
+        # (Phase 3.x.11 Task 5 critical fix).
+        duration = self._clock() - start_ts
+        tee_attestation = self._tee_runtime.get_attestation_bytes()
+        response = RunLayerSliceResponse.sign(
+            identity=self._identity,
+            request_id=request.request_id,
+            activation_blob=b"",
+            activation_shape=chunked_out.shape,
+            activation_dtype=chunked_out.dtype_str,
+            duration_seconds=float(duration),
+            tee_attestation=tee_attestation,
+            tee_type=self._tee_runtime.tee_type,
+            epsilon_spent=0.0,
+            activation_manifest=chunked_out.manifest,
+            next_token_id=result.next_token_id,
+            is_terminal=result.is_terminal,
+        )
+        response_manifest_bytes = encode_message(response)
+
+        # Encode each output chunk as an ActivationChunk wire frame.
         response_chunk_frames: List[bytes] = []
         for shard_chunk in chunked_out.chunks:
             frame = ActivationChunk(
