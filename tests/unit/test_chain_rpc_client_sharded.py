@@ -36,6 +36,8 @@ from prsm.compute.chain_rpc.client import (
 )
 from prsm.compute.chain_rpc.protocol import (
     DecodeMode,
+    EvictCacheRequest,
+    EvictCacheResponse,
     RunLayerSliceRequest,
     RunLayerSliceResponse,
     encode_message,
@@ -189,12 +191,25 @@ class _ShardedTransport:
 
 
 class _EvictionLog:
-    def __init__(self) -> None:
+    """Records every broadcast call. Returns a parsed
+    ``EvictCacheResponse(evicted=True)`` ack so the executor's
+    ack-parsing path is exercised."""
+
+    def __init__(self, *, evicted: bool = True) -> None:
         self.calls: List[Tuple[str, bytes]] = []
+        self._evicted = evicted
 
     def __call__(self, address: str, payload: bytes) -> bytes:
         self.calls.append((address, payload))
-        return b""
+        # Parse the broadcast envelope so the test can verify
+        # the executor sent a real ``EvictCacheRequest``.
+        msg = parse_message(payload)
+        assert isinstance(msg, EvictCacheRequest)
+        return encode_message(
+            EvictCacheResponse(
+                request_id=msg.request_id, evicted=self._evicted,
+            )
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -661,12 +676,13 @@ class TestShardedCancellation:
         next(gen)
         next(gen)
         gen.close()
-        # Eviction broadcast: both stages got an evict call with
-        # request_id payload.
+        # Eviction broadcast: both stages got an evict call.
         addresses = sorted(call[0] for call in evict.calls)
         assert addresses == sorted([alice.node_id, bob.node_id])
         for _, payload in evict.calls:
-            assert payload == b"req-1"
+            msg = parse_message(payload)
+            assert isinstance(msg, EvictCacheRequest)
+            assert msg.request_id == "req-1"
 
     def test_terminal_completion_also_triggers_eviction_broadcast(self):
         # Eviction is on EVERY exit path — natural completion
@@ -691,7 +707,11 @@ class TestShardedCancellation:
             request=_make_request("p", max_tokens=5), chain=chain,
         ))
         assert len(evict.calls) == 1
-        assert evict.calls[0] == (alice.node_id, b"req-1")
+        addr, payload = evict.calls[0]
+        assert addr == alice.node_id
+        msg = parse_message(payload)
+        assert isinstance(msg, EvictCacheRequest)
+        assert msg.request_id == "req-1"
 
     def test_no_eviction_wire_no_op_no_raise(self):
         # cache_evict_send_message=None → eviction is a silent

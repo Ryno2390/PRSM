@@ -72,6 +72,8 @@ from prsm.compute.chain_rpc.protocol import (
     ChainRpcUnknownTypeError,
     ChainRpcVersionMismatchError,
     DecodeMode,
+    EvictCacheRequest,
+    EvictCacheResponse,
     HandoffToken,
     RunLayerSliceRequest,
     RunLayerSliceResponse,
@@ -964,21 +966,62 @@ class RpcChainExecutor:
         chain: GPUChain,
         request_id: str,
     ) -> None:
-        """Best-effort eviction broadcast. Task 6 wires the
-        ``EvictCacheRequest`` wire message; until then, the
-        callable receives ``(address, request_id)`` so operators
-        can wire a custom transport (e.g., reuse ``send_message``
-        with a synthetic envelope) until Task 6 lands.
+        """Best-effort eviction broadcast. Encodes an
+        ``EvictCacheRequest`` (Phase 3.x.11 Task 6 wire message)
+        and sends it via ``cache_evict_send_message`` to every
+        chain stage. Server-side handler routes to
+        ``KVCacheManager.evict``; the ack is parsed for logging
+        but the executor doesn't fail the main flow on bad acks.
 
         Never raises — eviction is best-effort by design (server-
-        side TTL sweeper bounds the leak window).
+        side TTL sweeper bounds the leak window if a broadcast
+        misses; the manager is idempotent so duplicate broadcasts
+        from retried close paths are safe).
         """
         if self._cache_evict_send is None:
+            return
+        try:
+            evict_request_bytes = encode_message(
+                EvictCacheRequest(request_id=request_id),
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Encoding shouldn't realistically fail (request_id is
+            # already validated upstream), but if it does, we
+            # can't broadcast — fall back to TTL.
+            logger.warning(
+                "RpcChainExecutor: failed to encode EvictCacheRequest "
+                "for request_id=%r: %s: %s — relying on server-side "
+                "TTL sweeper",
+                request_id, exc.__class__.__name__, exc,
+            )
             return
         for stage_node_id in chain.stages:
             try:
                 address = self._resolve_address(stage_node_id)
-                self._cache_evict_send(address, request_id.encode("utf-8"))
+                response_bytes = self._cache_evict_send(
+                    address, evict_request_bytes,
+                )
+                # Parse the ack opportunistically. A None /
+                # empty / mis-shaped response is logged but
+                # doesn't fail the broadcast.
+                if response_bytes:
+                    try:
+                        ack = parse_message(response_bytes)
+                        if not isinstance(ack, EvictCacheResponse):
+                            logger.warning(
+                                "RpcChainExecutor: stage_node_id=%r "
+                                "returned non-EvictCacheResponse to "
+                                "eviction broadcast (%s) — TTL sweeper "
+                                "will close the gap",
+                                stage_node_id,
+                                type(ack).__name__,
+                            )
+                    except ChainRpcProtocolError as exc:
+                        logger.warning(
+                            "RpcChainExecutor: stage_node_id=%r "
+                            "eviction ack failed to parse: %s",
+                            stage_node_id, exc,
+                        )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "RpcChainExecutor: cache eviction broadcast to "

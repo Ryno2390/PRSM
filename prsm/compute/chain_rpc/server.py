@@ -46,12 +46,15 @@ from prsm.compute.chain_rpc.activation_codec import (
     encode_activation,
     reassemble_chunked,
 )
+from prsm.compute.chain_rpc.kv_cache import KVCacheManager
 from prsm.compute.chain_rpc.protocol import (
     ActivationChunk,
     ChainRpcMalformedError,
     ChainRpcProtocolError,
     ChainRpcUnknownTypeError,
     ChainRpcVersionMismatchError,
+    EvictCacheRequest,
+    EvictCacheResponse,
     HandoffToken,
     RunLayerSliceRequest,
     RunLayerSliceResponse,
@@ -244,6 +247,7 @@ class LayerStageServer:
         tier_c_streaming_decorator: Optional[
             Callable[[Any], Any]
         ] = None,
+        kv_cache_manager: Optional[KVCacheManager] = None,
     ) -> None:
         if identity is None or not hasattr(identity, "node_id"):
             raise RuntimeError(
@@ -310,6 +314,20 @@ class LayerStageServer:
                 "LayerStageServer: tier_c_streaming_decorator must "
                 "be callable if provided"
             )
+        # Phase 3.x.11 — kv_cache_manager is opt-in. When wired,
+        # the server handles EvictCacheRequest by routing to
+        # ``manager.evict``; when None, EvictCacheRequests are
+        # rejected with INTERNAL_ERROR (operator must wire the
+        # manager + the sharded-decode tail-runner together at
+        # node startup).
+        if (
+            kv_cache_manager is not None
+            and not isinstance(kv_cache_manager, KVCacheManager)
+        ):
+            raise RuntimeError(
+                "LayerStageServer: kv_cache_manager must be a "
+                "KVCacheManager instance if provided"
+            )
 
         self._identity = identity
         self._registry = registry
@@ -321,6 +339,7 @@ class LayerStageServer:
         self._max_streamed_payload_bytes = int(max_streamed_payload_bytes)
         self._streaming_runner = streaming_runner
         self._tier_c_streaming_decorator = tier_c_streaming_decorator
+        self._kv_cache_manager = kv_cache_manager
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -359,6 +378,25 @@ class LayerStageServer:
                 StageErrorCode.INTERNAL_ERROR,
                 f"internal error during parse: {exc.__class__.__name__}",
             )
+
+        # Phase 3.x.11 Task 6: EvictCacheRequest is a separate
+        # cache-management op that doesn't run through the
+        # normal layer-slice dispatch.
+        if isinstance(request, EvictCacheRequest):
+            try:
+                return self._handle_evict_cache(request)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "LayerStageServer.handle: unexpected eviction "
+                    "failure for request_id=%r",
+                    request.request_id,
+                )
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.INTERNAL_ERROR,
+                    f"internal error during evict_cache: "
+                    f"{exc.__class__.__name__}",
+                )
 
         if not isinstance(request, RunLayerSliceRequest):
             return self._error(
@@ -1416,6 +1454,33 @@ class LayerStageServer:
                 request_id=request_id or _UNKNOWN_REQUEST_ID,
                 code=code.value,
                 message=message,
+            )
+        )
+
+    # ── Phase 3.x.11 — KV-cache eviction handler ─────────────────────
+
+    def _handle_evict_cache(self, request: EvictCacheRequest) -> bytes:
+        """Route an ``EvictCacheRequest`` to the bound
+        ``KVCacheManager``. Returns an ``EvictCacheResponse``
+        with ``evicted=True/False``.
+
+        When ``kv_cache_manager`` was not wired at construction,
+        rejects with ``INTERNAL_ERROR`` — the server can't honor
+        sharded-decode eviction without a cache lifecycle owner.
+        """
+        if self._kv_cache_manager is None:
+            return self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                "evict_cache: server has no kv_cache_manager wired "
+                "(operator must pass kv_cache_manager= when sharded "
+                "decode is enabled)",
+            )
+        evicted = self._kv_cache_manager.evict(request.request_id)
+        return encode_message(
+            EvictCacheResponse(
+                request_id=request.request_id,
+                evicted=bool(evicted),
             )
         )
 

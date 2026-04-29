@@ -109,6 +109,9 @@ class ChainRpcMessageType(str, Enum):
     # Phase 3.x.8 — streaming-token output (additive on protocol v2):
     TOKEN_FRAME = "token_frame"  # incremental token output from tail stage
     STREAM_FINAL_FRAME = "stream_final_frame"  # terminal frame; embeds signed response
+    # Phase 3.x.11 — sharded-decode KV-cache eviction signal:
+    EVICT_CACHE_REQUEST = "evict_cache_request"  # executor → stage broadcast on terminal/cancel
+    EVICT_CACHE_RESPONSE = "evict_cache_response"  # stage → executor ack
 
 
 class DecodeMode(str, Enum):
@@ -1487,6 +1490,111 @@ class StreamFinalFrame:
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11 — KV-cache eviction signal
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class EvictCacheRequest:
+    """Phase 3.x.11 — executor → stage broadcast.
+
+    Sent on every terminal exit path of
+    ``RpcChainExecutor._execute_chain_streaming_sharded``
+    (natural completion, EOS, max_tokens cap, GeneratorExit
+    cancellation, exception). Best-effort delivery — server-side
+    TTL sweeper bounds the leak window if a broadcast misses
+    (e.g., stage temporarily unreachable, executor crash).
+
+    Wire: a single ``request_id`` payload. No signature — the
+    eviction signal is non-load-bearing for correctness (the
+    server-side TTL sweeper closes the same hole eventually).
+    Operators wanting cryptographic eviction proof wire a
+    pre-shared HMAC at the transport layer (out of v1 scope).
+
+    The handler at the server side calls
+    ``KVCacheManager.evict(request_id)`` which is idempotent —
+    duplicate broadcasts (e.g., from retried executor close) are
+    safe.
+    """
+
+    request_id: str
+    protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = ChainRpcMessageType.EVICT_CACHE_REQUEST.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        _validate_version(self.protocol_version)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "EvictCacheRequest":
+        _expect_type(data, ChainRpcMessageType.EVICT_CACHE_REQUEST)
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+@dataclass(frozen=True)
+class EvictCacheResponse:
+    """Phase 3.x.11 — stage → executor ack for ``EvictCacheRequest``.
+
+    ``evicted=True`` indicates the manager actually had a handle
+    for ``request_id`` and dropped it; ``evicted=False`` means
+    the no-op idempotent path (e.g., handle was already evicted
+    by TTL sweeper before the executor's broadcast arrived).
+
+    Operators may surface ``evicted=False`` rates as a metric to
+    detect misbehaving cache lifecycles; the executor itself
+    treats both responses as success.
+    """
+
+    request_id: str
+    evicted: bool
+    protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = ChainRpcMessageType.EVICT_CACHE_RESPONSE.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        if not isinstance(self.evicted, bool):
+            raise ChainRpcMalformedError(
+                f"evicted must be bool, got "
+                f"{type(self.evicted).__name__}"
+            )
+        _validate_version(self.protocol_version)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+            "evicted": self.evicted,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "EvictCacheResponse":
+        _expect_type(data, ChainRpcMessageType.EVICT_CACHE_RESPONSE)
+        evicted_raw = data.get("evicted")
+        if not isinstance(evicted_raw, bool):
+            raise ChainRpcMalformedError(
+                f"evicted must be bool, got {type(evicted_raw).__name__}"
+            )
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            evicted=evicted_raw,
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Codec
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -1498,6 +1606,8 @@ _MESSAGE_TYPE_REGISTRY: Dict[str, Callable[[Dict[str, Any]], Any]] = {
     ChainRpcMessageType.ACTIVATION_CHUNK.value: ActivationChunk.from_dict,
     ChainRpcMessageType.TOKEN_FRAME.value: TokenFrame.from_dict,
     ChainRpcMessageType.STREAM_FINAL_FRAME.value: StreamFinalFrame.from_dict,
+    ChainRpcMessageType.EVICT_CACHE_REQUEST.value: EvictCacheRequest.from_dict,
+    ChainRpcMessageType.EVICT_CACHE_RESPONSE.value: EvictCacheResponse.from_dict,
 }
 
 
