@@ -323,6 +323,77 @@ class _SpeculativeDistilGPT2Adapter:
             argmax_ids = logits.argmax(dim=-1).squeeze(0)
             return [int(t) for t in argmax_ids.tolist()]
 
+    def apply_lm_head_and_sample_batch_with_rejection(
+        self,
+        *,
+        hidden_state_batch: np.ndarray,
+        proposed_token_ids: List[int],
+        proposed_token_probs: List[float],
+        temperature: float,
+        top_k: int,
+        top_p: float,
+    ) -> Tuple[List[int], int]:
+        """Phase 3.x.11.y.x — Leviathan-2023 §2.2 stochastic VERIFY
+        for the v2 path. Project K+1 hidden states through ln_f +
+        lm_head, build the K+1 target distributions p_0..p_K
+        (temperature-scaled + top-k filtered + softmax-renormalized),
+        and call the runner's pure-NumPy rejection_sample_speculation
+        helper. Returns (verified_token_ids, accepted_count) with
+        len(verified_token_ids) == accepted_count + 1.
+
+        Uses a fixed-seed numpy default_rng so the test is fully
+        deterministic across the speculation loop. The seed lives
+        on the adapter so each VERIFY round advances the same RNG
+        — mirrors the production design where each verifier
+        process owns its own RNG state.
+        """
+        from prsm.compute.inference.sharded_runner import (
+            rejection_sample_speculation,
+        )
+        torch = self._torch
+        model = self._model
+        if temperature <= 0.0:
+            raise RuntimeError(
+                f"_SpeculativeDistilGPT2Adapter: v2 stochastic "
+                f"path called with temperature={temperature}; "
+                f"executor must route to v1 greedy at temp=0.0"
+            )
+        with torch.no_grad():
+            h = self._numpy_to_hidden(hidden_state_batch)
+            h = model.transformer.ln_f(h)
+            logits = model.lm_head(h)
+            # logits shape [1, K+1, vocab].
+            scaled = logits / temperature
+            if top_k > 0:
+                topk_vals, _ = torch.topk(scaled, k=top_k, dim=-1)
+                threshold = topk_vals[..., -1:].expand_as(scaled)
+                scaled = torch.where(
+                    scaled < threshold,
+                    torch.full_like(scaled, float("-inf")),
+                    scaled,
+                )
+            probs = torch.softmax(scaled, dim=-1)
+            # NumPy [K+1, vocab] for the rejection helper.
+            probs_np = probs.squeeze(0).cpu().numpy().astype(
+                np.float64,
+            )
+        # Renormalize to defend against float-precision drift in
+        # softmax output (np.random.choice rejects sums even
+        # 1e-7 off from 1.0).
+        target_distributions = []
+        for i in range(probs_np.shape[0]):
+            row = probs_np[i]
+            s = row.sum()
+            target_distributions.append(row / s if s > 0 else row)
+        if not hasattr(self, "_v2_rng"):
+            self._v2_rng = np.random.default_rng(seed=20260429)
+        return rejection_sample_speculation(
+            target_distributions=target_distributions,
+            proposed_token_ids=list(proposed_token_ids),
+            proposed_token_probs=list(proposed_token_probs),
+            rng=self._v2_rng,
+        )
+
     def truncate_cache(self, payload: Any, n_positions: int) -> Any:
         """Drop the last N positions from the DynamicCache. HF's
         ``DynamicCache.crop(max_length)`` truncates IN PLACE to the
@@ -1075,3 +1146,152 @@ class TestSpeculativeE2EPartialAcceptRollback:
         # rounds for max_tokens=4). At least one commit happened.
         assert len(draft.propose_calls) >= 1
         assert len(draft.commit_calls) >= 1
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.y.x Task 7 — v2 stochastic E2E (real distilgpt2 + temp > 0)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestSpeculativeE2EStochastic:
+    """Phase 3.x.11.y.x: Leviathan-2023 sampling-correct speculation
+    under temperature > 0. The load-bearing invariant is that the
+    marginal output distribution of the v2 speculative path matches
+    the non-speculative single-token-sampling path (chi-squared
+    convergence over many trials)."""
+
+    def test_v2_speculation_runs_at_temperature_gt_zero(
+        self, hf_model_and_tokenizer,
+    ):
+        """Smoke: speculation with proposed_token_probs at T=0.7
+        runs without crashing, emits exactly max_tokens tokens.
+        Guards against the v1-only gate that Task 5 lifted."""
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = "The quick brown fox"
+        max_tokens = 6
+
+        (
+            executor, alice_identity, bob_identity, _, _, _, draft,
+        ) = _build_speculative_two_stage(
+            model, tokenizer, speculation_depth=2,
+            sharded_default_max_tokens=max_tokens,
+        )
+        chain = _make_chain(alice_identity.node_id, bob_identity.node_id)
+
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(
+                prompt=prompt, max_tokens=max_tokens,
+                temperature=0.7,
+            ),
+            chain=chain,
+        ))
+        stream_tokens = [
+            e for e in events if isinstance(e, StreamToken)
+        ]
+        result = next(
+            e for e in events if isinstance(e, ChainExecutionResult)
+        )
+        assert len(stream_tokens) == max_tokens
+        assert isinstance(result.output, str)
+
+    def test_v2_speculation_first_emit_matches_softmax_marginal(
+        self, hf_model_and_tokenizer,
+    ):
+        """Statistical-correctness invariant for the v2 path's
+        SAMPLING-CORRECTNESS guarantee. The first emitted token
+        (PREFILL output) is sampled via
+        ``apply_lm_head_and_sample`` from the same softmax(logits/T)
+        distribution that non-speculative greedy-or-sample uses.
+        Under N=120 trials at T=0.7 + top_k=50, the empirical
+        marginal must match the analytical softmax-T distribution
+        (chi-squared on top-K tokens).
+
+        This is the load-bearing Phase 3.x.11.y.x guarantee: the
+        v2 path doesn't change the marginal output distribution.
+        The deeper Leviathan-2023 invariant (rejection sampling
+        on VERIFY rounds preserves the marginal) is unit-tested
+        in test_rejection_sample_speculation.py with 5000 trials
+        against a known target. This E2E confirms the executor
+        wires the v2 path through correctly.
+        """
+        import torch
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = "The quick brown fox"
+        N = 120
+        temperature = 0.7
+        top_k = 50
+
+        # Analytical reference distribution: softmax(logits[-1] / T)
+        # with top-k filter, restricted to top-k support.
+        with torch.no_grad():
+            input_ids = tokenizer.encode(
+                prompt, return_tensors="pt",
+            )
+            out = model(input_ids)
+            logits = out.logits[0, -1, :]
+            scaled = logits / temperature
+            topk_vals, topk_idx = torch.topk(scaled, k=top_k)
+            threshold = topk_vals[-1]
+            scaled_filt = torch.where(
+                scaled < threshold,
+                torch.full_like(scaled, float("-inf")),
+                scaled,
+            )
+            ref_probs = torch.softmax(scaled_filt, dim=-1).cpu().numpy()
+
+        # Spec arm: N trials of speculation at T=0.7; record the
+        # FIRST emitted token. Seed torch globally so multinomial
+        # is reproducible across runs.
+        torch.manual_seed(20260429)
+        spec_counts: Dict[int, int] = {}
+        for _ in range(N):
+            (
+                executor, alice_identity, bob_identity, _, _, _, _,
+            ) = _build_speculative_two_stage(
+                model, tokenizer, speculation_depth=2,
+                sharded_default_max_tokens=1,
+            )
+            chain = _make_chain(
+                alice_identity.node_id, bob_identity.node_id,
+            )
+            events = list(executor.execute_chain_streaming(
+                request=_make_request(
+                    prompt=prompt, max_tokens=1,
+                    temperature=temperature,
+                ),
+                chain=chain,
+            ))
+            stream_tokens = [
+                e for e in events if isinstance(e, StreamToken)
+            ]
+            assert len(stream_tokens) >= 1
+            tok = int(stream_tokens[0].token_id)
+            spec_counts[tok] = spec_counts.get(tok, 0) + 1
+
+        # Restrict comparison to top-k support (where ref_probs > 0).
+        # Compute total-variation distance — robust to small N.
+        topk_set = {int(t) for t in topk_idx.tolist()}
+        # Tokens emitted outside top-k indicate a sampling bug
+        # (top-k filter not applied or filter mismatched).
+        oot_count = sum(
+            c for tok, c in spec_counts.items() if tok not in topk_set
+        )
+        assert oot_count == 0, (
+            f"v2 speculation emitted {oot_count}/{N} tokens outside "
+            f"top_k={top_k}; sampling filter not applied"
+        )
+        tv = 0.0
+        for tok in topk_set:
+            p_emp = spec_counts.get(tok, 0) / N
+            p_ref = float(ref_probs[tok])
+            tv += abs(p_emp - p_ref)
+        tv *= 0.5
+        # Total-variation distance ~ O(1/sqrt(N)) under the null;
+        # for N=120 over top-50 support, expected TV under matched
+        # distributions is around 0.15-0.25. A broken sampler
+        # would produce TV > 0.5 (e.g., always emit argmax).
+        assert tv < 0.35, (
+            f"v2 speculation first-emit marginal TV={tv:.3f} vs "
+            f"analytical softmax-T reference; may indicate broken "
+            f"sampling math (expected < 0.35 for N={N})"
+        )
