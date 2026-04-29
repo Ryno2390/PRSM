@@ -101,6 +101,7 @@ _LAZY_STREAMING_NAMES = frozenset({
     "SamplingDefaults",
     "make_autoregressive_streaming_runner",
     "BatchedTrailingStreamingRunner",
+    "FixedRateStreamingRunner",
 })
 
 
@@ -137,6 +138,7 @@ def __getattr__(name: str):
         )
         from prsm.compute.inference.tier_c_decorators import (
             BatchedTrailingStreamingRunner,
+            FixedRateStreamingRunner,
         )
         attrs = {
             "StreamingChunk": StreamingChunk,
@@ -151,6 +153,7 @@ def __getattr__(name: str):
             "BatchedTrailingStreamingRunner": (
                 BatchedTrailingStreamingRunner
             ),
+            "FixedRateStreamingRunner": FixedRateStreamingRunner,
         }
         return attrs[name]
     raise AttributeError(
@@ -215,6 +218,7 @@ __all__ = [
     "make_autoregressive_streaming_runner",
     # Phase 3.x.10.y — Tier C constant-time padding decorators
     "BatchedTrailingStreamingRunner",
+    "FixedRateStreamingRunner",
     # Exceptions
     "InferenceExecutorError",
     "InsufficientBudgetError",
