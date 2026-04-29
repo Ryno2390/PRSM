@@ -729,6 +729,25 @@ class RunLayerSliceRequest:
         # MAX_VERIFY_BATCH_TOKENS - 1 (K drafts → K+1 verified;
         # K cap matches the response-side verified-len cap minus
         # the +1 verifier output).
+        # Phase 3.x.11.y Task 9 round-1 MEDIUM-1 remediation:
+        # symmetric co-set requirement. VERIFY mode REQUIRES
+        # proposed_token_ids to be set (closes the asymmetry
+        # where a malformed peer could send VERIFY without
+        # drafts; the runner caught it on tail-only via
+        # _sample_tail_verify but non-tail stages would have
+        # processed the K+1 batch silently). Mirrors the
+        # response-side verified_token_ids ⇔ accepted_count
+        # co-set invariant.
+        if (
+            self.decode_mode == DecodeMode.VERIFY
+            and self.proposed_token_ids is None
+        ):
+            raise ChainRpcMalformedError(
+                "decode_mode=VERIFY requires proposed_token_ids "
+                "to be set (the executor's speculation loop "
+                "carries the K draft tokens for accepted_count "
+                "comparison)"
+            )
         if self.proposed_token_ids is not None:
             if self.decode_mode != DecodeMode.VERIFY:
                 raise ChainRpcMalformedError(
@@ -1242,10 +1261,24 @@ class RunLayerSliceResponse:
         # Co-set invariant enforced at __post_init__; here
         # both keys are added together.
         if verified_token_ids is not None:
+            # Round-1 MEDIUM-3 remediation: defend against a
+            # caller passing verified_token_ids without
+            # accepted_count via the staticmethod entry. The
+            # __post_init__ co-set invariant catches this on
+            # dataclass construction; the staticmethod is also
+            # callable directly by ``verify_with_anchor``, so
+            # we explicitly raise here instead of silently
+            # coercing ``None or 0 → 0``.
+            if accepted_count is None:
+                raise ChainRpcMalformedError(
+                    "RunLayerSliceResponse.signing_payload: "
+                    "verified_token_ids is set but accepted_count "
+                    "is None — both must be co-set"
+                )
             payload["verified_token_ids"] = [
                 int(t) for t in verified_token_ids
             ]
-            payload["accepted_count"] = int(accepted_count or 0)
+            payload["accepted_count"] = int(accepted_count)
         return json.dumps(payload, sort_keys=True).encode("utf-8")
 
     @classmethod
@@ -1415,10 +1448,16 @@ class RunLayerSliceResponse:
         # identical wire bytes with pre-3.x.11.y. Co-set
         # invariant enforced by __post_init__.
         if self.verified_token_ids is not None:
+            # Round-1 MEDIUM-3 remediation: __post_init__ co-set
+            # invariant guarantees ``accepted_count is not None``
+            # whenever verified_token_ids is set. Use direct
+            # int() to make the invariant explicit (the prior
+            # ``self.accepted_count or 0`` silently masked an
+            # invalid state).
             out["verified_token_ids"] = [
                 int(t) for t in self.verified_token_ids
             ]
-            out["accepted_count"] = int(self.accepted_count or 0)
+            out["accepted_count"] = int(self.accepted_count)
         return out
 
     @classmethod

@@ -1174,11 +1174,23 @@ class RpcChainExecutor:
                 # against max_tokens — if we'd overshoot, truncate
                 # the emit + flag terminal; the rollback below
                 # accounts for the truncation.
+                # Round-1 MEDIUM-2 remediation: split the
+                # cap-bound check (>=, terminates the loop) from
+                # the actual-truncation flag (>, drives
+                # finish_reason="max_tokens"). At exact-cap-hit
+                # (==), the natural "stop" path applies if the
+                # chain flagged terminal; otherwise "max_tokens"
+                # is still the correct semantic since we're at
+                # the cap. ``cap_hit_mid_emit`` only fires when
+                # we ACTUALLY truncated the emitted slice.
                 emitted = list(verified[: accepted_count + 1])
                 cap_hit_mid_emit = False
-                if tokens_emitted + len(emitted) >= max_tokens:
+                if tokens_emitted + len(emitted) > max_tokens:
                     emitted = emitted[: max_tokens - tokens_emitted]
                     cap_hit_mid_emit = True
+                cap_reached = (
+                    tokens_emitted + len(emitted) >= max_tokens
+                )
                 for tok in emitted:
                     text_delta = self._decode_token_to_text(tok)
                     output_text_parts.append(text_delta)
@@ -1189,7 +1201,7 @@ class RpcChainExecutor:
                     ):
                         finish = "stop"
                     elif (
-                        cap_hit_mid_emit
+                        cap_reached
                         and tok == emitted[-1]
                     ):
                         finish = "max_tokens"
@@ -1231,7 +1243,7 @@ class RpcChainExecutor:
                 # iff EOS in emitted OR tokens_generated reached
                 # max_tokens server-side. We also enforce the
                 # client-side cap.
-                if cap_hit_mid_emit or tokens_emitted >= max_tokens:
+                if cap_reached:
                     is_terminal = True
                 elif chain_terminal:
                     is_terminal = True
@@ -1239,7 +1251,7 @@ class RpcChainExecutor:
                     # Continue speculation with the LAST emitted
                     # token as parent (= verified[accepted_count]
                     # in the no-cap case; = the truncated last in
-                    # cap_hit case but cap_hit terminates anyway).
+                    # cap_hit case but cap_reached terminates anyway).
                     next_token_id = int(emitted[-1])
 
             # Step 3: emit ChainExecutionResult.

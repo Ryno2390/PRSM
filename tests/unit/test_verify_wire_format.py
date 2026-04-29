@@ -56,6 +56,7 @@ def _make_request(
     *,
     settler,
     decode_mode: DecodeMode = DecodeMode.PREFILL,
+    proposed_token_ids=None,
 ) -> RunLayerSliceRequest:
     token = HandoffToken.sign(
         identity=settler,
@@ -64,6 +65,16 @@ def _make_request(
         chain_total_stages=1,
         deadline_unix=2000.0,
     )
+    # Round-1 MEDIUM-1: VERIFY now requires proposed_token_ids
+    # at the protocol layer (symmetric with response-side
+    # verified_token_ids ⇔ accepted_count co-set invariant).
+    # Tests defaulting to VERIFY mode synthesize a minimal
+    # K=1 proposed list.
+    if (
+        decode_mode == DecodeMode.VERIFY
+        and proposed_token_ids is None
+    ):
+        proposed_token_ids = (42,)
     return RunLayerSliceRequest(
         request_id="req-1",
         model_id="test-model",
@@ -76,6 +87,7 @@ def _make_request(
         upstream_token=token,
         deadline_unix=2000.0,
         decode_mode=decode_mode,
+        proposed_token_ids=proposed_token_ids,
     )
 
 

@@ -519,6 +519,14 @@ class ShardedAutoregressiveRunner:
                 layer_range=self._layer_range,
             )
             handle.payload = payload
+            # Phase 3.x.11.y Task 9 round-1 HIGH-1 remediation:
+            # bump cached_positions on EVERY successful forward
+            # (tail or non-tail). Without this, rollback against
+            # a non-tail handle silently no-ops and the cache
+            # grows unbounded with rejected speculative suffixes.
+            handle.cached_positions += self._input_n_positions(
+                activation_or_input_ids,
+            )
         elif decode_mode == DecodeMode.INCREMENTAL:
             handle = self._cache.get(request_id)
             if handle is None:
@@ -535,6 +543,8 @@ class ShardedAutoregressiveRunner:
                 kv_cache_payload=handle.payload,
             )
             handle.payload = updated_payload
+            # INCREMENTAL: single-position forward → +1 cached.
+            handle.cached_positions += 1
         else:
             # VERIFY — Phase 3.x.11.y
             handle = self._cache.get(request_id)
@@ -573,6 +583,8 @@ class ShardedAutoregressiveRunner:
                 kv_cache_payload=handle.payload,
             )
             handle.payload = updated_payload
+            # VERIFY: K+1 positions appended to cache.
+            handle.cached_positions += n_positions
 
         next_token_id: Optional[int] = None
         is_terminal = False
@@ -628,6 +640,36 @@ class ShardedAutoregressiveRunner:
             )
         # [K+1, hidden] or [1, K+1, hidden] — K+1 is always the
         # second-to-last axis (per the streaming runner convention).
+        return int(arr.shape[-2])
+
+    @staticmethod
+    def _input_n_positions(
+        activation_or_input_ids: Union[np.ndarray, List[int]],
+    ) -> int:
+        """Extract the seq-len position count from PREFILL/VERIFY
+        inputs. Used for ``cached_positions`` accounting on every
+        forward. INCREMENTAL is hard-coded to 1 by the caller
+        (single-position forward by definition).
+
+        Handles all valid input shapes:
+          - Stage 1 list[int]: length is the position count.
+          - Stage > 1 ndarray: seq-len axis is shape[-2] for
+            3-D ([batch, seq, hidden]) or 2-D ([seq, hidden]);
+            1-D ndarrays of token ids count as seq-len ==
+            shape[0].
+        """
+        if isinstance(activation_or_input_ids, list):
+            return len(activation_or_input_ids)
+        arr = np.asarray(activation_or_input_ids)
+        if arr.ndim == 1:
+            # 1-D input_ids ndarray (e.g., np.int64 array of token
+            # ids on the executor → server wire path).
+            return int(arr.shape[0])
+        if arr.ndim < 2:
+            raise RuntimeError(
+                f"ShardedAutoregressiveRunner: input ndarray must "
+                f"have ndim >= 1, got shape {arr.shape}"
+            )
         return int(arr.shape[-2])
 
     # ── tail-only sampling ────────────────────────────────────────────

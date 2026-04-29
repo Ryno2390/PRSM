@@ -109,9 +109,22 @@ class KVCacheHandle:
     never read or write this field — it stays 0 on non-tail
     runners.
 
+    ``cached_positions`` (Phase 3.x.11.y Task 9 round-1 HIGH-1
+    remediation) tracks the count of positions currently held
+    in the KV-cache payload. PREFILL bumps by ``seq_len``;
+    INCREMENTAL by 1; VERIFY by K+1. ALL stages (tail + non-
+    tail) bump this counter — it's load-bearing for
+    speculative-decoding rollback to clamp correctly on non-
+    tail stages whose ``tokens_generated`` stays 0. Without
+    this counter, ``rollback`` would silently no-op on non-
+    tail stages (tail-only ``tokens_generated`` clamp →
+    ``min(n_positions, 0) == 0`` → no truncate_fn call → cache
+    grows unbounded with rejected speculative suffixes).
+
     Mutable on purpose: the runner's incremental forward pass
     needs to mutate ``payload`` in place + the tail bumps
-    ``tokens_generated`` per sample. The dataclass is NOT frozen.
+    ``tokens_generated`` per sample + every forward bumps
+    ``cached_positions``. The dataclass is NOT frozen.
     """
 
     request_id: str
@@ -119,6 +132,7 @@ class KVCacheHandle:
     last_touch_time: float
     payload: Any = None
     tokens_generated: int = 0
+    cached_positions: int = 0
 
 
 class KVCacheManager:
@@ -272,26 +286,47 @@ class KVCacheManager:
         count; the returned payload is stored on the handle.
         Lock-held truncation prevents races where another thread
         reads the handle between truncation and the
-        ``tokens_generated`` decrement (catches a read-stale-cache
+        ``cached_positions`` decrement (catches a read-stale-cache
         bug pattern).
+
+        **Phase 3.x.11.y Task 9 round-1 HIGH-1 remediation.**
+        The clamp uses ``cached_positions`` (bumped on EVERY
+        forward — PREFILL by ``seq_len``, INCREMENTAL by 1,
+        VERIFY by K+1, on every stage tail or non-tail), NOT
+        ``tokens_generated`` (tail-only counter). Without the
+        cached_positions counter, rollback against a non-tail
+        stage's handle silently no-ops (``min(N, 0) == 0``)
+        and the model's KV-cache grows unbounded with
+        speculatively-cached-but-rejected positions, breaking
+        non-tail forward semantics on the next iteration.
 
         Idempotent paths:
           - unknown request_id → ``(False, 0)``
           - n_positions <= 0 → ``(False, 0)``
-          - handle has zero generated tokens → ``(False, 0)``
-          - n_positions > tokens_generated → drops everything
-            generated; returns ``(True, prior_tokens_generated)``
+          - handle has zero cached positions → ``(False, 0)``
+          - n_positions > cached_positions → drops everything
+            cached; returns ``(True, prior_cached_positions)``
 
         Returns ``(rolled_back, actual_dropped)``. ``rolled_back``
         True iff at least one position was dropped;
         ``actual_dropped`` is the count actually removed (may be
-        less than ``n_positions`` if cache had fewer generated
-        tokens).
+        less than ``n_positions`` if cache had fewer cached
+        positions).
 
         ``truncate_fn`` MUST NOT raise — exceptions propagate to
         the caller and the handle is left in a torn state. The
         runner-side ``model.truncate_cache`` is the typical
         impl; tests inject a mock.
+
+        Side-effect on ``tokens_generated``: this counter is
+        decremented BY THE CALLER (the runner) only when the
+        runner is tail-capable AND the runner judges that
+        emitted-but-now-rolled-back tokens should retroactively
+        free up max_tokens budget. The manager doesn't touch
+        ``tokens_generated`` here — the tail's max_tokens
+        accounting is intentionally one-directional (emitted
+        tokens count permanently against the cap, even if a
+        downstream consumer cancellation rolls back the cache).
         """
         if not isinstance(request_id, str) or not request_id:
             raise RuntimeError(
@@ -317,12 +352,12 @@ class KVCacheManager:
                 return (False, 0)
             if n_positions <= 0:
                 return (False, 0)
-            actual = min(n_positions, handle.tokens_generated)
+            actual = min(n_positions, handle.cached_positions)
             if actual == 0:
                 return (False, 0)
             updated_payload = truncate_fn(handle.payload, actual)
             handle.payload = updated_payload
-            handle.tokens_generated -= actual
+            handle.cached_positions -= actual
             return (True, actual)
 
     def evict_idle(self) -> List[str]:

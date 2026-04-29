@@ -328,14 +328,29 @@ class _SpeculativeDistilGPT2Adapter:
         ``DynamicCache.crop(max_length)`` truncates IN PLACE to the
         first ``max_length`` positions; we compute
         ``current - n_positions`` and call crop.
+
+        Per-stage seq_length lookup: the adapter is layer-range-
+        agnostic but a sharded runner only populates its own
+        layer range. Calling ``get_seq_length()`` without args
+        defaults to layer 0, which is empty on stages whose
+        layer_range[0] > 0 (e.g., bob 3-6) — would crop to 0
+        and corrupt the cache. Iterate to find any populated
+        layer and use its length as the source-of-truth.
         """
-        # crop is a layer-range-agnostic op — it truncates EVERY
-        # layer's K+V to the same length. Peek any layer for the
-        # current seq length.
+        current = 0
+        # DynamicCache supports __len__() returning layer count.
         try:
-            current = payload.get_seq_length()
+            n_layers = len(payload)
         except TypeError:
-            current = payload.get_seq_length(0)
+            n_layers = 32  # defensive upper bound
+        for i in range(n_layers):
+            try:
+                seq_len = payload.get_seq_length(i)
+            except Exception:  # noqa: BLE001
+                continue
+            if seq_len > 0:
+                current = seq_len
+                break
         new_length = max(0, current - n_positions)
         payload.crop(new_length)
         return payload
@@ -872,3 +887,191 @@ class TestSpeculativeE2ECacheLifecycle:
         assert "req-spec-e2e" not in alice_cache
         assert "req-spec-e2e" not in bob_cache
         assert "req-spec-e2e" not in draft
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Round-1 HIGH-1 regression coverage — partial-accept on real distilgpt2
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class _DeliberateMismatchDraft:
+    """Round-1 HIGH-1 regression coverage: a draft that proposes
+    deliberately-wrong tokens to force partial-accept. Non-tail
+    rollback against the cached_positions counter (NOT
+    tokens_generated, which stays 0 on non-tail) is the load-
+    bearing fix; this fake exercises that path.
+
+    Implements the DraftModel Protocol with state-tracked
+    history so commit/evict shape match HFDraftModel.
+    """
+
+    def __init__(self, k: int) -> None:
+        self._k = k
+        self._states: Dict[str, List[int]] = {}
+        self.propose_calls: List[dict] = []
+        self.commit_calls: List[dict] = []
+        self.evict_calls: List[str] = []
+
+    def reset(
+        self, *, request_id: str, prompt_input_ids: List[int],
+    ) -> None:
+        self._states[request_id] = list(prompt_input_ids)
+
+    def propose(
+        self,
+        *,
+        request_id: str,
+        parent_token_id: int,
+        k: int,
+        temperature: float,
+    ) -> List[int]:
+        self.propose_calls.append({
+            "parent": parent_token_id, "k": k,
+        })
+        # Always propose K zeros — token_id 0 is "!" in distilgpt2,
+        # essentially never the verifier's argmax for any natural
+        # prompt → forces accepted_count = 0 every round.
+        return [0] * k
+
+    def commit(
+        self, *, request_id: str, accepted_token_ids: List[int],
+    ) -> None:
+        self.commit_calls.append({
+            "accepted": list(accepted_token_ids),
+        })
+        self._states[request_id].extend(accepted_token_ids)
+
+    def evict(self, *, request_id: str) -> None:
+        self.evict_calls.append(request_id)
+        self._states.pop(request_id, None)
+
+    def __contains__(self, request_id: str) -> bool:
+        return request_id in self._states
+
+
+class TestSpeculativeE2EPartialAcceptRollback:
+    """Round-1 HIGH-1 regression coverage. The pre-fix bug: rollback
+    silently no-op'd on non-tail stages because the manager
+    clamped on tail-only ``tokens_generated`` (stays 0 on non-
+    tail). With deliberate-mismatch drafts forcing accepted_count=0
+    every round, every chain stage gets a real RollbackCacheRequest
+    that drops K positions; both stages' caches must end up
+    correctly truncated AND the final output must still match
+    single-host greedy (proves rollback didn't corrupt cache state).
+    """
+
+    def test_zero_accept_rolls_back_non_tail_cache(
+        self, hf_model_and_tokenizer,
+    ):
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = "The quick brown fox"
+        max_tokens = 4
+
+        # Reference: single-host greedy.
+        reference_ids = _single_host_greedy_token_ids(
+            model, tokenizer, prompt, max_new_tokens=max_tokens,
+        )
+
+        # Build a 2-stage chain with our deliberate-mismatch draft.
+        alice_identity = generate_node_identity("alice")
+        bob_identity = generate_node_identity("bob")
+        settler_identity = generate_node_identity("settler")
+        anchor = _Anchor()
+        anchor.register(alice_identity)
+        anchor.register(bob_identity)
+        anchor.register(settler_identity)
+
+        adapter = _SpeculativeDistilGPT2Adapter(model, tokenizer)
+        alice_cache = KVCacheManager()
+        bob_cache = KVCacheManager()
+        alice_runner = ShardedAutoregressiveRunner(
+            model=adapter, layer_range=(0, 3),
+            kv_cache_manager=alice_cache,
+            tee_attestation=b"\x07" * 32,
+            tee_type=TEEType.SOFTWARE,
+        )
+        bob_runner = ShardedAutoregressiveRunner(
+            model=adapter, layer_range=(3, 6),
+            kv_cache_manager=bob_cache,
+            tee_attestation=b"\x07" * 32,
+            tee_type=TEEType.SOFTWARE,
+            sampling_defaults=SamplingDefaults(
+                max_tokens=max_tokens, temperature=0.0,
+                top_k=50, top_p=0.95,
+            ),
+            eos_token_id=tokenizer.eos_token_id,
+        )
+        alice_server = LayerStageServer(
+            identity=alice_identity,
+            registry=_Registry(
+                model_id="distilgpt2", shard_ranges=[(0, 3)],
+            ),
+            runner=_PassthroughUnaryRunner(),
+            tee_runtime=_TEERuntime(),
+            anchor=anchor, clock=lambda: 1000.0,
+            kv_cache_manager=alice_cache, sharded_runner=alice_runner,
+        )
+        bob_server = LayerStageServer(
+            identity=bob_identity,
+            registry=_Registry(
+                model_id="distilgpt2", shard_ranges=[(3, 6)],
+            ),
+            runner=_PassthroughUnaryRunner(),
+            tee_runtime=_TEERuntime(),
+            anchor=anchor, clock=lambda: 1000.0,
+            kv_cache_manager=bob_cache, sharded_runner=bob_runner,
+        )
+        servers = {
+            alice_identity.node_id: alice_server,
+            bob_identity.node_id: bob_server,
+        }
+
+        def send_message(addr, b):
+            return servers[addr].handle(b)
+
+        draft = _DeliberateMismatchDraft(k=4)
+        executor = RpcChainExecutor(
+            settler_identity=settler_identity,
+            send_message=send_message,
+            anchor=anchor,
+            prompt_encoder=lambda p: np.array([0], dtype=np.int32),
+            output_decoder=lambda a: "",
+            enable_sharded_decode=True,
+            tokenizer=tokenizer,
+            cache_evict_send_message=send_message,
+            rollback_cache_send_message=send_message,
+            sharded_default_max_tokens=max_tokens,
+            draft_model=draft,
+            speculation_depth=4,
+        )
+        chain = _make_chain(alice_identity.node_id, bob_identity.node_id)
+
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(
+                prompt=prompt, max_tokens=max_tokens,
+                temperature=0.0,
+            ),
+            chain=chain,
+        ))
+        stream_tokens = [
+            e for e in events if isinstance(e, StreamToken)
+        ]
+        sharded_ids = [t.token_id for t in stream_tokens]
+
+        # Greedy-equivalence holds even with all-rejected drafts —
+        # accepted_count=0 emits the verifier's correction, which
+        # matches reference. If non-tail rollback no-op'd (pre-fix
+        # bug), Stage 1's cache would be inflated by 4 stale
+        # positions and the next VERIFY would compute wrong
+        # logits, breaking equivalence.
+        assert sharded_ids == reference_ids, (
+            f"partial-accept rollback corrupted non-tail cache: "
+            f"sharded {sharded_ids} != reference {reference_ids}"
+        )
+        # Caches drained on terminal eviction.
+        assert "req-spec-e2e" not in alice_cache
+        assert "req-spec-e2e" not in bob_cache
+        # Draft proposed every round (forced 0-accept means many
+        # rounds for max_tokens=4). At least one commit happened.
+        assert len(draft.propose_calls) >= 1
+        assert len(draft.commit_calls) >= 1

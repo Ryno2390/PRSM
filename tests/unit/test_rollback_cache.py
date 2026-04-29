@@ -151,9 +151,14 @@ def _seed_handle(
     tokens_generated: int = 5,
 ) -> None:
     """Helper: allocate + populate a handle so rollback has
-    something to drop."""
+    something to drop. Round-1 HIGH-1 remediation: rollback
+    clamps on ``cached_positions`` (bumped on every forward by
+    the runner) — seed BOTH counters to mirror real per-stage
+    state where cached_positions tracks total forwards and
+    tokens_generated is tail-only emit accounting."""
     handle = cache.allocate(request_id, n_layers=4)
     handle.payload = [f"P{i}" for i in range(n_payload)]
+    handle.cached_positions = n_payload
     handle.tokens_generated = tokens_generated
 
 
@@ -185,7 +190,7 @@ class TestRollbackCacheHandler:
         assert parsed.actual_dropped == 2
         # Manager actually truncated.
         h = cache.get("req-1")
-        assert h.tokens_generated == 3
+        assert h.cached_positions == 3
         assert h.payload == ["P0", "P1", "P2"]
         # Model.truncate_cache was called with n=2.
         assert len(model.truncate_calls) == 1
@@ -212,7 +217,7 @@ class TestRollbackCacheHandler:
         assert parsed.rolled_back is True
         assert parsed.actual_dropped == 3
         h = cache.get("req-1")
-        assert h.tokens_generated == 0
+        assert h.cached_positions == 0
         assert h.payload == []
 
     def test_zero_drop_is_idempotent_no_op(self):
@@ -236,7 +241,7 @@ class TestRollbackCacheHandler:
         assert parsed.actual_dropped == 0
         # Cache untouched.
         h = cache.get("req-1")
-        assert h.tokens_generated == 4
+        assert h.cached_positions == 4
         # truncate_cache not called.
         assert model.truncate_calls == []
 
@@ -345,9 +350,9 @@ class TestRollbackCacheHandler:
         assert isinstance(parsed, RollbackCacheResponse)
         assert parsed.actual_dropped == 2
         # req-1 truncated.
-        assert cache.get("req-1").tokens_generated == 1
+        assert cache.get("req-1").cached_positions == 1
         # req-2 untouched.
-        assert cache.get("req-2").tokens_generated == 3
+        assert cache.get("req-2").cached_positions == 3
         assert cache.get("req-2").payload == ["P0", "P1", "P2"]
 
 
@@ -391,8 +396,8 @@ class TestMultiStageBroadcast:
         assert isinstance(ack_b, RollbackCacheResponse)
         assert ack_a.actual_dropped == ack_b.actual_dropped == 2
         # Both caches truncated by 2.
-        assert cache_a.get("req-1").tokens_generated == 2
-        assert cache_b.get("req-1").tokens_generated == 2
+        assert cache_a.get("req-1").cached_positions == 2
+        assert cache_b.get("req-1").cached_positions == 2
         # Each model.truncate_cache called exactly once.
         assert len(model_a.truncate_calls) == 1
         assert len(model_b.truncate_calls) == 1

@@ -370,12 +370,15 @@ class TestRollback:
     def _setup_handle_with_tokens(
         self, mgr, request_id="req-1", tokens=4,
     ):
-        """Helper: allocate handle + simulate that N tokens have
-        been generated. Payload is a list of strings tagged by
-        position so tests can verify truncation."""
+        """Helper: allocate handle + simulate that N tokens are
+        cached (Phase 3.x.11.y Task 9 round-1 HIGH-1: clamp now
+        uses ``cached_positions``, not ``tokens_generated``).
+        Payload is a list of strings tagged by position so tests
+        can verify truncation."""
         handle = mgr.allocate(request_id, n_layers=2)
         handle.payload = [f"pos_{i}" for i in range(tokens)]
-        handle.tokens_generated = tokens
+        handle.cached_positions = tokens
+        handle.tokens_generated = tokens  # legacy tail counter; preserved
         return handle
 
     def test_rollback_happy_path_drops_n(self):
@@ -389,7 +392,10 @@ class TestRollback:
         assert rolled is True
         assert dropped == 2
         assert handle.payload == ["pos_0", "pos_1", "pos_2"]
-        assert handle.tokens_generated == 3
+        # Round-1 HIGH-1 remediation: rollback now decrements
+        # cached_positions, not tokens_generated (the latter is
+        # tail-only emitted-tokens accounting).
+        assert handle.cached_positions == 3
 
     def test_rollback_unknown_request_id_returns_false_zero(self):
         mgr = KVCacheManager()
@@ -414,7 +420,7 @@ class TestRollback:
         # truncate_fn MUST NOT be called for the no-op path.
         assert truncate_calls == []
         # Handle state unchanged.
-        assert handle.tokens_generated == 4
+        assert handle.cached_positions == 4
         assert handle.payload == ["pos_0", "pos_1", "pos_2", "pos_3"]
 
     def test_rollback_negative_n_is_noop(self):
@@ -424,8 +430,8 @@ class TestRollback:
         assert rolled is False
         assert dropped == 0
 
-    def test_rollback_past_tokens_generated_drops_all(self):
-        # Asking to drop 100 when only 4 tokens generated → drops
+    def test_rollback_past_cached_positions_drops_all(self):
+        # Asking to drop 100 when only 4 cached → drops
         # all 4, returns dropped=4.
         mgr = KVCacheManager()
         handle = self._setup_handle_with_tokens(mgr, tokens=4)
@@ -437,15 +443,16 @@ class TestRollback:
         assert rolled is True
         assert dropped == 4
         assert handle.payload == []
-        assert handle.tokens_generated == 0
+        assert handle.cached_positions == 0
 
-    def test_rollback_when_tokens_generated_zero_is_noop(self):
-        # PREFILL alone hasn't generated any tokens — rollback
-        # is a no-op even though the handle exists.
+    def test_rollback_when_cached_positions_zero_is_noop(self):
+        # Fresh-allocated handle has cached_positions=0 (no forward
+        # has been run). Rollback is a no-op even though the
+        # handle exists.
         mgr = KVCacheManager()
         handle = mgr.allocate("req-1", n_layers=2)
         handle.payload = ["pos_0", "pos_1"]
-        handle.tokens_generated = 0
+        handle.cached_positions = 0
         truncate_calls = []
         rolled, dropped = mgr.rollback(
             "req-1", 4, lambda p, n: truncate_calls.append(n) or p,
@@ -533,7 +540,7 @@ class TestRollback:
                         # holds during rollback's payload+counter
                         # update).
                         n_pay = len(h.payload)
-                        n_tok = h.tokens_generated
+                        n_tok = h.cached_positions
                         # Loose invariant: payload length + dropped
                         # so far should always equal initial 20.
                         # (Tight check would require atomic snapshot
@@ -557,7 +564,7 @@ class TestRollback:
         assert errors == []
         # Total dropped + remaining payload length == 20.
         final_payload_len = len(handle.payload)
-        final_tokens = handle.tokens_generated
+        final_cached = handle.cached_positions
         assert rollback_total[0] + final_payload_len == 20
         # Counter consistent with payload state.
-        assert final_tokens == final_payload_len
+        assert final_cached == final_payload_len
