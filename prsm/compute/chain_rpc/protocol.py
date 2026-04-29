@@ -584,6 +584,20 @@ class RunLayerSliceRequest:
     # default canonical encoding pattern, same as ``decode_mode`` /
     # ``streaming`` / sampling fields).
     proposed_token_ids: Optional[Tuple[int, ...]] = None
+    # Phase 3.x.11.y.x — sampling-correct speculation under
+    # temperature > 0. Tuple of per-draft probabilities (the draft
+    # model's ``q(d_i)`` per proposed token). Co-set with
+    # ``proposed_token_ids``: both set together OR both None.
+    # When set, the tail routes to
+    # ``apply_lm_head_and_sample_batch_with_rejection`` (Leviathan-
+    # 2023 rejection sampling); when None on a VERIFY request, the
+    # tail falls back to greedy ``apply_lm_head_and_sample_batch``
+    # (v1 path; argmax + longest-prefix-match). Each prob in
+    # ``[0, 1]``; length must equal ``len(proposed_token_ids)``.
+    # Default None preserves byte-equivalence with pre-3.x.11.y.x
+    # signed bytes (omit-when-default canonical encoding mirrors
+    # the ``proposed_token_ids`` pattern).
+    proposed_token_probs: Optional[Tuple[float, ...]] = None
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value
@@ -784,6 +798,44 @@ class RunLayerSliceRequest:
                         f"proposed_token_ids entries must be non-"
                         f"negative, got {tok}"
                     )
+        # Phase 3.x.11.y.x — proposed_token_probs validation.
+        # Co-set with proposed_token_ids: both set together OR
+        # both None. Each prob in [0, 1]. Length must match
+        # proposed_token_ids. ``None`` here is the v1 greedy path
+        # (tail uses argmax-based prefix-match); set here is the
+        # v2 stochastic path (tail uses Leviathan-2023 rejection
+        # sampling).
+        if self.proposed_token_probs is not None:
+            if self.proposed_token_ids is None:
+                raise ChainRpcMalformedError(
+                    "proposed_token_probs set but proposed_token_ids "
+                    "is None — both must be co-set (v2 stochastic "
+                    "speculation requires both per-draft probabilities "
+                    "AND the proposed token ids)"
+                )
+            if not isinstance(self.proposed_token_probs, tuple):
+                raise ChainRpcMalformedError(
+                    f"proposed_token_probs must be tuple, got "
+                    f"{type(self.proposed_token_probs).__name__}"
+                )
+            if len(self.proposed_token_probs) != len(self.proposed_token_ids):
+                raise ChainRpcMalformedError(
+                    f"proposed_token_probs length "
+                    f"{len(self.proposed_token_probs)} must equal "
+                    f"proposed_token_ids length "
+                    f"{len(self.proposed_token_ids)}"
+                )
+            for p in self.proposed_token_probs:
+                if isinstance(p, bool) or not isinstance(p, (int, float)):
+                    raise ChainRpcMalformedError(
+                        f"proposed_token_probs entries must be number, "
+                        f"got {type(p).__name__}"
+                    )
+                if not (0.0 <= float(p) <= 1.0):
+                    raise ChainRpcMalformedError(
+                        f"proposed_token_probs entries must be in "
+                        f"[0, 1], got {p}"
+                    )
 
     def to_dict(self) -> Dict[str, Any]:
         # activation_blob → hex for JSON-safety. For streamed (v2)
@@ -830,6 +882,16 @@ class RunLayerSliceRequest:
         # dispatches, which by definition didn't exist pre-3.x.11.y).
         if self.proposed_token_ids is not None:
             out["proposed_token_ids"] = list(self.proposed_token_ids)
+        # Phase 3.x.11.y.x — proposed_token_probs. Omit-when-None
+        # preserves byte-equivalence with pre-3.x.11.y.x signed
+        # bytes (v1 greedy callers leave probs unset; only v2
+        # stochastic callers populate the field). Encoded as a
+        # list of floats; co-set invariant with proposed_token_ids
+        # is enforced at __post_init__.
+        if self.proposed_token_probs is not None:
+            out["proposed_token_probs"] = [
+                float(p) for p in self.proposed_token_probs
+            ]
         return out
 
     @classmethod
@@ -951,6 +1013,26 @@ class RunLayerSliceRequest:
                         f"got {type(tok).__name__}"
                     )
             proposed_tuple = tuple(int(t) for t in proposed_raw)
+        # Phase 3.x.11.y.x — proposed_token_probs. Default None
+        # when absent (preserves byte-equivalence with pre-
+        # 3.x.11.y.x messages). When present, MUST be a list of
+        # numbers (bool rejected via the inner type check; range
+        # check + co-set invariant land in __post_init__).
+        probs_raw = data.get("proposed_token_probs")
+        probs_tuple: Optional[Tuple[float, ...]] = None
+        if probs_raw is not None:
+            if not isinstance(probs_raw, list):
+                raise ChainRpcMalformedError(
+                    f"proposed_token_probs must be list, got "
+                    f"{type(probs_raw).__name__}"
+                )
+            for p in probs_raw:
+                if isinstance(p, bool) or not isinstance(p, (int, float)):
+                    raise ChainRpcMalformedError(
+                        f"proposed_token_probs entries must be number, "
+                        f"got {type(p).__name__}"
+                    )
+            probs_tuple = tuple(float(p) for p in probs_raw)
         return cls(
             request_id=_required_str(data, "request_id"),
             model_id=_required_str(data, "model_id"),
@@ -968,6 +1050,7 @@ class RunLayerSliceRequest:
             temperature=temperature_raw,
             decode_mode=decode_mode,
             proposed_token_ids=proposed_tuple,
+            proposed_token_probs=probs_tuple,
             protocol_version=_required_int(data, "protocol_version"),
         )
 

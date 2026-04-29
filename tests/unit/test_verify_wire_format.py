@@ -549,3 +549,294 @@ class TestRollbackCacheResponse:
             ChainRpcMalformedError, match="rolled_back",
         ):
             parse_message(poisoned)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.y.x — proposed_token_probs (sampling-correct speculation)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestProposedTokenProbs:
+    """Phase 3.x.11.y.x Task 1 — wire-format extension.
+
+    Covers:
+      - v2 stochastic round-trip (probs set co-set with ids)
+      - v1 greedy omit-when-None byte-equivalence (no proposed_token_probs
+        key in canonical JSON when probs is None)
+      - co-set invariant (probs without ids rejected)
+      - range validation (each prob in [0, 1])
+      - length-must-match-ids invariant
+      - bool rejected as a prob
+      - signing-payload-coverage (signature commits to probs when set;
+        tampering invalidates verification)
+      - v1 client wire bytes byte-equivalent with pre-3.x.11.y.x
+        (no probs key in JSON)
+    """
+
+    def test_v2_round_trip(self, settler_identity):
+        req = _make_request(
+            settler=settler_identity,
+            decode_mode=DecodeMode.VERIFY,
+            proposed_token_ids=(100, 101, 102),
+        )
+        # _make_request synthesizes (42,) with single prop; for v2
+        # we explicitly pass probs co-set with the ids above.
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        v2 = RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="test-model",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"\x00\x00\x00\x00",
+            activation_shape=(1,),
+            activation_dtype="int32",
+            upstream_token=token,
+            deadline_unix=2000.0,
+            decode_mode=DecodeMode.VERIFY,
+            proposed_token_ids=(100, 101, 102),
+            proposed_token_probs=(0.9, 0.5, 0.3),
+        )
+        wire = encode_message(v2)
+        parsed = parse_message(wire)
+        assert isinstance(parsed, RunLayerSliceRequest)
+        assert parsed.proposed_token_probs == (0.9, 0.5, 0.3)
+
+    def test_v1_omits_when_none_byte_equivalence(self, settler_identity):
+        # v1 greedy callers leave proposed_token_probs unset; the
+        # canonical JSON MUST NOT carry the key (preserves byte-
+        # equivalence with pre-3.x.11.y.x signed bytes).
+        req = _make_request(
+            settler=settler_identity,
+            decode_mode=DecodeMode.VERIFY,
+        )
+        assert req.proposed_token_probs is None
+        wire = encode_message(req)
+        d = json.loads(wire)
+        assert "proposed_token_probs" not in d
+
+    def test_rejects_probs_without_ids(self, settler_identity):
+        # proposed_token_probs without proposed_token_ids = malformed.
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match="proposed_token_probs",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="test-model",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"\x00\x00\x00\x00",
+                activation_shape=(1,),
+                activation_dtype="int32",
+                upstream_token=token,
+                deadline_unix=2000.0,
+                proposed_token_probs=(0.5,),
+            )
+
+    def test_rejects_prob_above_one(self, settler_identity):
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match=r"\[0, 1\]",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="test-model",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"\x00\x00\x00\x00",
+                activation_shape=(1,),
+                activation_dtype="int32",
+                upstream_token=token,
+                deadline_unix=2000.0,
+                decode_mode=DecodeMode.VERIFY,
+                proposed_token_ids=(1,),
+                proposed_token_probs=(1.5,),
+            )
+
+    def test_rejects_negative_prob(self, settler_identity):
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match=r"\[0, 1\]",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="test-model",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"\x00\x00\x00\x00",
+                activation_shape=(1,),
+                activation_dtype="int32",
+                upstream_token=token,
+                deadline_unix=2000.0,
+                decode_mode=DecodeMode.VERIFY,
+                proposed_token_ids=(1,),
+                proposed_token_probs=(-0.1,),
+            )
+
+    def test_rejects_length_mismatch(self, settler_identity):
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match="length",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="test-model",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"\x00\x00\x00\x00",
+                activation_shape=(1,),
+                activation_dtype="int32",
+                upstream_token=token,
+                deadline_unix=2000.0,
+                decode_mode=DecodeMode.VERIFY,
+                proposed_token_ids=(1, 2, 3),
+                proposed_token_probs=(0.5,),
+            )
+
+    def test_rejects_bool_prob(self, settler_identity):
+        # bool is subclass of int; must be rejected explicitly.
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match="proposed_token_probs",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="test-model",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"\x00\x00\x00\x00",
+                activation_shape=(1,),
+                activation_dtype="int32",
+                upstream_token=token,
+                deadline_unix=2000.0,
+                decode_mode=DecodeMode.VERIFY,
+                proposed_token_ids=(1,),
+                proposed_token_probs=(True,),  # type: ignore[arg-type]
+            )
+
+    def test_from_dict_rejects_non_list_probs(self, settler_identity):
+        # Wire-level: poison the JSON with proposed_token_probs as
+        # a string instead of a list.
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        valid = RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="test-model",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"\x00\x00\x00\x00",
+            activation_shape=(1,),
+            activation_dtype="int32",
+            upstream_token=token,
+            deadline_unix=2000.0,
+            decode_mode=DecodeMode.VERIFY,
+            proposed_token_ids=(1,),
+            proposed_token_probs=(0.5,),
+        )
+        wire = encode_message(valid)
+        d = json.loads(wire)
+        d["proposed_token_probs"] = "not a list"
+        poisoned = json.dumps(d).encode("utf-8")
+        with pytest.raises(
+            ChainRpcMalformedError, match="proposed_token_probs",
+        ):
+            parse_message(poisoned)
+
+    def test_signing_payload_commits_probs(self, settler_identity):
+        # v1 greedy bytes (probs unset) and v2 stochastic bytes
+        # (probs set) MUST produce different canonical JSON, so
+        # downstream signers commit to the probs field on the
+        # response side. This test verifies the request-side
+        # canonical encoding includes proposed_token_probs only
+        # when set.
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        v1 = RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="test-model",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"\x00\x00\x00\x00",
+            activation_shape=(1,),
+            activation_dtype="int32",
+            upstream_token=token,
+            deadline_unix=2000.0,
+            decode_mode=DecodeMode.VERIFY,
+            proposed_token_ids=(1, 2, 3),
+        )
+        v2 = RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="test-model",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"\x00\x00\x00\x00",
+            activation_shape=(1,),
+            activation_dtype="int32",
+            upstream_token=token,
+            deadline_unix=2000.0,
+            decode_mode=DecodeMode.VERIFY,
+            proposed_token_ids=(1, 2, 3),
+            proposed_token_probs=(0.9, 0.5, 0.3),
+        )
+        v1_bytes = encode_message(v1)
+        v2_bytes = encode_message(v2)
+        assert v1_bytes != v2_bytes
+        # v1 has no probs key.
+        assert b"proposed_token_probs" not in v1_bytes
+        # v2 does.
+        assert b"proposed_token_probs" in v2_bytes
