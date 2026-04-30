@@ -130,7 +130,17 @@ test-cov:
 test-hardhat:
 	cd contracts && npx hardhat test
 
-test-all: test test-hardhat
+test-shell:
+	@command -v bats >/dev/null 2>&1 || { \
+		echo "bats not installed; brew install bats-core"; exit 1; }
+	bats tests/scripts/bats/
+
+test-shell-slow:
+	@command -v bats >/dev/null 2>&1 || { \
+		echo "bats not installed; brew install bats-core"; exit 1; }
+	PRSM_BATS_SLOW=1 bats tests/scripts/bats/
+
+test-all: test test-hardhat test-shell
 
 # ==============================================================================
 # Code Quality
