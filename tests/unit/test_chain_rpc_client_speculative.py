@@ -1571,3 +1571,61 @@ class TestPerStageDispatchCadence:
                 f"sleep duration {s} > cadence {cadence} "
                 f"(helper bug — sleeping more than cadence)"
             )
+
+
+class TestQXCompositionCadencePlusPadding:
+    """Phase 3.x.11.q.x Task 3 — composition smoke. The inner
+    RpcChainExecutor enforces per-stage dispatch cadence; an
+    outer BatchedTrailingShardedExecutor pads the trailing
+    StreamToken to a fixed byte length. Both fire on the same
+    request without interfering."""
+
+    def test_cadence_and_padding_compose(self):
+        from prsm.compute.chain_rpc.tier_c_sharded_executors import (
+            BatchedTrailingShardedExecutor,
+        )
+
+        sleep_calls: List[float] = []
+
+        def recording_sleep(seconds: float) -> None:
+            sleep_calls.append(float(seconds))
+
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[
+                ((10, 20, 99), 2, False),
+                ((30, 40, 88), 2, False),
+            ],
+        )
+        draft = _FakeDraft(propose_script=[[10, 20], [30, 40]])
+        cadence = 0.05
+        inner_executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            per_stage_dispatch_cadence_seconds=cadence,
+        )
+        # Wrap in M2 with pad_to_bytes.
+        decorator = BatchedTrailingShardedExecutor(
+            inner=inner_executor, pad_to_bytes=64,
+        )
+        from prsm.compute.chain_rpc import client as _client_mod
+        original_sleep = _client_mod.time.sleep
+        _client_mod.time.sleep = recording_sleep
+        try:
+            events = list(decorator.execute_chain_streaming(
+                request=_make_request(
+                    max_tokens=7, temperature=0.0,
+                ),
+                chain=chain,
+            ))
+        finally:
+            _client_mod.time.sleep = original_sleep
+        # Cadence fired (at least one positive sleep).
+        positive_sleeps = [s for s in sleep_calls if s > 0]
+        assert len(positive_sleeps) >= 1, (
+            "cadence didn't fire under composition"
+        )
+        # M2 emitted exactly 1 StreamToken with padded length.
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert len(tokens) == 1
+        assert len(tokens[0].text_delta.encode("utf-8")) == 64
