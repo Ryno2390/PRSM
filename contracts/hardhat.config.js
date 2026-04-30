@@ -3,6 +3,21 @@ require("@nomicfoundation/hardhat-verify");
 require("@openzeppelin/hardhat-upgrades");
 require("dotenv").config();
 
+// Validate PRIVATE_KEY format before handing it to hardhat's network
+// configs. The previous `process.env.PRIVATE_KEY ? [...] : []` guard
+// only filtered empty/undefined; a placeholder like
+// `your_private_key_here` still got passed through and tripped
+// hardhat's "private key too short" config validator (blocks ALL
+// network targets, including hardhat-local). Filter to the canonical
+// 0x-prefixed 64-hex-char (32-byte) format.
+const PK_RE = /^0x[0-9a-fA-F]{64}$/;
+function pkAccounts() {
+  const pk = process.env.PRIVATE_KEY;
+  if (!pk) return [];
+  if (!PK_RE.test(pk)) return [];  // malformed → skip silently for hardhat-local
+  return [pk];
+}
+
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
@@ -26,7 +41,7 @@ module.exports = {
     // Sepolia Testnet
     "sepolia": {
       url: process.env.SEPOLIA_RPC_URL || `https://sepolia.infura.io/v3/${process.env.INFURA_KEY}` || "",
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      accounts: pkAccounts(),
       chainId: 11155111,
       gas: 6000000,
       gasPrice: 20000000000, // 20 gwei
@@ -38,7 +53,7 @@ module.exports = {
     // Polygon Mumbai Testnet
     "polygon-mumbai": {
       url: process.env.POLYGON_MUMBAI_RPC_URL || `https://polygon-mumbai.infura.io/v3/${process.env.INFURA_KEY}` || "https://rpc-mumbai.maticvigil.com",
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      accounts: pkAccounts(),
       chainId: 80001,
       gas: 6000000,
       gasPrice: 10000000000, // 10 gwei
@@ -50,7 +65,7 @@ module.exports = {
     // Base Mainnet
     "base": {
       url: process.env.BASE_RPC_URL || "https://mainnet.base.org",
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      accounts: pkAccounts(),
       chainId: 8453,
       gas: "auto",
       gasPrice: "auto",
@@ -62,7 +77,7 @@ module.exports = {
     // Base Sepolia Testnet
     "base-sepolia": {
       url: process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org",
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      accounts: pkAccounts(),
       chainId: 84532,
       gas: "auto",
       gasPrice: "auto",
@@ -77,7 +92,7 @@ module.exports = {
       forking: {
         url: process.env.BASE_RPC_URL || "https://mainnet.base.org",
       },
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      accounts: pkAccounts(),
       chainId: 8453,
     },
 
@@ -87,14 +102,14 @@ module.exports = {
       forking: {
         url: process.env.MAINNET_RPC_URL || "",
       },
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      accounts: pkAccounts(),
       chainId: 1,
     },
 
     // Ethereum Mainnet
     "mainnet": {
       url: process.env.MAINNET_RPC_URL || "",
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      accounts: pkAccounts(),
       chainId: 1,
       gas: 6000000,
       gasPrice: "auto",
@@ -106,7 +121,7 @@ module.exports = {
     // Polygon Mainnet
     "polygon-mainnet": {
       url: process.env.POLYGON_MAINNET_RPC_URL || "https://polygon-rpc.com",
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      accounts: pkAccounts(),
       chainId: 137,
       gas: 6000000,
       gasPrice: 30000000000, // 30 gwei

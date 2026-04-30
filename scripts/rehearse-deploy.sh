@@ -124,13 +124,74 @@ npx hardhat run scripts/deploy-phase8-emission.js ${HARDHAT_NETWORK_FLAG}
 # ── 4. Phase 7-storage ────────────────────────────────────────────────
 echo
 echo "[4/5] Deploying Phase 7-storage…"
-: "${AUTHORIZED_VERIFIER:=${FOUNDATION_RESERVE_WALLET}}"
+# AUTHORIZED_VERIFIER is the Phase 7-storage proof verifier — distinct
+# from FOUNDATION_RESERVE_WALLET. On testnet/mainnet operators MUST pass
+# the dedicated off-chain prover EOA (or eventually a verifier contract).
+# Defaulting to FOUNDATION_RESERVE_WALLET would silently misconfigure
+# StorageSlashing.authorizedVerifier on mainnet.
+if [[ -z "${AUTHORIZED_VERIFIER:-}" ]]; then
+  if [[ "${NETWORK}" == "hardhat-local" ]]; then
+    AUTHORIZED_VERIFIER="${FOUNDATION_RESERVE_WALLET}"
+    echo "   Defaulting AUTHORIZED_VERIFIER=${AUTHORIZED_VERIFIER} for hardhat-local rehearsal."
+  else
+    echo "❌ AUTHORIZED_VERIFIER required on ${NETWORK} (the off-chain prover EOA;" >&2
+    echo "   defaulting to FOUNDATION_RESERVE_WALLET would silently misconfigure" >&2
+    echo "   StorageSlashing.authorizedVerifier). Set explicitly." >&2
+    exit 1
+  fi
+fi
 export AUTHORIZED_VERIFIER
 npx hardhat run scripts/deploy-phase7-storage.js ${HARDHAT_NETWORK_FLAG}
 
-# ── 5. Summary ────────────────────────────────────────────────────────
+# ── 5. Ownership transfer rehearsal (hardhat-local only by default) ───
+# Exercises the two-phase deploy model: hot-deployer does the cross-wire,
+# then transferOwnership(MULTISIG) hands all 7 Ownable contracts over.
+# On testnet/mainnet the operator runs transfer-ownership.js separately
+# with the real Foundation 2-of-3 multi-sig address; here we stub with
+# the second hardhat default account to verify the script's invariant
+# checks fire end-to-end.
+if [[ "${NETWORK}" == "hardhat-local" ]] && [[ "${SKIP_TRANSFER:-0}" != "1" ]]; then
+  echo
+  echo "[5/6] Rehearsing ownership transfer to stub multi-sig…"
+  # Hardhat default account #1 (well-known dev key, never used in real deploys).
+  STUB_MULTISIG="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+  # Newest manifests created by this rehearsal run.
+  AB="$(ls -1t "${CONTRACTS}/deployments/audit-bundle-localhost-"*.json 2>/dev/null | head -1 || true)"
+  P8="$(ls -1t "${CONTRACTS}/deployments/phase8-emission-localhost-"*.json 2>/dev/null | head -1 || true)"
+  P7S="$(ls -1t "${CONTRACTS}/deployments/phase7-storage-localhost-"*.json 2>/dev/null | head -1 || true)"
+  if [[ -z "${AB}" ]]; then
+    echo "❌ no audit-bundle manifest found for transfer rehearsal" >&2
+    exit 1
+  fi
+  FOUNDATION_MULTISIG="${STUB_MULTISIG}" \
+    AUDIT_BUNDLE_MANIFEST="${AB}" \
+    PHASE8_MANIFEST="${P8}" \
+    PHASE7_STORAGE_MANIFEST="${P7S}" \
+    npx hardhat run scripts/transfer-ownership.js ${HARDHAT_NETWORK_FLAG}
+
+  # Idempotency check: re-run against the same manifests. Every contract
+  # is already owned by the stub multi-sig; the script must skip cleanly
+  # without attempting any transfer txs. Catches a re-run after a partial
+  # ceremony from clobbering already-transferred contracts.
+  echo
+  echo "   Verifying idempotency (re-run must skip all 7)…"
+  RERUN_OUT="$(FOUNDATION_MULTISIG="${STUB_MULTISIG}" \
+    AUDIT_BUNDLE_MANIFEST="${AB}" \
+    PHASE8_MANIFEST="${P8}" \
+    PHASE7_STORAGE_MANIFEST="${P7S}" \
+    npx hardhat run scripts/transfer-ownership.js ${HARDHAT_NETWORK_FLAG})"
+  echo "${RERUN_OUT}" | grep -E "(already owned by multi-sig|Ownership transferred:)" || true
+  if ! echo "${RERUN_OUT}" | grep -q "Ownership transferred: 0 contracts; skipped (already-multi-sig): 7"; then
+    echo "❌ idempotency check failed: re-run did not skip all 7 contracts" >&2
+    echo "${RERUN_OUT}" >&2
+    exit 1
+  fi
+  echo "   ✅ idempotency holds (7/7 skipped on re-run)"
+fi
+
+# ── 6. Summary ────────────────────────────────────────────────────────
 echo
-echo "[5/5] Rehearsal complete."
+echo "[6/6] Rehearsal complete."
 echo
 echo "Manifests:"
 ls -1t "${CONTRACTS}/deployments/" | head -10 | while read -r f; do
