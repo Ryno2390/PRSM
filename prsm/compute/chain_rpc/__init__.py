@@ -83,6 +83,12 @@ from prsm.compute.chain_rpc.tier_c_sharded_executors import (
     BatchedTrailingShardedExecutor,
     FixedRateShardedExecutor,
 )
+from prsm.compute.chain_rpc.probs_cipher import (
+    ProbsCipher,
+    ProbsCipherError,
+    ProbsDecryptionError,
+    derive_key_from_psk,
+)
 
 __all__ = [
     # Protocol
@@ -137,4 +143,9 @@ __all__ = [
     "BatchedTrailingShardedExecutor",
     "FixedRateShardedExecutor",
     "make_tier_c_sharded_executor",
+    # Phase 3.x.11.q.y — encrypted proposed_token_probs cipher
+    "ProbsCipher",
+    "ProbsCipherError",
+    "ProbsDecryptionError",
+    "derive_key_from_psk",
 ]
