@@ -282,6 +282,131 @@ class TestHandoffTokenDictRoundTrip:
             HandoffToken.from_dict({})
 
 
+class TestHandoffTokenEphemeralPubkey:
+    """Phase 3.x.11.q.y' — ECDH ephemeral_pubkey field."""
+
+    def test_omit_when_none_byte_equivalent(self):
+        # Pre-q.y' tokens (no ephemeral_pubkey) MUST encode to
+        # the same canonical bytes as before — tag a load-bearing
+        # backwards-compat invariant for stored / replayed tokens.
+        identity = generate_node_identity("settler")
+        token = HandoffToken.sign(
+            identity=identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=2,
+            deadline_unix=1000.0,
+        )
+        d = token.to_dict()
+        assert "ephemeral_pubkey_hex" not in d
+        # Canonical key set matches pre-q.y'.
+        assert sorted(d.keys()) == sorted([
+            "request_id",
+            "settler_node_id",
+            "chain_stage_index",
+            "chain_total_stages",
+            "deadline_unix",
+            "signature_b64",
+        ])
+
+    def test_round_trip_with_ephemeral_pubkey(self):
+        identity = generate_node_identity("settler")
+        eph = b"\x42" * 32
+        token = HandoffToken.sign(
+            identity=identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=2,
+            deadline_unix=1000.0,
+            ephemeral_pubkey=eph,
+        )
+        recovered = HandoffToken.from_dict(token.to_dict())
+        assert recovered == token
+        assert recovered.ephemeral_pubkey == eph
+
+    def test_signing_payload_commits_ephemeral_pubkey(self):
+        # Setting different ephemeral_pubkey values produces
+        # distinct signing payloads — proves the field is
+        # cryptographically committed (not just stored).
+        identity = generate_node_identity("settler")
+        token_a = HandoffToken.sign(
+            identity=identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=2,
+            deadline_unix=1000.0,
+            ephemeral_pubkey=b"\x01" * 32,
+        )
+        token_b = HandoffToken.sign(
+            identity=identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=2,
+            deadline_unix=1000.0,
+            ephemeral_pubkey=b"\x02" * 32,
+        )
+        # Different ephemeral_pubkey → different signature.
+        assert token_a.signature_b64 != token_b.signature_b64
+
+    def test_substituting_ephemeral_pubkey_breaks_verify(self):
+        # Relay adversary substitutes the ephemeral_pubkey in
+        # transit. verify_with_anchor MUST return False because
+        # the signature was generated over the original pubkey.
+        identity = generate_node_identity("settler")
+        anchor = FakeAnchor()
+        _register(anchor, identity)
+        token = HandoffToken.sign(
+            identity=identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=2,
+            deadline_unix=1000.0,
+            ephemeral_pubkey=b"\x01" * 32,
+        )
+        # Original token verifies.
+        assert token.verify_with_anchor(anchor) is True
+        # Tampered ephemeral_pubkey breaks verification.
+        tampered = HandoffToken(
+            request_id=token.request_id,
+            settler_node_id=token.settler_node_id,
+            chain_stage_index=token.chain_stage_index,
+            chain_total_stages=token.chain_total_stages,
+            deadline_unix=token.deadline_unix,
+            signature_b64=token.signature_b64,
+            ephemeral_pubkey=b"\x02" * 32,  # substituted!
+        )
+        assert tampered.verify_with_anchor(anchor) is False
+
+    def test_rejects_wrong_length_pubkey(self):
+        identity = generate_node_identity("settler")
+        with pytest.raises(
+            ChainRpcMalformedError, match="32 bytes",
+        ):
+            HandoffToken.sign(
+                identity=identity,
+                request_id="req-1",
+                chain_stage_index=0,
+                chain_total_stages=2,
+                deadline_unix=1000.0,
+                ephemeral_pubkey=b"\x01" * 16,
+            )
+
+    def test_rejects_non_bytes_pubkey(self):
+        identity = generate_node_identity("settler")
+        with pytest.raises(
+            ChainRpcMalformedError, match="must be bytes",
+        ):
+            HandoffToken(
+                request_id="req-1",
+                settler_node_id=identity.node_id,
+                chain_stage_index=0,
+                chain_total_stages=2,
+                deadline_unix=1000.0,
+                signature_b64="x" * 88,
+                ephemeral_pubkey="not-bytes",  # type: ignore[arg-type]
+            )
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # RunLayerSliceRequest
 # ──────────────────────────────────────────────────────────────────────────

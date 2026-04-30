@@ -237,11 +237,39 @@ class HandoffToken:
     chain_total_stages: int
     deadline_unix: float
     signature_b64: str
+    # Phase 3.x.11.q.y' — per-request ECDH ephemeral public key.
+    # When set, carries an X25519 public key (32 raw bytes) that
+    # the receiving stage uses with its long-term X25519 private
+    # key to derive a per-request AES-256 key (HKDF-SHA256 over
+    # the shared secret + ``(request_id, stage_index)``). When
+    # None, the operator-distributed PSK path applies (Phase
+    # 3.x.11.q.y baseline). Covered by ``signing_payload`` so a
+    # relay adversary cannot substitute a different ephemeral
+    # pubkey without invalidating the settler's signature.
+    ephemeral_pubkey: Optional[bytes] = None
 
     def __post_init__(self) -> None:
         _validate_str_field("request_id", self.request_id)
         _validate_str_field("settler_node_id", self.settler_node_id)
         _validate_str_field("signature_b64", self.signature_b64)
+        # Phase 3.x.11.q.y' — ephemeral_pubkey shape validation.
+        # Exactly 32 bytes when set (X25519 public key length per
+        # RFC 7748). Bytes type only; defends against length
+        # forgery + type confusion.
+        if self.ephemeral_pubkey is not None:
+            if not isinstance(
+                self.ephemeral_pubkey, (bytes, bytearray),
+            ):
+                raise ChainRpcMalformedError(
+                    f"ephemeral_pubkey must be bytes, got "
+                    f"{type(self.ephemeral_pubkey).__name__}"
+                )
+            if len(self.ephemeral_pubkey) != 32:
+                raise ChainRpcMalformedError(
+                    f"ephemeral_pubkey must be exactly 32 bytes "
+                    f"(X25519 public key), got "
+                    f"{len(self.ephemeral_pubkey)}"
+                )
         # Reject bool: isinstance(True, int) is True in Python; without
         # this guard a peer sending {"chain_stage_index": false} would
         # produce a token with bool-typed numeric fields.
@@ -281,11 +309,18 @@ class HandoffToken:
         chain_stage_index: int,
         chain_total_stages: int,
         deadline_unix: float,
+        ephemeral_pubkey: Optional[bytes] = None,
     ) -> bytes:
         """Canonical bytes signed by the settler. Both signer and
         verifier MUST construct identical bytes from the same logical
         token, so all numeric fields are coerced to their JSON-stable
-        types and `sort_keys=True` enforces deterministic key ordering."""
+        types and `sort_keys=True` enforces deterministic key ordering.
+
+        Phase 3.x.11.q.y' — ``ephemeral_pubkey`` (when set) is
+        committed in the payload via hex encoding. Omit-when-None
+        preserves byte-equivalence for pre-q.y' tokens that
+        didn't have the field (key absent from the canonical
+        payload, not present-as-null)."""
         payload = {
             "request_id": request_id,
             "settler_node_id": settler_node_id,
@@ -293,6 +328,10 @@ class HandoffToken:
             "chain_total_stages": int(chain_total_stages),
             "deadline_unix": float(deadline_unix),
         }
+        if ephemeral_pubkey is not None:
+            payload["ephemeral_pubkey_hex"] = bytes(
+                ephemeral_pubkey,
+            ).hex()
         return json.dumps(payload, sort_keys=True).encode("utf-8")
 
     @classmethod
@@ -303,6 +342,7 @@ class HandoffToken:
         chain_stage_index: int,
         chain_total_stages: int,
         deadline_unix: float,
+        ephemeral_pubkey: Optional[bytes] = None,
     ) -> "HandoffToken":
         """Mint + sign a fresh token under the settler ``identity``."""
         payload = cls.signing_payload(
@@ -311,6 +351,7 @@ class HandoffToken:
             chain_stage_index,
             chain_total_stages,
             deadline_unix,
+            ephemeral_pubkey,
         )
         sig = identity.sign(payload)
         return cls(
@@ -320,6 +361,10 @@ class HandoffToken:
             chain_total_stages=int(chain_total_stages),
             deadline_unix=float(deadline_unix),
             signature_b64=sig,
+            ephemeral_pubkey=(
+                bytes(ephemeral_pubkey)
+                if ephemeral_pubkey is not None else None
+            ),
         )
 
     def verify_with_anchor(self, anchor: Any) -> bool:
@@ -348,13 +393,14 @@ class HandoffToken:
             self.chain_stage_index,
             self.chain_total_stages,
             self.deadline_unix,
+            self.ephemeral_pubkey,
         )
         return verify_signature(
             settler_pubkey_b64, payload, self.signature_b64
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "request_id": self.request_id,
             "settler_node_id": self.settler_node_id,
             "chain_stage_index": self.chain_stage_index,
@@ -362,9 +408,30 @@ class HandoffToken:
             "deadline_unix": self.deadline_unix,
             "signature_b64": self.signature_b64,
         }
+        # Phase 3.x.11.q.y' — omit-when-None for backwards-compat:
+        # pre-q.y' tokens stay byte-identical on the wire.
+        if self.ephemeral_pubkey is not None:
+            out["ephemeral_pubkey_hex"] = bytes(
+                self.ephemeral_pubkey,
+            ).hex()
+        return out
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "HandoffToken":
+        eph_hex = data.get("ephemeral_pubkey_hex")
+        eph_bytes: Optional[bytes] = None
+        if eph_hex is not None:
+            if not isinstance(eph_hex, str):
+                raise ChainRpcMalformedError(
+                    f"ephemeral_pubkey_hex must be str, got "
+                    f"{type(eph_hex).__name__}"
+                )
+            try:
+                eph_bytes = bytes.fromhex(eph_hex)
+            except ValueError as exc:
+                raise ChainRpcMalformedError(
+                    f"ephemeral_pubkey_hex is not valid hex: {exc}"
+                ) from exc
         return cls(
             request_id=_required_str(data, "request_id"),
             settler_node_id=_required_str(data, "settler_node_id"),
@@ -372,6 +439,7 @@ class HandoffToken:
             chain_total_stages=_required_int(data, "chain_total_stages"),
             deadline_unix=_required_number(data, "deadline_unix"),
             signature_b64=_required_str(data, "signature_b64"),
+            ephemeral_pubkey=eph_bytes,
         )
 
 
