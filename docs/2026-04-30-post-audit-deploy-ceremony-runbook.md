@@ -1,9 +1,28 @@
-# PRSM Mainnet Deploy-Ceremony Runbook
+# PRSM Post-Audit Deploy-Ceremony Runbook
 
-**Audience:** the operator running the ceremony with the Foundation 2-of-3
-hardware multi-sig signers. This is a chronological master runbook
-stitching the 5 deploy scripts + 2 transfer scripts + multi-sig governance
-follow-ups into one sequence with checkpoint pauses.
+**SCOPE — read first.** This runbook covers the **post-external-audit
+ceremony** that deploys the audit-bundle (Phase 3.1 + 7 + 7.1: EscrowPool,
+BatchSettlementRegistry, StakeBond) + Phase 8 emission
+(EmissionController, CompensationDistributor) + Phase 7-storage
+(StorageSlashing, KeyDistribution) — 9 contracts, plus the 7-Ownable
+`transferOwnership` handoff to the Foundation Safe and (optional) FTNS
+AccessControl role handoff.
+
+**This is NOT the runbook for tomorrow's ceremony.** Tomorrow (assuming
+hardware-arrival 2026-05-01) the operator runs **Phase 1.3 Task 8**
+(`deploy-provenance.js` for ProvenanceRegistry + RoyaltyDistributor with
+the Foundation Safe as `NETWORK_TREASURY`). For Task 8 see
+`docs/2026-04-30-phase1.3-task8-engineering-runbook.md` (engineering
+companion) and the operator-side `Multi-Sig_Action_Plan.md` in the
+Foundation vault. The post-audit ceremony documented HERE runs
+**weeks-to-months later** after external auditors sign off on the
+streaming-inference + emission + storage stack (Phase 7 Task 9 +
+Phase 7.1 Task 9, both currently `in_progress`).
+
+**Audience:** the operator running the post-audit ceremony with the
+Foundation 2-of-3 hardware multi-sig signers. Chronological master
+runbook stitching the 5 deploy scripts + 2 transfer scripts + multi-sig
+governance follow-ups into one sequence with checkpoint pauses.
 
 **Pre-reqs:**
 - All three hardware signing devices initialized + tested.
@@ -11,16 +30,23 @@ follow-ups into one sequence with checkpoint pauses.
 - Base Sepolia full-ceremony rehearsal completed end-to-end (this
   runbook, run with `NETWORK=base-sepolia`, must produce a green
   manifest before T-0).
-- Auditor sign-off on the audit-bundle + emission + storage contracts.
+- **External audit sign-off** on the audit-bundle + emission + storage
+  contracts. This is the load-bearing gate — the runbook below cannot
+  legitimately run before audit completion.
+- **Phase 1.3 Task 8 already executed.** ProvenanceRegistry +
+  RoyaltyDistributor live on Base mainnet; the Foundation Safe is
+  battle-tested as `NETWORK_TREASURY`.
 - Funded deployer hot wallet on Base mainnet (~0.5 ETH; see §1.5 for
   gas math).
 
 **Honest-scope notes:**
-- Phase 1.3 FTNSToken is deployed FRESH only if the Foundation has not
-  already deployed it. If a production token already exists on Base
-  mainnet, run with `FTNS_DEPLOY_MODE=existing` + provide its address.
+- FTNS already exists at `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` on
+  Base mainnet (verified 2026-04-30: symbol=FTNS, totalSupply=100M,
+  matches FTNSTokenSimple bytecode). Use `FTNS_DEPLOY_MODE=existing` +
+  provide that address. The `=real` and `=mock` modes exist for
+  testnet/hardhat-local rehearsal only.
 - This runbook does NOT cover Provenance / Royalty / NWTN-side contracts
-  — those are a separate ceremony tracked under Phase 1.3.
+  — those are Phase 1.3 Task 8 (separate, earlier ceremony).
 - `MINTER_ROLE → EmissionController` is intentionally a **post-handoff
   multi-sig governance tx** (not a deployer action). It cannot be
   scripted as part of this runbook because it requires the multi-sig

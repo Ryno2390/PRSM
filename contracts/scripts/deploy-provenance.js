@@ -18,6 +18,14 @@ const hre = require("hardhat");
 const fs = require("fs");
 const path = require("path");
 
+// Canonical Base mainnet FTNS address. Pinned here so a typo'd
+// FTNS_TOKEN_ADDRESS gets caught BEFORE we deploy RoyaltyDistributor
+// with a permanent (immutable constructor arg) link to a wrong token.
+// Verified 2026-04-30 via direct Base RPC: symbol=FTNS,
+// totalSupply=100M, name="PRSM Fungible Tokens for Node Support".
+const CANONICAL_FTNS_BASE_MAINNET = "0x5276a3756C85f2E9e46f6D34386167a209aa16e5";
+const BASE_MAINNET_CHAIN_ID = 8453n;
+
 async function main() {
   const ftnsAddress = process.env.FTNS_TOKEN_ADDRESS;
   const treasury = process.env.NETWORK_TREASURY;
@@ -25,6 +33,7 @@ async function main() {
   if (!treasury) throw new Error("NETWORK_TREASURY env var required");
 
   const network = hre.network.name;
+  const isMainnet = network === "base" || network === "mainnet";
   console.log(`\n=== Deploying provenance contracts to ${network} ===`);
   console.log(`FTNS token:       ${ftnsAddress}`);
   console.log(`Network treasury: ${treasury}`);
@@ -74,9 +83,37 @@ async function main() {
   }
   console.log(`  FTNS symbol:       ${symbol}`);
 
-  // 4. Log chain id (don't enforce — works on hardhat fork too).
+  // 4. Log chain id, and on mainnet HARD-FAIL if it doesn't match Base.
+  //    --network flag → hardhat config → connected RPC. If the RPC
+  //    URL points at the wrong chain (e.g. operator pasted a polygon
+  //    or sepolia URL into BASE_RPC_URL), the chainId mismatch catches
+  //    it BEFORE any tx is submitted.
   const chainIdActual = (await hre.ethers.provider.getNetwork()).chainId;
   console.log(`  Chain id:          ${chainIdActual}`);
+  if (network === "base" && chainIdActual !== BASE_MAINNET_CHAIN_ID) {
+    throw new Error(
+      `--network=base but RPC reports chainId=${chainIdActual}; ` +
+      `expected ${BASE_MAINNET_CHAIN_ID}. Check BASE_RPC_URL — likely ` +
+      `points at the wrong network. ABORT before deploy.`
+    );
+  }
+
+  // 5. On mainnet ONLY: refuse FTNS_TOKEN_ADDRESS that doesn't match
+  //    the canonical pinned production address. RoyaltyDistributor's
+  //    constructor wires this in immutably; a typo here is permanent.
+  //    Operator can override via FORCE_NONCANONICAL_FTNS=1 if/when a
+  //    new production token is intentionally deployed.
+  if (isMainnet && ftnsChecksum.toLowerCase() !== CANONICAL_FTNS_BASE_MAINNET.toLowerCase()) {
+    if (process.env.FORCE_NONCANONICAL_FTNS !== "1") {
+      throw new Error(
+        `FTNS_TOKEN_ADDRESS=${ftnsChecksum} does not match the canonical ` +
+        `Base mainnet FTNS at ${CANONICAL_FTNS_BASE_MAINNET}. If this is ` +
+        `intentional (new production token), set FORCE_NONCANONICAL_FTNS=1 ` +
+        `to override. Otherwise, FIX THE TYPO before proceeding.`
+      );
+    }
+    console.log(`  ⚠️  using non-canonical FTNS (FORCE_NONCANONICAL_FTNS=1 set)`);
+  }
 
   const [deployer] = await hre.ethers.getSigners();
   console.log(`\nDeployer:         ${deployer.address}`);
@@ -85,7 +122,7 @@ async function main() {
   console.log(`Deployer balance: ${hre.ethers.formatEther(balance)} ETH`);
   if (balance === 0n) throw new Error("Deployer has zero balance");
 
-  // 5. Treasury must not equal deployer. networkTreasury is immutable —
+  // 6. Treasury must not equal deployer. networkTreasury is immutable —
   //    the Sepolia bake-in convenience of using deployer-as-treasury is
   //    acceptable on testnet but would permanently route the 2% royalty
   //    fee to the deployer EOA on mainnet with no upgrade path. Belt and
@@ -96,6 +133,22 @@ async function main() {
       `NETWORK_TREASURY (${treasuryChecksum}) must not equal deployer (${deployer.address}). ` +
       `Use a dedicated treasury address — a multi-sig or foundation-controlled address, never the deployer EOA.`
     );
+  }
+
+  // 7. On mainnet ONLY: NETWORK_TREASURY must be a contract (Safe),
+  //    not an EOA. An EOA treasury defeats the multi-sig safety property
+  //    — losing a single private key would compromise the entire 2%
+  //    royalty stream forever, since networkTreasury is immutable.
+  if (isMainnet) {
+    const treasuryCode = await hre.ethers.provider.getCode(treasuryChecksum);
+    if (treasuryCode === "0x" || treasuryCode === "0x0") {
+      throw new Error(
+        `NETWORK_TREASURY ${treasuryChecksum} is an EOA on ${network}. ` +
+        `Expected a deployed multi-sig contract (Safe). Hot wallets cannot ` +
+        `replace 2-of-3 multi-sig safety for the immutable treasury role.`
+      );
+    }
+    console.log(`  Treasury bytecode: ${(treasuryCode.length / 2 - 1)} bytes (contract ✓)`);
   }
 
   // 1. Registry
