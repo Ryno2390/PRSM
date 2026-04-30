@@ -35,7 +35,7 @@ Untracked count: 168 → 164.
 | `prsm/compute/nwtn/` | 39 → 30 | PARTIAL: 9 .md/.json deleted (this commit). 30 .py + subdirs deferred — see §B |
 | `prsm/compute/collaboration/` | 16 | **CONFIRMED LEGACY** — v1.7.0 explicitly deleted these as "legacy that survived v1.6.0"; ~26K LoC; zero tracked-code refs. See §B. |
 | `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` 26 .py + 12 other subdirs 81 .py) | **CONFIRMED LEGACY across all 4 clusters** — chronos/ + agents/ + federation/ + 12 other subdirs all show v1.6 (or v1.7) deletion-then-reintroduction signature. ~80K LoC total. Bulk-delete recommended pending operator decision on whether the resurrection was a single event or independent. See §B. |
-| `tests/{integration,nwtn,scripts_integration,...}/` | 58 | LIKELY LEGACY — see §C |
+| `tests/{integration,nwtn,scripts_integration,...}/` | 58 | **ACTIONED 2026-04-30** — bulk-relocated to `tests/_legacy/2026-04-30-untracked-sweep/` per §C.1 (matches task #89 precedent). 551 tests collect cleanly post-move. See §C. |
 | `docs/api/PHASE_7_API_REFERENCE.md` | 1 | NEEDS REVIEW — see §D |
 | `config/nginx/ipfs-proxy.conf` | 1 | DEPRECATED INFRA — see §E |
 | (other small misc) | ~9 | see git status |
@@ -326,7 +326,9 @@ Three subdirs (`chronos/`, `agents/`, `federation/`) now show the same v1.6-dele
 
 The fact that all three subdirs share the soft-import / `*_AVAILABLE = False` fallback pattern suggests the v1.6 sprint anticipated optional re-introduction (otherwise tracked code would just import directly and break on absence). So at minimum the deletion was deliberate; the re-introduction may or may not have been.
 
-## §C — `tests/` (58 untracked files)
+## §C — `tests/` (58 untracked files) — ACTIONED 2026-04-30
+
+Status breakdown at audit start:
 
 ```
 19 integration
@@ -340,14 +342,16 @@ The fact that all three subdirs share the soft-import / `*_AVAILABLE = False` fa
  1 load
 ```
 
-**Important context:** task #89 in the task list is "Repo audit — relocate 109 legacy test files to `tests/_legacy/`" (completed). So there's an established pattern for legacy test relocation. These 58 untracked tests likely missed the #89 sweep.
+**Action taken (2026-04-30):** path (1) executed — bulk-relocated all 58 files to `tests/_legacy/2026-04-30-untracked-sweep/`, mirroring the directory structure under `tests/`. Matches task #89 precedent (relocated 109 legacy test files to `tests/_legacy/` earlier in the project). The relocation preserves the files for forensic recovery without polluting the live test surface.
 
-**Recommended action:**
-1. **Bulk-relocate to `tests/_legacy/`** (matches existing pattern from #89), OR
-2. **Spot-check + delete obvious legacy** (e.g. `tests/nwtn/*` is almost certainly NWTN-era), OR
-3. **Run the test suite to identify broken tests** — if a test fails to import or collect, it's stale.
+**Verification:** post-move `pytest tests/integration/ --collect-only` succeeds with 551 tests collected, no collection errors. The `tests/_legacy/` directory is the established quarantine pattern and is excluded from the default test surface.
 
-Path (3) is the most rigorous but slowest. Path (1) is the safest quick win and matches prior precedent.
+**Why not delete outright:**
+- 58 files is large enough that some may have salvageable test logic for current-architecture re-testing
+- `tests/_legacy/` is reversible — if any prove useful, `git mv` can pull them back into the live surface
+- Deletion is always a follow-up option after the operator reviews the relocated content
+
+If preferred, a follow-up `git rm -r tests/_legacy/2026-04-30-untracked-sweep/` after operator review converts this from quarantine to deletion.
 
 ## §D — `docs/api/PHASE_7_API_REFERENCE.md` (740 lines)
 
