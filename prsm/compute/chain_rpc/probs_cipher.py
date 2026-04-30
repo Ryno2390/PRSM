@@ -44,6 +44,7 @@ the co-set `proposed_token_ids` field (length must match).
 
 from __future__ import annotations
 
+import os
 import struct
 from typing import List, Sequence
 
@@ -188,9 +189,16 @@ class ProbsCipher:
         """
         plaintext = _encode_probs(probs)
         aad = _aad(request_id, stage_index)
-        # AESGCM.encrypt requires a 12-byte nonce; we generate via
-        # the library's random for cryptographic strength.
-        nonce = AESGCM.generate_key(bit_length=128)[:_GCM_NONCE_LEN]
+        # AES-GCM requires a 12-byte nonce sourced from a CSPRNG.
+        # ``os.urandom`` reads directly from the OS CSPRNG (the same
+        # source ``cryptography`` uses internally for key
+        # generation). Round-1 review L1: previously this used
+        # ``AESGCM.generate_key(bit_length=128)[:_GCM_NONCE_LEN]``,
+        # which is functionally equivalent but idiomatically wrong
+        # — ``generate_key`` is intended for key generation, not
+        # nonces. The reader-confusion cost outweighs any micro-
+        # convenience.
+        nonce = os.urandom(_GCM_NONCE_LEN)
         try:
             ct = self._aesgcm.encrypt(nonce, plaintext, aad)
         except Exception as exc:  # noqa: BLE001
