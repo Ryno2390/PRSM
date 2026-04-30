@@ -77,25 +77,76 @@ else
   HARDHAT_NETWORK_FLAG="--network ${NETWORK}"
 fi
 
-# ── 1. Mock FTNS (testnet/local only) ──────────────────────────────────
-if [[ -z "${FTNS_TOKEN_ADDRESS:-}" ]]; then
-  if [[ "${NETWORK}" == "base" || "${NETWORK}" == "mainnet" ]]; then
-    echo "❌ FTNS_TOKEN_ADDRESS required on mainnet." >&2
-    exit 1
-  fi
-  echo
-  echo "[1/5] Deploying MockERC20 (MFTNS stand-in)…"
-  MOCK_OUT="$(npx hardhat run scripts/deploy-mock-ftns.js ${HARDHAT_NETWORK_FLAG})"
-  echo "${MOCK_OUT}"
-  export FTNS_TOKEN_ADDRESS="$(echo "${MOCK_OUT}" | grep -oE 'MockERC20: 0x[0-9a-fA-F]{40}' | head -1 | awk '{print $2}')"
-  if [[ -z "${FTNS_TOKEN_ADDRESS}" ]]; then
-    echo "❌ could not parse MockERC20 address from deploy output" >&2
-    exit 1
-  fi
-  echo "   FTNS_TOKEN_ADDRESS=${FTNS_TOKEN_ADDRESS}"
-else
-  echo "[1/5] Using pre-existing FTNS token at ${FTNS_TOKEN_ADDRESS}"
+# ── 1. FTNS token ─────────────────────────────────────────────────────
+# FTNS_DEPLOY_MODE selects how the FTNS token enters the ceremony:
+#   - mock: deploy MockERC20 (test-only; banned on base/mainnet by the
+#           deploy-mock-ftns.js refusal check). Default on hardhat-local.
+#   - real: deploy fresh FTNSTokenSimple UUPS proxy. Required path when
+#           the operator wants to stand up a NEW production token (e.g.
+#           testnet bring-up). Default on testnet.
+#   - existing: use FTNS_TOKEN_ADDRESS provided by operator. Required
+#               on base/mainnet (token is already deployed).
+FTNS_FRESHLY_DEPLOYED=0  # set to 1 if rehearsal deployed FTNS itself
+if [[ -n "${FTNS_TOKEN_ADDRESS:-}" ]]; then
+  : "${FTNS_DEPLOY_MODE:=existing}"
 fi
+if [[ "${NETWORK}" == "base" || "${NETWORK}" == "mainnet" ]]; then
+  : "${FTNS_DEPLOY_MODE:=existing}"
+elif [[ "${NETWORK}" == "hardhat-local" ]]; then
+  : "${FTNS_DEPLOY_MODE:=mock}"
+else
+  : "${FTNS_DEPLOY_MODE:=real}"
+fi
+
+case "${FTNS_DEPLOY_MODE}" in
+  existing)
+    if [[ -z "${FTNS_TOKEN_ADDRESS:-}" ]]; then
+      echo "❌ FTNS_DEPLOY_MODE=existing but FTNS_TOKEN_ADDRESS unset." >&2
+      exit 1
+    fi
+    echo "[1/5] Using pre-existing FTNS token at ${FTNS_TOKEN_ADDRESS} (mode=existing)"
+    ;;
+  mock)
+    if [[ "${NETWORK}" == "base" || "${NETWORK}" == "mainnet" ]]; then
+      echo "❌ FTNS_DEPLOY_MODE=mock is forbidden on ${NETWORK}." >&2
+      exit 1
+    fi
+    echo
+    echo "[1/5] Deploying MockERC20 (MFTNS stand-in, mode=mock)…"
+    MOCK_OUT="$(npx hardhat run scripts/deploy-mock-ftns.js ${HARDHAT_NETWORK_FLAG})"
+    echo "${MOCK_OUT}"
+    export FTNS_TOKEN_ADDRESS="$(echo "${MOCK_OUT}" | grep -oE 'MockERC20: 0x[0-9a-fA-F]{40}' | head -1 | awk '{print $2}')"
+    if [[ -z "${FTNS_TOKEN_ADDRESS}" ]]; then
+      echo "❌ could not parse MockERC20 address from deploy output" >&2
+      exit 1
+    fi
+    echo "   FTNS_TOKEN_ADDRESS=${FTNS_TOKEN_ADDRESS}"
+    ;;
+  real)
+    echo
+    echo "[1/5] Deploying FTNSTokenSimple UUPS proxy (mode=real)…"
+    # Treasury defaulting matches the rest of the orchestrator: explicit
+    # required on testnet/mainnet, deployer-fallback on hardhat-local.
+    if [[ -z "${TREASURY_ADDRESS:-}" ]] && [[ "${NETWORK}" == "hardhat-local" ]]; then
+      echo "   TREASURY_ADDRESS unset; deploy-phase1-ftns.js will default to deployer for hardhat-local."
+    fi
+    REAL_OUT="$(npx hardhat run scripts/deploy-phase1-ftns.js ${HARDHAT_NETWORK_FLAG})"
+    echo "${REAL_OUT}"
+    export FTNS_TOKEN_ADDRESS="$(echo "${REAL_OUT}" | grep -oE 'FTNSTokenSimple: 0x[0-9a-fA-F]{40}' | head -1 | awk '{print $2}')"
+    if [[ -z "${FTNS_TOKEN_ADDRESS}" ]]; then
+      echo "❌ could not parse FTNSTokenSimple address from deploy output" >&2
+      exit 1
+    fi
+    echo "   FTNS_TOKEN_ADDRESS=${FTNS_TOKEN_ADDRESS}"
+    FTNS_FRESHLY_DEPLOYED=1
+    ;;
+  *)
+    echo "❌ unknown FTNS_DEPLOY_MODE=${FTNS_DEPLOY_MODE}" >&2
+    echo "   valid modes: mock | real | existing" >&2
+    exit 1
+    ;;
+esac
+export FTNS_FRESHLY_DEPLOYED
 
 # ── 2. Audit bundle (Phase 3.1 + 7 + 7.1) ─────────────────────────────
 echo
@@ -219,6 +270,37 @@ if [[ "${NETWORK}" == "hardhat-local" ]] && [[ "${SKIP_TRANSFER:-0}" != "1" ]]; 
     exit 1
   fi
   echo "   ✅ idempotency holds (7/7 skipped on re-run)"
+
+  # FTNS role transfer is only relevant if THIS rehearsal deployed FTNS
+  # itself (FTNS_DEPLOY_MODE=real). For mock + existing modes the
+  # deployer never held admin keys on the FTNS token, so nothing to
+  # transfer.
+  if [[ "${FTNS_FRESHLY_DEPLOYED}" == "1" ]]; then
+    echo
+    echo "   Rehearsing FTNS AccessControl role handoff…"
+    P1="$(ls -1t "${CONTRACTS}/deployments/phase1-ftns-localhost-"*.json 2>/dev/null | head -1 || true)"
+    if [[ -z "${P1}" ]]; then
+      echo "❌ no phase1-ftns manifest found for FTNS role-transfer rehearsal" >&2
+      exit 1
+    fi
+    FOUNDATION_MULTISIG="${STUB_MULTISIG}" \
+      PHASE1_FTNS_MANIFEST="${P1}" \
+      npx hardhat run scripts/transfer-ftns-roles.js ${HARDHAT_NETWORK_FLAG}
+
+    # Idempotency: re-run must skip all 5 actions (1 grant + 4 renounces).
+    echo
+    echo "   Verifying FTNS role-transfer idempotency (re-run must be a no-op)…"
+    RERUN_FTNS="$(FOUNDATION_MULTISIG="${STUB_MULTISIG}" \
+      PHASE1_FTNS_MANIFEST="${P1}" \
+      npx hardhat run scripts/transfer-ftns-roles.js ${HARDHAT_NETWORK_FLAG})"
+    echo "${RERUN_FTNS}" | grep -E "(skipping|FTNS roles handed off:)" || true
+    if ! echo "${RERUN_FTNS}" | grep -q "FTNS roles handed off: 0 txs; skipped (idempotent): 5"; then
+      echo "❌ FTNS role-transfer idempotency check failed" >&2
+      echo "${RERUN_FTNS}" >&2
+      exit 1
+    fi
+    echo "   ✅ FTNS role-transfer idempotency holds (5/5 skipped on re-run)"
+  fi
 fi
 
 # ── 6. Summary ────────────────────────────────────────────────────────

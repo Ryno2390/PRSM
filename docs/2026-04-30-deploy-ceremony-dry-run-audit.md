@@ -90,20 +90,48 @@ deploy-time check is just `extcodesize > 0` — not interface compliance.
 **Status:** not blocking for v1 mainnet (verifier stays an EOA per
 current runbook). Flag for the verifier-contract migration milestone.
 
-### G5 — Phase 1.3 FTNSToken deploy not in orchestrator **(LOW — documented)**
+### G5 — Phase 1.3 FTNSToken deploy + role handoff not in orchestrator **(MEDIUM — addressed)**
 
-`deploy.js` deploys FTNSToken as a UUPS proxy. It is **not** wired into
-`rehearse-deploy.sh`. On mainnet day, FTNSToken is the FIRST contract
-deployed (every downstream contract takes its address as a constructor
-arg). Mainnet operator currently has to remember to run `deploy.js`
-first, capture the proxy address, export it as `FTNS_TOKEN_ADDRESS`,
-then run `rehearse-deploy.sh`.
+The legacy `contracts/scripts/deploy.js` was stale (ethers v5 idioms;
+referenced a non-existent `FTNSToken` contract — actual deployed
+contract is `FTNSTokenSimple`; bundled out-of-scope contracts like
+Timelock + Governance + Marketplace). It would not have run on the
+current toolchain. Even if fixed, it was not wired into
+`rehearse-deploy.sh`. And there was no parallel script for the
+AccessControl role handoff (`transfer-ownership.js` explicitly skips
+FTNSToken because it's AccessControl-based, not Ownable).
 
-**Status:** not addressed in this dry-run because Phase 1.3 has its own
-audit clock (separate ceremony documented in the Phase 1.3 deploy
-runbook). Bundling into `rehearse-deploy.sh` is appropriate when both
-run on the same day, which is the current plan. Flagged for the
-mainnet-day master checklist.
+**Fix:** added two new scripts and an `FTNS_DEPLOY_MODE` selector:
+
+- `contracts/scripts/deploy-phase1-ftns.js`: deploys
+  `FTNSTokenSimple` as a UUPS proxy via OpenZeppelin upgrades plugin.
+  Uses ethers v6 idioms matching the rest of the deploy fleet. Hard-
+  fails on testnet/mainnet without explicit `TREASURY_ADDRESS` (silent
+  fallback to deployer would mint 100M FTNS to a hot key on mainnet).
+  Verifies post-init invariants: name, symbol, totalSupply == 100M,
+  treasury balance == initialSupply, deployer holds all 4 roles.
+
+- `contracts/scripts/transfer-ftns-roles.js`: handles the AccessControl
+  ceremony — grants `DEFAULT_ADMIN_ROLE` to multi-sig, renounces all
+  four roles (DEFAULT_ADMIN, MINTER, PAUSER, BURNER) on deployer.
+  Belt-and-braces: refuses to renounce DEFAULT_ADMIN on deployer if
+  multi-sig has not yet received it (would permanently strand the
+  contract). Idempotent on re-runs. Documents the post-handoff
+  follow-up (`MINTER_ROLE` → `EmissionController` is a separate
+  multi-sig-signed governance tx, not in this script).
+
+- `scripts/rehearse-deploy.sh`: new `FTNS_DEPLOY_MODE={mock|real|existing}`
+  env var selects FTNS source. Defaults: `mock` on hardhat-local
+  (preserves fast-rehearsal speed); `existing` on base/mainnet (token
+  pre-deployed, operator provides `FTNS_TOKEN_ADDRESS`); `real` on
+  testnets. The transfer-ownership rehearsal step now also runs the
+  FTNS role handoff + idempotency check when `FTNS_DEPLOY_MODE=real`.
+
+**Verified end-to-end:** ran `FTNS_DEPLOY_MODE=real ./scripts/rehearse-deploy.sh`
+on hardhat-local — Phase 1.3 deploy + 4 audit-bundle/Phase 8/Phase 7-storage
+deploys + 7-Ownable transfer + 5-action FTNS role handoff (1 grant + 4
+renounces) all green; both ownership and FTNS-role transfer idempotent
+on re-run. Mock-mode default rehearsal unchanged.
 
 ### G6 — `FOUNDATION_RESERVE_WALLET` + pool sinks default silently **(MEDIUM — addressed)**
 
@@ -162,7 +190,7 @@ Two full rehearsals run end-to-end against a fresh hardhat-local node:
 | Cross-wire txs | ✅ rehearsed (post-deploy invariants pass) |
 | `transferOwnership` to multi-sig | ✅ rehearsed (this audit) |
 | Idempotency under partial-ceremony re-run | ✅ rehearsed |
-| Phase 1.3 FTNSToken deploy | ⚠️ separate script, not orchestrator-bundled |
+| Phase 1.3 FTNSToken deploy + role handoff | ✅ wired (G5 addressed; FTNS_DEPLOY_MODE selector) |
 | `FOUNDATION_RESERVE_WALLET` + pool sinks mainnet guard | ✅ wired (G6 addressed post-G1) |
 | Verifier-contract migration | ⚠️ deferred (EOA prover for v1) |
 | Hardware signer-set documentation | ⚠️ operator-side (not engineering) |
