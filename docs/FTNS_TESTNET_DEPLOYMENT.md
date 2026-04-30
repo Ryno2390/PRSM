@@ -28,6 +28,20 @@ You can interact with the live contract on [Etherscan](https://sepolia.etherscan
 
 The rest of this guide covers how to deploy a fresh instance (e.g. for local testing or a new network).
 
+> ⚠️ **Stale-content notice (2026-04-30):** the "Deployment Methods" sections
+> below reference `scripts/deploy.js` and `scripts/verify-deployment.js` —
+> both deleted because they used ethers v5 idioms and referenced
+> contracts (`FTNSToken`, `FTNSMarketplace`, `FTNSGovernance`,
+> `TimelockController`) that don't exist in the current architecture.
+> They also reference `polygon-mumbai`, which Polygon shut down in
+> April 2024. **For a fresh FTNS deploy, use the current
+> `scripts/deploy-phase1-ftns.js` (`FTNSTokenSimple` UUPS proxy).**
+> For ProvenanceRegistry + RoyaltyDistributor on Base, see the
+> Phase 1.3 Task 8 engineering runbook at
+> `docs/2026-04-30-phase1.3-task8-engineering-runbook.md`. The
+> below sections are kept for historical context but should not be
+> followed verbatim.
+
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)

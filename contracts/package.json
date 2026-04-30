@@ -1,7 +1,7 @@
 {
   "name": "prsm-ftns-contracts",
   "version": "1.0.0",
-  "description": "PRSM FTNS Smart Contracts for Polygon",
+  "description": "PRSM FTNS smart contracts on Base (FTNSTokenSimple, ProvenanceRegistry, RoyaltyDistributor, audit-bundle, Phase 8 emission, Phase 7-storage)",
   "main": "index.js",
   "scripts": {
     "compile": "hardhat compile",
@@ -10,20 +10,19 @@
     "test:gas": "REPORT_GAS=true hardhat test",
     "test:ci": "hardhat test --reporter=json > test-results.json",
     "coverage:check": "hardhat coverage && node scripts/check-coverage.js",
-    "deploy:testnet": "hardhat run scripts/deploy.js --network polygon-mumbai",
-    "deploy:mainnet": "hardhat run scripts/deploy.js --network polygon-mainnet",
-    "verify": "hardhat verify --network polygon-mumbai",
+    "deploy:provenance:sepolia": "hardhat run scripts/deploy-provenance.js --network base-sepolia",
+    "deploy:provenance:base": "hardhat run scripts/deploy-provenance.js --network base",
+    "verify:provenance": "hardhat run scripts/verify-provenance-deployment.js",
     "node": "hardhat node",
     "console": "hardhat console"
   },
   "keywords": [
     "ethereum",
-    "polygon",
+    "base",
     "smart-contracts",
     "ftns",
-    "tokens",
-    "defi",
-    "marketplace"
+    "provenance",
+    "royalty"
   ],
   "author": "PRSM Team",
   "license": "MIT",

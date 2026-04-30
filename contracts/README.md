@@ -55,23 +55,46 @@ REPORT_GAS=true npm test
 
 ## Deployment
 
-The live FTNS contract is already deployed to Base mainnet. For new test deployments or bridge contract upgrades:
+The FTNS token is already live on Base mainnet (see "Live Addresses"
+below). Subsequent contract ceremonies follow this layered structure:
+
+| Ceremony | Scope | Script | Engineering runbook |
+|---|---|---|---|
+| **Phase 1.3 Task 8** | ProvenanceRegistry + RoyaltyDistributor with Foundation Safe as `NETWORK_TREASURY` | `scripts/deploy-provenance.js` | [`docs/2026-04-30-phase1.3-task8-engineering-runbook.md`](../docs/2026-04-30-phase1.3-task8-engineering-runbook.md) |
+| **Post-audit** | Audit-bundle + Phase 8 emission + Phase 7-storage (9 contracts + transferOwnership) | `../scripts/rehearse-deploy.sh` orchestrator | [`docs/2026-04-30-post-audit-deploy-ceremony-runbook.md`](../docs/2026-04-30-post-audit-deploy-ceremony-runbook.md) |
+
+For Phase 1.3 Task 8 (the immediate post-hardware-arrival ceremony):
 
 ```bash
-# Base Sepolia (testnet)
-npx hardhat run scripts/deploy.js --network base-sepolia
+# Pre-flight: 10 verifications BEFORE burning gas
+../scripts/pre-task8-checklist.sh
 
-# Base mainnet (mainnet)
-npx hardhat run scripts/deploy.js --network base
+# Hardhat-local rehearsal (mock FTNS + stub treasury + verifier)
+../scripts/rehearse-task8.sh
+
+# Base Sepolia rehearsal (real testnet RPC + real testnet treasury)
+NETWORK=base-sepolia FTNS_TOKEN_ADDRESS=0x... NETWORK_TREASURY=0x... \
+  PRIVATE_KEY=0x... BASE_SEPOLIA_RPC_URL=<rpc> \
+  ../scripts/rehearse-task8.sh
+
+# Mainnet (only after pre-flight green)
+npx hardhat run scripts/deploy-provenance.js --network base 2>&1 \
+  | tee /tmp/mainnet-deploy-$(date +%s).log
+
+# Post-deploy verification
+PROVENANCE_MANIFEST=deployments/provenance-base-<ts>.json \
+  npx hardhat run scripts/verify-provenance-deployment.js --network base
+
+# Post-deploy ops handoff (find OLD-address refs + generate PR + memory stub)
+MAINNET_MANIFEST=deployments/provenance-base-<ts>.json \
+  ../scripts/post-task8-handoff-checklist.sh
 ```
 
-Verify on Basescan:
+Verify on Basescan (Etherscan v2 unified API):
 
 ```bash
-npx hardhat verify --network base <CONTRACT_ADDRESS>
+npx hardhat verify --network base <CONTRACT_ADDRESS> [constructor args...]
 ```
-
-See [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) for the full deployment walkthrough.
 
 ## Live Addresses
 
