@@ -182,6 +182,7 @@ def _make_executor(
     submitter: Optional[RecordingSubmitter] = None,
     cost_per_layer: Decimal = Decimal("0.01"),
     tier_c_chain_executor: Optional[Any] = None,
+    tier_c_speculation_enabled: bool = False,
 ):
     if registered is None:
         registered = {g.node_id: "pk-" + g.node_id for g in pool}
@@ -221,6 +222,7 @@ def _make_executor(
         node_identity=generate_node_identity("test-settler"),
         cost_per_layer=cost_per_layer,
         tier_c_chain_executor=tier_c_chain_executor,
+        tier_c_speculation_enabled=tier_c_speculation_enabled,
     )
     return executor, pool_holder, trust
 
@@ -233,6 +235,7 @@ def _request(
     request_id: str = "req-1",
     prompt: str = "hello",
     content_tier: ContentTier = ContentTier.A,
+    temperature: Optional[float] = None,
 ) -> InferenceRequest:
     return InferenceRequest(
         prompt=prompt,
@@ -241,6 +244,7 @@ def _request(
         privacy_tier=privacy_tier,
         content_tier=content_tier,
         request_id=request_id,
+        temperature=temperature,
     )
 
 
@@ -1078,3 +1082,137 @@ class TestTierCRoutingIntegration:
         ))
         finals = [x for x in items if isinstance(x, InferenceResult)]
         assert len(finals) == 1 and finals[0].success is True
+
+
+class TestTierCSpeculationGate:
+    """Phase 3.x.11.q.y Task 4 — Tier C + temperature > 0
+    (speculation) is denied unless the operator explicitly opts in
+    via tier_c_speculation_enabled=True."""
+
+    def test_tier_c_temp_gt_zero_default_denies(self):
+        # Default deploy: tier_c_speculation_enabled=False. A
+        # Tier C request with temperature > 0 must surface a
+        # structured failure rather than reaching the chain.
+        primary = StreamingChainExecutor()
+        tier_c = _RecordingTierCExecutor(
+            StreamingChainExecutor(deltas=["t1"]),
+        )
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=tier_c,
+            # tier_c_speculation_enabled defaults to False.
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.C, temperature=0.7),
+        ))
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1
+        assert finals[0].success is False
+        assert "tier_c_speculation_enabled=True" in finals[0].error
+        assert "constant_k_commitment" in finals[0].error
+        # Decorator did NOT see the request.
+        assert tier_c.invocations == []
+
+    def test_tier_c_temp_zero_unaffected_by_default_gate(self):
+        # Greedy Tier C (temperature=0 or None) must continue to
+        # work under the default deploy.
+        primary = StreamingChainExecutor()
+        tier_c = _RecordingTierCExecutor(
+            StreamingChainExecutor(deltas=["t1"]),
+        )
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=tier_c,
+        )
+        # temperature=0.0 → greedy → no speculation.
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.C, temperature=0.0),
+        ))
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1 and finals[0].success is True
+        assert len(tier_c.invocations) == 1
+
+    def test_tier_c_temp_none_unaffected_by_default_gate(self):
+        # Defensive: temperature unset (None) is treated as
+        # greedy and must NOT trip the gate.
+        primary = StreamingChainExecutor()
+        tier_c = _RecordingTierCExecutor(
+            StreamingChainExecutor(deltas=["t1"]),
+        )
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=tier_c,
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.C, temperature=None),
+        ))
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1 and finals[0].success is True
+        assert len(tier_c.invocations) == 1
+
+    def test_tier_c_temp_gt_zero_with_opt_in_routes(self):
+        # Operator opts in: tier_c_speculation_enabled=True. The
+        # request must reach the wired decorator. (This test
+        # exercises the gate's allow-path; it does NOT verify the
+        # decorator is actually speculation-capable — that's the
+        # operator's contract per the failure-message guidance.)
+        primary = StreamingChainExecutor()
+        tier_c = _RecordingTierCExecutor(
+            StreamingChainExecutor(deltas=["t1"]),
+        )
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=tier_c,
+            tier_c_speculation_enabled=True,
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.C, temperature=0.7),
+        ))
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1 and finals[0].success is True
+        assert len(tier_c.invocations) == 1
+
+    def test_tier_a_temp_gt_zero_unaffected(self):
+        # Tier A + temperature > 0 stays on the primary path
+        # regardless of the speculation gate. The gate is
+        # Tier-C-scoped only.
+        primary = StreamingChainExecutor()
+        tier_c = _RecordingTierCExecutor(
+            StreamingChainExecutor(deltas=["t1"]),
+        )
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=tier_c,
+            # default-denied gate; should not affect Tier A.
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.A, temperature=0.7),
+        ))
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1 and finals[0].success is True
+        # Tier A → primary, NOT decorator.
+        assert tier_c.invocations == []
+        assert primary.streaming_calls != []
+
+    def test_tier_b_temp_gt_zero_unaffected(self):
+        primary = StreamingChainExecutor()
+        tier_c = _RecordingTierCExecutor(
+            StreamingChainExecutor(deltas=["t1"]),
+        )
+        executor, _, _ = _make_executor(
+            pool=[_gpu("a"), _gpu("b")],
+            chain_executor=primary,
+            tier_c_chain_executor=tier_c,
+        )
+        items = _drain_streaming(executor.execute_streaming(
+            _request(content_tier=ContentTier.B, temperature=0.7),
+        ))
+        finals = [x for x in items if isinstance(x, InferenceResult)]
+        assert len(finals) == 1 and finals[0].success is True
+        assert tier_c.invocations == []
+        assert primary.streaming_calls != []

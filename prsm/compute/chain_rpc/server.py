@@ -252,6 +252,7 @@ class LayerStageServer:
         ] = None,
         kv_cache_manager: Optional[KVCacheManager] = None,
         sharded_runner: Optional[Any] = None,
+        encrypted_probs_cipher: Optional[Any] = None,
     ) -> None:
         if identity is None or not hasattr(identity, "node_id"):
             raise RuntimeError(
@@ -360,6 +361,24 @@ class LayerStageServer:
         self._tier_c_streaming_decorator = tier_c_streaming_decorator
         self._kv_cache_manager = kv_cache_manager
         self._sharded_runner = sharded_runner
+        # Phase 3.x.11.q.y — encrypted_probs_cipher is opt-in. When
+        # wired, the server decrypts encrypted_proposed_token_probs
+        # at the boundary using the same cipher (operator distributes
+        # the PSK out-of-band). When None + the wire field is set,
+        # the server returns MALFORMED_REQUEST (the executor
+        # mistakenly dispatched encrypted probs to a server that
+        # can't decrypt — operator misconfig).
+        if encrypted_probs_cipher is not None:
+            for method in ("encrypt", "decrypt"):
+                if not callable(
+                    getattr(encrypted_probs_cipher, method, None),
+                ):
+                    raise RuntimeError(
+                        f"LayerStageServer: encrypted_probs_cipher "
+                        f"must implement {method}(...) per "
+                        f"prsm.compute.chain_rpc.probs_cipher.ProbsCipher"
+                    )
+        self._encrypted_probs_cipher = encrypted_probs_cipher
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -872,6 +891,47 @@ class LayerStageServer:
             runner_kwargs["proposed_token_probs"] = list(
                 request.proposed_token_probs,
             )
+        elif request.encrypted_proposed_token_probs is not None:
+            # Phase 3.x.11.q.y — encrypted probs path. Decrypt at
+            # the boundary using the operator-wired cipher; pass
+            # plaintext to the runner just like the legacy path.
+            # The cipher's AAD bind (request_id || stage_index)
+            # causes decryption to fail loudly on cross-stage
+            # replay; we surface that as MALFORMED_REQUEST.
+            if self._encrypted_probs_cipher is None:
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    "encrypted_proposed_token_probs set on the wire "
+                    "but server has no encrypted_probs_cipher wired "
+                    "— operator misconfig (the executor encrypted "
+                    "but the tail can't decrypt)",
+                )
+            stage_index = (
+                request.upstream_token.chain_stage_index
+                if request.upstream_token is not None else 0
+            )
+            expected_k = (
+                len(request.proposed_token_ids)
+                if request.proposed_token_ids is not None else 0
+            )
+            try:
+                plaintext_probs = self._encrypted_probs_cipher.decrypt(
+                    ciphertext=bytes(
+                        request.encrypted_proposed_token_probs,
+                    ),
+                    request_id=request.request_id,
+                    stage_index=stage_index,
+                    expected_k=expected_k,
+                )
+            except Exception as exc:  # noqa: BLE001
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    f"encrypted_proposed_token_probs decrypt failed: "
+                    f"{exc.__class__.__name__}: {exc}",
+                )
+            runner_kwargs["proposed_token_probs"] = plaintext_probs
 
         start_ts = self._clock()
         try:

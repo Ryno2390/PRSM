@@ -244,6 +244,7 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         privacy_overhead: Optional[Mapping[PrivacyLevel, Decimal]] = None,
         allow_partial_regions: bool = False,
         tier_c_chain_executor: Optional[Any] = None,
+        tier_c_speculation_enabled: bool = False,
     ) -> None:
         if gpu_pool_provider is None or not callable(gpu_pool_provider):
             raise RuntimeError(
@@ -290,6 +291,16 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         self._catalog = dict(model_catalog)
         self._chain_executor = chain_executor
         self._tier_c_chain_executor = tier_c_chain_executor
+        # Phase 3.x.11.q.y — operator opt-in for speculation +
+        # Tier C composition. When False (default), Tier C requests
+        # with temperature > 0 still surface a structured failure
+        # (speculation under Tier C is denied unless this is True
+        # AND the wired tier_c_chain_executor is speculation-capable
+        # with encrypted_probs_cipher + flat_k_mode + the tail's
+        # constant_k_commitment). When True, the routing layer
+        # forwards Tier C + temp>0 to tier_c_chain_executor without
+        # blocking.
+        self._tier_c_speculation_enabled = bool(tier_c_speculation_enabled)
         self._identity = node_identity
         self._cost_per_layer = Decimal(cost_per_layer)
         self._privacy_overhead = dict(
@@ -431,6 +442,38 @@ class ParallaxScheduledExecutor(InferenceExecutor):
                 )
                 return
             chain_executor = self._tier_c_chain_executor
+
+            # Phase 3.x.11.q.y — Tier C + temperature > 0
+            # (i.e. speculation) is denied unless the operator
+            # explicitly opts in via ``tier_c_speculation_enabled``
+            # AND wires a speculation-capable
+            # tier_c_chain_executor (encrypted_probs_cipher +
+            # flat_k_mode + a tail with constant_k_commitment).
+            # Otherwise vanilla speculation under Tier C would
+            # leak the per-iteration acceptance count on the
+            # wire and burn the chain-level constant-time
+            # invariant. See docs §7.14 (audit-prep).
+            request_temp = getattr(request, "temperature", None)
+            if (
+                request_temp is not None
+                and float(request_temp) > 0.0
+                and not self._tier_c_speculation_enabled
+            ):
+                yield InferenceResult.failure(
+                    request.request_id,
+                    "Tier C streaming with temperature > 0 "
+                    "(speculation) requires "
+                    "tier_c_speculation_enabled=True at "
+                    "ParallaxScheduledExecutor construction "
+                    "AND a speculation-capable "
+                    "tier_c_chain_executor wired with "
+                    "encrypted_probs_cipher + flat_k_mode + a "
+                    "tail with constant_k_commitment=True "
+                    "(Phase 3.x.11.q.y bundle). Until then, "
+                    "Tier C streaming is restricted to "
+                    "temperature == 0 (greedy).",
+                )
+                return
 
         # Drive the chain executor's streaming generator. Each
         # ``StreamToken`` becomes an ``InferenceTokenEvent``; the

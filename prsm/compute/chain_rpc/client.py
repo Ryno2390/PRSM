@@ -354,6 +354,20 @@ class RpcChainExecutor:
         draft_model: Optional[Any] = None,
         speculation_depth: int = 4,
         rollback_cache_send_message: Optional[SendMessage] = None,
+        # ── Phase 3.x.11.q.y opt-ins ─────────────────────────────────
+        # ``encrypted_probs_cipher`` (when wired) replaces plaintext
+        # ``proposed_token_probs`` on the wire with AES-GCM ciphertext
+        # under the ``encrypted_proposed_token_probs`` field. Tail
+        # decrypts using the same cipher (operator distributes the
+        # PSK out-of-band). Operators wire this on the SEPARATE
+        # RpcChainExecutor instance routed under
+        # ``ParallaxScheduledExecutor.tier_c_chain_executor``.
+        # ``flat_k_mode`` disables the executor's adaptive K state
+        # machine — K stays at ``speculation_depth`` for all rounds.
+        # Eliminates the cross-round content correlation surface
+        # documented in §3.6.3 of the threat-model addendum.
+        encrypted_probs_cipher: Optional[Any] = None,
+        flat_k_mode: bool = False,
     ) -> None:
         if settler_identity is None or not hasattr(settler_identity, "node_id"):
             raise RuntimeError(
@@ -504,6 +518,21 @@ class RpcChainExecutor:
         self._cache_evict_send = cache_evict_send_message
         self._sharded_default_max_tokens = int(sharded_default_max_tokens)
         self._draft_model = draft_model
+        # Phase 3.x.11.q.y — encrypted probs + flat-K. Validate
+        # cipher shape if wired; default None means plaintext probs
+        # (Tier A/B path). flat_k_mode is a pure boolean.
+        if encrypted_probs_cipher is not None:
+            for method in ("encrypt", "decrypt"):
+                if not callable(
+                    getattr(encrypted_probs_cipher, method, None),
+                ):
+                    raise RuntimeError(
+                        f"RpcChainExecutor: encrypted_probs_cipher "
+                        f"must implement {method}(...) per "
+                        f"prsm.compute.chain_rpc.probs_cipher.ProbsCipher"
+                    )
+        self._encrypted_probs_cipher = encrypted_probs_cipher
+        self._flat_k_mode = bool(flat_k_mode)
         self._speculation_depth = int(speculation_depth)
         self._rollback_cache_send = rollback_cache_send_message
 
@@ -1321,7 +1350,12 @@ class RpcChainExecutor:
                 # an executor-side parameter; the chain stages
                 # adapt naturally to the new batch size on the
                 # next VERIFY dispatch.
-                if use_stochastic:
+                if use_stochastic and not self._flat_k_mode:
+                    # Phase 3.x.11.q.y — flat_k_mode disables
+                    # adaptive K under Tier C. K stays at
+                    # speculation_depth across all rounds —
+                    # eliminates the cross-round content correlation
+                    # surface (threat-model addendum §3.6.3 + §3.8).
                     accept_history.append((accepted_count, k_round))
                     if len(accept_history) == accept_history.maxlen:
                         total_ac = sum(a for a, _ in accept_history)
@@ -1417,11 +1451,32 @@ class RpcChainExecutor:
             tuple(float(p) for p in proposed_token_probs)
             if proposed_token_probs is not None else None
         )
+        # Phase 3.x.11.q.y — encrypted probs path. When the cipher
+        # is wired AND probs are set, encrypt the plaintext probs
+        # under the request's per-stage AAD and ship the ciphertext
+        # via encrypted_proposed_token_probs. The plaintext probs
+        # are dropped from the wire (the wire's exclusion invariant
+        # at __post_init__ enforces this). Per-stage encryption
+        # uses (request_id, stage_index) AAD — relay adversary
+        # can't replay the ciphertext across stages.
+        use_encrypted_probs = (
+            self._encrypted_probs_cipher is not None
+            and proposed_probs_tuple is not None
+        )
         last_response: Optional[RunLayerSliceResponse] = None
 
         for stage_index in range(chain_total):
             stage_node_id = chain.stages[stage_index]
             layer_range = tuple(chain.layer_ranges[stage_index])
+            encrypted_probs_bytes: Optional[bytes] = None
+            wire_probs = proposed_probs_tuple
+            if use_encrypted_probs:
+                encrypted_probs_bytes = self._encrypted_probs_cipher.encrypt(
+                    probs=list(proposed_probs_tuple),
+                    request_id=request.request_id,
+                    stage_index=stage_index,
+                )
+                wire_probs = None  # exclusion-invariant: only one set
             response, activation = self._dispatch_stage(
                 stage_index=stage_index,
                 stage_node_id=stage_node_id,
@@ -1433,7 +1488,8 @@ class RpcChainExecutor:
                 decode_mode=DecodeMode.VERIFY,
                 include_sampling_fields=True,
                 proposed_token_ids=proposed_tuple,
-                proposed_token_probs=proposed_probs_tuple,
+                proposed_token_probs=wire_probs,
+                encrypted_proposed_token_probs=encrypted_probs_bytes,
             )
             outcomes.append(StageOutcome(
                 stage_index=stage_index,
@@ -2134,6 +2190,7 @@ class RpcChainExecutor:
         include_sampling_fields: bool = False,
         proposed_token_ids: Optional[Tuple[int, ...]] = None,
         proposed_token_probs: Optional[Tuple[float, ...]] = None,
+        encrypted_proposed_token_probs: Optional[bytes] = None,
     ) -> Tuple[RunLayerSliceResponse, np.ndarray]:
         """Mint token → encode request → send → parse + verify response
         → decode output activation.
@@ -2222,6 +2279,7 @@ class RpcChainExecutor:
             include_sampling_fields=include_sampling_fields,
             proposed_token_ids=proposed_token_ids,
             proposed_token_probs=proposed_token_probs,
+            encrypted_proposed_token_probs=encrypted_proposed_token_probs,
         )
 
     # ── inline path ──────────────────────────────────────────────────
@@ -2242,6 +2300,7 @@ class RpcChainExecutor:
         include_sampling_fields: bool = False,
         proposed_token_ids: Optional[Tuple[int, ...]] = None,
         proposed_token_probs: Optional[Tuple[float, ...]] = None,
+        encrypted_proposed_token_probs: Optional[bytes] = None,
     ) -> Tuple[RunLayerSliceResponse, np.ndarray]:
         """v1 inline path: activation rides hex-encoded inside the JSON
         envelope; response activation rides the same way.
@@ -2283,6 +2342,7 @@ class RpcChainExecutor:
             temperature=temperature,
             proposed_token_ids=proposed_token_ids,
             proposed_token_probs=proposed_token_probs,
+            encrypted_proposed_token_probs=encrypted_proposed_token_probs,
         )
         request_bytes = encode_message(wire_request)
 
