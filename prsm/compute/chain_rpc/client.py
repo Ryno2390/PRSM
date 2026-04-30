@@ -1711,6 +1711,11 @@ class RpcChainExecutor:
                             encrypted_replay_accepted_prefix=(
                                 encrypted_prefix
                             ),
+                            target_stage_index=(
+                                stage_index
+                                if encrypted_prefix is not None
+                                else None
+                            ),
                         ),
                     )
                 else:

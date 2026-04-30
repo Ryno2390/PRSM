@@ -2109,6 +2109,104 @@ class LayerStageServer:
                     str(exc),
                 )
             raise
+        # Phase 3.x.11.q.y' — replay accepted prefix to repopulate
+        # the cache after a constant-K rollback. Decrypt at the
+        # boundary if the prefix arrived encrypted; surface
+        # MALFORMED_REQUEST on cipher failure (mirrors the
+        # encrypted_proposed_token_probs decrypt path from
+        # Phase 3.x.11.q.y). Replay is best-effort at the runner
+        # level — non-stage-0 stages cannot replay without
+        # upstream hidden state and return False without raising.
+        prefix_tokens: Optional[List[int]] = None
+        if request.replay_accepted_prefix is not None:
+            prefix_tokens = list(request.replay_accepted_prefix)
+        elif request.encrypted_replay_accepted_prefix is not None:
+            if self._encrypted_probs_cipher is None:
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    "encrypted_replay_accepted_prefix set on the "
+                    "wire but server has no encrypted_probs_cipher "
+                    "wired — operator misconfig (the executor "
+                    "encrypted but the tail can't decrypt)",
+                )
+            if not callable(getattr(
+                self._encrypted_probs_cipher, "decrypt_prefix", None,
+            )):
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    "encrypted_replay_accepted_prefix received but "
+                    "cipher does not implement decrypt_prefix(...) "
+                    "— operator wired a pre-q.y' cipher",
+                )
+            # Phase 3.x.11.q.y' — stage_index for AAD binding comes
+            # from the wire field (validator already enforced co-set
+            # with encrypted_replay_accepted_prefix in the protocol
+            # layer; we know it's set here).
+            stage_index = int(request.target_stage_index)
+            # Cap expected_k at MAX_VERIFY_BATCH_TOKENS so a malicious
+            # peer with a wrong-length ciphertext can't blow up
+            # decode allocation. The cipher's decrypt_prefix
+            # validates length matches expected_k * 8 bytes.
+            #
+            # We don't know K a priori from the rollback envelope
+            # (it's not co-set with proposed_token_ids the way
+            # the probs path is). Try sequential K values
+            # 1..n_positions_to_drop and accept the one that
+            # decrypts cleanly. Bounded by n_positions_to_drop so
+            # the overhead is constant per round.
+            decrypted: Optional[List[int]] = None
+            for try_k in range(1, int(request.n_positions_to_drop) + 1):
+                try:
+                    decrypted = (
+                        self._encrypted_probs_cipher.decrypt_prefix(
+                            ciphertext=bytes(
+                                request.encrypted_replay_accepted_prefix,
+                            ),
+                            request_id=request.request_id,
+                            stage_index=stage_index,
+                            expected_k=try_k,
+                        )
+                    )
+                    break
+                except Exception:  # noqa: BLE001
+                    continue
+            if decrypted is None:
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    "encrypted_replay_accepted_prefix decrypt failed "
+                    "for all expected_k in [1, n_positions_to_drop] "
+                    "— ciphertext was tampered, wrong key, or "
+                    "AAD-replayed across (request_id, stage_index)",
+                )
+            prefix_tokens = decrypted
+        if prefix_tokens:
+            replay_fn = getattr(
+                self._sharded_runner, "replay_accepted_prefix", None,
+            )
+            if callable(replay_fn):
+                try:
+                    replay_fn(
+                        request_id=request.request_id,
+                        prefix_token_ids=prefix_tokens,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    if exc.__class__.__name__ == (
+                        "MissingVerifyCapabilityError"
+                    ):
+                        return self._error(
+                            request.request_id,
+                            StageErrorCode.MALFORMED_REQUEST,
+                            str(exc),
+                        )
+                    # Best-effort: log + continue. The rollback
+                    # itself succeeded (wire leak is closed); the
+                    # cache state may be inconsistent on the next
+                    # VERIFY round but the executor's TTL-sweeper
+                    # bounds the impact.
+                    pass
         return encode_message(
             RollbackCacheResponse(
                 request_id=request.request_id,

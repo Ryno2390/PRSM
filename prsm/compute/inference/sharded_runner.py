@@ -49,9 +49,12 @@ Cache lifecycle ownership:
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
-from typing import Any, List, Optional, Protocol, Tuple, Union
+from typing import Any, List, Optional, Protocol, Sequence, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -1354,3 +1357,81 @@ class ShardedAutoregressiveRunner:
         when no handle existed). Wired by the executor's
         terminal-cleanup signal (Task 6 ``EvictCacheRequest``)."""
         return self._cache.evict(request_id)
+
+    def replay_accepted_prefix(
+        self,
+        *,
+        request_id: str,
+        prefix_token_ids: Sequence[int],
+    ) -> bool:
+        """Phase 3.x.11.q.y' — replay accepted prefix into the
+        local cache after a constant-K rollback.
+
+        Under the ``always_rollback_k`` protocol, the executor
+        drops ``K + 1`` positions per VERIFY round regardless of
+        accepted_count. The cache is now ``ac + 1`` positions
+        SHORT of the correct state. This method runs the accepted
+        prefix forward through the local layer slice to restore
+        the cache.
+
+        **Stage 0 only at v1.** This stage owns the embedding
+        layer, so it can drive a forward starting from
+        ``input_or_hidden=prefix_token_ids``. Non-stage-0 stages
+        require the upstream hidden state for those positions —
+        not available at the server (the executor would have to
+        re-coordinate by re-PREFILLing the chain). Non-stage-0
+        replay returns ``False`` without raising; the server
+        treats this as best-effort and continues.
+
+        Returns ``True`` if the cache was replayed; ``False`` if
+        the stage cannot replay (non-stage-0) OR the prefix was
+        empty.
+
+        The wire-side rollback is constant-K regardless of this
+        method's behavior — the timing-channel closure is at the
+        rollback envelope (Phase 3.x.11.q.y' Task 1 + 2). This
+        method exists to keep the cache state correct under the
+        new rollback protocol.
+        """
+        if not prefix_token_ids:
+            return False
+        # Non-stage-0: layer_range[0] > 0 means we receive hidden
+        # states from upstream, not raw token IDs. Replay needs
+        # upstream hidden states which the server doesn't have.
+        if self._layer_range[0] != 0:
+            return False
+        if not callable(getattr(self._model, "forward_verify", None)):
+            raise MissingVerifyCapabilityError(
+                "ShardedAutoregressiveRunner.replay_accepted_prefix "
+                "requires model.forward_verify(...) per "
+                "ShardedLayerForward Protocol — this model omits "
+                "it"
+            )
+        # Drive a forward over the prefix tokens to repopulate
+        # the cache. The handle is mutated in place; the
+        # KVCacheManager doesn't gate single-handle access (its
+        # lock is per-operation, not per-handle).
+        handle = self._cache.get(request_id)
+        if handle is None:
+            # Cache was already evicted (TTL/LRU race) — nothing
+            # to replay into. Server treats as best-effort.
+            return False
+        try:
+            _, updated_payload = self._model.forward_verify(
+                input_or_hidden=list(int(t) for t in prefix_token_ids),
+                layer_range=self._layer_range,
+                kv_cache_payload=handle.payload,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ShardedAutoregressiveRunner.replay_accepted_prefix: "
+                "forward_verify raised %s: %s — cache state "
+                "may be inconsistent on next VERIFY round",
+                exc.__class__.__name__, exc,
+            )
+            raise
+        handle.payload = updated_payload
+        handle.cached_positions = (
+            handle.cached_positions + len(prefix_token_ids)
+        )
+        return True

@@ -516,6 +516,7 @@ class TestRollbackCacheRequestReplayPrefix:
             request_id="abc",
             n_positions_to_drop=4,
             encrypted_replay_accepted_prefix=b"\x01\x02\x03\x04" * 16,
+            target_stage_index=2,
         )
         wire = encode_message(req)
         parsed = parse_message(wire)
@@ -524,6 +525,31 @@ class TestRollbackCacheRequestReplayPrefix:
         assert parsed.encrypted_replay_accepted_prefix == (
             b"\x01\x02\x03\x04" * 16
         )
+        assert parsed.target_stage_index == 2
+
+    def test_encrypted_without_target_stage_index_rejected(self):
+        # Co-set invariant: encrypted prefix requires
+        # target_stage_index for AAD binding.
+        with pytest.raises(
+            ChainRpcMalformedError,
+            match="target_stage_index",
+        ):
+            RollbackCacheRequest(
+                request_id="abc",
+                n_positions_to_drop=4,
+                encrypted_replay_accepted_prefix=b"\x00" * 32,
+                # target_stage_index NOT set
+            )
+
+    def test_target_stage_index_out_of_range_rejected(self):
+        with pytest.raises(
+            ChainRpcMalformedError, match=r"\[0, 255\]",
+        ):
+            RollbackCacheRequest(
+                request_id="abc",
+                n_positions_to_drop=4,
+                target_stage_index=256,
+            )
 
     def test_neither_set_is_v1_truncation_only(self):
         # Backwards-compat: pre-q.y' deployments emit rollbacks
@@ -549,6 +575,7 @@ class TestRollbackCacheRequestReplayPrefix:
                 n_positions_to_drop=4,
                 replay_accepted_prefix=(1, 2, 3),
                 encrypted_replay_accepted_prefix=b"x" * 32,
+                target_stage_index=0,
             )
 
     def test_rejects_non_tuple_plaintext(self):
@@ -603,6 +630,7 @@ class TestRollbackCacheRequestReplayPrefix:
                 request_id="abc",
                 n_positions_to_drop=4,
                 encrypted_replay_accepted_prefix=b"",
+                target_stage_index=0,
             )
 
     def test_rejects_oversized_encrypted(self):
@@ -613,6 +641,7 @@ class TestRollbackCacheRequestReplayPrefix:
                 request_id="abc",
                 n_positions_to_drop=4,
                 encrypted_replay_accepted_prefix=b"\x00" * 4097,
+                target_stage_index=0,
             )
 
     def test_rejects_non_bytes_encrypted(self):
@@ -625,6 +654,7 @@ class TestRollbackCacheRequestReplayPrefix:
                 encrypted_replay_accepted_prefix=(
                     "not-bytes"  # type: ignore[arg-type]
                 ),
+                target_stage_index=0,
             )
 
     def test_invalid_hex_in_from_dict_rejected(self):

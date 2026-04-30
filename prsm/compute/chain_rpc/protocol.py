@@ -2128,6 +2128,14 @@ class RollbackCacheRequest:
     # rollback (backwards-compat path; pre-q.y' deployments).
     replay_accepted_prefix: Optional[Tuple[int, ...]] = None
     encrypted_replay_accepted_prefix: Optional[bytes] = None
+    # Phase 3.x.11.q.y' — stage_index for AAD binding when
+    # encrypted_replay_accepted_prefix is set. The executor sets
+    # this to the destination stage's chain_stage_index so the
+    # server can derive the correct AAD without extra context.
+    # Required co-set with encrypted_replay_accepted_prefix (else
+    # the server can't decrypt). Range [0, 255] mirrors the
+    # ProbsCipher AAD validator.
+    target_stage_index: Optional[int] = None
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.ROLLBACK_CACHE_REQUEST.value
@@ -2212,6 +2220,30 @@ class RollbackCacheRequest:
                     f"{len(self.encrypted_replay_accepted_prefix)} "
                     f"exceeds 4096 cap"
                 )
+            # Phase 3.x.11.q.y' — co-set invariant: target_stage_index
+            # MUST be set when encrypted_replay_accepted_prefix is
+            # set (the AAD binding requires it). Defends against a
+            # caller-side bug where the cipher uses one stage_index
+            # but the server tries to decrypt with another.
+            if self.target_stage_index is None:
+                raise ChainRpcMalformedError(
+                    "encrypted_replay_accepted_prefix requires "
+                    "target_stage_index to be set (AAD binding)"
+                )
+        if self.target_stage_index is not None:
+            if (
+                isinstance(self.target_stage_index, bool)
+                or not isinstance(self.target_stage_index, int)
+            ):
+                raise ChainRpcMalformedError(
+                    f"target_stage_index must be int, got "
+                    f"{type(self.target_stage_index).__name__}"
+                )
+            if not (0 <= self.target_stage_index <= 255):
+                raise ChainRpcMalformedError(
+                    f"target_stage_index must be in [0, 255], "
+                    f"got {self.target_stage_index}"
+                )
         _validate_version(self.protocol_version)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -2231,6 +2263,8 @@ class RollbackCacheRequest:
             out["encrypted_replay_accepted_prefix_hex"] = bytes(
                 self.encrypted_replay_accepted_prefix,
             ).hex()
+        if self.target_stage_index is not None:
+            out["target_stage_index"] = int(self.target_stage_index)
         return out
 
     @classmethod
@@ -2266,11 +2300,23 @@ class RollbackCacheRequest:
                     f"encrypted_replay_accepted_prefix_hex is not "
                     f"valid hex: {exc}"
                 ) from exc
+        target_raw = data.get("target_stage_index")
+        target_idx: Optional[int] = None
+        if target_raw is not None:
+            if isinstance(target_raw, bool) or not isinstance(
+                target_raw, int,
+            ):
+                raise ChainRpcMalformedError(
+                    f"target_stage_index must be int, got "
+                    f"{type(target_raw).__name__}"
+                )
+            target_idx = int(target_raw)
         return cls(
             request_id=_required_str(data, "request_id"),
             n_positions_to_drop=int(n_raw),
             replay_accepted_prefix=replay_tuple,
             encrypted_replay_accepted_prefix=enc_bytes,
+            target_stage_index=target_idx,
             protocol_version=_required_int(data, "protocol_version"),
         )
 
