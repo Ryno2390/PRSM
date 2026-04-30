@@ -36,9 +36,9 @@ Untracked count: 168 → 164.
 | `prsm/compute/collaboration/` | 16 | **CONFIRMED LEGACY** — v1.7.0 explicitly deleted these as "legacy that survived v1.6.0"; ~26K LoC; zero tracked-code refs. See §B. |
 | `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` 26 .py + 12 other subdirs 81 .py) | **CONFIRMED LEGACY across all 4 clusters** — chronos/ + agents/ + federation/ + 12 other subdirs all show v1.6 (or v1.7) deletion-then-reintroduction signature. ~80K LoC total. Bulk-delete recommended pending operator decision on whether the resurrection was a single event or independent. See §B. |
 | `tests/{integration,nwtn,scripts_integration,...}/` | 58 | **ACTIONED 2026-04-30** — bulk-relocated to `tests/_legacy/2026-04-30-untracked-sweep/` per §C.1 (matches task #89 precedent). 551 tests collect cleanly post-move. See §C. |
-| `docs/api/PHASE_7_API_REFERENCE.md` | 1 | NEEDS REVIEW — see §D |
-| `config/nginx/ipfs-proxy.conf` | 1 | DEPRECATED INFRA — see §E |
-| (other small misc) | ~9 | see git status |
+| `docs/api/PHASE_7_API_REFERENCE.md` | 1 | **ACTIONED 2026-04-30** — deleted; explicit v1.6.3 deletion record (commit f847b954) categorized as "Legacy API/code docs". Different Phase 7 from current in-progress audit-bundle Phase 7. See §D. |
+| `config/nginx/ipfs-proxy.conf` | 1 | **ACTIONED 2026-04-30** — deleted; native-storage migration plan explicitly slates this for deletion. See §E. |
+| (other small misc — `prsm/core/{infrastructure,monitoring}/`, `prsm/data/storage/`, `prsm/economy/{governance,marketplace,tokenomics}/`) | 9 | **ACTIONED 2026-04-30** — bulk-deleted; all 9 files have explicit v1.6/v1.7 deletion records (fc7cb8bc, 8ca4b6be, 358fbdb8, 4e2b3bc8). Zero hard tracked-code imports verified. 551 tests collect post-delete. |
 
 ---
 
@@ -353,25 +353,47 @@ Status breakdown at audit start:
 
 If preferred, a follow-up `git rm -r tests/_legacy/2026-04-30-untracked-sweep/` after operator review converts this from quarantine to deletion.
 
-## §D — `docs/api/PHASE_7_API_REFERENCE.md` (740 lines)
+## §D — `docs/api/PHASE_7_API_REFERENCE.md` (740 lines) — ACTIONED 2026-04-30
 
-Comprehensive API reference for Phase 7. Contains: Overview, Authentication, Base URLs, API Components, Error Handling, Rate Limiting, Webhooks, SDK Libraries.
+**Action:** deleted.
 
-Phase 7 is `[in_progress]` in the task list (hardware-gated for mainnet deploy). The doc may or may not match the current Phase 7 contract surface (which has gone through Tasks 1-9 with §8.x hardening passes since this doc was written).
+The 740-line doc described an "enterprise architecture Phase 7" with sections for Global Infrastructure API, Multi-Cloud Orchestration, Container Runtime Abstraction, Enterprise Monitoring — all subsystems removed in v1.6.0 scope alignment.
 
-**Recommended action:**
-1. **Review for accuracy** against current `prsm/economy/web3/stake_manager.py` + the audit-bundle contracts. If accurate → commit. If stale → either rewrite or delete.
-2. **Defer until post-audit ceremony** since the API surface may stabilize differently after auditor review.
+**Deletion record:** v1.6.3 documentation accuracy sweep (commit `f847b954`, 2026-04-10). CHANGELOG.md line 394 categorizes this file as "Legacy API/code docs" alongside `API_DOCUMENTATION.md`, `CODE_REVIEW.md`, `EXAMPLES_COOKBOOK.md`, `TECHNICAL_ADVANTAGES.md`.
 
-## §E — `config/nginx/ipfs-proxy.conf` (1 file)
+**Disambiguation:** the current in-progress "Phase 7" task (#31, hardware-gated mainnet deploy of audit-bundle stack) is a DIFFERENT Phase 7 — the audit-bundle Phase 7 covers StakeManager / EscrowPool / BatchSettlementRegistry on-chain contracts, NOT the deleted "enterprise architecture" framing. The deleted doc would mislead any operator reading it expecting current contract surface.
 
-Referenced from `docs/native-storage-design.md` and `docs/plans/native-storage-migration.md`. The "native-storage-migration" doc title indicates PRSM is migrating AWAY from IPFS to native storage. Only 1 tracked Python file imports IPFS-related modules (vs many for current inference/storage code paths) — confirming IPFS is being phased out.
+The reintroduction-then-deletion follows the same pattern as §B compute/ subdirs and §E nginx config.
 
-**Recommended action:**
-1. Wait for native-storage migration to land, then delete the conf.
-2. Or commit now as documentation of legacy infrastructure.
+## §E — `config/nginx/ipfs-proxy.conf` (1 file) — ACTIONED 2026-04-30
 
-Currently low priority since the file isn't broken or load-bearing.
+**Action:** deleted.
+
+The nginx conf proxied an IPFS Web UI container. Two tracked planning docs (`docs/native-storage-design.md` line 451, `docs/plans/native-storage-migration.md` line 47) explicitly slate this file for deletion as part of the in-progress IPFS → native-storage migration. The native-storage migration plan itself states: "Remove all IPFS/Kubo dependencies from PRSM, rewiring 68+ files to use the native `prsm/storage` module."
+
+No tracked infrastructure config (`docker-compose.yml`, kubernetes manifests, prometheus configs) references this file. The container it proxied (`ipfs:5001`) is the legacy IPFS Kubo daemon being removed by the migration.
+
+## §F — Small misc (9 files) — ACTIONED 2026-04-30
+
+**Action:** bulk-deleted.
+
+Files removed:
+- `prsm/core/infrastructure/ipfs_cdn_bridge.py` — deleted in `358fbdb8` ("feat(storage): add ContentStore singleton, delete IPFS library files")
+- `prsm/core/monitoring/enterprise_monitoring.py` — deleted in `8ca4b6be`
+- `prsm/core/monitoring/rlt_performance_monitor.py` — deleted in `8ca4b6be`
+- `prsm/data/storage/production_data_layer.py` — deleted in `8ca4b6be`
+- `prsm/economy/governance/dgm_governance.py` — deleted in `fc7cb8bc` (v1.6 bulk-delete; named explicitly in commit msg)
+- `prsm/economy/governance/proposals.py` — deleted in `8ca4b6be`
+- `prsm/economy/marketplace/` (entire dir) — deleted in `4e2b3bc8` ("chore: finish PR 5 deletions (marketplace, legacy tests, reputation_api)")
+- `prsm/economy/tokenomics/enhanced_pricing_engine.py` — deleted in `fc7cb8bc`
+- `prsm/economy/tokenomics/marketplace.py` — deleted in `8ca4b6be`
+
+**Reference verification:** spot-check of the highest-ref files (`proposals.py` 75 hits, `rlt_performance_monitor` 7 hits) confirmed all references are either:
+- generic doc/CHANGELOG mentions of `"proposals"` as a word
+- string-literal entries in name lists (e.g., `prsm/compute/scalability/auto_scaler.py` lists `"rlt_performance_monitor"` as a service-name string)
+- stale legacy test files (`tests/test_rlt_performance_monitor.py`) that don't actually import the deleted module
+
+Zero hard `from prsm...import` statements in live code. 551 tests collect post-delete.
 
 ---
 
