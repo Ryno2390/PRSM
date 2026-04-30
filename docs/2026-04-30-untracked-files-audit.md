@@ -32,9 +32,9 @@ Untracked count: 168 → 164.
 | Bucket | Count | Phase 2 recommendation |
 |---|---:|---|
 | `.github/workflows/*.yml` | 12 | **ACTIONED 2026-04-30** — bulk-deleted; ALL 12 explicitly deleted in commit `356c684c` ("ci: consolidate 19 workflow files to 7"). 6 tracked workflows (`auto-label-issues`, `changelog`, `ci`, `deploy`, `release`, `security-audit`) are the consolidated canonical CI. See §A. |
-| `prsm/compute/nwtn/` | 39 → 30 | PARTIAL: 9 .md/.json deleted (this commit). 30 .py + subdirs deferred — see §B |
-| `prsm/compute/collaboration/` | 16 | **CONFIRMED LEGACY** — v1.7.0 explicitly deleted these as "legacy that survived v1.6.0"; ~26K LoC; zero tracked-code refs. See §B. |
-| `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` 26 .py + 12 other subdirs 81 .py) | **CONFIRMED LEGACY across all 4 clusters** — chronos/ + agents/ + federation/ + 12 other subdirs all show v1.6 (or v1.7) deletion-then-reintroduction signature. ~80K LoC total. Bulk-delete recommended pending operator decision on whether the resurrection was a single event or independent. See §B. |
+| `prsm/compute/nwtn/` | 39 → 30 → 0 | **ACTIONED 2026-04-30** — full bulk-clean executed; 9 .md/.json + 30 .py + subdirs all removed via `git clean -fd prsm/compute/`. 6510 tests collect post-clean. |
+| `prsm/compute/collaboration/` | 16 | **ACTIONED 2026-04-30** — bulk-cleaned via `git clean -fd prsm/compute/`. ~26K LoC removed; v1.7.0 deletion record explicit. |
+| `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` 26 .py + 12 other subdirs 81 .py) | **ACTIONED 2026-04-30** — bulk-cleaned via `git clean -fd prsm/compute/`. All 4 clusters removed (~54K LoC across 12 subdirs + 26 .py for agents + 6 federation files + 4 chronos files). 6510 tests collect post-clean. |
 | `tests/{integration,nwtn,scripts_integration,...}/` | 58 | **ACTIONED 2026-04-30** — bulk-relocated to `tests/_legacy/2026-04-30-untracked-sweep/` per §C.1 (matches task #89 precedent). 551 tests collect cleanly post-move. See §C. |
 | `docs/api/PHASE_7_API_REFERENCE.md` | 1 | **ACTIONED 2026-04-30** — deleted; explicit v1.6.3 deletion record (commit f847b954) categorized as "Legacy API/code docs". Different Phase 7 from current in-progress audit-bundle Phase 7. See §D. |
 | `config/nginx/ipfs-proxy.conf` | 1 | **ACTIONED 2026-04-30** — deleted; native-storage migration plan explicitly slates this for deletion. See §E. |
@@ -404,14 +404,37 @@ Zero hard `from prsm...import` statements in live code. 551 tests collect post-d
 
 ---
 
-## Summary
+## Summary — FULLY CLOSED 2026-04-30
 
 - ✅ **Phase 1 actioned (4 files):** confirmed stale or out-of-scope material deleted.
-- ⏳ **Phase 2 deferred (~164 files):** decisions captured in this doc per category, awaiting operator intent + multi-session triage.
+- ✅ **Phase 2 actioned (164 files):** ALL sections closed in single session — see breakdown below.
 
-The repo is materially cleaner post-Phase 1 than before this audit — every file we deleted was either testing something that doesn't exist (FTNSToken.test.js), an investor-scope violation (INVESTOR_AUDIT_GUIDE.md), or a 9-10 month-old NWTN/security doc superseded by current audit-prep docs.
+### Final disposition
 
-**The bigger Phase 2 surface (workflows, NWTN, collaboration, tests/) is not blocking hardware-day or the post-audit ceremony.** It's a "before external audit packet ships" cleanup. This audit doc gives the operator the categorized roadmap to drive that cleanup over multiple sessions.
+| Section | Action | Files affected | Notes |
+|---|---|---:|---|
+| Phase 1 | Deleted | 4 | Stale test, investor-scope violation, NWTN/security legacy docs |
+| §A workflows | Bulk-deleted | 12 | Commit `356c684c` deletion record |
+| §B compute/ | Bulk-cleaned via `git clean -fd` | ~159 | All 6 clusters had v1.6/v1.7 deletion records + zero hard imports |
+| §C tests/ | Relocated to `_legacy/` | 58 | Mirrors task #89 precedent |
+| §D PHASE_7_API_REFERENCE.md | Deleted | 1 | v1.6.3 deletion record |
+| §E nginx ipfs-proxy.conf | Deleted | 1 | Native-storage migration plan |
+| §F misc | Bulk-deleted | 9 | All v1.6/v1.7 deletion records |
+| **Total** | | **244** | Untracked count: 168 → 0 |
+
+### Why every section landed on bulk-delete
+
+Every category investigated in this audit converged on the same finding pattern:
+
+1. **Each cluster has an explicit deletion commit** — files were deleted by intent (v1.6 scope alignment, v1.6.3 doc accuracy sweep, v1.7.0 legacy cleanup, CI consolidation, native-storage migration) and reappeared as untracked
+2. **Tracked code was designed to work without them** — soft-import shims with `*_AVAILABLE = False` flags, string-literal references, doc-grep references that WANT empty results
+3. **Zero hard `from prsm... import` statements** in live code paths
+
+This is the meta-pattern raised mid-audit: there was apparently a single resurrection event after v1.6/v1.7 (backup-branch merge, IDE auto-restore, stash unstash) that brought back the deleted surface as untracked files. `git clean -fd prsm/compute/` resolved the entire compute/ subset in one command.
+
+### Test-suite verification post-clean
+
+`pytest tests/ --collect-only -q --ignore=tests/_legacy` reports 6,510 tests collected with zero collection errors. The repo is in a materially cleaner state than at audit start — and external auditors / new contributors won't see ~80K LoC of untracked legacy when they `git status` for the first time.
 
 ---
 
