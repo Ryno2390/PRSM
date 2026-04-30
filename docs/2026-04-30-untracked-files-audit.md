@@ -34,7 +34,7 @@ Untracked count: 168 → 164.
 | `.github/workflows/*.yml` | 12 | NEEDS USER DECISION — see §A |
 | `prsm/compute/nwtn/` | 39 → 30 | PARTIAL: 9 .md/.json deleted (this commit). 30 .py + subdirs deferred — see §B |
 | `prsm/compute/collaboration/` | 16 | LIKELY LEGACY — see §B |
-| `prsm/compute/{federation,agents,chronos,others}/` | 28 | MIXED — see §B |
+| `prsm/compute/{federation,agents,chronos,others}/` | 28 | MIXED — see §B (chronos/ has v1.6-plan re-introduction puzzle requiring operator decision) |
 | `tests/{integration,nwtn,scripts_integration,...}/` | 58 | LIKELY LEGACY — see §C |
 | `docs/api/PHASE_7_API_REFERENCE.md` | 1 | NEEDS REVIEW — see §D |
 | `config/nginx/ipfs-proxy.conf` | 1 | DEPRECATED INFRA — see §E |
@@ -129,12 +129,39 @@ The list above (academic/containers/datascience/...) reads like a **product cata
 
 - `federation/` (6) — distributed_evolution / distributed_model_registry / distributed_rlt_network / knowledge_transfer / model_registry / phase5_demo
 - `agents/` (6) — base / architects / compilers / executors / prompters / routers
-- `chronos/` (4) — cashout_api / enterprise_sdk / staking_integration / treasury_provider
+- `chronos/` (4) — see chronos-specific findings below
 - Others (12) — validation / teachers / students / network / improvement / evolution / evaluation / distillation / data / candidates / benchmarking / ai_orchestration (1 file each)
 
 Mixed state again — `prsm/compute/agents/__init__.py` + others tracked, but new dirs are not.
 
 **Recommended action:** dedicated compute-cleanup sessions per subdir. Same triage pattern: spot-check imports, commit live files, archive/delete legacy.
+
+#### chronos/ specific finding — v1.6-plan re-introduction puzzle (2026-04-30)
+
+The 4 untracked files in `prsm/compute/chronos/` are:
+- `cashout_api.py` (137 lines)
+- `enterprise_sdk.py` (632 lines)
+- `staking_integration.py` (467 lines)
+- `treasury_provider.py` (501 lines)
+
+Total: 1,737 LoC of "FTNS↔USD/USDT enterprise treasury" code (MicroStrategy/Coinbase Custody integration scope).
+
+**The puzzle:** `docs/archive/2026-04-09-v1.6-scope-alignment.md` explicitly slated 3 of these (`enterprise_sdk.py`, `staking_integration.py`, `treasury_provider.py`) plus 2 currently-tracked files (`hub_spoke_router.py`, `exchange_router.py`) for `git rm` deletion in the v1.6 sprint. The v1.6 sprint shipped to PyPI 2026-04-09 per project memory. So:
+- The 3 untracked files WERE deleted by v1.6, then re-introduced (status now: present-as-untracked, never re-committed).
+- The 2 supposedly-deleted files (`hub_spoke_router.py`, `exchange_router.py`) are still tracked — the v1.6 plan was modified mid-execution.
+
+**Dependency direction:** the 4 untracked files import FROM tracked chronos code (`models.py`, `clearing_engine.py`, `hub_spoke_router.py`, `price_oracles.py`). NO tracked code imports the untracked 4. So they're downstream consumers — bulk-deleting them does NOT break any tracked code path. (Confirmed via `git ls-files | xargs grep` for the four module names.)
+
+**Operator decision needed:**
+- **If the v1.6 deletion was correct + the re-introduction was unintentional** (e.g., resurrected from a backup branch by accident): bulk-delete all 4. Repo aligns with v1.6 plan.
+- **If the re-introduction was intentional** (e.g., enterprise treasury integration is being revived as a Phase X feature): commit them. Update `docs/archive/2026-04-09-v1.6-scope-alignment.md` to note the reversal, or move that doc out of `archive/` since its conclusions no longer hold.
+- **If unclear:** keep as-is, but the audit-blocker remains until resolved.
+
+**My recommendation:** the v1.6 sprint had a clear scope-alignment thesis (memory: "deleted ~210K LoC legacy"), and the canonical PRSM scope today is "Research, Storage, and Modeling" — enterprise FTNS↔USD treasury integration doesn't appear in current architecture docs, threat model, or Phase 1.3/Phase 7/Phase 7.1 surfaces. Bulk-delete is more likely the correct call. But this needs operator confirmation since 1,737 LoC carries real cost-to-recreate if the intent was preservation.
+
+**Smaller mystery:** `cashout_api.py` (137 lines) is NOT in the v1.6 deletion list, BUT it imports from `hub_spoke_router.py` (which v1.6 slated for deletion). So it was probably co-introduced with the deletion-plan files. Same disposition recommendation.
+
+Both `hub_spoke_router.py` and `exchange_router.py` are currently tracked but were also slated for v1.6 deletion. Their fate is logically coupled with the 4 untracked files: if the operator decides the enterprise-treasury layer was correctly deprecated by v1.6, all 6 files should go (4 deletions + 2 `git rm` of currently-tracked files). If preservation was intentional, all 6 stay.
 
 ## §C — `tests/` (58 untracked files)
 
