@@ -225,12 +225,21 @@ check_path "[2g] CHANGELOG.md (add Phase 1.3 Task 8 mainnet entry)" \
 
 # ── Section 3: PR body draft ──────────────────────────────────────────
 PR_PATH="/tmp/task8-mainnet-handoff-pr-body-$(date +%s).md"
+# Network-aware language: avoid lying about "Base mainnet" when run
+# against a hardhat-localhost or testnet manifest.
+if [[ "${NEW_NETWORK}" == "base" ]]; then
+  NETWORK_LABEL="Base mainnet"
+elif [[ "${NEW_NETWORK}" == "base-sepolia" ]]; then
+  NETWORK_LABEL="Base Sepolia testnet"
+else
+  NETWORK_LABEL="${NEW_NETWORK} (chainId ${NEW_CHAIN_ID})"
+fi
 cat > "${PR_PATH}" <<EOF
-# Phase 1.3 Task 8 — Mainnet deploy handoff
+# Phase 1.3 Task 8 — Deploy handoff (${NETWORK_LABEL})
 
-ProvenanceRegistry + RoyaltyDistributor deployed on Base mainnet ${NEW_TIMESTAMP}.
+ProvenanceRegistry + RoyaltyDistributor deployed on ${NETWORK_LABEL} at ${NEW_TIMESTAMP}.
 
-## Mainnet addresses
+## Deployed addresses
 - **ProvenanceRegistry:** \`${NEW_REGISTRY}\`
 - **RoyaltyDistributor:** \`${NEW_DISTRIBUTOR}\`
 - **NetworkTreasury (Foundation Safe):** \`${NEW_TREASURY}\`
@@ -252,7 +261,7 @@ Deployer (now retired): \`${NEW_DEPLOYER}\`
 ## Verification
 \`\`\`bash
 PROVENANCE_MANIFEST=${MAINNET_MANIFEST} \\
-  npx hardhat run scripts/verify-provenance-deployment.js --network base
+  npx hardhat run scripts/verify-provenance-deployment.js --network ${NEW_NETWORK}
 \`\`\`
 Expect: ✅ All on-chain state matches manifest.
 
@@ -270,16 +279,16 @@ echo "  → use \`gh pr create --body-file ${PR_PATH}\` after pushing the addres
 MEM_PATH="/tmp/task8-mainnet-deploy-memory-stub-$(date +%s).md"
 cat > "${MEM_PATH}" <<EOF
 ---
-name: Phase 1.3 Task 8 mainnet deploy — $(date +%Y-%m-%d)
-description: ProvenanceRegistry + RoyaltyDistributor live on Base mainnet at known addresses; Foundation Safe wired as NETWORK_TREASURY; deployer key retired post-sweep
+name: Phase 1.3 Task 8 deploy (${NETWORK_LABEL}) — $(date +%Y-%m-%d)
+description: ProvenanceRegistry + RoyaltyDistributor live on ${NETWORK_LABEL} at known addresses; Foundation Safe wired as NETWORK_TREASURY; deployer key retired post-sweep
 type: project
 ---
-# Phase 1.3 Task 8 mainnet deploy — $(date +%Y-%m-%d)
+# Phase 1.3 Task 8 deploy (${NETWORK_LABEL}) — $(date +%Y-%m-%d)
 
-Deploy completed ${NEW_TIMESTAMP} on Base mainnet (chainId 8453) via
+Deploy completed ${NEW_TIMESTAMP} on ${NETWORK_LABEL} via
 the disposable deployer key per Multi-Sig_Action_Plan.md §5-6.
 
-**Mainnet addresses:**
+**Deployed addresses:**
 - ProvenanceRegistry: \`${NEW_REGISTRY}\`
 - RoyaltyDistributor: \`${NEW_DISTRIBUTOR}\`
 - NetworkTreasury (Foundation 2-of-3 Safe): \`${NEW_TREASURY}\`
