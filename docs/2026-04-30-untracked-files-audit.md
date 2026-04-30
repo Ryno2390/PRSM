@@ -1,0 +1,214 @@
+# Untracked Files Audit — 2026-04-30
+
+**Goal:** the repo had 168 untracked files when this audit started. CLAUDE.md
+mandates the repo stay clean for external audit. This document categorizes
+the surface and proposes per-category actions. Phase 1 (immediate
+deletions, ~4 files) was actioned in the same commit that produces this
+doc; Phase 2 (the larger triage of ~164 remaining files) is captured
+here for multi-session decision-making since most files require user
+intent that I shouldn't unilaterally encode.
+
+---
+
+## Phase 1 — actioned in same commit
+
+Four confirmed-stale files deleted:
+
+| Path | Why |
+|---|---|
+| `contracts/test/FTNSToken.test.js` | Tests `FTNSToken` contract which doesn't exist (only `FTNSTokenSimple`). 33 ethers v5 idiom uses (`ethers.utils.parseEther`). Same era as the deleted `deploy.js` / `verify-deployment.js`. |
+| `docs/audit/INVESTOR_AUDIT_GUIDE.md` | Investor material per `feedback_repo_scope_prsm_vs_prismatica.md` — investor-facing docs go to a separate private Prismatica surface, not the public PRSM dev repo. |
+| `docs/research/NWTN_Critical_Analysis_and_Improvement_Recommendations.md` | Dated August 2025; NWTN-era legacy product. Streaming-inference subsystem at Phase 3.x.* is the canonical inference path now. |
+| `docs/security/SECURITY_IMPLEMENTATION_STATUS.md` | Dated June 2025; superseded by `docs/2026-04-27-cumulative-audit-prep.md` and the threat-model addendum. |
+
+Untracked count: 168 → 164.
+
+---
+
+## Phase 2 — needs user decision
+
+164 remaining untracked files across 5 buckets:
+
+| Bucket | Count | Phase 2 recommendation |
+|---|---:|---|
+| `.github/workflows/*.yml` | 12 | NEEDS USER DECISION — see §A |
+| `prsm/compute/nwtn/` | 39 | LIKELY LEGACY — see §B |
+| `prsm/compute/collaboration/` | 16 | LIKELY LEGACY — see §B |
+| `prsm/compute/{federation,agents,chronos,others}/` | 28 | MIXED — see §B |
+| `tests/{integration,nwtn,scripts_integration,...}/` | 58 | LIKELY LEGACY — see §C |
+| `docs/api/PHASE_7_API_REFERENCE.md` | 1 | NEEDS REVIEW — see §D |
+| `config/nginx/ipfs-proxy.conf` | 1 | DEPRECATED INFRA — see §E |
+| (other small misc) | ~9 | see git status |
+
+---
+
+## §A — `.github/workflows/*.yml` (12 files, ~4,000 lines)
+
+```
+cd.yml                           329 lines
+ci-cd-pipeline.yml               651 lines
+ci-comprehensive.yml             339 lines
+deploy-production.yml            516 lines
+infrastructure-tests.yml         356 lines
+neural-regression.yml             30 lines
+performance-regression.yml       343 lines
+production-deploy.yml            440 lines
+security-validation.yml          465 lines
+security.yml                      64 lines
+test-coverage.yml                135 lines
+validation-pipeline.yml          439 lines
+```
+
+**Tracked workflows already in `.github/workflows/`:** `auto-label-issues.yml`, `changelog.yml`, `ci.yml`, `deploy.yml`, `release.yml`, `security-audit.yml`. These are the actual CI surface today.
+
+**No staleness markers found in the 12 untracked workflows** (no Polygon Mumbai, no `FTNSToken`/`FTNSMarketplace`/`FTNSGovernance` references, no references to the deleted `deploy.js`/`verify-deployment.js`/`deploy-simple.js`).
+
+**Possible explanations:**
+- Aspirational CI infrastructure from a planning sprint that never got wired in
+- Parallel CI that was abandoned in favor of the 6 currently-tracked workflows
+- Pending check-in from a previous session that got interrupted
+
+**Recommended action paths:**
+1. **Review-and-add:** read each of the 12 to confirm they're useful + non-overlapping with the 6 tracked workflows; add the live ones, delete the rest. ~2-3 hours of focused review.
+2. **Bulk delete:** if these are abandoned drafts, delete all 12. ~5 minutes.
+3. **Defer:** leave as untracked clutter. Not recommended because external auditors / contributors will see them and wonder.
+
+The right call depends on **operator intent** that I can't determine from the files alone. Path (2) is safer if there's any doubt — re-creating workflows from scratch is cheaper than reviewing 4K lines of YAML for production-readiness.
+
+## §B — `prsm/compute/` (83 untracked files)
+
+### NWTN subdir (39 files)
+
+NWTN is the legacy conceptual product per project memory. Streaming-inference subsystem (Phase 3.x.*, with roadmap cap reached at q.x today) is the canonical inference path.
+
+**HOWEVER:** spot-check shows `prsm/compute/nwtn/__init__.py` + `prsm/compute/nwtn/training/__init__.py` ARE tracked. The directory is mixed — some files committed, some untracked. So bulk-delete is unsafe.
+
+**Sample untracked files:**
+- `prsm/compute/nwtn/BREAKTHROUGH_PIPELINE_DOCUMENTATION.md`
+- `prsm/compute/nwtn/CRITICAL_FIXES_IMPLEMENTATION_SUMMARY.md`
+- `prsm/compute/nwtn/ETHICAL_DATA_INGESTION_ROADMAP.md`
+- `prsm/compute/nwtn/NWTN_LOCAL_INTEGRATION_COMPLETE.md`
+- `prsm/compute/nwtn/NWTN_OPTIMIZATION_ROADMAP.md`
+- 34 more (mix of `.py` and `.md` files)
+
+The `.md` files look like dev-research notes; the `.py` files are subsystems that were never committed.
+
+**Recommended action:**
+1. **Triage `.md` notes first** (lower risk): move to `docs/_legacy/nwtn/` or delete if superseded by the cumulative audit-prep doc.
+2. **For `.py` files:** check imports. If a file is imported from a tracked file → commit it. If not → likely legacy; archive to `prsm/_legacy/nwtn/` or delete.
+3. **Defer to a dedicated NWTN-cleanup session.** Treating it as a single multi-hour task is the safest path; mixing per-file decisions across multiple unrelated subsystems risks breaking imports.
+
+### collaboration/ subdir (16 files)
+
+```
+prsm/compute/collaboration/README.md
+prsm/compute/collaboration/academic/
+prsm/compute/collaboration/containers/
+prsm/compute/collaboration/datascience/
+prsm/compute/collaboration/design/
+prsm/compute/collaboration/development/
+prsm/compute/collaboration/enterprise/
+prsm/compute/collaboration/grants/
+prsm/compute/collaboration/jupyter/
+prsm/compute/collaboration/latex/
+prsm/compute/collaboration/models.py
+prsm/compute/collaboration/references/
+prsm/compute/collaboration/specialized/
+prsm/compute/collaboration/state_sync.py
+prsm/compute/collaboration/tech_transfer/
+prsm/compute/collaboration/university_industry/
+```
+
+`prsm/compute/collaboration/p2p/__init__.py` + `prsm/compute/collaboration/security/__init__.py` ARE tracked. So this is also a mixed-state subdir.
+
+The list above (academic/containers/datascience/...) reads like a **product catalog** of collaboration verticals — which is a NWTN-era product framing. Current PRSM canonical scope is "Research, Storage, and Modeling" per `project_prsm_scope_2026.md` — these specific verticals don't appear in current architecture.
+
+**Recommended action:** dedicated collaboration-cleanup session. Probably most are legacy.
+
+### Other compute/ subdirs (28 files)
+
+- `federation/` (6) — distributed_evolution / distributed_model_registry / distributed_rlt_network / knowledge_transfer / model_registry / phase5_demo
+- `agents/` (6) — base / architects / compilers / executors / prompters / routers
+- `chronos/` (4) — cashout_api / enterprise_sdk / staking_integration / treasury_provider
+- Others (12) — validation / teachers / students / network / improvement / evolution / evaluation / distillation / data / candidates / benchmarking / ai_orchestration (1 file each)
+
+Mixed state again — `prsm/compute/agents/__init__.py` + others tracked, but new dirs are not.
+
+**Recommended action:** dedicated compute-cleanup sessions per subdir. Same triage pattern: spot-check imports, commit live files, archive/delete legacy.
+
+## §C — `tests/` (58 untracked files)
+
+```
+19 integration
+16 nwtn
+10 scripts_integration
+ 4 unit
+ 3 new_integration_tests
+ 2 security
+ 2 benchmarks
+ 1 performance
+ 1 load
+```
+
+**Important context:** task #89 in the task list is "Repo audit — relocate 109 legacy test files to `tests/_legacy/`" (completed). So there's an established pattern for legacy test relocation. These 58 untracked tests likely missed the #89 sweep.
+
+**Recommended action:**
+1. **Bulk-relocate to `tests/_legacy/`** (matches existing pattern from #89), OR
+2. **Spot-check + delete obvious legacy** (e.g. `tests/nwtn/*` is almost certainly NWTN-era), OR
+3. **Run the test suite to identify broken tests** — if a test fails to import or collect, it's stale.
+
+Path (3) is the most rigorous but slowest. Path (1) is the safest quick win and matches prior precedent.
+
+## §D — `docs/api/PHASE_7_API_REFERENCE.md` (740 lines)
+
+Comprehensive API reference for Phase 7. Contains: Overview, Authentication, Base URLs, API Components, Error Handling, Rate Limiting, Webhooks, SDK Libraries.
+
+Phase 7 is `[in_progress]` in the task list (hardware-gated for mainnet deploy). The doc may or may not match the current Phase 7 contract surface (which has gone through Tasks 1-9 with §8.x hardening passes since this doc was written).
+
+**Recommended action:**
+1. **Review for accuracy** against current `prsm/economy/web3/stake_manager.py` + the audit-bundle contracts. If accurate → commit. If stale → either rewrite or delete.
+2. **Defer until post-audit ceremony** since the API surface may stabilize differently after auditor review.
+
+## §E — `config/nginx/ipfs-proxy.conf` (1 file)
+
+Referenced from `docs/native-storage-design.md` and `docs/plans/native-storage-migration.md`. The "native-storage-migration" doc title indicates PRSM is migrating AWAY from IPFS to native storage. Only 1 tracked Python file imports IPFS-related modules (vs many for current inference/storage code paths) — confirming IPFS is being phased out.
+
+**Recommended action:**
+1. Wait for native-storage migration to land, then delete the conf.
+2. Or commit now as documentation of legacy infrastructure.
+
+Currently low priority since the file isn't broken or load-bearing.
+
+---
+
+## Summary
+
+- ✅ **Phase 1 actioned (4 files):** confirmed stale or out-of-scope material deleted.
+- ⏳ **Phase 2 deferred (~164 files):** decisions captured in this doc per category, awaiting operator intent + multi-session triage.
+
+The repo is materially cleaner post-Phase 1 than before this audit — every file we deleted was either testing something that doesn't exist (FTNSToken.test.js), an investor-scope violation (INVESTOR_AUDIT_GUIDE.md), or a 9-10 month-old NWTN/security doc superseded by current audit-prep docs.
+
+**The bigger Phase 2 surface (workflows, NWTN, collaboration, tests/) is not blocking hardware-day or the post-audit ceremony.** It's a "before external audit packet ships" cleanup. This audit doc gives the operator the categorized roadmap to drive that cleanup over multiple sessions.
+
+---
+
+## Quick-action one-liners
+
+If the operator wants to take aggressive action without per-file review:
+
+```bash
+# Bulk-delete 12 unwired CI workflows (Path A.2)
+rm .github/workflows/{cd,ci-cd-pipeline,ci-comprehensive,deploy-production,infrastructure-tests,neural-regression,performance-regression,production-deploy,security-validation,security,test-coverage,validation-pipeline}.yml
+
+# Bulk-relocate untracked tests to tests/_legacy/ (Path C.1; matches #89 precedent)
+mkdir -p tests/_legacy/2026-04-30-untracked-sweep
+git status --short | grep '^??' | awk '{print $2}' | grep '^tests/' | while read f; do
+  mkdir -p "tests/_legacy/2026-04-30-untracked-sweep/$(dirname "${f#tests/}")"
+  mv "$f" "tests/_legacy/2026-04-30-untracked-sweep/${f#tests/}"
+done
+
+# Spot-check NWTN .md files for deletion
+ls prsm/compute/nwtn/*.md
+```
+
+Don't run these blindly — the audit report is the deliberation, not the action.
