@@ -31,7 +31,7 @@ Untracked count: 168 → 164.
 
 | Bucket | Count | Phase 2 recommendation |
 |---|---:|---|
-| `.github/workflows/*.yml` | 12 | NEEDS USER DECISION — see §A |
+| `.github/workflows/*.yml` | 12 | **ACTIONED 2026-04-30** — bulk-deleted; ALL 12 explicitly deleted in commit `356c684c` ("ci: consolidate 19 workflow files to 7"). 6 tracked workflows (`auto-label-issues`, `changelog`, `ci`, `deploy`, `release`, `security-audit`) are the consolidated canonical CI. See §A. |
 | `prsm/compute/nwtn/` | 39 → 30 | PARTIAL: 9 .md/.json deleted (this commit). 30 .py + subdirs deferred — see §B |
 | `prsm/compute/collaboration/` | 16 | **CONFIRMED LEGACY** — v1.7.0 explicitly deleted these as "legacy that survived v1.6.0"; ~26K LoC; zero tracked-code refs. See §B. |
 | `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` 26 .py + 12 other subdirs 81 .py) | **CONFIRMED LEGACY across all 4 clusters** — chronos/ + agents/ + federation/ + 12 other subdirs all show v1.6 (or v1.7) deletion-then-reintroduction signature. ~80K LoC total. Bulk-delete recommended pending operator decision on whether the resurrection was a single event or independent. See §B. |
@@ -42,7 +42,14 @@ Untracked count: 168 → 164.
 
 ---
 
-## §A — `.github/workflows/*.yml` (12 files, ~4,000 lines)
+## §A — `.github/workflows/*.yml` (12 files, ~4,000 lines) — ACTIONED 2026-04-30
+
+**Action:** bulk-deleted. ALL 12 untracked workflows have an explicit deletion record in commit `356c684c` ("ci: consolidate 19 workflow files to 7; clean canonical ci.yml + deploy.yml"). Same legacy-reintroduction pattern as §B/§D/§E/§F.
+
+The current 6 tracked workflows (`auto-label-issues.yml`, `changelog.yml`, `ci.yml`, `deploy.yml`, `release.yml`, `security-audit.yml`) are the consolidated canonical CI surface; the 12 untracked workflows were the pre-consolidation surface that the same commit replaced. Re-running the consolidation now (rather than re-reviewing 4K lines of YAML) is faster, safer, and matches operator intent already established in the deletion commit.
+
+#### Original pre-action analysis (preserved for context)
+
 
 ```
 cd.yml                           329 lines
