@@ -32,7 +32,7 @@ Untracked count: 168 → 164.
 | Bucket | Count | Phase 2 recommendation |
 |---|---:|---|
 | `.github/workflows/*.yml` | 12 | NEEDS USER DECISION — see §A |
-| `prsm/compute/nwtn/` | 39 | LIKELY LEGACY — see §B |
+| `prsm/compute/nwtn/` | 39 → 30 | PARTIAL: 9 .md/.json deleted (this commit). 30 .py + subdirs deferred — see §B |
 | `prsm/compute/collaboration/` | 16 | LIKELY LEGACY — see §B |
 | `prsm/compute/{federation,agents,chronos,others}/` | 28 | MIXED — see §B |
 | `tests/{integration,nwtn,scripts_integration,...}/` | 58 | LIKELY LEGACY — see §C |
@@ -77,26 +77,26 @@ The right call depends on **operator intent** that I can't determine from the fi
 
 ## §B — `prsm/compute/` (83 untracked files)
 
-### NWTN subdir (39 files)
+### NWTN subdir (39 → 30 files; .md/.json sweep actioned 2026-04-30)
 
 NWTN is the legacy conceptual product per project memory. Streaming-inference subsystem (Phase 3.x.*, with roadmap cap reached at q.x today) is the canonical inference path.
 
-**HOWEVER:** spot-check shows `prsm/compute/nwtn/__init__.py` + `prsm/compute/nwtn/training/__init__.py` ARE tracked. The directory is mixed — some files committed, some untracked. So bulk-delete is unsafe.
+**HOWEVER:** spot-check shows `prsm/compute/nwtn/__init__.py` + `prsm/compute/nwtn/training/__init__.py` ARE tracked. The directory is mixed — some files committed, some untracked. So bulk-delete on `.py` files is unsafe.
 
-**Sample untracked files:**
-- `prsm/compute/nwtn/BREAKTHROUGH_PIPELINE_DOCUMENTATION.md`
-- `prsm/compute/nwtn/CRITICAL_FIXES_IMPLEMENTATION_SUMMARY.md`
-- `prsm/compute/nwtn/ETHICAL_DATA_INGESTION_ROADMAP.md`
-- `prsm/compute/nwtn/NWTN_LOCAL_INTEGRATION_COMPLETE.md`
-- `prsm/compute/nwtn/NWTN_OPTIMIZATION_ROADMAP.md`
-- 34 more (mix of `.py` and `.md` files)
+**Phase 1 actioned (2026-04-30):** the 9 lowest-risk `.md` + `.json` files at the top of `prsm/compute/nwtn/` deleted. All confirmed dated July-August 2025 (~9 months old) with NWTN-era branding ("Neural Web for Transformation Networking", "9-Step Reasoning Pipeline", "Voicebox", "Breakthrough Pipeline") superseded by the streaming-inference subsystem. Verified zero references from tracked Python files; package import (`import prsm.compute.nwtn`) still succeeds post-deletion.
 
-The `.md` files look like dev-research notes; the `.py` files are subsystems that were never committed.
+Files deleted:
+- `README.md` (1073 lines; old "9-Step AI Reasoning Pipeline" framing)
+- `BREAKTHROUGH_PIPELINE_DOCUMENTATION.md` (Last Updated: July 31, 2025)
+- `CRITICAL_FIXES_IMPLEMENTATION_SUMMARY.md` (Date: August 11, 2025)
+- `ETHICAL_DATA_INGESTION_ROADMAP.md` (no date; "52 diverse sources" data ingestion strategy from old data layer)
+- `NWTN_LOCAL_INTEGRATION_COMPLETE.md` (Generated: August 7, 2025; GPT-OSS+Gemma+Ollama integration era)
+- `NWTN_OPTIMIZATION_ROADMAP.md` (730 lines; neuro-symbolic reasoning roadmap)
+- `NWTN_OPTIMIZATION_VALIDATION_COMPLETE.md` (candidate-deduplication validation note)
+- `NWTN_VOICEBOX_OPTIMIZATION_COMPLETE.md` (Qwen2.5:7B integration note)
+- `nwtn_complete_pipeline_results_1754921011.json` (Aug 11 2025 pipeline-results dump)
 
-**Recommended action:**
-1. **Triage `.md` notes first** (lower risk): move to `docs/_legacy/nwtn/` or delete if superseded by the cumulative audit-prep doc.
-2. **For `.py` files:** check imports. If a file is imported from a tracked file → commit it. If not → likely legacy; archive to `prsm/_legacy/nwtn/` or delete.
-3. **Defer to a dedicated NWTN-cleanup session.** Treating it as a single multi-hour task is the safest path; mixing per-file decisions across multiple unrelated subsystems risks breaking imports.
+**Phase 2 deferred:** the 30 remaining untracked items in `prsm/compute/nwtn/` (mostly `.py` files in subdirs: `architectures/`, `backends/`, `bsc/`, `core/`, `corpus/`, `engines/`, `experiments/`, `openclaw/`, `processing/`, `reasoning/`, `security/`, `synthesis/`, `team/`, `test_prompts/`, `whiteboard/` plus a few top-level `.py` files like `breakthrough_modes.py`, `complete_system.py`, `context_manager.py`, etc.). These need import-graph analysis before deletion (tracked files DO import from `prsm.compute.nwtn` — but which specific submodules?). Recommend a dedicated session.
 
 ### collaboration/ subdir (16 files)
 
