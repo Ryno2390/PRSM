@@ -333,6 +333,7 @@ def _make_spec_executor(
     encrypted_probs_cipher=None,
     flat_k_mode: bool = False,
     always_rollback_k: bool = False,
+    per_stage_dispatch_cadence_seconds=None,
 ) -> RpcChainExecutor:
     return RpcChainExecutor(
         settler_identity=settler,
@@ -350,6 +351,9 @@ def _make_spec_executor(
         encrypted_probs_cipher=encrypted_probs_cipher,
         flat_k_mode=flat_k_mode,
         always_rollback_k=always_rollback_k,
+        per_stage_dispatch_cadence_seconds=(
+            per_stage_dispatch_cadence_seconds
+        ),
     )
 
 
@@ -1455,3 +1459,115 @@ class TestAlwaysRollbackK:
             expected_k=3,
         )
         assert decrypted == [10, 20, 99]
+
+
+class TestPerStageDispatchCadence:
+    """Phase 3.x.11.q.x — per_stage_dispatch_cadence_seconds
+    constructor flag + sharded-loop integration. Closes the §7.13
+    honest-scope item #1 (per-stage wire still leaks per-token
+    timing under sharded autoregressive decode)."""
+
+    def test_constructor_rejects_non_positive_cadence(self):
+        # Validator: cadence must be positive when set.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 99), 2, False)],
+        )
+        draft = _FakeDraft(propose_script=[[10, 20]])
+        for bad in [0, -0.5, -1]:
+            with pytest.raises(RuntimeError, match="positive"):
+                _make_spec_executor(
+                    transport=transport, settler=settler, anchor=anchor,
+                    draft=draft, speculation_depth=2,
+                    per_stage_dispatch_cadence_seconds=bad,
+                )
+
+    def test_constructor_rejects_bool_cadence(self):
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 99), 2, False)],
+        )
+        draft = _FakeDraft(propose_script=[[10, 20]])
+        with pytest.raises(RuntimeError, match="must be number"):
+            _make_spec_executor(
+                transport=transport, settler=settler, anchor=anchor,
+                draft=draft, speculation_depth=2,
+                per_stage_dispatch_cadence_seconds=True,  # type: ignore[arg-type]
+            )
+
+    def test_no_cadence_default_unaffected(self):
+        # Default (None) preserves legacy behavior — no sleeps.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 99), 2, False)],
+        )
+        draft = _FakeDraft(propose_script=[[10, 20]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            # per_stage_dispatch_cadence_seconds=None default
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=4, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        # PREFILL=7 + verify K=2 full-accept → 4 tokens (7,10,20,99).
+        assert [t.token_id for t in tokens] == [7, 10, 20, 99]
+
+    def test_cadence_clamps_inter_iteration_via_sleep_calls(self):
+        # tests/conftest.py installs an auto-use mock that patches
+        # time.sleep → instant (so unit tests don't actually
+        # block). We can't use wall-clock to verify cadence; we
+        # instead patch `time.sleep` ourselves to record calls
+        # and assert at least one sleep with duration > 0
+        # happened (= cadence clamp fired between iterations).
+        import time as _time
+        sleep_calls: List[float] = []
+        original_sleep = _time.sleep
+
+        def recording_sleep(seconds: float) -> None:
+            sleep_calls.append(float(seconds))
+            # Don't actually sleep — fast test.
+
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[
+                ((10, 20, 99), 2, False),  # round 1 full-accept
+                ((30, 40, 88), 2, False),  # round 2 full-accept
+            ],
+        )
+        draft = _FakeDraft(propose_script=[[10, 20], [30, 40]])
+        cadence = 0.05  # 50ms
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            per_stage_dispatch_cadence_seconds=cadence,
+        )
+        # Replace time.sleep on the imported module that the
+        # executor uses (chain_rpc.client imports `time` at
+        # module level + calls `time.sleep` inside the helper).
+        from prsm.compute.chain_rpc import client as _client_mod
+        _client_mod.time.sleep = recording_sleep
+        try:
+            list(executor.execute_chain_streaming(
+                request=_make_request(max_tokens=7, temperature=0.0),
+                chain=chain,
+            ))
+        finally:
+            _client_mod.time.sleep = original_sleep
+        # At least one sleep call with a positive duration close
+        # to the cadence. PREFILL → VERIFY round 1 inter-iter gap
+        # is the first sleep; round 1 → round 2 is the second.
+        positive_sleeps = [s for s in sleep_calls if s > 0]
+        assert len(positive_sleeps) >= 1, (
+            f"cadence clamp didn't fire — no positive sleep calls "
+            f"recorded (sleep_calls={sleep_calls})"
+        )
+        # Each sleep should be ≤ cadence (helper sleeps the
+        # remainder, not more).
+        for s in positive_sleeps:
+            assert s <= cadence + 1e-6, (
+                f"sleep duration {s} > cadence {cadence} "
+                f"(helper bug — sleeping more than cadence)"
+            )

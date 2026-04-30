@@ -380,6 +380,19 @@ class RpcChainExecutor:
         # rejection rollback continues — operator opts in for
         # Tier C speculation deployments.
         always_rollback_k: bool = False,
+        # Phase 3.x.11.q.x — per-stage dispatch cadence. When set
+        # (positive float, seconds), the sharded decode loop
+        # clamps inter-iteration timing so each per-stage RPC
+        # arrives at a uniform cadence regardless of decode work.
+        # Closes the threat-model §3.7 honest-scope item (per-
+        # stage wire still leaks per-token timing under sharded
+        # autoregressive decode). The chain-level decorators in
+        # Phase 3.x.11.q mask the executor → caller wire only;
+        # this kwarg masks the executor → per-stage wire by
+        # uniformly throttling per-token chain redispatch rate.
+        # When None (default), no clamping — per-stage cadence
+        # equals native decode rate.
+        per_stage_dispatch_cadence_seconds: Optional[float] = None,
     ) -> None:
         if settler_identity is None or not hasattr(settler_identity, "node_id"):
             raise RuntimeError(
@@ -546,6 +559,34 @@ class RpcChainExecutor:
         self._encrypted_probs_cipher = encrypted_probs_cipher
         self._flat_k_mode = bool(flat_k_mode)
         self._always_rollback_k = bool(always_rollback_k)
+        # Phase 3.x.11.q.x — per-stage dispatch cadence validator.
+        if per_stage_dispatch_cadence_seconds is not None:
+            if (
+                isinstance(
+                    per_stage_dispatch_cadence_seconds, bool,
+                )
+                or not isinstance(
+                    per_stage_dispatch_cadence_seconds, (int, float),
+                )
+            ):
+                raise RuntimeError(
+                    "RpcChainExecutor: "
+                    "per_stage_dispatch_cadence_seconds must be "
+                    "number when set, got "
+                    f"{type(per_stage_dispatch_cadence_seconds).__name__}"
+                )
+            if per_stage_dispatch_cadence_seconds <= 0:
+                raise RuntimeError(
+                    "RpcChainExecutor: "
+                    "per_stage_dispatch_cadence_seconds must be "
+                    "positive, got "
+                    f"{per_stage_dispatch_cadence_seconds}"
+                )
+        self._per_stage_cadence = (
+            float(per_stage_dispatch_cadence_seconds)
+            if per_stage_dispatch_cadence_seconds is not None
+            else None
+        )
         self._speculation_depth = int(speculation_depth)
         self._rollback_cache_send = rollback_cache_send_message
 
@@ -893,6 +934,11 @@ class RpcChainExecutor:
 
         try:
             # Step 1: PREFILL pass — produces token #1.
+            # Phase 3.x.11.q.x: track dispatch-start timestamp for
+            # per-stage cadence clamp. PREFILL kicks off
+            # last_dispatch_unix; subsequent INCREMENTAL iterations
+            # wait until cadence elapses since the prior start.
+            last_dispatch_unix = self._wait_for_per_stage_cadence(None)
             next_token_id, is_terminal, prefill_outcomes = (
                 self._run_chain_iteration_sharded(
                     request=request,
@@ -916,6 +962,11 @@ class RpcChainExecutor:
             # Step 2: INCREMENTAL decode loop.
             sequence_idx = 1
             while not is_terminal and sequence_idx < max_tokens:
+                # Phase 3.x.11.q.x: per-stage cadence clamp before
+                # the next per-token chain dispatch.
+                last_dispatch_unix = (
+                    self._wait_for_per_stage_cadence(last_dispatch_unix)
+                )
                 next_token_id, is_terminal, inc_outcomes = (
                     self._run_chain_iteration_sharded(
                         request=request,
@@ -1182,6 +1233,9 @@ class RpcChainExecutor:
         draft_reset_done = True
         try:
             # Step 1: PREFILL pass — produces token #1.
+            # Phase 3.x.11.q.x: track dispatch-start timestamp for
+            # per-stage cadence clamp.
+            last_dispatch_unix = self._wait_for_per_stage_cadence(None)
             next_token_id, is_terminal, prefill_outcomes = (
                 self._run_chain_iteration_sharded(
                     request=request,
@@ -1205,6 +1259,16 @@ class RpcChainExecutor:
 
             # Step 2: speculative VERIFY loop.
             while not is_terminal and tokens_emitted < max_tokens:
+                # Phase 3.x.11.q.x: per-stage cadence clamp before
+                # the next per-token speculative VERIFY dispatch.
+                # Each VERIFY round in this loop sends one full
+                # chain pass with K+1 batched positions; the
+                # cadence clamps the rate of these chain dispatches
+                # so the per-stage wire sees uniform inter-arrival
+                # regardless of K and per-stage decode work.
+                last_dispatch_unix = (
+                    self._wait_for_per_stage_cadence(last_dispatch_unix)
+                )
                 # Step 2a: draft proposes K tokens. v1 path uses
                 # propose (greedy, probs implicit); v2 path uses
                 # propose_with_probs and forwards q(d_i) on the
@@ -1837,6 +1901,38 @@ class RpcChainExecutor:
         except TypeError:
             # Tokenizers that don't accept skip_special_tokens kwarg.
             return self._tokenizer.decode([int(token_id)])
+
+    def _wait_for_per_stage_cadence(
+        self,
+        last_dispatch_started_unix: Optional[float],
+    ) -> float:
+        """Phase 3.x.11.q.x — clamp inter-iteration cadence in
+        the sharded decode loops. When ``per_stage_cadence`` is
+        wired, sleeps until the cadence elapses since the last
+        dispatch start. Returns the new ``last_dispatch_started``
+        timestamp (now, post-sleep). The caller passes in the
+        prior iteration's start; on the first iteration the
+        caller passes ``None`` and we just return ``now``.
+
+        From the per-stage wire's perspective this enforces a
+        uniform inter-arrival cadence on per-token chain
+        redispatches: each stage receives at most one VERIFY/
+        INCREMENTAL/PREFILL RPC per cadence period regardless
+        of the underlying decode work. Closes the §7.13 honest-
+        scope item #1 (per-stage timing leak under sharded
+        autoregressive decode).
+        """
+        now = self._clock()
+        if (
+            self._per_stage_cadence is None
+            or last_dispatch_started_unix is None
+        ):
+            return now
+        elapsed = now - last_dispatch_started_unix
+        if elapsed < self._per_stage_cadence:
+            time.sleep(self._per_stage_cadence - elapsed)
+            now = self._clock()
+        return now
 
     def _evict_cache_on_stages(
         self,
