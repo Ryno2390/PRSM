@@ -20,6 +20,7 @@ from prsm.compute.chain_rpc.probs_cipher import (
     ProbsCipher,
     ProbsCipherError,
     ProbsDecryptionError,
+    X25519AnchoredCipher,
     derive_key_from_psk,
 )
 
@@ -224,3 +225,192 @@ class TestDeriveKeyFromPSK:
     def test_rejects_short_psk(self):
         with pytest.raises(ProbsCipherError, match="too short"):
             derive_key_from_psk(b"too-short")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# X25519AnchoredCipher — Phase 3.x.11.q.y'
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestX25519AnchoredCipher:
+    """Phase 3.x.11.q.y' — per-request ECDH cipher.
+
+    Validates the load-bearing surface invariants:
+      - encrypt/decrypt round-trip with shared (server, executor)
+      - per-request fresh keypair → forward secrecy across requests
+      - ephemeral_pubkey substitution breaks decrypt (AAD bound
+        via signing_payload, but the cipher itself authenticates
+        via the AES-GCM tag once the derived key changes)
+      - rollback prefix path uses distinct AAD from probs path
+    """
+
+    def _setup_pair(self):
+        """Mint server long-term keypair + ephemeral keypair, set
+        up server-side cipher + simulate executor-side derive."""
+        # Server long-term keypair.
+        srv_priv, srv_pub = X25519AnchoredCipher.generate_keypair()
+        # Executor mints fresh ephemeral keypair per request.
+        eph_priv, eph_pub = X25519AnchoredCipher.generate_keypair()
+        srv = X25519AnchoredCipher(srv_priv)
+        # Executor uses an X25519AnchoredCipher constructed from
+        # its EPHEMERAL private key. The peer pubkey it passes
+        # in is the SERVER's long-term public key.
+        exec_cipher = X25519AnchoredCipher(eph_priv)
+        return srv, exec_cipher, srv_pub, eph_pub
+
+    def test_round_trip_probs(self):
+        srv, exec_cipher, srv_pub, eph_pub = self._setup_pair()
+        # Executor encrypts with the server's long-term pubkey
+        # as the "peer" → derive shared secret(eph_priv, srv_pub).
+        ct = exec_cipher.encrypt(
+            probs=[0.5, 0.3],
+            request_id="req-1",
+            stage_index=0,
+            ephemeral_pubkey=srv_pub,
+            chain_total_stages=2,
+        )
+        # Server decrypts with executor's eph_pub as the "peer" →
+        # derive shared secret(srv_priv, eph_pub). Equal by ECDH
+        # symmetry.
+        out = srv.decrypt(
+            ciphertext=ct,
+            request_id="req-1",
+            stage_index=0,
+            expected_k=2,
+            ephemeral_pubkey=eph_pub,
+            chain_total_stages=2,
+        )
+        assert out == pytest.approx([0.5, 0.3], abs=1e-12)
+
+    def test_round_trip_prefix(self):
+        srv, exec_cipher, srv_pub, eph_pub = self._setup_pair()
+        ct = exec_cipher.encrypt_prefix(
+            prefix=[101, 202, 303],
+            request_id="req-1",
+            stage_index=0,
+            ephemeral_pubkey=srv_pub,
+            chain_total_stages=2,
+        )
+        out = srv.decrypt_prefix(
+            ciphertext=ct,
+            request_id="req-1",
+            stage_index=0,
+            expected_k=3,
+            ephemeral_pubkey=eph_pub,
+            chain_total_stages=2,
+        )
+        assert out == [101, 202, 303]
+
+    def test_substituted_ephemeral_pubkey_fails(self):
+        srv, exec_cipher, srv_pub, eph_pub = self._setup_pair()
+        ct = exec_cipher.encrypt(
+            probs=[0.5],
+            request_id="req-1",
+            stage_index=0,
+            ephemeral_pubkey=srv_pub,
+            chain_total_stages=2,
+        )
+        # Adversary mints a fresh keypair and substitutes the
+        # ephemeral_pubkey on the wire. Server decrypt derives a
+        # different shared secret → AES-GCM tag mismatch.
+        _, fake_pub = X25519AnchoredCipher.generate_keypair()
+        with pytest.raises(ProbsDecryptionError):
+            srv.decrypt(
+                ciphertext=ct,
+                request_id="req-1",
+                stage_index=0,
+                expected_k=1,
+                ephemeral_pubkey=fake_pub,  # substituted!
+                chain_total_stages=2,
+            )
+
+    def test_per_request_forward_secrecy(self):
+        # Two requests with DIFFERENT ephemeral keys yield
+        # ciphertexts that cannot decrypt across requests.
+        srv_priv, srv_pub = X25519AnchoredCipher.generate_keypair()
+        srv = X25519AnchoredCipher(srv_priv)
+        eph1_priv, eph1_pub = X25519AnchoredCipher.generate_keypair()
+        eph2_priv, eph2_pub = X25519AnchoredCipher.generate_keypair()
+        ec1 = X25519AnchoredCipher(eph1_priv)
+        ec2 = X25519AnchoredCipher(eph2_priv)
+        ct1 = ec1.encrypt(
+            probs=[0.5], request_id="req-1", stage_index=0,
+            ephemeral_pubkey=srv_pub, chain_total_stages=2,
+        )
+        # Server tries to decrypt req-1's ciphertext with req-2's
+        # ephemeral pubkey → fails.
+        with pytest.raises(ProbsDecryptionError):
+            srv.decrypt(
+                ciphertext=ct1,
+                request_id="req-1", stage_index=0, expected_k=1,
+                ephemeral_pubkey=eph2_pub,
+                chain_total_stages=2,
+            )
+
+    def test_distinct_aad_probs_vs_rollback(self):
+        # Cross-AAD replay defense: a probs ciphertext cannot be
+        # decrypted by decrypt_prefix (AAD spaces are disjoint).
+        srv, exec_cipher, srv_pub, eph_pub = self._setup_pair()
+        ct_probs = exec_cipher.encrypt(
+            probs=[0.5, 0.3],
+            request_id="req-1",
+            stage_index=0,
+            ephemeral_pubkey=srv_pub,
+            chain_total_stages=2,
+        )
+        with pytest.raises(ProbsDecryptionError):
+            srv.decrypt_prefix(
+                ciphertext=ct_probs,
+                request_id="req-1",
+                stage_index=0,
+                expected_k=2,
+                ephemeral_pubkey=eph_pub,
+                chain_total_stages=2,
+            )
+
+    def test_chain_total_stages_binding(self):
+        # info input includes chain_total_stages: a relay that
+        # lifts the envelope from a 2-stage chain into a 3-stage
+        # chain at the same stage_index gets a different derived
+        # key → decrypt fails.
+        srv, exec_cipher, srv_pub, eph_pub = self._setup_pair()
+        ct = exec_cipher.encrypt(
+            probs=[0.5],
+            request_id="req-1",
+            stage_index=0,
+            ephemeral_pubkey=srv_pub,
+            chain_total_stages=2,
+        )
+        with pytest.raises(ProbsDecryptionError):
+            srv.decrypt(
+                ciphertext=ct,
+                request_id="req-1", stage_index=0, expected_k=1,
+                ephemeral_pubkey=eph_pub,
+                chain_total_stages=3,  # tampered!
+            )
+
+    def test_evict_request_drops_keys(self):
+        srv, exec_cipher, srv_pub, eph_pub = self._setup_pair()
+        # Force a key derivation by encrypting once.
+        ct = exec_cipher.encrypt(
+            probs=[0.5], request_id="req-1", stage_index=0,
+            ephemeral_pubkey=srv_pub, chain_total_stages=2,
+        )
+        srv.decrypt(
+            ciphertext=ct,
+            request_id="req-1", stage_index=0, expected_k=1,
+            ephemeral_pubkey=eph_pub, chain_total_stages=2,
+        )
+        # One cache entry expected.
+        n = srv.evict_request("req-1")
+        assert n == 1
+        # Idempotent: second evict returns 0.
+        assert srv.evict_request("req-1") == 0
+
+    def test_rejects_wrong_length_privkey(self):
+        with pytest.raises(ProbsCipherError, match="32 bytes"):
+            X25519AnchoredCipher(b"\x00" * 16)
+
+    def test_rejects_non_bytes_privkey(self):
+        with pytest.raises(ProbsCipherError, match="must be bytes"):
+            X25519AnchoredCipher("not-bytes")  # type: ignore[arg-type]

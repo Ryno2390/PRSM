@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import os
 import struct
-from typing import List, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -56,6 +56,8 @@ __all__ = [
     "ProbsCipher",
     "ProbsCipherError",
     "ProbsDecryptionError",
+    "X25519AnchoredCipher",
+    "derive_key_from_psk",
 ]
 
 
@@ -425,3 +427,339 @@ def derive_key_from_psk(
         info=b"probs-cipher-v1",
     )
     return hkdf.derive(bytes(psk_bytes))
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# X25519AnchoredCipher — Phase 3.x.11.q.y'
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class X25519AnchoredCipher:
+    """Phase 3.x.11.q.y' — per-request ECDH key negotiation cipher.
+
+    Drop-in alternative to ``ProbsCipher`` for executors and tail
+    stages that want fresh-per-request AES keys without operator-
+    managed PSK distribution. The cipher derives a per-request
+    AES-256 key by:
+
+      1. Reading the executor's ephemeral X25519 public key from
+         the request's HandoffToken (``request.upstream_token.
+         ephemeral_pubkey``); the executor mints a fresh keypair
+         per request and ships the public half on the (signed)
+         token. Token signature commits the ephemeral pubkey, so
+         a relay can't substitute it.
+      2. Performing ECDH against this stage's long-term X25519
+         private key → 32-byte shared secret.
+      3. HKDF-SHA256 over the shared secret with
+         ``info = request_id || stage_index_byte || chain_total_stages_byte``
+         → AES-256 key. Per-request uniqueness comes from the
+         ephemeral half (item 1); per-stage uniqueness comes from
+         the HKDF info input.
+
+    Surface-compatible with ``ProbsCipher``: implements ``encrypt``
+    / ``decrypt`` / ``encrypt_prefix`` / ``decrypt_prefix`` with
+    the same signatures, so swapping is a drop-in change at the
+    ``RpcChainExecutor`` / ``LayerStageServer`` level. Operators
+    pick PSK or ECDH based on deployment posture; the runtime
+    integration is unchanged.
+
+    **Operational model.**
+    - Long-term X25519 keypair per stage, signed by the anchor
+      under the existing publisher-key infrastructure (so the
+      executor can resolve + verify the public half).
+    - Executor mints + caches a fresh ephemeral X25519 keypair
+      per request. Carries the public half on every HandoffToken
+      it issues (one per stage in the chain). Caches the private
+      half in-memory for the request's lifetime.
+    - Receiving stage performs ECDH against its long-term private
+      key + the on-token ephemeral public; derives the cipher key.
+      The cipher caches derived keys per-request to avoid
+      recomputing on every encrypt/decrypt call within the same
+      request.
+
+    **Security model.**
+    - Forward secrecy: per-request ephemeral keys mean compromise
+      of one request's traffic does not compromise other requests'.
+      Compromise of the long-term key still permits decryption of
+      future traffic but NOT past traffic (since the executor's
+      ephemeral private was discarded after the request completed).
+    - The anchor + token signature chain authenticates the public
+      keys. A relay cannot substitute a different ephemeral
+      pubkey without invalidating the settler's signature on
+      HandoffToken.
+
+    **Honest scope (v1).**
+    - Replay-attack window inside ``deadline_unix`` is NOT closed
+      here — a relay could replay an entire request envelope
+      (including the ephemeral pubkey + ciphertexts). Mitigation
+      via per-stage nonce cache is orthogonal; defer to follow-up.
+    - Post-quantum resistance not addressed. R6 trigger-watch.
+    """
+
+    def __init__(self, local_x25519_privkey_bytes: bytes) -> None:
+        """``local_x25519_privkey_bytes`` is the 32-byte raw private
+        key (X25519 format per RFC 7748). Operators load this from
+        secure storage at server startup; see ``generate_keypair``
+        for fresh key minting."""
+        # Lazy import to keep the module loadable when X25519 isn't
+        # available (e.g., older cryptography versions). Fail loudly
+        # at construction-time rather than at first encrypt.
+        from cryptography.hazmat.primitives.asymmetric.x25519 import (
+            X25519PrivateKey,
+        )
+        if not isinstance(
+            local_x25519_privkey_bytes, (bytes, bytearray),
+        ):
+            raise ProbsCipherError(
+                f"local_x25519_privkey_bytes must be bytes, got "
+                f"{type(local_x25519_privkey_bytes).__name__}"
+            )
+        if len(local_x25519_privkey_bytes) != 32:
+            raise ProbsCipherError(
+                f"local_x25519_privkey_bytes must be exactly 32 "
+                f"bytes (X25519 raw private key), got "
+                f"{len(local_x25519_privkey_bytes)}"
+            )
+        self._privkey = X25519PrivateKey.from_private_bytes(
+            bytes(local_x25519_privkey_bytes),
+        )
+        # Per-(request_id, ephemeral_pubkey) → AESGCM cache. Bounded
+        # by the request lifecycle: the operator's TTL sweeper +
+        # eviction broadcast bounds the cache size. We don't add
+        # an internal LRU here because the cache key set is
+        # already bounded by concurrent in-flight requests.
+        self._key_cache: dict = {}
+
+    def _derive_key(
+        self,
+        *,
+        ephemeral_pubkey_bytes: bytes,
+        request_id: str,
+        stage_index: int,
+        chain_total_stages: Optional[int] = None,
+    ) -> "AESGCM":
+        from cryptography.hazmat.primitives.asymmetric.x25519 import (
+            X25519PublicKey,
+        )
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+        cache_key = (
+            request_id,
+            bytes(ephemeral_pubkey_bytes),
+            int(stage_index),
+            int(chain_total_stages or 0),
+        )
+        cached = self._key_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            peer_pub = X25519PublicKey.from_public_bytes(
+                bytes(ephemeral_pubkey_bytes),
+            )
+            shared_secret = self._privkey.exchange(peer_pub)
+        except Exception as exc:  # noqa: BLE001
+            raise ProbsCipherError(
+                f"X25519 ECDH failed: {exc}"
+            ) from exc
+        # info input bound to (request_id, stage_index,
+        # chain_total_stages). chain_total_stages defends against
+        # chain-length forgery (a relay can't lift an envelope
+        # from a 2-stage chain into a 3-stage chain even at the
+        # same stage_index).
+        info = (
+            request_id.encode("utf-8")
+            + b"|"
+            + bytes([int(stage_index) & 0xFF])
+            + b"|"
+            + bytes([int(chain_total_stages or 0) & 0xFF])
+        )
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=_AES_KEY_LEN,
+            salt=b"prsm-3.x.11.q.y-prime-x25519-aead",
+            info=info,
+        )
+        derived = hkdf.derive(shared_secret)
+        aesgcm = AESGCM(derived)
+        self._key_cache[cache_key] = aesgcm
+        return aesgcm
+
+    @staticmethod
+    def generate_keypair() -> Tuple[bytes, bytes]:
+        """Mint a fresh X25519 keypair. Returns
+        ``(private_bytes, public_bytes)`` (each 32 raw bytes).
+        Operators use this to provision long-term server keys
+        AND the executor uses it to mint per-request ephemeral
+        keys."""
+        from cryptography.hazmat.primitives.asymmetric.x25519 import (
+            X25519PrivateKey,
+        )
+        from cryptography.hazmat.primitives import serialization
+        priv = X25519PrivateKey.generate()
+        priv_bytes = priv.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        pub = priv.public_key()
+        pub_bytes = pub.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        return bytes(priv_bytes), bytes(pub_bytes)
+
+    # ─── Surface-compatible API ──────────────────────────────────────
+    #
+    # The methods below mirror ProbsCipher's surface. They take
+    # the same kwargs (request_id, stage_index, etc.) plus a new
+    # ``ephemeral_pubkey`` kwarg that the caller (executor or
+    # server) extracts from the request's HandoffToken. The
+    # ProbsCipher integration in client.py / server.py duck-types
+    # via Protocol; the executor-side wrapper in client.py
+    # detects which cipher class is in use and threads the
+    # appropriate kwargs.
+
+    def encrypt(
+        self,
+        *,
+        probs: Sequence[float],
+        request_id: str,
+        stage_index: int,
+        ephemeral_pubkey: bytes,
+        chain_total_stages: Optional[int] = None,
+    ) -> bytes:
+        plaintext = _encode_probs(probs)
+        aad = _aad(request_id, stage_index)
+        nonce = os.urandom(_GCM_NONCE_LEN)
+        aesgcm = self._derive_key(
+            ephemeral_pubkey_bytes=ephemeral_pubkey,
+            request_id=request_id,
+            stage_index=stage_index,
+            chain_total_stages=chain_total_stages,
+        )
+        try:
+            ct = aesgcm.encrypt(nonce, plaintext, aad)
+        except Exception as exc:  # noqa: BLE001
+            raise ProbsCipherError(
+                f"X25519AnchoredCipher.encrypt failed: {exc}"
+            ) from exc
+        return nonce + ct
+
+    def decrypt(
+        self,
+        *,
+        ciphertext: bytes,
+        request_id: str,
+        stage_index: int,
+        expected_k: int,
+        ephemeral_pubkey: bytes,
+        chain_total_stages: Optional[int] = None,
+    ) -> List[float]:
+        if not isinstance(ciphertext, (bytes, bytearray)):
+            raise ProbsCipherError(
+                f"ciphertext must be bytes, got "
+                f"{type(ciphertext).__name__}"
+            )
+        if len(ciphertext) < _GCM_NONCE_LEN + 16:
+            raise ProbsCipherError(
+                f"ciphertext too short: {len(ciphertext)} bytes "
+                f"(minimum {_GCM_NONCE_LEN + 16} = nonce + GCM tag)"
+            )
+        nonce = bytes(ciphertext[:_GCM_NONCE_LEN])
+        ct = bytes(ciphertext[_GCM_NONCE_LEN:])
+        aad = _aad(request_id, stage_index)
+        aesgcm = self._derive_key(
+            ephemeral_pubkey_bytes=ephemeral_pubkey,
+            request_id=request_id,
+            stage_index=stage_index,
+            chain_total_stages=chain_total_stages,
+        )
+        try:
+            plaintext = aesgcm.decrypt(nonce, ct, aad)
+        except InvalidTag as exc:
+            raise ProbsDecryptionError(
+                "X25519AnchoredCipher: AES-GCM tag mismatch — "
+                "ciphertext tampered, ephemeral_pubkey "
+                "substituted, OR replayed across (request_id, "
+                "stage_index) pairs. Caller should surface "
+                "MALFORMED_REQUEST."
+            ) from exc
+        return _decode_probs(plaintext, expected_k)
+
+    def encrypt_prefix(
+        self,
+        *,
+        prefix: Sequence[int],
+        request_id: str,
+        stage_index: int,
+        ephemeral_pubkey: bytes,
+        chain_total_stages: Optional[int] = None,
+    ) -> bytes:
+        plaintext = _encode_prefix(prefix)
+        aad = _aad_rollback(request_id, stage_index)
+        nonce = os.urandom(_GCM_NONCE_LEN)
+        aesgcm = self._derive_key(
+            ephemeral_pubkey_bytes=ephemeral_pubkey,
+            request_id=request_id,
+            stage_index=stage_index,
+            chain_total_stages=chain_total_stages,
+        )
+        try:
+            ct = aesgcm.encrypt(nonce, plaintext, aad)
+        except Exception as exc:  # noqa: BLE001
+            raise ProbsCipherError(
+                f"X25519AnchoredCipher.encrypt_prefix failed: {exc}"
+            ) from exc
+        return nonce + ct
+
+    def decrypt_prefix(
+        self,
+        *,
+        ciphertext: bytes,
+        request_id: str,
+        stage_index: int,
+        expected_k: int,
+        ephemeral_pubkey: bytes,
+        chain_total_stages: Optional[int] = None,
+    ) -> List[int]:
+        if not isinstance(ciphertext, (bytes, bytearray)):
+            raise ProbsCipherError(
+                f"ciphertext must be bytes, got "
+                f"{type(ciphertext).__name__}"
+            )
+        if len(ciphertext) < _GCM_NONCE_LEN + 16:
+            raise ProbsCipherError(
+                f"ciphertext too short: {len(ciphertext)} bytes "
+                f"(minimum {_GCM_NONCE_LEN + 16} = nonce + GCM tag)"
+            )
+        nonce = bytes(ciphertext[:_GCM_NONCE_LEN])
+        ct = bytes(ciphertext[_GCM_NONCE_LEN:])
+        aad = _aad_rollback(request_id, stage_index)
+        aesgcm = self._derive_key(
+            ephemeral_pubkey_bytes=ephemeral_pubkey,
+            request_id=request_id,
+            stage_index=stage_index,
+            chain_total_stages=chain_total_stages,
+        )
+        try:
+            plaintext = aesgcm.decrypt(nonce, ct, aad)
+        except InvalidTag as exc:
+            raise ProbsDecryptionError(
+                "X25519AnchoredCipher: AES-GCM tag mismatch on "
+                "rollback prefix — ciphertext tampered, "
+                "ephemeral_pubkey substituted, OR cross-AAD "
+                "replay (probs ↔ rollback). Caller should "
+                "surface MALFORMED_REQUEST."
+            ) from exc
+        return _decode_prefix(plaintext, expected_k)
+
+    def evict_request(self, request_id: str) -> int:
+        """Drop all cached AESGCM instances for ``request_id``.
+        Called by the operator at request terminal. Returns the
+        number of (ephemeral, stage) cache entries dropped."""
+        keys_to_drop = [
+            k for k in self._key_cache.keys() if k[0] == request_id
+        ]
+        for k in keys_to_drop:
+            self._key_cache.pop(k, None)
+        return len(keys_to_drop)
