@@ -9,6 +9,32 @@
 
 ---
 
+> ⚠️ **Stale-content notice (2026-04-30):** the body below references
+> `scripts/deploy.js`, `scripts/deploy-simple.js`, and Polygon Mumbai —
+> all three deleted/deprecated. `deploy.js` + `verify-deployment.js`
+> were ethers v5 + referenced contracts that don't exist in the current
+> architecture (commit `8a073b50`); `deploy-simple.js` + `simple-deploy.js`
+> + `test-deployment.js` were similar-era stale (commit `<this commit>`).
+> Polygon Mumbai itself shut down 2024-04 (replaced by Polygon Amoy).
+>
+> **For current deploy paths see:**
+> - **Phase 1.3 Task 8 (immediate, post-hardware-arrival 2026-05-01):**
+>   `docs/2026-04-30-phase1.3-task8-engineering-runbook.md` — deploys
+>   ProvenanceRegistry + RoyaltyDistributor on Base mainnet via the
+>   4-script T-0 pipeline (`pre-task8-checklist.sh` → `deploy-provenance.js`
+>   → `verify-provenance-deployment.js` → `post-task8-handoff-checklist.sh`).
+> - **Post-audit ceremony (audit-bundle + Phase 8 + Phase 7-storage,
+>   weeks-to-months out):** `docs/2026-04-30-post-audit-deploy-ceremony-runbook.md`
+>   driven by `scripts/rehearse-deploy.sh` orchestrator.
+> - **Fresh FTNSTokenSimple deploy (testnet only):** `contracts/scripts/deploy-phase1-ftns.js`
+>   with mainnet-safety guards (`TREASURY_ADDRESS` required on testnet/mainnet).
+>
+> The FTNS token live-deployment table at the top of this doc is
+> still accurate and the only load-bearing fact in this file. The
+> rest is kept for historical context.
+
+---
+
 Complete guide for deploying FTNS smart contracts to Polygon Mumbai testnet.
 
 ## 🚀 Quick Deployment (5 minutes)
