@@ -33,7 +33,7 @@ Untracked count: 168 → 164.
 |---|---:|---|
 | `.github/workflows/*.yml` | 12 | NEEDS USER DECISION — see §A |
 | `prsm/compute/nwtn/` | 39 → 30 | PARTIAL: 9 .md/.json deleted (this commit). 30 .py + subdirs deferred — see §B |
-| `prsm/compute/collaboration/` | 16 | LIKELY LEGACY — see §B |
+| `prsm/compute/collaboration/` | 16 | **CONFIRMED LEGACY** — v1.7.0 explicitly deleted these as "legacy that survived v1.6.0"; ~26K LoC; zero tracked-code refs. See §B. |
 | `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` expands to 26 .py) | MIXED — see §B. **Pattern confirmed across 3 subdirs:** chronos/ + agents/ + federation/ all show v1.6-plan re-introduction signature. Bulk-delete recommended for all three pending operator confirmation. |
 | `tests/{integration,nwtn,scripts_integration,...}/` | 58 | LIKELY LEGACY — see §C |
 | `docs/api/PHASE_7_API_REFERENCE.md` | 1 | NEEDS REVIEW — see §D |
@@ -98,7 +98,32 @@ Files deleted:
 
 **Phase 2 deferred:** the 30 remaining untracked items in `prsm/compute/nwtn/` (mostly `.py` files in subdirs: `architectures/`, `backends/`, `bsc/`, `core/`, `corpus/`, `engines/`, `experiments/`, `openclaw/`, `processing/`, `reasoning/`, `security/`, `synthesis/`, `team/`, `test_prompts/`, `whiteboard/` plus a few top-level `.py` files like `breakthrough_modes.py`, `complete_system.py`, `context_manager.py`, etc.). These need import-graph analysis before deletion (tracked files DO import from `prsm.compute.nwtn` — but which specific submodules?). Recommend a dedicated session.
 
-### collaboration/ subdir (16 files)
+### collaboration/ subdir (16 files) — STRONGEST bulk-delete case yet (2026-04-30)
+
+The 16 untracked entries expand to roughly 26,400 LoC across `academic/`, `containers/`, `datascience/`, `design/`, `development/`, `enterprise/`, `grants/`, `jupyter/`, `latex/`, `references/`, `specialized/`, `tech_transfer/`, `university_industry/` plus `README.md`, `models.py` (16 lines), `state_sync.py` (86 lines). `prsm/compute/collaboration/p2p/__init__.py` + `prsm/compute/collaboration/security/__init__.py` ARE tracked.
+
+**v1.7.0 delete commit identifies these EXPLICITLY as "legacy that survived v1.6.0":**
+
+Commit `2901b576` ("chore(release): v1.7.0 — audit punch list (12 items)", 2026-04-10) deleted 36 files / 26,402 lines from `prsm/compute/collaboration/` — covering ALL the same subdirs that are now back as untracked. Commit message verbatim:
+
+> Removed ~7K lines of legacy code that survived v1.6.0: dead /teacher and /distillation endpoints, langchain wrapper, duplicate sdks/python package, **legacy collaboration subdirs**, 8 broken legacy imports, 8 dead test files
+
+So the deletion intent is documented in TWO places: the v1.6 plan doc (Task 18 line 838: "Delete `prsm/collaboration/`") AND the v1.7 release commit (which caught the residue v1.6 missed). The current re-introduction reverses BOTH.
+
+**Tracked-code reference check:** zero tracked code (excluding this audit doc) imports any of the 16 untracked entries. The single hit (`tests/_legacy/test_ai_collaboration.py`) is in the `tests/_legacy/` quarantine directory established by task #89 — not live test surface.
+
+**README content check:** the README.md (290 lines deleted in v1.7) leads with "🌟 Revolutionary Collaboration Architecture" + "🍃 The 'Coca-Cola Recipe' Security Model" — heavy on emoji-laden marketing prose typical of pre-v1.6 NWTN-era branding, not the lean technical product surface PRSM ships now. Same staleness signature as the deleted NWTN .md files in Phase 1.
+
+**Disposition recommendation:** bulk-delete, with the strongest evidence in §B so far:
+1. Explicit v1.6 plan doc (Task 18) named the parent dir
+2. Explicit v1.7 release commit caught and removed the surviving subdirs
+3. Zero tracked-code references (only `tests/_legacy/` hits)
+4. README marketing-prose framing matches the NWTN-era documents already deleted in Phase 1
+
+This is functionally a v1.7-deletion-then-reintroduction signature — one minor revision past the chronos/agents/federation v1.6-deletion signature. Same meta-question applies (single resurrection event vs independent re-introductions), and now spans v1.6 + v1.7 plans both.
+
+#### collaboration/ ORIGINAL listing (preserved for context)
+
 
 ```
 prsm/compute/collaboration/README.md
