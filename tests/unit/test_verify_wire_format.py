@@ -491,6 +491,177 @@ class TestRollbackCacheRequest:
             )
 
 
+class TestRollbackCacheRequestReplayPrefix:
+    """Phase 3.x.11.q.y' — replay_accepted_prefix +
+    encrypted_replay_accepted_prefix wire-format extensions.
+
+    Validates the always-rollback-K protocol's wire envelope:
+    plaintext prefix for non-Tier-C / debug deploys; encrypted
+    prefix for the constant-time speculation stack."""
+
+    def test_replay_prefix_round_trip(self):
+        req = RollbackCacheRequest(
+            request_id="abc",
+            n_positions_to_drop=4,
+            replay_accepted_prefix=(101, 202, 303),
+        )
+        wire = encode_message(req)
+        parsed = parse_message(wire)
+        assert isinstance(parsed, RollbackCacheRequest)
+        assert parsed.replay_accepted_prefix == (101, 202, 303)
+        assert parsed.encrypted_replay_accepted_prefix is None
+
+    def test_encrypted_replay_prefix_round_trip(self):
+        req = RollbackCacheRequest(
+            request_id="abc",
+            n_positions_to_drop=4,
+            encrypted_replay_accepted_prefix=b"\x01\x02\x03\x04" * 16,
+        )
+        wire = encode_message(req)
+        parsed = parse_message(wire)
+        assert isinstance(parsed, RollbackCacheRequest)
+        assert parsed.replay_accepted_prefix is None
+        assert parsed.encrypted_replay_accepted_prefix == (
+            b"\x01\x02\x03\x04" * 16
+        )
+
+    def test_neither_set_is_v1_truncation_only(self):
+        # Backwards-compat: pre-q.y' deployments emit rollbacks
+        # without either field set. Round-trip stays byte-identical
+        # to pre-q.y' behavior.
+        req = RollbackCacheRequest(
+            request_id="abc",
+            n_positions_to_drop=4,
+        )
+        encoded = req.to_dict()
+        # Neither field appears in the canonical encoding when
+        # unset (omit-when-default invariant for backwards-compat).
+        assert "replay_accepted_prefix" not in encoded
+        assert "encrypted_replay_accepted_prefix_hex" not in encoded
+
+    def test_rejects_both_plaintext_and_encrypted(self):
+        with pytest.raises(
+            ChainRpcMalformedError,
+            match="cannot carry both",
+        ):
+            RollbackCacheRequest(
+                request_id="abc",
+                n_positions_to_drop=4,
+                replay_accepted_prefix=(1, 2, 3),
+                encrypted_replay_accepted_prefix=b"x" * 32,
+            )
+
+    def test_rejects_non_tuple_plaintext(self):
+        with pytest.raises(
+            ChainRpcMalformedError, match="must be tuple",
+        ):
+            RollbackCacheRequest(
+                request_id="abc",
+                n_positions_to_drop=4,
+                replay_accepted_prefix=[1, 2, 3],  # type: ignore[arg-type]
+            )
+
+    def test_rejects_negative_token_in_plaintext(self):
+        with pytest.raises(
+            ChainRpcMalformedError, match="non-negative",
+        ):
+            RollbackCacheRequest(
+                request_id="abc",
+                n_positions_to_drop=4,
+                replay_accepted_prefix=(1, -2, 3),
+            )
+
+    def test_rejects_bool_token_in_plaintext(self):
+        with pytest.raises(
+            ChainRpcMalformedError, match="must be int",
+        ):
+            RollbackCacheRequest(
+                request_id="abc",
+                n_positions_to_drop=4,
+                replay_accepted_prefix=(
+                    1, True, 3,  # type: ignore[arg-type]
+                ),
+            )
+
+    def test_rejects_oversized_plaintext(self):
+        with pytest.raises(
+            ChainRpcMalformedError, match="exceeds cap",
+        ):
+            RollbackCacheRequest(
+                request_id="abc",
+                n_positions_to_drop=4,
+                replay_accepted_prefix=tuple(
+                    range(MAX_VERIFY_BATCH_TOKENS + 1)
+                ),
+            )
+
+    def test_rejects_empty_encrypted(self):
+        with pytest.raises(
+            ChainRpcMalformedError, match="non-empty",
+        ):
+            RollbackCacheRequest(
+                request_id="abc",
+                n_positions_to_drop=4,
+                encrypted_replay_accepted_prefix=b"",
+            )
+
+    def test_rejects_oversized_encrypted(self):
+        with pytest.raises(
+            ChainRpcMalformedError, match="exceeds 4096",
+        ):
+            RollbackCacheRequest(
+                request_id="abc",
+                n_positions_to_drop=4,
+                encrypted_replay_accepted_prefix=b"\x00" * 4097,
+            )
+
+    def test_rejects_non_bytes_encrypted(self):
+        with pytest.raises(
+            ChainRpcMalformedError, match="must be bytes",
+        ):
+            RollbackCacheRequest(
+                request_id="abc",
+                n_positions_to_drop=4,
+                encrypted_replay_accepted_prefix=(
+                    "not-bytes"  # type: ignore[arg-type]
+                ),
+            )
+
+    def test_invalid_hex_in_from_dict_rejected(self):
+        # A wire blob with non-hex chars in the encrypted field
+        # should fail parsing cleanly (defends against malformed
+        # peer encoding).
+        with pytest.raises(
+            ChainRpcMalformedError, match="not.*valid hex",
+        ):
+            RollbackCacheRequest.from_dict({
+                "type": "rollback_cache_request",
+                "protocol_version": 2,
+                "request_id": "abc",
+                "n_positions_to_drop": 4,
+                "encrypted_replay_accepted_prefix_hex": "ZZZZ",
+            })
+
+    def test_pre_q_y_prime_byte_equivalent_round_trip(self):
+        # Load-bearing backwards-compat: rollbacks created before
+        # this slice (no replay fields) MUST encode to the same
+        # bytes pre- and post-extension. Pin via canonical
+        # to_dict() shape comparison.
+        req = RollbackCacheRequest(
+            request_id="abc-123",
+            n_positions_to_drop=2,
+        )
+        encoded = req.to_dict()
+        # Canonical pre-q.y' shape: type + protocol_version +
+        # request_id + n_positions_to_drop, NOTHING else.
+        assert sorted(encoded.keys()) == sorted([
+            "type",
+            "protocol_version",
+            "request_id",
+            "n_positions_to_drop",
+        ])
+
+
 class TestRollbackCacheResponse:
     def test_round_trip(self):
         resp = RollbackCacheResponse(

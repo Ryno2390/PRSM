@@ -2115,6 +2115,19 @@ class RollbackCacheRequest:
 
     request_id: str
     n_positions_to_drop: int
+    # Phase 3.x.11.q.y' — replay-accepted-prefix protocol. When the
+    # executor runs in always_rollback_k mode (constant-K wire-side
+    # rollback, see threat-model addendum §3.8), the rollback is
+    # accompanied by the accepted prefix bytes so the stage can
+    # repopulate its cache to the correct state after the constant-K
+    # truncation. Mutual-exclusion: at most one of
+    # ``replay_accepted_prefix`` (plaintext) and
+    # ``encrypted_replay_accepted_prefix`` (AES-GCM ciphertext under
+    # AAD = request_id || stage_index || b"rollback") may be set.
+    # When neither is set, this is a v1-style truncation-only
+    # rollback (backwards-compat path; pre-q.y' deployments).
+    replay_accepted_prefix: Optional[Tuple[int, ...]] = None
+    encrypted_replay_accepted_prefix: Optional[bytes] = None
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.ROLLBACK_CACHE_REQUEST.value
@@ -2139,15 +2152,86 @@ class RollbackCacheRequest:
                 f"n_positions_to_drop {self.n_positions_to_drop} "
                 f"exceeds cap {MAX_VERIFY_BATCH_TOKENS}"
             )
+        # Phase 3.x.11.q.y' — replay-prefix mutual-exclusion +
+        # type/cap validators.
+        if (
+            self.replay_accepted_prefix is not None
+            and self.encrypted_replay_accepted_prefix is not None
+        ):
+            raise ChainRpcMalformedError(
+                "RollbackCacheRequest cannot carry both "
+                "replay_accepted_prefix (plaintext) and "
+                "encrypted_replay_accepted_prefix (ciphertext); "
+                "set exactly one or neither (v1-truncation-only)"
+            )
+        if self.replay_accepted_prefix is not None:
+            if not isinstance(self.replay_accepted_prefix, tuple):
+                raise ChainRpcMalformedError(
+                    f"replay_accepted_prefix must be tuple, got "
+                    f"{type(self.replay_accepted_prefix).__name__}"
+                )
+            if len(self.replay_accepted_prefix) > MAX_VERIFY_BATCH_TOKENS:
+                raise ChainRpcMalformedError(
+                    f"replay_accepted_prefix length "
+                    f"{len(self.replay_accepted_prefix)} exceeds "
+                    f"cap {MAX_VERIFY_BATCH_TOKENS}"
+                )
+            for i, t in enumerate(self.replay_accepted_prefix):
+                if isinstance(t, bool) or not isinstance(t, int):
+                    raise ChainRpcMalformedError(
+                        f"replay_accepted_prefix[{i}] must be int, "
+                        f"got {type(t).__name__}"
+                    )
+                if t < 0:
+                    raise ChainRpcMalformedError(
+                        f"replay_accepted_prefix[{i}] must be "
+                        f"non-negative, got {t}"
+                    )
+        if self.encrypted_replay_accepted_prefix is not None:
+            if not isinstance(
+                self.encrypted_replay_accepted_prefix,
+                (bytes, bytearray),
+            ):
+                raise ChainRpcMalformedError(
+                    f"encrypted_replay_accepted_prefix must be "
+                    f"bytes, got "
+                    f"{type(self.encrypted_replay_accepted_prefix).__name__}"
+                )
+            if len(self.encrypted_replay_accepted_prefix) == 0:
+                raise ChainRpcMalformedError(
+                    "encrypted_replay_accepted_prefix must be "
+                    "non-empty when set"
+                )
+            # Plaintext prefix is at most MAX_VERIFY_BATCH_TOKENS
+            # int64s = MAX_VERIFY_BATCH_TOKENS * 8 bytes. AES-GCM
+            # adds 12-byte nonce + 16-byte tag = 28 bytes. Cap at
+            # 4096 bytes accommodates K up to ~509 with overhead.
+            if len(self.encrypted_replay_accepted_prefix) > 4096:
+                raise ChainRpcMalformedError(
+                    f"encrypted_replay_accepted_prefix bytes "
+                    f"{len(self.encrypted_replay_accepted_prefix)} "
+                    f"exceeds 4096 cap"
+                )
         _validate_version(self.protocol_version)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "type": self.MESSAGE_TYPE,
             "protocol_version": self.protocol_version,
             "request_id": self.request_id,
             "n_positions_to_drop": self.n_positions_to_drop,
         }
+        # Phase 3.x.11.q.y' — omit-when-None canonical encoding for
+        # backwards-compat (pre-q.y' rollbacks remain byte-identical).
+        if self.replay_accepted_prefix is not None:
+            out["replay_accepted_prefix"] = list(
+                self.replay_accepted_prefix,
+            )
+        if self.encrypted_replay_accepted_prefix is not None:
+            out["encrypted_replay_accepted_prefix_hex"] = bytes(
+                self.encrypted_replay_accepted_prefix,
+            ).hex()
+        return out
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RollbackCacheRequest":
@@ -2158,9 +2242,35 @@ class RollbackCacheRequest:
                 f"n_positions_to_drop must be int, got "
                 f"{type(n_raw).__name__}"
             )
+        replay_raw = data.get("replay_accepted_prefix")
+        replay_tuple: Optional[Tuple[int, ...]] = None
+        if replay_raw is not None:
+            if not isinstance(replay_raw, list):
+                raise ChainRpcMalformedError(
+                    f"replay_accepted_prefix must be list, got "
+                    f"{type(replay_raw).__name__}"
+                )
+            replay_tuple = tuple(int(t) for t in replay_raw)
+        enc_hex = data.get("encrypted_replay_accepted_prefix_hex")
+        enc_bytes: Optional[bytes] = None
+        if enc_hex is not None:
+            if not isinstance(enc_hex, str):
+                raise ChainRpcMalformedError(
+                    f"encrypted_replay_accepted_prefix_hex must be "
+                    f"str, got {type(enc_hex).__name__}"
+                )
+            try:
+                enc_bytes = bytes.fromhex(enc_hex)
+            except ValueError as exc:
+                raise ChainRpcMalformedError(
+                    f"encrypted_replay_accepted_prefix_hex is not "
+                    f"valid hex: {exc}"
+                ) from exc
         return cls(
             request_id=_required_str(data, "request_id"),
             n_positions_to_drop=int(n_raw),
+            replay_accepted_prefix=replay_tuple,
+            encrypted_replay_accepted_prefix=enc_bytes,
             protocol_version=_required_int(data, "protocol_version"),
         )
 
