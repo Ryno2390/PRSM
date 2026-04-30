@@ -34,7 +34,7 @@ Untracked count: 168 → 164.
 | `.github/workflows/*.yml` | 12 | NEEDS USER DECISION — see §A |
 | `prsm/compute/nwtn/` | 39 → 30 | PARTIAL: 9 .md/.json deleted (this commit). 30 .py + subdirs deferred — see §B |
 | `prsm/compute/collaboration/` | 16 | **CONFIRMED LEGACY** — v1.7.0 explicitly deleted these as "legacy that survived v1.6.0"; ~26K LoC; zero tracked-code refs. See §B. |
-| `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` expands to 26 .py) | MIXED — see §B. **Pattern confirmed across 3 subdirs:** chronos/ + agents/ + federation/ all show v1.6-plan re-introduction signature. Bulk-delete recommended for all three pending operator confirmation. |
+| `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` 26 .py + 12 other subdirs 81 .py) | **CONFIRMED LEGACY across all 4 clusters** — chronos/ + agents/ + federation/ + 12 other subdirs all show v1.6 (or v1.7) deletion-then-reintroduction signature. ~80K LoC total. Bulk-delete recommended pending operator decision on whether the resurrection was a single event or independent. See §B. |
 | `tests/{integration,nwtn,scripts_integration,...}/` | 58 | LIKELY LEGACY — see §C |
 | `docs/api/PHASE_7_API_REFERENCE.md` | 1 | NEEDS REVIEW — see §D |
 | `config/nginx/ipfs-proxy.conf` | 1 | DEPRECATED INFRA — see §E |
@@ -155,11 +155,70 @@ The list above (academic/containers/datascience/...) reads like a **product cata
 - `federation/` (6) — distributed_evolution / distributed_model_registry / distributed_rlt_network / knowledge_transfer / model_registry / phase5_demo
 - `agents/` (6 top-level entries; 26 .py files when subdirs expanded) — see agents-specific findings below
 - `chronos/` (4) — see chronos-specific findings below
-- Others (12) — validation / teachers / students / network / improvement / evolution / evaluation / distillation / data / candidates / benchmarking / ai_orchestration (1 file each)
+- Others (12 subdirs, 81 .py files, ~54K LoC) — see §B 12-subdir finding below
 
 Mixed state again — `prsm/compute/agents/__init__.py` + others tracked, but new dirs are not.
 
-**Recommended action:** dedicated compute-cleanup sessions per subdir. Same triage pattern: spot-check imports, commit live files, archive/delete legacy.
+#### 12-subdir bulk finding — all named in v1.6 deletion commit (2026-04-30)
+
+The 12 single-entry untracked subdirs in `prsm/compute/` are:
+
+| Subdir | .py files | LoC | Tracked refs (excl _legacy + audit) |
+|---|---:|---:|---:|
+| `ai_orchestration/` | 7 | 6,141 | 2 |
+| `benchmarking/` | 4 | 2,956 | 1 |
+| `candidates/` | 6 | 284 | 1 |
+| `data/` | 2 | 126 | 0 |
+| `distillation/` | 21 | 16,193 | 2 |
+| `evaluation/` | 6 | 4,024 | 1 |
+| `evolution/` | 10 | 6,049 | 1 |
+| `improvement/` | 4 | 3,009 | 2 |
+| `network/` | 3 | 943 | 0 |
+| `students/` | 3 | 3,224 | 1 |
+| `teachers/` | 13 | 9,723 | 7 |
+| `validation/` | 2 | 1,392 | 0 |
+| **Total** | **81** | **54,064** | **18 refs across 12 dirs** |
+
+**v1.6 bulk-delete commit `fc7cb8bc` (2026-04-09) names all 12 explicitly.** Commit message verbatim:
+
+> `prsm/compute/`: teachers, distillation, evolution, improvement, students, candidates, ai_orchestration (entire subtrees)
+> ...
+> Additionally delete legacy files identified during PR 2 execution:
+> - `prsm/compute/data/`, `prsm/compute/evaluation/`, `prsm/compute/network/` (partial or full, per investigation)
+
+That covers 10 of 12 (full subtrees: teachers/distillation/evolution/improvement/students/candidates/ai_orchestration; partial-or-full: data/evaluation/network). The remaining 2 — `benchmarking/` and `validation/` — also show in the same `fc7cb8bc` deletion commit per `git log --diff-filter=D`.
+
+**Tracked-code reference check (all 18 cross-references verified soft-import or doc-grep):**
+
+The 18 tracked-code references break down:
+- **Doc-grep references** (4): `docs/2026-04-09-v1.6-scope-alignment-design.md` + `docs/archive/2026-04-09-v1.6-scope-alignment.md` + `prsm/core/compliance/` (compliance docs grep for absence-of-imports as part of v1.6 verification — they want these grep results to be EMPTY).
+- **Migration helper** (1): `scripts/fix_imports.py` — substring-replacement table mapping `from prsm.teachers` → `from prsm.compute.teachers` for OLD code paths predating v1.6. The script is itself a v1.6-era migration helper and would not need to exist if these subdirs were live.
+- **Soft-import test refs** (13): all wrapped in `try/except ImportError` with `RLT_TEACHER_AVAILABLE = True` / similar fallback flags. Same pattern as federation/ + agents/. Examples:
+  - `tests/integration/test_complete_prsm_system.py:428-430` — try/except around `from prsm.compute.teachers.seal import SEALService`
+  - `tests/integration/test_prsm_core_integration.py:37-39` — try/except + `RLT_TEACHER_AVAILABLE = True` on success
+  - `tests/integration/test_prsm_fixed_components.py:46-47` — same shape
+
+**Disposition recommendation:** bulk-delete all 12 subdirs (81 files, ~54K LoC). Evidence:
+1. v1.6 `fc7cb8bc` commit names every single one (10 explicitly + 2 implicitly via the diff)
+2. Zero hard imports — all 13 test refs are soft `try/except` with `*_AVAILABLE` fallback flags
+3. Doc-grep refs WANT these grep results to come up empty (v1.6 acceptance criteria #4 in design doc: `grep -r "from prsm.compute.teachers\|distillation\|..." prsm/ tests/` → empty)
+4. The `scripts/fix_imports.py` script is itself an artifact of the v1.6 migration
+
+This brings §B (compute/ untracked) to a single coherent finding: **EVERY compute/ untracked subdir is post-v1.6 (and post-v1.7 for collaboration/) re-introduction of explicitly-deleted legacy code.** No subdir survived investigation as "still live, just not committed yet" — every one is named in a deletion record.
+
+#### §B meta-summary
+
+The compute/ untracked-files surface decomposes as:
+- nwtn/ (39 → 30 files; 9 .md/.json deleted Phase 1; 30 .py deferred per import-graph analysis)
+- collaboration/ (16 entries, 26K LoC) — v1.7-deletion-then-reintroduction
+- chronos/ (4 files, 1.7K LoC) — v1.6-deletion-then-reintroduction
+- agents/ (6 entries → 26 .py files) — v1.6-deletion-then-reintroduction (with inline tracked-code comments)
+- federation/ (6 files) — v1.6-deletion-then-reintroduction
+- 12 other subdirs (81 files, 54K LoC) — v1.6-deletion-then-reintroduction (all named in one commit)
+
+**Total compute/ untracked legacy:** ~159 files / ~80K+ LoC, all of it explicitly named in v1.6 or v1.7 deletion records, all of it referenced from tracked code only via soft-import shims that exist precisely BECAUSE the v1.6/v1.7 designs anticipated optional re-introduction.
+
+**Single meta-question for operator:** if there was a SINGLE resurrection event after v1.6/v1.7 (backup-branch merge, stash pop, `git restore` from old ref, IDE auto-restore, etc.), bulk-delete with `git clean -fd prsm/compute/` resolves the entire §B surface in one command. If re-introductions were independent, each subdir needs separate operator review — but the case for "intentional revival" is weak across all 6 subdir clusters investigated.
 
 #### agents/ specific finding — v1.6 deletion confirmed by tracked-code comments (2026-04-30)
 
