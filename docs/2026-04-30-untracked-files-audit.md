@@ -34,7 +34,7 @@ Untracked count: 168 → 164.
 | `.github/workflows/*.yml` | 12 | NEEDS USER DECISION — see §A |
 | `prsm/compute/nwtn/` | 39 → 30 | PARTIAL: 9 .md/.json deleted (this commit). 30 .py + subdirs deferred — see §B |
 | `prsm/compute/collaboration/` | 16 | LIKELY LEGACY — see §B |
-| `prsm/compute/{federation,agents,chronos,others}/` | 28 | MIXED — see §B (chronos/ has v1.6-plan re-introduction puzzle requiring operator decision) |
+| `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` expands to 26 .py) | MIXED — see §B. **Pattern emerging:** chronos/ + agents/ both have v1.6-plan re-introduction (chronos via plan doc, agents via tracked-code inline comments). Bulk-delete recommended for both pending operator confirmation. |
 | `tests/{integration,nwtn,scripts_integration,...}/` | 58 | LIKELY LEGACY — see §C |
 | `docs/api/PHASE_7_API_REFERENCE.md` | 1 | NEEDS REVIEW — see §D |
 | `config/nginx/ipfs-proxy.conf` | 1 | DEPRECATED INFRA — see §E |
@@ -128,13 +128,51 @@ The list above (academic/containers/datascience/...) reads like a **product cata
 ### Other compute/ subdirs (28 files)
 
 - `federation/` (6) — distributed_evolution / distributed_model_registry / distributed_rlt_network / knowledge_transfer / model_registry / phase5_demo
-- `agents/` (6) — base / architects / compilers / executors / prompters / routers
+- `agents/` (6 top-level entries; 26 .py files when subdirs expanded) — see agents-specific findings below
 - `chronos/` (4) — see chronos-specific findings below
 - Others (12) — validation / teachers / students / network / improvement / evolution / evaluation / distillation / data / candidates / benchmarking / ai_orchestration (1 file each)
 
 Mixed state again — `prsm/compute/agents/__init__.py` + others tracked, but new dirs are not.
 
 **Recommended action:** dedicated compute-cleanup sessions per subdir. Same triage pattern: spot-check imports, commit live files, archive/delete legacy.
+
+#### agents/ specific finding — v1.6 deletion confirmed by tracked-code comments (2026-04-30)
+
+The 6 untracked entries in `prsm/compute/agents/` expand to 26 .py files:
+- `base.py` (top-level "PRSM Base Agent Framework / 5-layer PRSM architecture")
+- `architects/` (1 file: hierarchical_architect.py)
+- `compilers/` (2 files: rlt_enhanced_compiler.py, hierarchical_compiler.py)
+- `executors/` (10 files: ollama_client / openrouter_client / hybrid_router / model_executor / api_clients / etc.)
+- `prompters/` (1 file: prompt_optimizer.py)
+- `routers/` (5 files: rlt_enhanced_router / marketplace_integration / tool_router / performance_tracker / model_router)
+
+**Tracked `__init__.py` describes a TOTALLY DIFFERENT scope** — "PRSM WASM Mobile Agent Runtime" (dispatcher/executor/instruction_set/models/data_processor; Ring 9 Courier pattern). It explicitly does NOT import any of the untracked subdirs. The two architectures (NWTN-era "5-layer" vs current "WASM Mobile Agent") share a directory but not a design.
+
+**Strongest evidence yet that v1.6 deletion was intentional:** all 3 tracked Python files that reference these untracked subdirs do so via `try/except ImportError` with EXPLICIT INLINE COMMENTS confirming the deletion was by-design:
+
+- `prsm/data/context/enhanced_context_compression.py:30`:
+  ```python
+  # ModelExecutor removed (agents/executors/ deleted in v1.6.0 scope alignment)
+  try:
+      from prsm.compute.agents.executors.model_executor import ModelExecutor
+  except ImportError:
+      ModelExecutor = None  # type: ignore[assignment,misc]
+  ```
+- `prsm/data/context/reasoning_trace_sharing.py:33`: identical pattern
+- `prsm/compute/performance/performance_benchmarks.py:114`: function-level `try` import (not module-level)
+
+The tracked code is DESIGNED to work without these files. The re-introduction does NOT activate them in any tracked code path — the soft-import fallback (`ModelExecutor = None`) handles it.
+
+**Disposition recommendation:** same as chronos but with stronger evidence. The case for bulk-delete here is more clear-cut because the v1.6 design intent is documented in tracked-code comments (not just an archive plan doc). All 26 .py files (plus the 5 subdirs and `base.py`) can be removed with no code-path breakage; the soft-import shims would just continue to fall back to `None` (which they already do today since import paths fail when `__init__.py` doesn't exist for the subdirs).
+
+**Verified:** the subdirs ARE the issue — `prsm/compute/agents/executors/__init__.py` exists in the untracked subdir, but Python's import system needs that file to be reachable. With the subdir untracked + Python looking up the path, the imports DO succeed locally (because the files exist on disk), but they would fail in any clean checkout. So the soft-import shims are already "live insurance" against deletion — exactly the v1.6 design.
+
+**Operator decision needed:** same matrix as chronos:
+- If v1.6 deletion was correct + re-introduction unintentional → bulk-delete all 26 .py + 5 subdirs + `base.py`
+- If re-introduction was intentional (Phase X agent-system revival) → commit them + remove the v1.6 deletion comments + remove the soft-import shims (the comments are now lying)
+- If unclear → defer
+
+**My recommendation:** bulk-delete is strongly correct here. The tracked-code comments explicitly document the design intent. Keeping the untracked re-introduction creates a "phantom dependency" — code locally works because files exist, but the same code on a clean checkout would silently route through the `None` fallback. That divergence between local and clean-checkout behavior is exactly what the v1.6 sprint was trying to eliminate.
 
 #### chronos/ specific finding — v1.6-plan re-introduction puzzle (2026-04-30)
 
