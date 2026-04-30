@@ -330,6 +330,9 @@ def _make_spec_executor(
     speculation_depth: int = 4,
     rollback_send=None,
     cache_evict_send=None,
+    encrypted_probs_cipher=None,
+    flat_k_mode: bool = False,
+    always_rollback_k: bool = False,
 ) -> RpcChainExecutor:
     return RpcChainExecutor(
         settler_identity=settler,
@@ -344,6 +347,9 @@ def _make_spec_executor(
         rollback_cache_send_message=rollback_send,
         cache_evict_send_message=cache_evict_send,
         sharded_default_max_tokens=64,
+        encrypted_probs_cipher=encrypted_probs_cipher,
+        flat_k_mode=flat_k_mode,
+        always_rollback_k=always_rollback_k,
     )
 
 
@@ -1291,3 +1297,161 @@ class TestAdaptiveK:
         ks = [c["k"] for c in draft.propose_with_probs_calls]
         # All five rounds at k_max — capped, no overshoot.
         assert ks == [k_max] * 5
+
+
+class TestAlwaysRollbackK:
+    """Phase 3.x.11.q.y' — always-rollback-K + replay-prefix
+    protocol. Closes the residual rollback drop-value leak from
+    threat-model §3.8 by dispatching a constant-K rollback per
+    VERIFY round regardless of accepted_count, accompanied by the
+    accepted prefix tokens (encrypted under the wired cipher when
+    present)."""
+
+    def test_constant_k_rollback_on_full_accept(self):
+        # Full-accept round: v1 path emits NO rollback (cached_extra
+        # == 0). Always-rollback-K mode emits a rollback with
+        # n_positions_to_drop == K + 1 anyway.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 99), 2, False)],
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraft(propose_script=[[10, 20]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            rollback_send=rollback_log,
+            always_rollback_k=True,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=4, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        # PREFILL=7, full-accept K=2 + bonus → emit [10, 20, 99]
+        assert [t.token_id for t in tokens] == [7, 10, 20, 99]
+        # Always-rollback-K dispatched a rollback with K+1 dropped
+        # even though accepted_count == K (full accept).
+        assert len(rollback_log.calls) == 1
+        assert rollback_log.calls[0][1].n_positions_to_drop == 3  # K+1
+        # replay_accepted_prefix carries the actually-emitted tokens
+        # so the server can replay them after the constant-K
+        # truncation rebuilds the cache to the correct state.
+        assert rollback_log.calls[0][1].replay_accepted_prefix == (
+            10, 20, 99,
+        )
+
+    def test_constant_k_rollback_on_partial_accept(self):
+        # Partial accept (1 of K=2 + bonus mismatch). v1 path drops
+        # 1; q.y' drops K+1 = 3 with prefix carrying the 2 emitted.
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 99, 88), 1, False)],  # partial: 1 ac
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraft(propose_script=[[10, 20]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            rollback_send=rollback_log,
+            always_rollback_k=True,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=3, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        # PREFILL=7, ac=1 + correction → emit [10, 99]; loop ends
+        # at max_tokens=3.
+        assert [t.token_id for t in tokens] == [7, 10, 99]
+        assert len(rollback_log.calls) == 1
+        # CONSTANT-K invariant: drop count is K+1 regardless of
+        # actual accepted_count. Wire observer cannot distinguish
+        # this round (ac=1) from the full-accept round (ac=K)
+        # purely from the rollback envelope.
+        assert rollback_log.calls[0][1].n_positions_to_drop == 3
+        # Prefix has only the actually-emitted 2 tokens.
+        assert rollback_log.calls[0][1].replay_accepted_prefix == (
+            10, 99,
+        )
+
+    def test_v1_mode_unchanged(self):
+        # Default (always_rollback_k=False) preserves v1 behavior:
+        # full accept → no rollback; partial accept → drop count
+        # equals (K+1) - len(emitted).
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[
+                ((10, 20, 99), 2, False),    # full: 0 dropped
+                ((40, 41, 42), 0, False),    # 0 ac: 2 dropped
+            ],
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraft(propose_script=[[10, 20], [50, 51]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            rollback_send=rollback_log,
+            # always_rollback_k defaults to False.
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=5, temperature=0.0),
+            chain=chain,
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert [t.token_id for t in tokens] == [7, 10, 20, 99, 40]
+        # v1: only round 2 triggered rollback.
+        assert len(rollback_log.calls) == 1
+        assert rollback_log.calls[0][1].n_positions_to_drop == 2
+        # v1 doesn't carry the replay prefix (backwards-compat).
+        assert (
+            rollback_log.calls[0][1].replay_accepted_prefix is None
+        )
+        assert (
+            rollback_log.calls[0][1].encrypted_replay_accepted_prefix
+            is None
+        )
+
+    def test_encrypted_prefix_when_cipher_wired(self):
+        # When always_rollback_k=True AND encrypted_probs_cipher is
+        # wired, the prefix is encrypted on the wire (plaintext
+        # field is None, encrypted field is set).
+        from prsm.compute.chain_rpc.probs_cipher import (
+            ProbsCipher,
+            derive_key_from_psk,
+        )
+
+        cipher = ProbsCipher(
+            key=derive_key_from_psk(b"test-psk-q-y-prime-rollback"),
+        )
+        settler, anchor, transport, _, chain = _build_single_stage(
+            sample_script=[(7, False)],
+            verify_script=[((10, 20, 99), 2, False)],
+        )
+        rollback_log = _RollbackLog()
+        draft = _FakeDraft(propose_script=[[10, 20]])
+        executor = _make_spec_executor(
+            transport=transport, settler=settler, anchor=anchor,
+            draft=draft, speculation_depth=2,
+            rollback_send=rollback_log,
+            encrypted_probs_cipher=cipher,
+            flat_k_mode=True,
+            always_rollback_k=True,
+        )
+        list(executor.execute_chain_streaming(
+            request=_make_request(max_tokens=4, temperature=0.0),
+            chain=chain,
+        ))
+        assert len(rollback_log.calls) == 1
+        rb = rollback_log.calls[0][1]
+        # Encrypted form on the wire; plaintext field is None.
+        assert rb.encrypted_replay_accepted_prefix is not None
+        assert rb.replay_accepted_prefix is None
+        # Cipher must round-trip back to the original prefix.
+        decrypted = cipher.decrypt_prefix(
+            ciphertext=rb.encrypted_replay_accepted_prefix,
+            request_id=rb.request_id,
+            stage_index=0,
+            expected_k=3,
+        )
+        assert decrypted == [10, 20, 99]

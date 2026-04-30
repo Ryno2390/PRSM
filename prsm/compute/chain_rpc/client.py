@@ -368,6 +368,18 @@ class RpcChainExecutor:
         # documented in §3.6.3 of the threat-model addendum.
         encrypted_probs_cipher: Optional[Any] = None,
         flat_k_mode: bool = False,
+        # Phase 3.x.11.q.y' — always-rollback-K + replay-prefix
+        # protocol. When True, every VERIFY round dispatches a
+        # RollbackCacheRequest with n_positions_to_drop = K
+        # regardless of accepted_count, accompanied by the
+        # accepted prefix tokens (encrypted under the wired
+        # encrypted_probs_cipher when present, plaintext
+        # otherwise). Closes the wire-side accepted_count leak
+        # from threat-model addendum §3.8 (rollback drop-value
+        # channel). When False (default), v1-style only-on-
+        # rejection rollback continues — operator opts in for
+        # Tier C speculation deployments.
+        always_rollback_k: bool = False,
     ) -> None:
         if settler_identity is None or not hasattr(settler_identity, "node_id"):
             raise RuntimeError(
@@ -533,6 +545,7 @@ class RpcChainExecutor:
                     )
         self._encrypted_probs_cipher = encrypted_probs_cipher
         self._flat_k_mode = bool(flat_k_mode)
+        self._always_rollback_k = bool(always_rollback_k)
         self._speculation_depth = int(speculation_depth)
         self._rollback_cache_send = rollback_cache_send_message
 
@@ -1331,13 +1344,33 @@ class RpcChainExecutor:
                 # case. Compute against k_round (this round's K)
                 # instead. cap_hit_mid_emit case: emitted shorter
                 # than accepted_count + 1, so cached_extra grows.
-                cached_extra = (k_round + 1) - len(emitted)
-                if cached_extra > 0:
+                #
+                # Phase 3.x.11.q.y' — under always_rollback_k mode,
+                # we ALWAYS dispatch a constant-K rollback (drop
+                # k_round + 1 = full verify forward) accompanied by
+                # the accepted prefix tokens; the server replays
+                # the prefix through forward_verify to rebuild the
+                # cache to the correct len(emitted) state. Wire
+                # observer sees a constant-byte rollback per round
+                # regardless of accepted_count — closes the §3.8
+                # rollback drop-value channel.
+                if self._always_rollback_k:
                     self._rollback_cache_on_stages(
                         chain=chain,
                         request_id=request.request_id,
-                        n_positions_to_drop=cached_extra,
+                        n_positions_to_drop=k_round + 1,
+                        replay_accepted_prefix=tuple(
+                            int(t) for t in emitted
+                        ),
                     )
+                else:
+                    cached_extra = (k_round + 1) - len(emitted)
+                    if cached_extra > 0:
+                        self._rollback_cache_on_stages(
+                            chain=chain,
+                            request_id=request.request_id,
+                            n_positions_to_drop=cached_extra,
+                        )
 
                 # Step 2g: adaptive K — v2-only to preserve v1's
                 # bit-identical-to-Phase-3.x.11.y regression
@@ -1571,12 +1604,21 @@ class RpcChainExecutor:
         chain: GPUChain,
         request_id: str,
         n_positions_to_drop: int,
+        replay_accepted_prefix: Optional[Tuple[int, ...]] = None,
     ) -> None:
         """Best-effort RollbackCacheRequest broadcast. Encodes a
         ``RollbackCacheRequest`` and sends it via
         ``rollback_cache_send_message`` to every chain stage.
         Server-side handler routes to ``KVCacheManager.rollback``
         (Phase 3.x.11.y Task 6).
+
+        Phase 3.x.11.q.y' — when ``replay_accepted_prefix`` is
+        provided, encodes it on the wire either as plaintext (no
+        cipher wired) or as AES-GCM ciphertext under the per-stage
+        AAD (request_id, stage_index, b"rollback") to defend
+        against cross-AAD replay between probs and rollback.
+        Server replays the prefix through ``forward_verify`` to
+        repopulate the cache after the constant-K truncation.
 
         Never raises — rollback is best-effort by design (server-
         side TTL sweeper bounds the leak window if a broadcast
@@ -1585,23 +1627,94 @@ class RpcChainExecutor:
         """
         if self._rollback_cache_send is None or n_positions_to_drop <= 0:
             return
-        try:
-            rollback_bytes = encode_message(
-                RollbackCacheRequest(
-                    request_id=request_id,
-                    n_positions_to_drop=int(n_positions_to_drop),
-                ),
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "RpcChainExecutor: failed to encode "
-                "RollbackCacheRequest for request_id=%r: %s: %s — "
-                "relying on server-side TTL sweeper",
-                request_id, exc.__class__.__name__, exc,
-            )
-            return
-        for stage_node_id in chain.stages:
+        # Phase 3.x.11.q.y' — per-stage encoding (each stage gets
+        # its own ciphertext blob with stage-bound AAD when the
+        # cipher is wired). When no cipher AND no prefix, fall
+        # back to the v1 encoding (pre-q.y' byte-equivalent path).
+        use_replay = replay_accepted_prefix is not None
+        use_encrypted_replay = (
+            use_replay and self._encrypted_probs_cipher is not None
+        )
+        # Pre-encode the legacy v1 message ONCE when neither the
+        # prefix nor cipher are in play — preserves the prior
+        # encode-once perf optimization on the common path.
+        legacy_bytes: Optional[bytes] = None
+        if not use_replay:
             try:
+                legacy_bytes = encode_message(
+                    RollbackCacheRequest(
+                        request_id=request_id,
+                        n_positions_to_drop=int(n_positions_to_drop),
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "RpcChainExecutor: failed to encode "
+                    "RollbackCacheRequest for request_id=%r: %s: %s "
+                    "— relying on server-side TTL sweeper",
+                    request_id, exc.__class__.__name__, exc,
+                )
+                return
+        for stage_index, stage_node_id in enumerate(chain.stages):
+            try:
+                # Phase 3.x.11.q.y' — per-stage encode for the
+                # replay path; reuse legacy_bytes for the v1 path.
+                if use_replay:
+                    plaintext_prefix: Optional[Tuple[int, ...]] = (
+                        replay_accepted_prefix
+                    )
+                    encrypted_prefix: Optional[bytes] = None
+                    if use_encrypted_replay:
+                        # Encode prefix as int64-packed bytes with
+                        # rollback-distinct AAD so a relay can't
+                        # replay a probs ciphertext into a rollback
+                        # field (or vice versa).
+                        try:
+                            encrypted_prefix = (
+                                self._encrypted_probs_cipher
+                                .encrypt_prefix(
+                                    prefix=list(replay_accepted_prefix),
+                                    request_id=request_id,
+                                    stage_index=stage_index,
+                                )
+                            )
+                        except AttributeError:
+                            # Cipher doesn't implement
+                            # encrypt_prefix (pre-q.y' ProbsCipher).
+                            # Fall back to plaintext + log — v1
+                            # operators still see the constant-K
+                            # masking, just without the prefix
+                            # confidentiality (acceptable since v1
+                            # operators didn't have the channel
+                            # closed at all).
+                            logger.warning(
+                                "RpcChainExecutor: cipher %s does "
+                                "not implement encrypt_prefix(...) "
+                                "— falling back to plaintext "
+                                "replay_accepted_prefix on the "
+                                "wire (channel still closes the "
+                                "drop-value leak; prefix length is "
+                                "still observable)",
+                                type(self._encrypted_probs_cipher)
+                                .__name__,
+                            )
+                            encrypted_prefix = None
+                        else:
+                            plaintext_prefix = None
+                    rollback_bytes = encode_message(
+                        RollbackCacheRequest(
+                            request_id=request_id,
+                            n_positions_to_drop=int(
+                                n_positions_to_drop,
+                            ),
+                            replay_accepted_prefix=plaintext_prefix,
+                            encrypted_replay_accepted_prefix=(
+                                encrypted_prefix
+                            ),
+                        ),
+                    )
+                else:
+                    rollback_bytes = legacy_bytes  # type: ignore[assignment]
                 address = self._resolve_address(stage_node_id)
                 response_bytes = self._rollback_cache_send(
                     address, rollback_bytes,

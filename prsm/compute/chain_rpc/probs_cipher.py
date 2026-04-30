@@ -96,6 +96,75 @@ def _aad(request_id: str, stage_index: int) -> bytes:
     return request_id.encode("utf-8") + b"|" + bytes([stage_index])
 
 
+def _aad_rollback(request_id: str, stage_index: int) -> bytes:
+    """Phase 3.x.11.q.y' — distinct AAD for the rollback-prefix
+    channel. Adds a ``|rollback`` suffix to the existing AAD so a
+    relay adversary CANNOT replay a probs ciphertext into a
+    rollback envelope (or vice versa). The two AAD spaces are
+    disjoint by construction."""
+    if not isinstance(request_id, str) or not request_id:
+        raise ProbsCipherError(
+            f"request_id must be non-empty str, got {request_id!r}"
+        )
+    if (
+        not isinstance(stage_index, int)
+        or isinstance(stage_index, bool)
+        or stage_index < 0
+        or stage_index > 255
+    ):
+        raise ProbsCipherError(
+            f"stage_index must be int in [0, 255], got {stage_index!r}"
+        )
+    return (
+        request_id.encode("utf-8")
+        + b"|"
+        + bytes([stage_index])
+        + b"|rollback"
+    )
+
+
+def _encode_prefix(prefix: Sequence[int]) -> bytes:
+    """Pack K token IDs as `K * 8` little-endian int64 bytes."""
+    if not isinstance(prefix, (list, tuple)):
+        raise ProbsCipherError(
+            f"prefix must be list/tuple, got {type(prefix).__name__}"
+        )
+    out = bytearray()
+    for i, t in enumerate(prefix):
+        if isinstance(t, bool) or not isinstance(t, int):
+            raise ProbsCipherError(
+                f"prefix[{i}] must be int, got {type(t).__name__}"
+            )
+        if t < 0:
+            raise ProbsCipherError(
+                f"prefix[{i}] must be non-negative, got {t}"
+            )
+        out += struct.pack("<q", int(t))
+    return bytes(out)
+
+
+def _decode_prefix(plaintext: bytes, expected_k: int) -> List[int]:
+    """Unpack `expected_k * 8` bytes → list of K token IDs."""
+    expected_bytes = expected_k * 8
+    if len(plaintext) != expected_bytes:
+        raise ProbsCipherError(
+            f"decrypted prefix length {len(plaintext)} does not "
+            f"match expected K * 8 = {expected_bytes} (K={expected_k})"
+        )
+    out: List[int] = []
+    for i in range(expected_k):
+        offset = i * 8
+        chunk = plaintext[offset:offset + 8]
+        (t,) = struct.unpack("<q", chunk)
+        if t < 0:
+            raise ProbsCipherError(
+                f"decrypted prefix[{i}] = {t} negative "
+                f"(corrupted plaintext or wrong key)"
+            )
+        out.append(int(t))
+    return out
+
+
 def _encode_probs(probs: Sequence[float]) -> bytes:
     """Pack K probs as `K * 8` little-endian float64 bytes."""
     if not isinstance(probs, (list, tuple)):
@@ -253,6 +322,76 @@ class ProbsCipher:
                 "MALFORMED_REQUEST."
             ) from exc
         return _decode_probs(plaintext, expected_k)
+
+    def encrypt_prefix(
+        self,
+        *,
+        prefix: Sequence[int],
+        request_id: str,
+        stage_index: int,
+    ) -> bytes:
+        """Phase 3.x.11.q.y' — encrypt the accepted-prefix tokens
+        for the always-rollback-K + replay-prefix protocol.
+
+        Plaintext: K token IDs → ``K * 8`` little-endian int64 bytes.
+        Ciphertext: ``nonce (12B) || AES-GCM output``.
+        AAD: ``request_id_utf8 || b"|" || stage_index_byte || b"|rollback"``
+        — distinct from the ``encrypt`` AAD so a relay adversary
+        cannot replay a probs ciphertext into a rollback envelope
+        (the AAD spaces are disjoint by construction).
+        """
+        plaintext = _encode_prefix(prefix)
+        aad = _aad_rollback(request_id, stage_index)
+        nonce = os.urandom(_GCM_NONCE_LEN)
+        try:
+            ct = self._aesgcm.encrypt(nonce, plaintext, aad)
+        except Exception as exc:  # noqa: BLE001
+            raise ProbsCipherError(
+                f"AES-GCM encrypt_prefix failed: {exc}"
+            ) from exc
+        return nonce + ct
+
+    def decrypt_prefix(
+        self,
+        *,
+        ciphertext: bytes,
+        request_id: str,
+        stage_index: int,
+        expected_k: int,
+    ) -> List[int]:
+        """Phase 3.x.11.q.y' — decrypt the accepted-prefix tokens.
+
+        Validates total ciphertext length, AAD match (distinct
+        from probs AAD), and plaintext length matches
+        ``expected_k * 8``. Caller MUST pre-bound ``expected_k``
+        per the rollback-protocol contract: prefix length is at
+        most ``MAX_VERIFY_BATCH_TOKENS`` (the cap is enforced by
+        the wire validator on ``RollbackCacheRequest``).
+        """
+        if not isinstance(ciphertext, (bytes, bytearray)):
+            raise ProbsCipherError(
+                f"ciphertext must be bytes, got "
+                f"{type(ciphertext).__name__}"
+            )
+        if len(ciphertext) < _GCM_NONCE_LEN + 16:
+            raise ProbsCipherError(
+                f"ciphertext too short: {len(ciphertext)} bytes "
+                f"(minimum {_GCM_NONCE_LEN + 16} = nonce + GCM tag)"
+            )
+        nonce = bytes(ciphertext[:_GCM_NONCE_LEN])
+        ct = bytes(ciphertext[_GCM_NONCE_LEN:])
+        aad = _aad_rollback(request_id, stage_index)
+        try:
+            plaintext = self._aesgcm.decrypt(nonce, ct, aad)
+        except InvalidTag as exc:
+            raise ProbsDecryptionError(
+                "AES-GCM tag mismatch on rollback prefix — "
+                "ciphertext tampered, wrong key, OR ciphertext "
+                "replayed across (request_id, stage_index) pairs "
+                "or across the probs/rollback AAD boundary. "
+                "Caller should surface MALFORMED_REQUEST."
+            ) from exc
+        return _decode_prefix(plaintext, expected_k)
 
 
 def derive_key_from_psk(
