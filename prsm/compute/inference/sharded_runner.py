@@ -508,6 +508,7 @@ class ShardedAutoregressiveRunner:
         tee_type: TEEType,
         sampling_defaults: Optional[SamplingDefaults] = None,
         eos_token_id: Optional[int] = None,
+        constant_k_commitment: bool = False,
     ) -> None:
         if model is None:
             raise RuntimeError(
@@ -600,6 +601,23 @@ class ShardedAutoregressiveRunner:
         self._tee_type = tee_type
         self._sampling_defaults = sampling_defaults
         self._eos_token_id = eos_token_id
+        # Phase 3.x.11.q.y — constant-K commitment flag. When True
+        # AND the dispatch is a v2 stochastic VERIFY (probs set +
+        # temperature > 0), the runner pads the rejection-helper's
+        # ac+1 verified entries up to K+1 by greedy-continuing
+        # from the §2.2 corrected position. The wire-side
+        # accepted_count is fixed to K (constant-byte) regardless
+        # of actual acceptance.
+        #
+        # Honest scope: position 0 of the K+1 emitted tokens has
+        # the §2.2 marginal-equals-target invariant; positions 1..K
+        # are greedy-continuation of the §2.2-corrected sequence.
+        # Multi-position §2.2 marginal claim narrows under
+        # constant-K — operators choosing this mode accept the
+        # statistical narrowing in exchange for the wire-surface
+        # masking. Tier C operators wire this; Tier A/B operators
+        # leave it default False.
+        self._constant_k_commitment = bool(constant_k_commitment)
 
     # ── public read-only accessors ────────────────────────────────────
 
@@ -1227,6 +1245,69 @@ class ShardedAutoregressiveRunner:
                 f"expected {accepted_count + 1} verified token ids "
                 f"(accepted_count + 1), got {len(verified_token_ids)}"
             )
+        # Phase 3.x.11.q.y — constant-K commitment. Under Tier C,
+        # the wire-side accepted_count must be K (constant-byte)
+        # regardless of actual acceptance. Pad verified_token_ids
+        # up to K+1 by greedy-continuing from the §2.2-corrected
+        # position via the v1 batched argmax helper. Honest scope:
+        # position 0 of the K+1 padded entries retains the §2.2
+        # marginal-equals-target invariant; positions
+        # accepted_count+1..K are greedy-argmax from the verifier's
+        # K+1 batched logits — multi-position §2.2 marginal claim
+        # narrows. Operators choosing this mode accept the
+        # statistical narrowing in exchange for the wire surface
+        # masking.
+        #
+        # Implementation: invoke the v1 batched-argmax helper to get
+        # K+1 deterministic verifier argmaxes; replace
+        # verified_token_ids[i] for i in [accepted_count+1, K] with
+        # the v1 helper's argmaxes at those positions. Position
+        # accepted_count itself stays the §2.2 correction (the
+        # natural rejection-sampling pivot).
+        if self._constant_k_commitment and accepted_count < k:
+            v1_helper = getattr(
+                self._model, "apply_lm_head_and_sample_batch", None,
+            )
+            if not callable(v1_helper):
+                raise MissingVerifyCapabilityError(
+                    "ShardedAutoregressiveRunner: constant_k_commitment "
+                    "requires model.apply_lm_head_and_sample_batch(...) "
+                    "for greedy-continuation padding past the §2.2 "
+                    "correction position"
+                )
+            v1_argmaxes = v1_helper(
+                hidden_state_batch=hidden_state_batch,
+                temperature=0.0,
+                top_k=top_k,
+                top_p=top_p,
+            )
+            if (
+                not isinstance(v1_argmaxes, list)
+                or len(v1_argmaxes) != k + 1
+            ):
+                raise RuntimeError(
+                    f"ShardedAutoregressiveRunner: constant_k pad "
+                    f"helper must return list of K+1={k + 1} ints, "
+                    f"got {type(v1_argmaxes).__name__} of length "
+                    f"{len(v1_argmaxes) if hasattr(v1_argmaxes, '__len__') else '?'}"
+                )
+            # Pad: keep positions 0..accepted_count from §2.2
+            # rejection helper; fill accepted_count+1..K with v1
+            # greedy argmaxes from the same K+1 hidden batch.
+            padded = (
+                list(verified_token_ids)
+                + [int(t) for t in v1_argmaxes[accepted_count + 1:]]
+            )
+            verified_token_ids = tuple(padded)
+            accepted_count = k
+            # Post-condition: len == K+1, ac == K. Wire surface is
+            # constant-byte regardless of actual acceptance.
+            if len(verified_token_ids) != k + 1:
+                raise RuntimeError(
+                    f"ShardedAutoregressiveRunner: constant_k pad "
+                    f"produced {len(verified_token_ids)} entries, "
+                    f"expected K+1={k + 1}"
+                )
         return verified_token_ids, accepted_count
 
     # ── eviction passthrough ──────────────────────────────────────────

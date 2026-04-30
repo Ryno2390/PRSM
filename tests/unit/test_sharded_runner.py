@@ -1654,6 +1654,7 @@ def _make_v2_tail_runner(
     layer_range: Tuple[int, int] = (0, 6),
     eos_token_id: int = 999,
     sampling_defaults: SamplingDefaults = None,
+    constant_k_commitment: bool = False,
 ) -> Tuple[
     ShardedAutoregressiveRunner,
     _FakeV2VerifyTailShardedModel,
@@ -1675,6 +1676,7 @@ def _make_v2_tail_runner(
             max_tokens=512, temperature=0.7, top_k=50, top_p=0.95,
         ),
         eos_token_id=eos_token_id,
+        constant_k_commitment=constant_k_commitment,
     )
     return runner, model, cache
 
@@ -1926,4 +1928,233 @@ class TestV2StochasticVerifyRouting:
                 request=_FakeRequest(temperature=0.7),
                 proposed_token_ids=[100, 101],
                 proposed_token_probs=[0.5],   # |probs|=1 vs |ids|=2
+            )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.q.y Task 3 — constant-K commitment
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestConstantKCommitment:
+    """Phase 3.x.11.q.y constant-K commitment under v2 stochastic
+    VERIFY. The runner pads verified_token_ids up to K+1 by
+    greedy-continuing from the §2.2 corrected position; the
+    wire-side accepted_count is fixed to K regardless of actual
+    acceptance.
+    """
+
+    def test_constant_k_pads_partial_accept_to_k_plus_one(self):
+        # K=4, actual ac=1 (rejection at position 1). Without
+        # constant-K, runner returns (verified[:2], 1). Under
+        # constant-K, runner pads with v1-greedy argmaxes for
+        # positions 2..K and returns (K+1 entries, K).
+        K = 4
+        # Rejection helper returns ac=1 with 2 entries:
+        #   [accepted_d_0, correction_at_pos_1]
+        rejection_script = [([100, 999], 1)]
+        # v1 batched argmax helper returns K+1=5 deterministic
+        # argmaxes (verify_batch_script).
+        verify_batch_script = [[100, 999, 200, 201, 202]]
+        runner, model, _ = _make_v2_tail_runner(
+            rejection_script=rejection_script,
+            verify_batch_script=verify_batch_script,
+            constant_k_commitment=True,
+        )
+        # Seed the cache as if PREFILL ran.
+        from prsm.compute.chain_rpc.kv_cache import KVCacheHandle
+        runner._cache._handles["req-1"] = KVCacheHandle(
+            request_id="req-1",
+            payload=[], n_layers=6,
+            cached_positions=3,
+            tokens_generated=0,
+            last_touch_time=1000.0,
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101, 102, 103],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(temperature=0.7),
+            proposed_token_ids=[100, 101, 102, 103],
+            proposed_token_probs=[0.9, 0.5, 0.5, 0.5],
+        )
+        # accepted_count is K=4 on the wire (constant-byte).
+        assert result.accepted_count == K
+        # verified_token_ids has K+1=5 entries (constant-byte).
+        assert len(result.verified_token_ids) == K + 1
+        # Position 0 is the §2.2 accepted draft; position 1 is the
+        # §2.2 correction (both from rejection helper). Positions
+        # 2..K are v1 greedy argmaxes (200, 201, 202).
+        assert result.verified_token_ids[0] == 100  # accepted
+        assert result.verified_token_ids[1] == 999  # §2.2 correction
+        assert result.verified_token_ids[2] == 200  # greedy pad
+        assert result.verified_token_ids[3] == 201  # greedy pad
+        assert result.verified_token_ids[4] == 202  # greedy pad
+
+    def test_constant_k_no_op_when_actual_ac_equals_k(self):
+        # When the rejection helper already returned ac=K (full
+        # accept), no padding is needed. Output is unchanged.
+        K = 3
+        rejection_script = [([10, 20, 30, 999], K)]
+        runner, model, _ = _make_v2_tail_runner(
+            rejection_script=rejection_script,
+            verify_batch_script=[[10, 20, 30, 999]],
+            constant_k_commitment=True,
+        )
+        from prsm.compute.chain_rpc.kv_cache import KVCacheHandle
+        runner._cache._handles["req-1"] = KVCacheHandle(
+            request_id="req-1",
+            payload=[], n_layers=6,
+            cached_positions=2,
+            tokens_generated=0,
+            last_touch_time=1000.0,
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 10, 20, 30],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(temperature=0.7),
+            proposed_token_ids=[10, 20, 30],
+            proposed_token_probs=[0.9, 0.9, 0.9],
+        )
+        assert result.accepted_count == K
+        assert len(result.verified_token_ids) == K + 1
+        assert result.verified_token_ids == (10, 20, 30, 999)
+
+    def test_constant_k_zero_accept_pads_full_k(self):
+        # K=2, ac=0 (rejection at position 0). Padding fills all
+        # K positions after the §2.2 correction.
+        K = 2
+        rejection_script = [([777], 0)]  # only correction
+        verify_batch_script = [[42, 100, 200]]  # K+1=3 argmaxes
+        runner, model, _ = _make_v2_tail_runner(
+            rejection_script=rejection_script,
+            verify_batch_script=verify_batch_script,
+            constant_k_commitment=True,
+        )
+        from prsm.compute.chain_rpc.kv_cache import KVCacheHandle
+        runner._cache._handles["req-1"] = KVCacheHandle(
+            request_id="req-1",
+            payload=[], n_layers=6,
+            cached_positions=2,
+            tokens_generated=0,
+            last_touch_time=1000.0,
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 5, 6],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(temperature=0.7),
+            proposed_token_ids=[5, 6],
+            proposed_token_probs=[0.5, 0.5],
+        )
+        assert result.accepted_count == K
+        assert len(result.verified_token_ids) == K + 1
+        # Position 0: §2.2 correction (777). Positions 1..K: greedy
+        # pad from v1 helper (verify_batch_script[0][1:] = [100, 200]).
+        assert result.verified_token_ids[0] == 777
+        assert result.verified_token_ids[1] == 100
+        assert result.verified_token_ids[2] == 200
+
+    def test_constant_k_disabled_returns_natural_ac(self):
+        # Backwards-compat: when constant_k_commitment=False
+        # (default), runner returns (verified[:ac+1], ac) — the
+        # natural narrowed semantic. Tier A/B ungated path.
+        K = 4
+        rejection_script = [([100, 999], 1)]
+        runner, model, _ = _make_v2_tail_runner(
+            rejection_script=rejection_script,
+            verify_batch_script=[[100, 999, 200, 201, 202]],
+            constant_k_commitment=False,  # default
+        )
+        from prsm.compute.chain_rpc.kv_cache import KVCacheHandle
+        runner._cache._handles["req-1"] = KVCacheHandle(
+            request_id="req-1",
+            payload=[], n_layers=6,
+            cached_positions=3,
+            tokens_generated=0,
+            last_touch_time=1000.0,
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 100, 101, 102, 103],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(temperature=0.7),
+            proposed_token_ids=[100, 101, 102, 103],
+            proposed_token_probs=[0.9, 0.5, 0.5, 0.5],
+        )
+        # Natural ac=1, len=2. NOT padded.
+        assert result.accepted_count == 1
+        assert len(result.verified_token_ids) == 2
+
+    def test_constant_k_does_not_affect_v1_greedy_path(self):
+        # Sanity: constant-K commitment is gated on v2 stochastic
+        # (probs set + temperature > 0). v1 greedy path
+        # (proposed_token_probs is None) returns K+1 entries
+        # naturally; constant-K is a no-op even when flag is set.
+        K = 3
+        runner, model, _ = _make_v2_tail_runner(
+            rejection_script=[],  # not used in v1
+            verify_batch_script=[[10, 20, 30, 999]],
+            constant_k_commitment=True,
+        )
+        from prsm.compute.chain_rpc.kv_cache import KVCacheHandle
+        runner._cache._handles["req-1"] = KVCacheHandle(
+            request_id="req-1",
+            payload=[], n_layers=6,
+            cached_positions=2,
+            tokens_generated=0,
+            last_touch_time=1000.0,
+        )
+        result = runner.run_layer_slice_unary(
+            activation_or_input_ids=[42, 10, 20, 30],
+            request_id="req-1",
+            decode_mode=DecodeMode.VERIFY,
+            is_final_stage=True,
+            request=_FakeRequest(temperature=0.0),  # v1 greedy
+            proposed_token_ids=[10, 20, 30],
+            proposed_token_probs=None,  # v1 path
+        )
+        # v1 returns K+1 + accepted_count = longest-prefix-match.
+        # For (proposed=10,20,30) vs (verifier_argmax=10,20,30,999),
+        # all 3 prefix-match → ac=3=K.
+        assert result.accepted_count == K
+        assert len(result.verified_token_ids) == K + 1
+
+    def test_constant_k_post_condition_invariant(self):
+        # Defense-in-depth: the runner asserts len == K+1 after
+        # padding. A buggy v1 helper that returned the wrong
+        # length should surface as a clear RuntimeError, not
+        # silently produce wrong-length output.
+        rejection_script = [([100, 999], 1)]
+        # v1 helper returns wrong-length list (K+1=4 expected, 3 returned)
+        verify_batch_script = [[100, 999, 200]]  # only 3 entries
+        runner, model, _ = _make_v2_tail_runner(
+            rejection_script=rejection_script,
+            verify_batch_script=verify_batch_script,
+            constant_k_commitment=True,
+        )
+        from prsm.compute.chain_rpc.kv_cache import KVCacheHandle
+        runner._cache._handles["req-1"] = KVCacheHandle(
+            request_id="req-1",
+            payload=[], n_layers=6,
+            cached_positions=3,
+            tokens_generated=0,
+            last_touch_time=1000.0,
+        )
+        with pytest.raises(
+            RuntimeError, match="must return list of K\\+1",
+        ):
+            runner.run_layer_slice_unary(
+                activation_or_input_ids=[42, 100, 101, 102],
+                request_id="req-1",
+                decode_mode=DecodeMode.VERIFY,
+                is_final_stage=True,
+                request=_FakeRequest(temperature=0.7),
+                proposed_token_ids=[100, 101, 102],
+                proposed_token_probs=[0.9, 0.5, 0.5],
             )
