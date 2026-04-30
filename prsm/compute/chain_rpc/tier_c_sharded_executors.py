@@ -47,7 +47,7 @@ TIER_GATE deny.
 from __future__ import annotations
 
 import time as _time_module
-from typing import Any, Callable, Iterator, Optional, Union
+from typing import Any, Callable, Iterator, Optional, Tuple, Union
 
 from prsm.compute.chain_rpc.client import StreamToken
 from prsm.compute.inference.parallax_executor import ChainExecutionResult
@@ -81,13 +81,36 @@ class BatchedTrailingShardedExecutor:
     empty (no result), nothing is emitted; downstream consumers
     handle the empty-iterator case per their existing contract.
 
-    Note: per Phase 3.x.11.q design plan §3.4, total response size
-    still leaks the total joined-text length to a byte counter.
-    Operator-configurable padding to a fixed max-length is
-    deferred to Phase 3.x.11.q.x.
+    Phase 3.x.11.q.x — operator-configurable padding via
+    ``pad_to_bytes``. When set, the joined text is padded with
+    U+0020 (space) to exactly ``pad_to_bytes`` bytes (UTF-8
+    encoded length); when joined exceeds the cap, the runner
+    truncates at the codepoint boundary AND sets
+    ``finish_reason="length_capped"``. Closes the §7.13 honest-
+    scope item #2 (M2 response-size leak total joined-text
+    length): wire byte count becomes constant regardless of
+    actual content length. Caveats:
+
+    - Whitespace fill: trailing whitespace is convention-strippable
+      by the MCP reader. Operators wanting a non-printable sentinel
+      can override via a future kwarg; v1 ships whitespace.
+
+    - UTF-8 safe: when joined-text bytes exceed the cap, truncation
+      walks back to the last complete codepoint to avoid splitting
+      a multi-byte sequence. Re-pads with whitespace after the
+      truncation to hit the exact byte count.
+
+    - Operators set ``pad_to_bytes`` ≥ expected max output length.
+      Choosing too low forces frequent length-capped truncations
+      (functional-correctness loss); too high inflates wire bytes.
     """
 
-    def __init__(self, inner: Any) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        *,
+        pad_to_bytes: Optional[int] = None,
+    ) -> None:
         if inner is None:
             raise RuntimeError(
                 "BatchedTrailingShardedExecutor requires an inner "
@@ -100,7 +123,24 @@ class BatchedTrailingShardedExecutor:
                 "RpcChainExecutor or another chain-streaming "
                 "executor"
             )
+        # Phase 3.x.11.q.x — pad_to_bytes validator.
+        if pad_to_bytes is not None:
+            if (
+                isinstance(pad_to_bytes, bool)
+                or not isinstance(pad_to_bytes, int)
+            ):
+                raise RuntimeError(
+                    "BatchedTrailingShardedExecutor: pad_to_bytes "
+                    "must be int when set, got "
+                    f"{type(pad_to_bytes).__name__}"
+                )
+            if pad_to_bytes <= 0:
+                raise RuntimeError(
+                    "BatchedTrailingShardedExecutor: pad_to_bytes "
+                    f"must be positive, got {pad_to_bytes}"
+                )
         self._inner = inner
+        self._pad_to_bytes = pad_to_bytes
 
     def execute_chain_streaming(
         self,
@@ -147,14 +187,70 @@ class BatchedTrailingShardedExecutor:
                 for t in tokens
             )
             last = tokens[-1]
+            finish_reason = last.finish_reason
+            # Phase 3.x.11.q.x — pad/truncate to fixed byte length.
+            if self._pad_to_bytes is not None:
+                joined, finish_reason = _pad_or_truncate_utf8(
+                    joined,
+                    self._pad_to_bytes,
+                    original_finish_reason=finish_reason,
+                )
             yield StreamToken(
                 sequence_index=0,
                 text_delta=joined,
                 token_id=last.token_id,
-                finish_reason=last.finish_reason,
+                finish_reason=finish_reason,
             )
         if result is not None:
             yield result
+
+
+def _pad_or_truncate_utf8(
+    text: str,
+    pad_to_bytes: int,
+    *,
+    original_finish_reason: Optional[str],
+) -> Tuple[str, Optional[str]]:
+    """Phase 3.x.11.q.x helper — pad or truncate ``text`` to
+    exactly ``pad_to_bytes`` UTF-8 bytes.
+
+    Returns ``(padded_text, finish_reason)``:
+    - Joined-text byte length ≤ pad_to_bytes: pad with U+0020
+      (space) to exact byte count; preserve original
+      finish_reason.
+    - Joined-text byte length > pad_to_bytes: truncate at last
+      complete codepoint boundary, re-pad with whitespace to hit
+      pad_to_bytes exactly, override finish_reason to
+      ``"length_capped"``.
+
+    Edge cases:
+    - Multi-byte UTF-8 codepoint at the truncation boundary:
+      bytes[:pad_to_bytes] may end mid-sequence. We use
+      ``decode(errors="ignore")`` to drop the partial codepoint,
+      then re-pad with whitespace to the exact byte target.
+    - Pure-ASCII fast path: byte length = char length, no
+      multi-byte handling needed.
+    """
+    encoded = text.encode("utf-8")
+    current_len = len(encoded)
+    if current_len == pad_to_bytes:
+        return text, original_finish_reason
+    if current_len < pad_to_bytes:
+        # Pad with space to exact byte count. Each space is one
+        # byte in UTF-8 so the math is exact.
+        return text + " " * (pad_to_bytes - current_len), (
+            original_finish_reason
+        )
+    # Truncate. Drop bytes past the cap, decode with errors="ignore"
+    # to strip any partial multi-byte codepoint at the boundary.
+    truncated = encoded[:pad_to_bytes].decode("utf-8", errors="ignore")
+    truncated_bytes = len(truncated.encode("utf-8"))
+    # Re-pad with whitespace to hit pad_to_bytes EXACTLY (the
+    # decode-errors-ignore step may have dropped a few bytes
+    # below the cap when the cap fell mid-codepoint).
+    if truncated_bytes < pad_to_bytes:
+        truncated = truncated + " " * (pad_to_bytes - truncated_bytes)
+    return truncated, "length_capped"
 
 
 class FixedRateShardedExecutor:

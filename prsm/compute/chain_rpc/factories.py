@@ -260,6 +260,7 @@ def make_tier_c_sharded_executor(
     *,
     mode: str,
     cadence_seconds: Optional[float] = None,
+    pad_to_bytes: Optional[int] = None,
 ):
     """Wrap an inner chain executor in one of the Phase 3.x.11.q
     constant-time decorators. Mirrors Phase 3.x.10.y's pattern of
@@ -274,13 +275,20 @@ def make_tier_c_sharded_executor(
                        per-token yield).
       cadence_seconds: required for ``mode="m1"``; rejected for
                        ``mode="m2"`` (M2 has no cadence concept).
+      pad_to_bytes:    Phase 3.x.11.q.x — applies to ``mode="m2"``
+                       only; pads or truncates the joined trailing
+                       frame to exactly ``pad_to_bytes`` UTF-8
+                       bytes (closes §7.13 honest-scope item #2,
+                       M2 response-size leak). Rejected for
+                       ``mode="m1"``.
 
     Returns:
       A ``BatchedTrailingShardedExecutor`` or
       ``FixedRateShardedExecutor`` instance.
 
     Raises:
-      ValueError: unknown mode; cadence misconfig.
+      ValueError: unknown mode; cadence misconfig; pad_to_bytes
+                  misapplied.
     """
     from prsm.compute.chain_rpc.tier_c_sharded_executors import (
         BatchedTrailingShardedExecutor,
@@ -294,13 +302,22 @@ def make_tier_c_sharded_executor(
                 "not applicable for mode='m2' (BatchedTrailing has "
                 "no per-token cadence concept)"
             )
-        return BatchedTrailingShardedExecutor(inner=inner)
+        return BatchedTrailingShardedExecutor(
+            inner=inner, pad_to_bytes=pad_to_bytes,
+        )
     if mode == "m1":
         if cadence_seconds is None:
             raise ValueError(
                 "make_tier_c_sharded_executor: cadence_seconds is "
                 "required for mode='m1' (FixedRate cadence-driven "
                 "yield)"
+            )
+        if pad_to_bytes is not None:
+            raise ValueError(
+                "make_tier_c_sharded_executor: pad_to_bytes is "
+                "applicable only for mode='m2' (M1 emits per-token "
+                "frames; response-size masking belongs at the M2 "
+                "trailing-frame boundary)"
             )
         return FixedRateShardedExecutor(
             inner=inner, cadence_seconds=cadence_seconds,

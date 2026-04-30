@@ -437,3 +437,166 @@ class TestMakeTierCShardedExecutor:
         assert "BatchedTrailingShardedExecutor" in mod.__all__
         assert "FixedRateShardedExecutor" in mod.__all__
         assert "make_tier_c_sharded_executor" in mod.__all__
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.q.x — pad_to_bytes on M2
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestBatchedTrailingPadding:
+    """Phase 3.x.11.q.x — operator-configurable response-size
+    padding closes the §7.13 honest-scope item #2 (M2 response-size
+    leaks total joined-text length)."""
+
+    def test_pad_short_text_to_exact_byte_length(self):
+        inner = _FakeChainExecutor([
+            _token(0, "Hi", token_id=42, finish_reason="stop"),
+            _result(),
+        ])
+        decorator = BatchedTrailingShardedExecutor(
+            inner=inner, pad_to_bytes=10,
+        )
+        events = list(decorator.execute_chain_streaming(
+            request="req", chain="chain",
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert len(tokens) == 1
+        # Encoded byte length is exactly pad_to_bytes.
+        assert len(tokens[0].text_delta.encode("utf-8")) == 10
+        # Original content preserved as prefix.
+        assert tokens[0].text_delta.startswith("Hi")
+        # finish_reason from the inner stays "stop" (no truncation).
+        assert tokens[0].finish_reason == "stop"
+
+    def test_truncate_overlong_text_sets_length_capped(self):
+        inner = _FakeChainExecutor([
+            _token(0, "this string is definitely longer than 10 bytes",
+                   token_id=42, finish_reason="stop"),
+            _result(),
+        ])
+        decorator = BatchedTrailingShardedExecutor(
+            inner=inner, pad_to_bytes=10,
+        )
+        events = list(decorator.execute_chain_streaming(
+            request="req", chain="chain",
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        # Encoded byte length is exactly pad_to_bytes.
+        assert len(tokens[0].text_delta.encode("utf-8")) == 10
+        # finish_reason overridden to length_capped.
+        assert tokens[0].finish_reason == "length_capped"
+
+    def test_utf8_safe_truncation_at_codepoint_boundary(self):
+        # 4-byte CJK codepoints — truncating at byte 5 would split
+        # the second one. Helper must drop the partial codepoint
+        # and re-pad to the exact byte target.
+        # "你好" = 6 bytes UTF-8 (3 bytes each). Cap at 5 bytes
+        # falls mid-second-codepoint.
+        inner = _FakeChainExecutor([
+            _token(0, "你好", token_id=42, finish_reason="stop"),
+            _result(),
+        ])
+        decorator = BatchedTrailingShardedExecutor(
+            inner=inner, pad_to_bytes=5,
+        )
+        events = list(decorator.execute_chain_streaming(
+            request="req", chain="chain",
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        # Exact byte length.
+        text = tokens[0].text_delta
+        assert len(text.encode("utf-8")) == 5
+        # Should preserve the first complete codepoint at minimum.
+        assert text.startswith("你")
+        # length_capped because original was > pad_to_bytes.
+        assert tokens[0].finish_reason == "length_capped"
+
+    def test_exact_match_no_modification(self):
+        # Edge: text length == pad_to_bytes. No padding, no
+        # truncation, finish_reason preserved.
+        inner = _FakeChainExecutor([
+            _token(0, "0123456789",
+                   token_id=42, finish_reason="stop"),
+            _result(),
+        ])
+        decorator = BatchedTrailingShardedExecutor(
+            inner=inner, pad_to_bytes=10,
+        )
+        events = list(decorator.execute_chain_streaming(
+            request="req", chain="chain",
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert tokens[0].text_delta == "0123456789"
+        assert tokens[0].finish_reason == "stop"
+
+    def test_pad_to_bytes_none_preserves_legacy_behavior(self):
+        # Default (None) — no padding, joined text exactly as
+        # produced. Bit-identical to pre-q.x.
+        inner = _FakeChainExecutor([
+            _token(0, "a"),
+            _token(1, "b"),
+            _token(2, "c", finish_reason="stop"),
+            _result(),
+        ])
+        decorator = BatchedTrailingShardedExecutor(inner=inner)
+        events = list(decorator.execute_chain_streaming(
+            request="req", chain="chain",
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert tokens[0].text_delta == "abc"
+        assert tokens[0].finish_reason == "stop"
+
+    def test_constructor_rejects_non_int_pad(self):
+        with pytest.raises(RuntimeError, match="must be int"):
+            BatchedTrailingShardedExecutor(
+                inner=_FakeChainExecutor([_result()]),
+                pad_to_bytes=10.5,  # type: ignore[arg-type]
+            )
+
+    def test_constructor_rejects_bool_pad(self):
+        with pytest.raises(RuntimeError, match="must be int"):
+            BatchedTrailingShardedExecutor(
+                inner=_FakeChainExecutor([_result()]),
+                pad_to_bytes=True,  # type: ignore[arg-type]
+            )
+
+    def test_constructor_rejects_zero_pad(self):
+        with pytest.raises(RuntimeError, match="positive"):
+            BatchedTrailingShardedExecutor(
+                inner=_FakeChainExecutor([_result()]),
+                pad_to_bytes=0,
+            )
+
+    def test_constructor_rejects_negative_pad(self):
+        with pytest.raises(RuntimeError, match="positive"):
+            BatchedTrailingShardedExecutor(
+                inner=_FakeChainExecutor([_result()]),
+                pad_to_bytes=-1,
+            )
+
+    def test_factory_threads_pad_to_bytes(self):
+        from prsm.compute.chain_rpc import make_tier_c_sharded_executor
+        inner = _FakeChainExecutor([
+            _token(0, "X", token_id=42, finish_reason="stop"),
+            _result(),
+        ])
+        decorator = make_tier_c_sharded_executor(
+            inner, mode="m2", pad_to_bytes=8,
+        )
+        events = list(decorator.execute_chain_streaming(
+            request="req", chain="chain",
+        ))
+        tokens = [e for e in events if isinstance(e, StreamToken)]
+        assert len(tokens[0].text_delta.encode("utf-8")) == 8
+
+    def test_factory_rejects_pad_to_bytes_for_m1(self):
+        from prsm.compute.chain_rpc import make_tier_c_sharded_executor
+        inner = _FakeChainExecutor([_result()])
+        with pytest.raises(
+            ValueError, match="applicable only for mode='m2'",
+        ):
+            make_tier_c_sharded_executor(
+                inner, mode="m1", cadence_seconds=0.05,
+                pad_to_bytes=10,
+            )
