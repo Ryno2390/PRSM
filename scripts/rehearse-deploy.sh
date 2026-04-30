@@ -100,7 +100,23 @@ fi
 # ── 2. Audit bundle (Phase 3.1 + 7 + 7.1) ─────────────────────────────
 echo
 echo "[2/5] Deploying audit bundle (Phase 3.1 + 7 + 7.1)…"
-: "${FOUNDATION_RESERVE_WALLET:=0x000000000000000000000000000000000000dEaD}"
+# FOUNDATION_RESERVE_WALLET is wired into multiple Phase-3.1/7/7.1
+# constructors. On hardhat-local default to a burn address for rehearsal
+# convenience; on testnet/mainnet REQUIRE explicit operator input. A
+# silent fallback to 0x...dEaD on mainnet would route every emission +
+# escrow refund into a burn address with no recovery.
+if [[ -z "${FOUNDATION_RESERVE_WALLET:-}" ]]; then
+  if [[ "${NETWORK}" == "hardhat-local" ]]; then
+    FOUNDATION_RESERVE_WALLET="0x000000000000000000000000000000000000dEaD"
+    echo "   Defaulting FOUNDATION_RESERVE_WALLET=${FOUNDATION_RESERVE_WALLET} for hardhat-local rehearsal."
+  else
+    echo "❌ FOUNDATION_RESERVE_WALLET required on ${NETWORK}." >&2
+    echo "   This wires into EscrowPool / StakeBond / etc. constructors;" >&2
+    echo "   defaulting to 0x...dEaD on mainnet would burn every routed payment." >&2
+    echo "   Set explicitly to the Foundation 2-of-3 multi-sig (or treasury)." >&2
+    exit 1
+  fi
+fi
 export FOUNDATION_RESERVE_WALLET
 BUNDLE_OUT="$(npx hardhat run scripts/deploy-audit-bundle.js ${HARDHAT_NETWORK_FLAG})"
 echo "${BUNDLE_OUT}"
@@ -115,9 +131,25 @@ echo "   StakeBond parsed → ${STAKE_BOND_ADDRESS}"
 # ── 3. Phase 8 emission ───────────────────────────────────────────────
 echo
 echo "[3/5] Deploying Phase 8 emission…"
-: "${CREATOR_POOL:=0x00000000000000000000000000000000000c7ea0}"
-: "${OPERATOR_POOL:=0x0000000000000000000000000000000000000fee}"
-: "${GRANT_POOL:=0x00000000000000000000000000000000000c07a0}"
+# CREATOR_POOL / OPERATOR_POOL / GRANT_POOL are the three CompensationDistributor
+# pool sinks. On hardhat-local default to vanity-byte placeholders; on
+# testnet/mainnet REQUIRE explicit operator input — silent fallback would
+# route every emission tx into addresses no one controls.
+if [[ "${NETWORK}" == "hardhat-local" ]]; then
+  : "${CREATOR_POOL:=0x00000000000000000000000000000000000c7ea0}"
+  : "${OPERATOR_POOL:=0x0000000000000000000000000000000000000fee}"
+  : "${GRANT_POOL:=0x00000000000000000000000000000000000c07a0}"
+else
+  for var in CREATOR_POOL OPERATOR_POOL GRANT_POOL; do
+    if [[ -z "${!var:-}" ]]; then
+      echo "❌ ${var} required on ${NETWORK}." >&2
+      echo "   This is a CompensationDistributor pool sink; defaulting to a" >&2
+      echo "   placeholder on mainnet would route emission to an unowned address." >&2
+      echo "   Set explicitly to the Foundation-managed pool address." >&2
+      exit 1
+    fi
+  done
+fi
 export CREATOR_POOL OPERATOR_POOL GRANT_POOL
 npx hardhat run scripts/deploy-phase8-emission.js ${HARDHAT_NETWORK_FLAG}
 

@@ -105,23 +105,27 @@ runbook). Bundling into `rehearse-deploy.sh` is appropriate when both
 run on the same day, which is the current plan. Flagged for the
 mainnet-day master checklist.
 
-### G6 — `FOUNDATION_RESERVE_WALLET` defaults to `0x...dEaD` **(LOW — documented)**
+### G6 — `FOUNDATION_RESERVE_WALLET` + pool sinks default silently **(MEDIUM — addressed)**
 
-Orchestrator default:
+Original orchestrator defaults:
 ```bash
 : "${FOUNDATION_RESERVE_WALLET:=0x000000000000000000000000000000000000dEaD}"
+: "${CREATOR_POOL:=0x00000000000000000000000000000000000c7ea0}"
+: "${OPERATOR_POOL:=0x0000000000000000000000000000000000000fee}"
+: "${GRANT_POOL:=0x00000000000000000000000000000000000c07a0}"
 ```
-On hardhat-local this is fine. On mainnet, if the operator forgets to
-set `FOUNDATION_RESERVE_WALLET`, every contract that takes it as
-constructor arg gets `0x...dEaD` (a burn address) and EmissionController
-mints would be irretrievable. Currently relies on operator vigilance.
+On hardhat-local these are fine. On mainnet, if the operator forgets to
+set any of them, every contract takes the placeholder as a constructor
+arg and emissions / refunds route to addresses no one controls
+(`FOUNDATION_RESERVE_WALLET=0x...dEaD` burns; the three pool defaults
+are vanity-byte addresses with unknown private keys).
 
-**Status:** would be a HIGH gap if the operator could run mainnet
-without an explicit env var. Hardening proposal: extend the existing
-mainnet check (lines 81-84 of `rehearse-deploy.sh` for FTNS) to
-require `FOUNDATION_RESERVE_WALLET` on `base`/`mainnet`. Not implemented
-in this dry-run because the runbook calls it out, but worth wiring as a
-belt-and-braces guard before mainnet day.
+**Fix:** network-conditional guard mirroring the AUTHORIZED_VERIFIER
+pattern. On `hardhat-local`, fall back to placeholders + log; on any
+other network, hard-fail with explanation per missing var. Verified by
+running the bash logic with `NETWORK=base-sepolia` + unset
+`FOUNDATION_RESERVE_WALLET` — exits 1 with the expected error before
+any RPC call.
 
 ## Test Evidence
 
@@ -159,7 +163,7 @@ Two full rehearsals run end-to-end against a fresh hardhat-local node:
 | `transferOwnership` to multi-sig | ✅ rehearsed (this audit) |
 | Idempotency under partial-ceremony re-run | ✅ rehearsed |
 | Phase 1.3 FTNSToken deploy | ⚠️ separate script, not orchestrator-bundled |
-| `FOUNDATION_RESERVE_WALLET` mainnet guard | ⚠️ relies on operator vigilance |
+| `FOUNDATION_RESERVE_WALLET` + pool sinks mainnet guard | ✅ wired (G6 addressed post-G1) |
 | Verifier-contract migration | ⚠️ deferred (EOA prover for v1) |
 | Hardware signer-set documentation | ⚠️ operator-side (not engineering) |
 | Real-multisig (not stub) ceremony rehearsal | ⏳ blocked until 2026-05-01 |
