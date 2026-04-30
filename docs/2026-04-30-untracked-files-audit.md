@@ -34,7 +34,7 @@ Untracked count: 168 → 164.
 | `.github/workflows/*.yml` | 12 | NEEDS USER DECISION — see §A |
 | `prsm/compute/nwtn/` | 39 → 30 | PARTIAL: 9 .md/.json deleted (this commit). 30 .py + subdirs deferred — see §B |
 | `prsm/compute/collaboration/` | 16 | LIKELY LEGACY — see §B |
-| `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` expands to 26 .py) | MIXED — see §B. **Pattern emerging:** chronos/ + agents/ both have v1.6-plan re-introduction (chronos via plan doc, agents via tracked-code inline comments). Bulk-delete recommended for both pending operator confirmation. |
+| `prsm/compute/{federation,agents,chronos,others}/` | 28 (`agents/` expands to 26 .py) | MIXED — see §B. **Pattern confirmed across 3 subdirs:** chronos/ + agents/ + federation/ all show v1.6-plan re-introduction signature. Bulk-delete recommended for all three pending operator confirmation. |
 | `tests/{integration,nwtn,scripts_integration,...}/` | 58 | LIKELY LEGACY — see §C |
 | `docs/api/PHASE_7_API_REFERENCE.md` | 1 | NEEDS REVIEW — see §D |
 | `config/nginx/ipfs-proxy.conf` | 1 | DEPRECATED INFRA — see §E |
@@ -200,6 +200,47 @@ Total: 1,737 LoC of "FTNS↔USD/USDT enterprise treasury" code (MicroStrategy/Co
 **Smaller mystery:** `cashout_api.py` (137 lines) is NOT in the v1.6 deletion list, BUT it imports from `hub_spoke_router.py` (which v1.6 slated for deletion). So it was probably co-introduced with the deletion-plan files. Same disposition recommendation.
 
 Both `hub_spoke_router.py` and `exchange_router.py` are currently tracked but were also slated for v1.6 deletion. Their fate is logically coupled with the 4 untracked files: if the operator decides the enterprise-treasury layer was correctly deprecated by v1.6, all 6 files should go (4 deletions + 2 `git rm` of currently-tracked files). If preservation was intentional, all 6 stay.
+
+#### federation/ specific finding — third subdir matching v1.6 re-introduction signature (2026-04-30)
+
+The 6 untracked files in `prsm/compute/federation/` are:
+- `distributed_evolution.py`
+- `distributed_model_registry.py`
+- `distributed_rlt_network.py`
+- `knowledge_transfer.py`
+- `model_registry.py`
+- `phase5_demo.py`
+
+17 tracked files coexist in the subdir (consensus / p2p_network / fault_tolerance / etc.) — same mixed-state pattern as chronos/ + agents/.
+
+**v1.6 plan evidence:** the same `docs/archive/2026-04-09-v1.6-scope-alignment.md` plan doc explicitly slated 4 of the 6 untracked files for `git rm` deletion: `distributed_evolution.py`, `distributed_rlt_network.py`, `knowledge_transfer.py`, `phase5_demo.py`. The other 2 (`distributed_model_registry.py`, `model_registry.py`) are not in the named deletion list but follow the same re-introduction-after-deletion pattern.
+
+**Soft-import shim pattern matches agents/ exactly:** all 3 tracked test files that reference `distributed_rlt_network` import it via `try/except ImportError` with a `FEDERATION_AVAILABLE = False` fallback flag:
+
+- `tests/integration/test_complete_prsm_system.py:505` — try/except wrapping import
+- `tests/integration/test_prsm_core_integration.py:54` — try/except + `FEDERATION_AVAILABLE = True` on success
+- `tests/integration/test_prsm_fixed_components.py:70` — explicit `FEDERATION_AVAILABLE = False` initialization, set True only on import success
+
+This is the same "code designed to work without these files" signature documented for agents/ — the soft-import shim handles missing modules by routing through the `FEDERATION_AVAILABLE = False` branch. The tracked tests would NOT break if the 6 untracked files were deleted; they'd just skip the federation-specific paths.
+
+**Disposition recommendation:** same as chronos + agents. Bulk-delete is most likely correct. The case here is supported by THREE pieces of converging evidence:
+1. v1.6 plan doc explicitly names 4 of 6 files for deletion
+2. Tracked tests use soft-import + `FEDERATION_AVAILABLE` fallback (same pattern as agents/)
+3. Files are downstream consumers — no tracked code depends on them being present
+
+**Operator decision needed:** same matrix:
+- If v1.6 deletion correct + re-introduction unintentional → bulk-delete all 6
+- If re-introduction intentional → commit all 6 + remove `FEDERATION_AVAILABLE = False` fallback in tests
+- If unclear → defer
+
+#### Meta-pattern across §B subdirs
+
+Three subdirs (`chronos/`, `agents/`, `federation/`) now show the same v1.6-deletion-then-reintroduction signature. This raises a meta-question worth surfacing to the operator:
+
+- **Was there a single resurrection event after v1.6** (e.g., a stash unstash, a backup-branch merge, a `git restore` from an old ref) that brought back multiple subsystems at once? If so, all three are candidates for the same `git clean -fd` scope.
+- **Or were these independent re-introductions** across different sessions, each with different intent? If so, each subdir needs separate operator decision.
+
+The fact that all three subdirs share the soft-import / `*_AVAILABLE = False` fallback pattern suggests the v1.6 sprint anticipated optional re-introduction (otherwise tracked code would just import directly and break on absence). So at minimum the deletion was deliberate; the re-introduction may or may not have been.
 
 ## §C — `tests/` (58 untracked files)
 
