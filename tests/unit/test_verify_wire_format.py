@@ -840,3 +840,233 @@ class TestProposedTokenProbs:
         assert b"proposed_token_probs" not in v1_bytes
         # v2 does.
         assert b"proposed_token_probs" in v2_bytes
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3.x.11.q.y Task 1 — encrypted_proposed_token_probs wire field
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestEncryptedProposedTokenProbs:
+    """Encrypted-wire variant of proposed_token_probs (Phase 3.x.11.q.y).
+
+    Mutually exclusive with plaintext probs; constraints + bytes
+    cap; round-trip serialization; omit-when-None byte-equivalence
+    with pre-3.x.11.q.y messages.
+    """
+
+    def test_round_trip_with_encrypted_field(self, settler_identity):
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        # AES-GCM ciphertext shape: 12-byte nonce + 16-byte tag +
+        # ~24-byte K=3 plaintext = 52 bytes. Synthesize valid bytes
+        # at a representative size; the wire layer doesn't validate
+        # AES-GCM internals.
+        ciphertext = bytes(range(52))
+        req = RunLayerSliceRequest(
+            request_id="req-1",
+            model_id="m",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"\x00",
+            activation_shape=(1,),
+            activation_dtype="int32",
+            upstream_token=token,
+            deadline_unix=2000.0,
+            decode_mode=DecodeMode.VERIFY,
+            proposed_token_ids=(1, 2, 3),
+            encrypted_proposed_token_probs=ciphertext,
+        )
+        wire = encode_message(req)
+        decoded = parse_message(wire)
+        assert isinstance(decoded, RunLayerSliceRequest)
+        assert decoded.encrypted_proposed_token_probs == ciphertext
+        # Plaintext probs MUST be None on the round-trip
+        # (mutual exclusion enforced).
+        assert decoded.proposed_token_probs is None
+
+    def test_mutually_exclusive_with_plaintext_probs(
+        self, settler_identity,
+    ):
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError,
+            match="mutually exclusive",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="m",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"\x00",
+                activation_shape=(1,),
+                activation_dtype="int32",
+                upstream_token=token,
+                deadline_unix=2000.0,
+                decode_mode=DecodeMode.VERIFY,
+                proposed_token_ids=(1, 2),
+                proposed_token_probs=(0.5, 0.5),
+                encrypted_proposed_token_probs=b"\x00" * 32,
+            )
+
+    def test_requires_proposed_token_ids(self, settler_identity):
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        # decode_mode=VERIFY validator fires first ("requires
+        # proposed_token_ids to be set") on this misconfig; the
+        # encrypted-probs co-set check would also catch it. Both
+        # match on substring "proposed_token_ids".
+        with pytest.raises(
+            ChainRpcMalformedError,
+            match="proposed_token_ids",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="m",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"\x00",
+                activation_shape=(1,),
+                activation_dtype="int32",
+                upstream_token=token,
+                deadline_unix=2000.0,
+                decode_mode=DecodeMode.VERIFY,
+                proposed_token_ids=None,
+                encrypted_proposed_token_probs=b"\x00" * 32,
+            )
+
+    def test_rejects_non_bytes(self, settler_identity):
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match="must be bytes",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="m",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"\x00",
+                activation_shape=(1,),
+                activation_dtype="int32",
+                upstream_token=token,
+                deadline_unix=2000.0,
+                decode_mode=DecodeMode.VERIFY,
+                proposed_token_ids=(42,),
+                encrypted_proposed_token_probs="not-bytes",  # type: ignore[arg-type]
+            )
+
+    def test_rejects_empty_bytes(self, settler_identity):
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match="non-empty",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="m",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"\x00",
+                activation_shape=(1,),
+                activation_dtype="int32",
+                upstream_token=token,
+                deadline_unix=2000.0,
+                decode_mode=DecodeMode.VERIFY,
+                proposed_token_ids=(42,),
+                encrypted_proposed_token_probs=b"",
+            )
+
+    def test_rejects_oversized_bytes(self, settler_identity):
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        with pytest.raises(
+            ChainRpcMalformedError, match="1024-byte cap",
+        ):
+            RunLayerSliceRequest(
+                request_id="req-1",
+                model_id="m",
+                layer_range=(0, 4),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=b"\x00",
+                activation_shape=(1,),
+                activation_dtype="int32",
+                upstream_token=token,
+                deadline_unix=2000.0,
+                decode_mode=DecodeMode.VERIFY,
+                proposed_token_ids=(42,),
+                encrypted_proposed_token_probs=b"\x00" * 1025,
+            )
+
+    def test_omit_when_none_preserves_byte_equivalence(
+        self, settler_identity,
+    ):
+        # Pre-3.x.11.q.y request (no encrypted field) must serialize
+        # to byte-identical wire as the same request constructed
+        # post-3.x.11.q.y with encrypted field unset.
+        token = HandoffToken.sign(
+            identity=settler_identity,
+            request_id="req-1",
+            chain_stage_index=0,
+            chain_total_stages=1,
+            deadline_unix=2000.0,
+        )
+        common_kwargs = dict(
+            request_id="req-1",
+            model_id="m",
+            layer_range=(0, 4),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=b"\x00",
+            activation_shape=(1,),
+            activation_dtype="int32",
+            upstream_token=token,
+            deadline_unix=2000.0,
+            decode_mode=DecodeMode.VERIFY,
+            proposed_token_ids=(42,),
+        )
+        v1 = RunLayerSliceRequest(**common_kwargs)
+        v2 = RunLayerSliceRequest(
+            **common_kwargs,
+            encrypted_proposed_token_probs=None,
+        )
+        assert encode_message(v1) == encode_message(v2)
+        # Wire bytes do NOT contain the field name.
+        assert b"encrypted_proposed_token_probs" not in encode_message(v1)

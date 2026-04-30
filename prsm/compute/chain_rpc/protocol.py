@@ -598,6 +598,43 @@ class RunLayerSliceRequest:
     # signed bytes (omit-when-default canonical encoding mirrors
     # the ``proposed_token_ids`` pattern).
     proposed_token_probs: Optional[Tuple[float, ...]] = None
+    # Phase 3.x.11.q.y — encrypted-wire variant of
+    # ``proposed_token_probs``. AES-GCM ciphertext bytes (key
+    # derived per-request via ECDH ephemeral piggybacked on the
+    # HandoffToken). Co-set EXCLUSION invariant with
+    # ``proposed_token_probs``: at most one of the two can be set
+    # on a single request. Operators choose plaintext or
+    # encrypted at config time (Tier C operators set
+    # ``encrypted_probs_mode=True`` on RpcChainExecutor; Tier A/B
+    # operators leave it default False and use plaintext).
+    #
+    # When set, the tail decrypts the ciphertext using the
+    # request's DH-derived symmetric key, then routes to the
+    # standard rejection-sampling helper exactly as it would for
+    # plaintext probs. The wire surface becomes content-
+    # uncorrelated ciphertext — defends against passive network
+    # observers but NOT against stage operators with valid
+    # anchor-verified identity (R3 S1 attacker model unchanged).
+    #
+    # Bytes max length cap: ``MAX_VERIFY_BATCH_TOKENS - 1``
+    # plaintext probs at 8 bytes/float = ~512 bytes; AES-GCM adds
+    # 12-byte nonce + 16-byte tag = ~540 bytes max. Cap at 1024
+    # bytes for headroom + future-proofing against alternative
+    # ciphersuites. Default None preserves byte-equivalence with
+    # pre-3.x.11.q.y signed bytes (omit-when-default canonical
+    # encoding mirrors the ``proposed_token_probs`` pattern).
+    #
+    # Note on end-to-end authentication: like all
+    # RunLayerSliceRequest body fields (proposed_token_ids,
+    # proposed_token_probs, etc.), the ciphertext is NOT
+    # end-to-end-signed at the request level — only the
+    # HandoffToken's boundary fields (request_id, settler,
+    # stage_index, total_stages, deadline) are signed. A relay
+    # adversary can substitute the ciphertext bytes in transit;
+    # mitigated by the AES-GCM AAD bind (request_id || stage_index)
+    # which causes decryption to fail at the tail on substitution.
+    # Carry-forward of the Phase 3.x.11.y.x M2 honest-scope point.
+    encrypted_proposed_token_probs: Optional[bytes] = None
     protocol_version: int = CHAIN_RPC_PROTOCOL_VERSION
 
     MESSAGE_TYPE: str = ChainRpcMessageType.RUN_LAYER_SLICE_REQUEST.value
@@ -836,6 +873,49 @@ class RunLayerSliceRequest:
                         f"proposed_token_probs entries must be in "
                         f"[0, 1], got {p}"
                     )
+        # Phase 3.x.11.q.y — encrypted_proposed_token_probs
+        # validation. Exclusion invariant with proposed_token_probs:
+        # at most one of the two can be set on a single request
+        # (operators choose plaintext OR encrypted at config; mixing
+        # would imply ambiguous routing on the tail). Bytes cap
+        # at 1024 bytes (see field docstring for derivation).
+        if self.encrypted_proposed_token_probs is not None:
+            if self.proposed_token_probs is not None:
+                raise ChainRpcMalformedError(
+                    "encrypted_proposed_token_probs and "
+                    "proposed_token_probs are mutually exclusive — "
+                    "at most one can be set on a single VERIFY "
+                    "request (operators choose plaintext OR "
+                    "encrypted at RpcChainExecutor construction)"
+                )
+            if self.proposed_token_ids is None:
+                raise ChainRpcMalformedError(
+                    "encrypted_proposed_token_probs set but "
+                    "proposed_token_ids is None — both must be "
+                    "co-set (the encrypted ciphertext encrypts "
+                    "the per-draft probabilities for those ids)"
+                )
+            if not isinstance(
+                self.encrypted_proposed_token_probs, (bytes, bytearray),
+            ):
+                raise ChainRpcMalformedError(
+                    f"encrypted_proposed_token_probs must be bytes, "
+                    f"got "
+                    f"{type(self.encrypted_proposed_token_probs).__name__}"
+                )
+            if len(self.encrypted_proposed_token_probs) == 0:
+                raise ChainRpcMalformedError(
+                    "encrypted_proposed_token_probs must be non-empty "
+                    "(empty bytes carry no AES-GCM nonce + tag)"
+                )
+            if len(self.encrypted_proposed_token_probs) > 1024:
+                raise ChainRpcMalformedError(
+                    f"encrypted_proposed_token_probs bytes "
+                    f"{len(self.encrypted_proposed_token_probs)} "
+                    f"exceeds 1024-byte cap (defends against memory "
+                    f"exhaustion from a hostile peer claiming huge "
+                    f"ciphertext)"
+                )
 
     def to_dict(self) -> Dict[str, Any]:
         # activation_blob → hex for JSON-safety. For streamed (v2)
@@ -892,6 +972,16 @@ class RunLayerSliceRequest:
             out["proposed_token_probs"] = [
                 float(p) for p in self.proposed_token_probs
             ]
+        # Phase 3.x.11.q.y — encrypted_proposed_token_probs.
+        # Hex-encoded bytes for JSON-safety; omit-when-None
+        # preserves byte-equivalence with pre-3.x.11.q.y signed
+        # bytes. Mutually exclusive with proposed_token_probs at
+        # __post_init__ — at most one of the two will be in the
+        # serialized output.
+        if self.encrypted_proposed_token_probs is not None:
+            out["encrypted_proposed_token_probs_hex"] = bytes(
+                self.encrypted_proposed_token_probs,
+            ).hex()
         return out
 
     @classmethod
@@ -1033,6 +1123,25 @@ class RunLayerSliceRequest:
                         f"got {type(p).__name__}"
                     )
             probs_tuple = tuple(float(p) for p in probs_raw)
+        # Phase 3.x.11.q.y — encrypted_proposed_token_probs.
+        # Hex-decoded; default None when absent (preserves byte-
+        # equivalence). Mutual exclusion with proposed_token_probs
+        # validated at __post_init__.
+        encrypted_probs_raw = data.get("encrypted_proposed_token_probs_hex")
+        encrypted_probs_bytes: Optional[bytes] = None
+        if encrypted_probs_raw is not None:
+            if not isinstance(encrypted_probs_raw, str):
+                raise ChainRpcMalformedError(
+                    f"encrypted_proposed_token_probs_hex must be str, "
+                    f"got {type(encrypted_probs_raw).__name__}"
+                )
+            try:
+                encrypted_probs_bytes = bytes.fromhex(encrypted_probs_raw)
+            except ValueError as exc:
+                raise ChainRpcMalformedError(
+                    f"encrypted_proposed_token_probs_hex must be valid "
+                    f"hex string: {exc}"
+                ) from exc
         return cls(
             request_id=_required_str(data, "request_id"),
             model_id=_required_str(data, "model_id"),
@@ -1051,6 +1160,7 @@ class RunLayerSliceRequest:
             decode_mode=decode_mode,
             proposed_token_ids=proposed_tuple,
             proposed_token_probs=probs_tuple,
+            encrypted_proposed_token_probs=encrypted_probs_bytes,
             protocol_version=_required_int(data, "protocol_version"),
         )
 
