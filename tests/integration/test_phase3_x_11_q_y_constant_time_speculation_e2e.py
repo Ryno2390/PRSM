@@ -195,6 +195,7 @@ def _build_constant_time_speculative_two_stage(
     *,
     speculation_depth: int = 4,
     sharded_default_max_tokens: int = 8,
+    always_rollback_k: bool = False,
 ) -> Tuple[
     RpcChainExecutor,
     Any,  # alice identity
@@ -343,6 +344,7 @@ def _build_constant_time_speculative_two_stage(
         speculation_depth=speculation_depth,
         encrypted_probs_cipher=executor_cipher,
         flat_k_mode=True,
+        always_rollback_k=always_rollback_k,
     )
     return (
         executor,
@@ -635,3 +637,187 @@ class TestConstantTimeSpeculationE2E:
             f"tokens outside top_k={top_k} support — top-K filter "
             f"broken at position 0 under constant-K commitment"
         )
+
+
+class TestAlwaysRollbackKE2E:
+    """Phase 3.x.11.q.y' — always-rollback-K + replay-prefix
+    protocol end-to-end. Closes the residual rollback drop-value
+    leak from threat-model §3.8 + flips the q.y E2E pin from
+    'leak documented' to 'leak absent'."""
+
+    def test_e3_constant_k_rollback_pin(
+        self, hf_model_and_tokenizer,
+    ):
+        """Under always_rollback_k=True, every observed
+        RollbackCacheRequest must have n_positions_to_drop ==
+        K + 1 regardless of accepted_count. A passive wire
+        observer learns no acceptance information from the
+        rollback envelope."""
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = "The quick brown fox"
+        max_tokens = 6
+        K = 2
+
+        (
+            executor, alice_identity, bob_identity, _, _, observer,
+        ) = _build_constant_time_speculative_two_stage(
+            model, tokenizer,
+            speculation_depth=K,
+            sharded_default_max_tokens=max_tokens,
+            always_rollback_k=True,
+        )
+        chain = _make_chain(
+            alice_identity.node_id, bob_identity.node_id,
+        )
+
+        list(executor.execute_chain_streaming(
+            request=_make_request(
+                prompt=prompt, max_tokens=max_tokens,
+                temperature=0.7,
+            ),
+            chain=chain,
+        ))
+
+        rollbacks = observer.rollback_requests()
+        # Must observe at least one rollback (else vacuous —
+        # speculation didn't fire).
+        assert len(rollbacks) >= 1, (
+            "no RollbackCacheRequests observed — speculation "
+            "didn't fire, test is vacuous"
+        )
+        for rb in rollbacks:
+            # CONSTANT-K invariant: every rollback drops K + 1
+            # regardless of acceptance count. Wire observer
+            # cannot distinguish full-accept rounds from
+            # partial-accept rounds.
+            assert rb.n_positions_to_drop == K + 1, (
+                f"observed rollback with n_positions_to_drop="
+                f"{rb.n_positions_to_drop}; expected K+1={K + 1} "
+                f"(constant-K invariant broken)"
+            )
+            # Every rollback must carry the encrypted replay
+            # prefix (cipher is wired). Plaintext form must
+            # NOT appear (mutual-exclusion + the encrypted-
+            # cipher path is preferred).
+            assert rb.encrypted_replay_accepted_prefix is not None, (
+                "rollback under always_rollback_k + cipher "
+                "missing encrypted_replay_accepted_prefix"
+            )
+            assert rb.replay_accepted_prefix is None, (
+                "plaintext replay_accepted_prefix on the wire "
+                "when cipher is wired (mutual-exclusion broken)"
+            )
+            # target_stage_index must be set for the AAD binding.
+            assert rb.target_stage_index is not None
+            assert 0 <= rb.target_stage_index < 2  # 2-stage chain
+
+    def test_e4_constant_k_invariant_smoke(
+        self, hf_model_and_tokenizer,
+    ):
+        """Smoke: under always_rollback_k=True, the executor
+        emits exactly max_tokens output tokens and the
+        terminal ChainExecutionResult fires."""
+        model, tokenizer = hf_model_and_tokenizer
+        prompt = "The quick brown fox"
+        max_tokens = 6
+        K = 2
+
+        (
+            executor, alice_identity, bob_identity, _, _, _,
+        ) = _build_constant_time_speculative_two_stage(
+            model, tokenizer,
+            speculation_depth=K,
+            sharded_default_max_tokens=max_tokens,
+            always_rollback_k=True,
+        )
+        chain = _make_chain(
+            alice_identity.node_id, bob_identity.node_id,
+        )
+        events = list(executor.execute_chain_streaming(
+            request=_make_request(
+                prompt=prompt, max_tokens=max_tokens,
+                temperature=0.7,
+            ),
+            chain=chain,
+        ))
+        stream_tokens = [
+            e for e in events if isinstance(e, StreamToken)
+        ]
+        result = next(
+            e for e in events
+            if isinstance(e, ChainExecutionResult)
+        )
+        assert len(stream_tokens) == max_tokens
+        assert result is not None
+
+
+class TestX25519PerRequestKeyRotation:
+    """Phase 3.x.11.q.y' Task 6 — pure-cipher proof that fresh
+    ephemeral keypairs per request prevent cross-request
+    decryption.
+
+    Lighter-weight than the full E2E builder (avoids the
+    distilgpt2 model load) — the X25519 + AES-GCM round-trip
+    is a property of ProbsCipher's surface, not of the chain
+    integration."""
+
+    def test_e5_x25519_per_request_key_rotation(self):
+        from prsm.compute.chain_rpc.probs_cipher import (
+            X25519AnchoredCipher,
+        )
+        # Server long-term key.
+        srv_priv, srv_pub = X25519AnchoredCipher.generate_keypair()
+        srv = X25519AnchoredCipher(srv_priv)
+
+        # Two requests, two distinct ephemeral keypairs.
+        eph1_priv, eph1_pub = X25519AnchoredCipher.generate_keypair()
+        eph2_priv, eph2_pub = X25519AnchoredCipher.generate_keypair()
+        # Fresh ephemerals must differ (X25519 generate_keypair is
+        # backed by the OS CSPRNG; collision probability ≪ 2^-128).
+        assert eph1_pub != eph2_pub
+        ec1 = X25519AnchoredCipher(eph1_priv)
+        ec2 = X25519AnchoredCipher(eph2_priv)
+
+        # Encrypt under req-1's ephemeral.
+        ct1 = ec1.encrypt(
+            probs=[0.5, 0.3],
+            request_id="req-1", stage_index=0,
+            ephemeral_pubkey=srv_pub, chain_total_stages=2,
+        )
+        # Server decrypts req-1 with req-1's eph_pub → success.
+        out1 = srv.decrypt(
+            ciphertext=ct1,
+            request_id="req-1", stage_index=0, expected_k=2,
+            ephemeral_pubkey=eph1_pub, chain_total_stages=2,
+        )
+        assert out1 == pytest.approx([0.5, 0.3], abs=1e-12)
+
+        # Adversary replays req-1's ciphertext but substitutes
+        # req-2's ephemeral pubkey (e.g., to forge a fresh
+        # request envelope). Server's derived key is now
+        # ECDH(srv_priv, eph2_pub) which is different from
+        # ECDH(srv_priv, eph1_pub). AES-GCM tag mismatch.
+        from prsm.compute.chain_rpc.probs_cipher import (
+            ProbsDecryptionError,
+        )
+        with pytest.raises(ProbsDecryptionError):
+            srv.decrypt(
+                ciphertext=ct1,
+                request_id="req-1", stage_index=0, expected_k=2,
+                ephemeral_pubkey=eph2_pub,  # rotated!
+                chain_total_stages=2,
+            )
+
+        # Sanity: req-2's own ciphertext decrypts fine with its
+        # own ephemeral.
+        ct2 = ec2.encrypt(
+            probs=[0.7],
+            request_id="req-2", stage_index=0,
+            ephemeral_pubkey=srv_pub, chain_total_stages=2,
+        )
+        out2 = srv.decrypt(
+            ciphertext=ct2,
+            request_id="req-2", stage_index=0, expected_k=1,
+            ephemeral_pubkey=eph2_pub, chain_total_stages=2,
+        )
+        assert out2 == pytest.approx([0.7], abs=1e-12)
