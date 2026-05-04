@@ -1,7 +1,7 @@
 # PRSM Mainnet Audit — Cumulative Refresh (2026-04-27)
 
 **Date:** 2026-04-27
-**Audit tag:** `cumulative-audit-prep-20260430-g` (pins commit `b64ad6a1`)
+**Audit tag:** `cumulative-audit-prep-20260504-h` (pins commit at HEAD post Phase 1.3 Task 8 deploy)
 **Supersedes:**
 - `phase7.1x-audit-prep-20260422-2` (Phase 7/7.1/7.1x — economic substrate; still valid for that surface, now extended)
 
@@ -2328,6 +2328,49 @@ Phase 3.x.11.q.x closes the two named honest-scope items that have been carrying
 
 **Tag:** none — this is infrastructure (shell + JS scripts + runbooks), not a tagged smart-contract release. The 2026-04-30 commit window is `34b59c11..e4c52144` (13 commits).
 
+### ✅ Phase 1.3 Task 8 — CEREMONY EXECUTED 2026-05-04
+
+The Phase 1.3 Task 8 ceremony executed on Base mainnet 2026-05-04. Tag: `phase1.3-task8-complete-20260504`. Manifest committed to repo at `contracts/deployments/provenance-base-1777917793612.json`.
+
+**Live contract addresses on Base mainnet (chainId 8453):**
+
+| Contract | Address | Verified on Basescan |
+|---|---|---|
+| ProvenanceRegistry | `0xdF470BFa9eF310B196801D5105468515d0069915` | ✓ |
+| RoyaltyDistributor | `0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2` | ✓ |
+| FTNSToken (canonical) | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` | ✓ pre-existing |
+| Foundation Safe (NETWORK_TREASURY) | `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` | ✓ Safe Wallet 2-of-3 |
+
+**Foundation Safe configuration (verified end-to-end pre-ceremony):**
+- Threshold: 2 of 3 owners
+- Owners: Ledger Nano S Plus + Trezor Safe 3 + OneKey Classic 1S Pure (hardware-wallet addresses)
+- Phase 4.2 round-trip: Ledger + Trezor signing flow verified
+- Phase 4.3 round-trip: OneKey + Ledger signing flow verified
+
+**On-chain immutable wiring validated by `verify-provenance-deployment.js`:**
+
+```
+✓ ProvenanceRegistry bytecode: 2102 bytes
+✓ RoyaltyDistributor bytecode: 2729 bytes
+✓ ftns()             == 0x5276a3756C85f2E9e46f6D34386167a209aa16e5  (canonical FTNS)
+✓ registry()         == 0xdF470BFa9eF310B196801D5105468515d0069915  (deployed Registry)
+✓ networkTreasury()  == 0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791  (Foundation Safe)
+✓ NETWORK_FEE_BPS    == 200 (= 2.00%)
+✓ NetworkTreasury bytecode: 171 bytes (Safe contract, not EOA)
+✓ FTNS.symbol()      == "FTNS"
+✅ All on-chain state matches manifest.
+```
+
+**Ceremony evidence the auditor will read:**
+- Manifest JSON in repo: `contracts/deployments/provenance-base-1777917793612.json`
+- Commit SHA: `2daeafec`
+- Tag: `phase1.3-task8-complete-20260504`
+- Basescan source-verified ABIs: linkable from each address above
+
+**Disposable deployer key retired post-ceremony.** Per Multi-Sig Action Plan §5–§6, the deployer key was generated in-terminal via `eth_account.Account.create()`, used to sign the 2 contract deploys + 2 verify calls, then swept (~$11.83 returned to Ledger via tx `0xdda889bb04b7324eba1d11296c1448eb73266d258c010ee29310302797b44d31`). Terminal closed → env var cleared → `unset HISTFILE` prevented persistence. The address has no remaining on-chain authority: contracts are non-Ownable + non-upgradeable.
+
+**Operational lessons captured at:** `docs/2026-05-04-task8-deploy-ceremony-lessons.md` (worth reading alongside this section for the Phase 7 / Phase 7.1 deploy ceremonies that follow auditor sign-off).
+
 ### Headline guarantees — Phase 1.3 Task 8 (immediate ceremony post-hardware)
 
 1. **Phase 1.3 Task 8 deploy script (`contracts/scripts/deploy-provenance.js`)** — ProvenanceRegistry + RoyaltyDistributor with three NEW mainnet-only safety guards (commit `85988825`):
@@ -2372,9 +2415,9 @@ This is the BIGGER ceremony, post-external-audit (currently gated on Phase 7 Tas
 
 ### Honest scope (carries forward)
 
-- **Hardware multi-sig signers + Foundation Safe deployment** — operator-side prep per Multi-Sig Action Plan. Hardware arrives 2026-05-01; ceremony executable from 2026-05-01 evening at earliest.
-- **Real Base Sepolia full-ceremony rehearsal with hardware signers** — tonight's rehearsals were against hardhat-local stub signers + stub treasury. Real-multi-sig rehearsal is post-hardware-init.
-- **External audit gate on the audit-bundle ceremony** — Phase 7 Task 9 + Phase 7.1 Task 9 in `[in_progress]` state pending external auditor sign-off.
+- **Hardware multi-sig signers + Foundation Safe deployment** — ✅ EXECUTED 2026-05-03 (Safe deploy) + 2026-05-04 (provenance contracts). See "CEREMONY EXECUTED 2026-05-04" subsection above.
+- **Real Base Sepolia full-ceremony rehearsal with hardware signers** — superseded by direct mainnet execution. Phase 4.2 + 4.3 round-trip tests on Base mainnet itself proved the 2-of-3 signing flow end-to-end before the deploy ceremony ran.
+- **External audit gate on the audit-bundle ceremony** — Phase 7 Task 9 + Phase 7.1 Task 9 still in `[in_progress]` state pending external auditor sign-off. Foundation Safe `0x91b0...5791` from today's ceremony is the canonical `MULTISIG` argument these ceremonies will use when they execute.
 - **G4 verifier-contract migration** — `StorageSlashing.authorizedVerifier` accepts EOA prover for v1; eventual migration to a verifier contract when feasible.
 - **F10 BASE_RPC_URL archival recommendation** — operator-side choice; soft-recommended in runbooks.
 - **FTNSToken DEFAULT_ADMIN_ROLE handoff** — separate decision on its own timeline. Production FTNS at `0x5276…` was deployed by a hot key the Foundation will load onto a hardware device 2026-05-01; whether/when to hand admin to the Safe is a Foundation governance call.
@@ -2435,6 +2478,7 @@ When the Foundation signs the auditor contract:
 - **1.0 (2026-04-29)** — added §7.12 "Sampling-Correct Speculation under Temperature > 0" covering Phase 3.x.11.y.x. 8 headline guarantees: greedy-equivalence regression preserved (v1 traffic bit-identical to Phase 3.x.11.y); sampling-correctness invariant under T > 0 (Leviathan-2023 §2.2 marginal-output-equals-softmax(logits/T) — proven via 5000-trial unit test + 2-stage E2E with TV<0.35 at distilgpt2+T=0.7+top_k=50); `proposed_token_probs` wire-format extension co-set with proposed_token_ids + signing-payload commitment + omit-when-None canonical encoding; tail-shape narrowing (v2 returns ac+1, NOT K+1; split-validator on both runner and executor sides); critical correctness fix to rollback math (`(k_round + 1) - len(emitted)` instead of `len(verified) - len(emitted)`, which under-counts in v2 partial-accept); adaptive K state machine (rolling 4-round window, halve <25% / double >75%, floor 1 / ceiling MAX_VERIFY_BATCH_TOKENS-1); server-side stale-runner backwards-compat (TypeError → MALFORMED_REQUEST, no silent fallback); executor-side capability check on draft.propose_with_probs. Threat-model addendum §3.6 added covering 3 new content-correlated surfaces: accept-rate channel narrows under stochastic (was deterministic v1, now noisy v2); proposed_token_probs ships K floats per VERIFY round (NEW wire surface, strongest leak); adaptive K cross-round correlation (operator-configurable flat-K opt-out for privacy-vs-perf trade). Phase 3.x.11.q.y bundled placeholder for constant-time speculation (encrypted/padded probs + masked accept-rate). Phase 3.x.11.y.x tag: phase3.x.11.y.x-merge-ready-20260429 (pending Task 9 review).
 - **1.4 (2026-04-30)** — added §7.15 "Phase 3.x.11.q.x — per-stage cadence + M2 response-size padding". Closes the two named honest-scope items carrying since §7.13: (1) per-stage wire timing leak under sharded autoregressive decode via `RpcChainExecutor.per_stage_dispatch_cadence_seconds=...` (clamps inter-iteration cadence in BOTH non-speculative + speculative sharded loops; per-stage RPCs arrive at uniform inter-arrival regardless of K and decode work); (2) M2 response-size leak via `BatchedTrailingShardedExecutor.pad_to_bytes=...` (UTF-8-safe truncation + whitespace fill to fixed byte target; codepoint-boundary safety via decode(errors="ignore")). Factory threads pad_to_bytes for m2 + rejects for m1. Composition: per-stage cadence + chain-level decorators wired together = full-network constant-time masking. Threat-model §3.7 + §3.8 updated to 1.6 revision. After q.x, the streaming-inference subsystem closes every named structural deferral; only Phase 3.x.11.q.y'' (multi-stage replay forward path, conditional on telemetry) remains as a follow-up. Phase 3.x.11.q.x tag: phase3.x.11.q.x-merge-ready-20260430 (pending Task 5 review).
 
+- **1.7 (2026-05-04)** — ✅ Phase 1.3 Task 8 ceremony EXECUTED on Base mainnet. Foundation Safe `0x91b0...5791` (2-of-3 Ledger+Trezor+OneKey) + ProvenanceRegistry `0xdF47...9915` + RoyaltyDistributor `0x3E82...D6c2` deployed and source-verified on Basescan. Both contracts pass `verify-provenance-deployment.js` on-chain wiring validation (ftns/registry/networkTreasury/NETWORK_FEE_BPS=200/treasury-bytecode-171). 2% network fee now permanently routed to Foundation Safe via immutable constructor arg. §7.16 updated with "CEREMONY EXECUTED 2026-05-04" subsection at top documenting live addresses, manifest commit `2daeafec`, and milestone tag `phase1.3-task8-complete-20260504`. Operational lessons captured at `docs/2026-05-04-task8-deploy-ceremony-lessons.md` covering: eth_account 0x-prefix gotcha, Alchemy network-specific URLs (caught by chainId pin), Base L1 data fee buffer requirement for sweeps, and the security incident around deployer key paste in chat (containable because contracts are non-Ownable+non-upgradeable; hardware wallets remain the primary defense for keys with ongoing authority). Multi-Sig Action Plan addendum committed to operator's iCloud Vault for next ceremony's reference.
 - **1.6 (2026-04-30)** — repo cleanup sprint completes: untracked count 168 → 0 across all 7 categorized sections of `docs/2026-04-30-untracked-files-audit.md` (Phase 1 + §A workflows + §B compute/ + §C tests/ + §D PHASE_7_API_REFERENCE.md + §E nginx ipfs-proxy.conf + §F misc). 244 files affected total. Single-session execution after every category investigated converged on the same finding pattern: each cluster had an explicit v1.6/v1.7 deletion commit, tracked code was designed to work without them (soft-import shims with `*_AVAILABLE = False` flags), and zero hard `from prsm... import` statements existed in live code paths. §B alone removed ~159 files / ~80K+ LoC across 6 compute/ subdir clusters (chronos/ + agents/ + federation/ + collaboration/ + nwtn/ + 12 other subdirs) via `git clean -fd prsm/compute/`. §C relocated 58 untracked tests to `tests/_legacy/2026-04-30-untracked-sweep/` mirroring the task #89 quarantine precedent. Test-suite verification post-sprint: `pytest tests/ --collect-only --ignore=tests/_legacy` reports **6,510 tests collected** with zero collection errors. Repo is now in a materially cleaner state for external auditor handoff than at sprint start. Sprint commits: f2f6029b..b64ad6a1 (this tag).
 - **1.5 (2026-04-30)** — added §7.16 "Phase 1.3 Task 8 deploy-ceremony infrastructure". DIFFERENT AXIS from §7.1-§7.15 (which covered the streaming-inference subsystem): §7.16 covers the operator-facing scripts + runbooks + rehearsal infrastructure that wrap the on-chain contracts auditors review under Phase 1.3 + Phase 7 + Phase 7.1 + Phase 8 + Phase 7-storage. Two ceremonies covered: (a) Phase 1.3 Task 8 (immediate, post-hardware) — deploy-provenance.js with three new mainnet-only safety guards (chainId pin + canonical-FTNS pin + treasury-is-contract); 4-script T-0 pipeline (pre-task8-checklist → deploy-provenance → verify-provenance-deployment → post-task8-handoff-checklist); (b) post-audit ceremony (audit-bundle + Phase 8 + Phase 7-storage; gated on Phase 7 Task 9 + Phase 7.1 Task 9 external audit) — 9 contracts + transferOwnership for 7 Ownable + AccessControl handoff for FTNSToken; G1+G2+G3+G5+G6 audit gaps closed. 7 trust seams called out for auditor focus: disposable deployer key, two-phase deploy model rationale, MINTER_ROLE post-handoff governance tx, mainnet-fork dry-run safety methodology, hardhat-config pkAccounts() placeholder rejection, idempotent transfer ceremonies, engineering audit of Multi-Sig Action Plan with executable F1+F3+F5+F9 closures, stale-script purge (deploy.js + verify-deployment.js were ethers v5 + referenced non-existent contracts; deleted with downstream reconciliation). 13-commit sprint window: 34b59c11..e4c52144. No round-1 review applies (deploy-ceremony infrastructure, not smart-contract code; chain test caught one real bug pre-commit, fixed in 7ddf87b3). Hardware-gated honest-scope items: Foundation Safe deployment + real Base Sepolia full-ceremony rehearsal + external audit gate + FTNSToken DEFAULT_ADMIN_ROLE handoff timing.
 - **1.3 (2026-04-30)** — added §7.14.1 "Phase 3.x.11.q.y' delta" covering closure of v1 honest-scope residuals. Two channels closed: (1) `RollbackCacheRequest.n_positions_to_drop` leak via `RpcChainExecutor.always_rollback_k=True` + new `replay_accepted_prefix` / `encrypted_replay_accepted_prefix` / `target_stage_index` wire fields with mutual-exclusion + co-set validators; rollback-distinct AAD `b"|rollback"` defends against cross-AAD replay; server decrypts at the boundary + drives `runner.replay_accepted_prefix` → forward over the prefix tokens to repopulate the cache (stage-0 only at v1; non-stage-0 best-effort honest-scope); (2) operator-managed PSK distribution via `X25519AnchoredCipher` + `HandoffToken.ephemeral_pubkey` field (signed via the existing settler signature; relay substitution breaks `verify_with_anchor`); per-request ECDH + HKDF over `(request_id, stage_index, chain_total_stages)` → forward secrecy across requests + chain-length forgery defense. E2E pin transitions from `test_e3_residual_rollback_leak_is_documented` (q.y baseline; asserts leak presence) to `TestAlwaysRollbackKE2E::test_e3_constant_k_rollback_pin` (q.y' opt-in; asserts `n_positions_to_drop == K + 1` regardless of acceptance). Threat-model addendum §3.8 updated to 1.5. Honest-scope residuals carry forward: multi-stage replay best-effort, replay window inside `deadline_unix`, post-quantum (R6), multi-position §2.2 marginal narrowing, per-stage timing leak (Phase 3.x.11.q.x), adaptive K under flat-K is OFF. Phase 3.x.11.q.y' tag: phase3.x.11.q.y'-merge-ready-20260430 (pending Task 8 review).
