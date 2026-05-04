@@ -11,8 +11,10 @@ coverage.json
 # Build info
 build-info
 
-# Deployment outputs
+# Deployment outputs — testnet/dev manifests excluded; mainnet manifests
+# are permanent on-chain records and committed as audit artifacts.
 deployments/*.json
+!deployments/*-base-*.json
 
 # Package manager
 # package-lock.json is committed for reproducible CI builds (hardhat
