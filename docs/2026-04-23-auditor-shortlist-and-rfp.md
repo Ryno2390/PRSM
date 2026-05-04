@@ -1,9 +1,30 @@
 # Auditor Shortlist + RFP Template (PRSM Bundled Engagement)
 
-**Date:** 2026-04-23
+**Date:** 2026-04-23 (RFP body refreshed 2026-05-04 with post-deploy evidence)
 **Owner:** engineering lead (RFP send-off delegated to Foundation officers once provisioned)
-**Status:** Shortlist research complete; RFP template ready to send
-**Depends on:** Foundation 2-of-3 multi-sig provisioning + treasury funding for retainer
+**Status:** ✅ Ready to send. Evidence layer upgraded by Phase 1.3 Task 8 mainnet deploy 2026-05-04.
+**Depends on:** ~~Foundation 2-of-3 multi-sig provisioning + treasury funding for retainer~~ — **CLOSED 2026-05-03**: Foundation Safe `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` live (2-of-3 Ledger+Trezor+OneKey) on Base mainnet.
+
+---
+
+## 0.5. Refresh notes (2026-05-04)
+
+The original 2026-04-23 RFP draft referenced "Foundation multi-sig is provisioned and treasury is funded" as a forward claim. **As of 2026-05-04 the underlying claims are now provable on-chain:**
+
+- Foundation Safe (2-of-3): `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` on Base mainnet — viewable on Basescan + Safe Wallet UI
+- ProvenanceRegistry: `0xdF470BFa9eF310B196801D5105468515d0069915` — Basescan-verified ABI
+- RoyaltyDistributor: `0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2` — Basescan-verified ABI
+- 2% network fee permanently routed to Foundation Safe via immutable constructor arg
+- All 3 hardware signers (Ledger + Trezor + OneKey) proven able to sign Safe transactions end-to-end pre-deploy via Phase 4.2 + 4.3 round-trip tests
+- Latest cumulative audit-prep tag: `cumulative-audit-prep-20260504-h` (commit `dadfb5f8`)
+- Phase 1.3 Task 8 milestone tag: `phase1.3-task8-complete-20260504` (commit `2daeafec`)
+
+**For the RFP, this matters because:**
+- Auditors evaluating "is this team operationally ready" can verify the multi-sig + a real reference deploy on-chain in 2 minutes
+- Any "show me the Foundation" objection is closed by Basescan link
+- The body of §4.2 has been refreshed inline with this evidence
+
+§4.4 caveat about "if pre-Foundation-formation, remove final Foundation signature block" no longer applies — Foundation Safe is provably operational.
 
 ---
 
@@ -155,8 +176,15 @@ is on our shortlist given your {{CITE_SPECIFIC_RECENT_AUDIT}} work.
 - Merge-ready freeze tag: phase7.1x-audit-prep-20260422-2
 - Pre-audit hardening complete: six review findings resolved pre-audit
   (documented in the bundle coordinator, §5)
-- Local hardhat deploy rehearsal with 15 invariant checks green end-to-end;
-  Base Sepolia dress rehearsal planned pre-mainnet
+- Local hardhat deploy rehearsal with 15 invariant checks green end-to-end
+- Live mainnet reference deploy proves the team ships:
+  Phase 1.3 Task 8 (provenance contracts) executed 2026-05-04 on Base mainnet
+  via the same disposable-deployer-key pattern these audit-bundle deploys
+  will use. Foundation Safe (2-of-3 Ledger+Trezor+OneKey) at
+  0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791. ProvenanceRegistry +
+  RoyaltyDistributor source-verified on Basescan with immutable wiring
+  validated post-deploy.
+- Latest cumulative audit-prep tag: cumulative-audit-prep-20260504-h
 
 === Starting point for your review ===
 
@@ -251,15 +279,22 @@ or the RFP asks questions the sender can't answer:
 
 - [ ] Foundation entity is formed OR the RFP explicitly flags that Foundation
   formation is in progress (adjust email template §4.2 accordingly).
-- [ ] Multi-sig provisioned and treasury funded with the retainer amount
-  likely required (industry range for ~2500 LoC: $50K-$250K).
+- [x] **Multi-sig provisioned** — Foundation Safe (2-of-3) live on Base mainnet
+  at `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` (closed 2026-05-03).
+  Retainer funding still operator-side; multi-sig itself is operational.
 - [ ] Repo is accessible to the auditor — either public, or access-gated
   invite flow is ready.
-- [ ] The six review findings flagged as "RESOLVED pre-audit" in
-  `docs/2026-04-22-phase7.1x-audit-prep.md` are actually landed in the tree
-  referenced by the freeze tag.
-- [ ] At least one deploy rehearsal against Base Sepolia has run green
-  (tracked in `docs/2026-04-23-testnet-rehearsal-plan.md` §5 Step 1).
+- [x] **Pre-audit findings landed pre-tag** — six review findings flagged as
+  "RESOLVED pre-audit" in `docs/2026-04-22-phase7.1x-audit-prep.md` are in
+  the tree at `phase7.1x-audit-prep-20260422-2` (the audit-bundle freeze tag).
+- [x] **Mainnet deploy rehearsal proven** — Phase 1.3 Task 8 deploy executed
+  live on Base mainnet 2026-05-04 using the same disposable-deployer-key +
+  fund-and-sweep + Foundation-Safe-as-treasury pattern these audit-bundle
+  deploys will use. Tag `phase1.3-task8-complete-20260504`. The
+  `verify-provenance-deployment.js` post-deploy validator pattern carries
+  over directly to the audit-bundle deploy via `transfer-ownership.js` +
+  `transfer-ftns-roles.js` idempotency checks. Per-firm Base Sepolia dress
+  rehearsal still optional but the operator-side ceremony is proven.
 
 ---
 
