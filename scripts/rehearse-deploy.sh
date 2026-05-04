@@ -271,6 +271,20 @@ if [[ "${NETWORK}" == "hardhat-local" ]] && [[ "${SKIP_TRANSFER:-0}" != "1" ]]; 
   fi
   echo "   ✅ idempotency holds (7/7 skipped on re-run)"
 
+  # ── 5b. Post-handoff audit-bundle state verification ─────────────
+  # verify-audit-bundle-deployment.js mirrors the verify-provenance-
+  # deployment.js pattern for the audit-bundle stack. With EXPECTED_OWNER
+  # set, it asserts every Ownable contract was transferred to the stub
+  # multi-sig — catches a bug where transfer-ownership.js silently no-ops
+  # or transfers to the wrong address. Also re-validates cross-wires +
+  # init params + bytecode + FTNS symbol post-handoff.
+  echo
+  echo "   Verifying audit-bundle on-chain state + post-handoff owner…"
+  AUDIT_BUNDLE_MANIFEST="${AB}" \
+    EXPECTED_OWNER="${STUB_MULTISIG}" \
+    npx hardhat run scripts/verify-audit-bundle-deployment.js ${HARDHAT_NETWORK_FLAG}
+  echo "   ✅ audit-bundle on-chain state matches manifest + owner == stub multi-sig"
+
   # FTNS role transfer is only relevant if THIS rehearsal deployed FTNS
   # itself (FTNS_DEPLOY_MODE=real). For mock + existing modes the
   # deployer never held admin keys on the FTNS token, so nothing to
