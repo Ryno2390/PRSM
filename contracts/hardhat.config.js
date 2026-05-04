@@ -11,10 +11,39 @@ require("dotenv").config();
 // network targets, including hardhat-local). Filter to the canonical
 // 0x-prefixed 64-hex-char (32-byte) format.
 const PK_RE = /^0x[0-9a-fA-F]{64}$/;
+let _malformedPkWarned = false;  // dedup across N network configs
 function pkAccounts() {
   const pk = process.env.PRIVATE_KEY;
   if (!pk) return [];
-  if (!PK_RE.test(pk)) return [];  // malformed → skip silently for hardhat-local
+  if (!PK_RE.test(pk)) {
+    // 2026-05-04 ceremony lesson L1: silently returning [] when PRIVATE_KEY
+    // is set-but-malformed leaves the operator with `TypeError: Cannot read
+    // properties of undefined (reading 'address')` deep inside the deploy
+    // script — opaque + costs ~5 min of debug. A single warn here turns
+    // that into a 5-second debug.
+    //
+    // Most common cause caught today: eth_account's `acct.key.hex()` in
+    // some library versions returns the key WITHOUT the `0x` prefix.
+    // Fix: `export PRIVATE_KEY="0x$PRIVATE_KEY"`.
+    //
+    // We continue returning [] (not throwing) so hardhat-local rehearsals
+    // that don't need PRIVATE_KEY still work. Dedup'd across calls so the
+    // warn fires once even though hardhat enumerates ~16 network configs.
+    if (!_malformedPkWarned) {
+      const len = pk.length;
+      const hint = !pk.startsWith("0x")
+        ? `missing 0x prefix; try: export PRIVATE_KEY="0x$PRIVATE_KEY"`
+        : len !== 66
+        ? `wrong length (got ${len}, expected 66 = 0x + 64 hex)`
+        : `non-hex characters in key body`;
+      console.warn(
+        `[hardhat.config:pkAccounts] PRIVATE_KEY set but malformed; ` +
+        `skipping all networks that require it (${hint})`
+      );
+      _malformedPkWarned = true;
+    }
+    return [];
+  }
   return [pk];
 }
 

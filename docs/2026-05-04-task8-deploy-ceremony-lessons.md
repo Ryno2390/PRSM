@@ -129,7 +129,12 @@ File "<string>", line 1
 
 1. **Multi-Sig Action Plan §5 keygen output should NEVER print the key inlined with code.** Print key on its own line with explicit `[KEY ON THIS LINE — DO NOT COPY THIS LINE]` markers. If it must be a Python value, never as a `-c` one-liner; always via `os.environ['PRIVATE_KEY']` pulled from terminal env.
 
-2. **§6 sweep script should be in the repo as a file** (not pasted as a one-liner). Then the user runs `python3 scripts/sweep_deployer.py` which reads the key from env var. The temp-file sweep script we built today is a starting point for committing.
+2. **§6 sweep script committed as `scripts/sweep-deployer.py`** ✅ landed post-ceremony. Reads `PRIVATE_KEY` from env var, never as CLI arg or Python literal. Operator workflow simplifies to:
+   ```bash
+   export RECOVERY_ADDR="0x..."   # your Ledger Base address
+   python3 scripts/sweep-deployer.py
+   ```
+   Built-in safety: validates key format (auto-prepends 0x if missing per L1), validates RECOVERY_ADDR ≠ DEPLOYER_ADDR, validates RPC chain matches expected, reserves 5e12 wei buffer for Base L1 data fee per L3, prints clear final-state report.
 
 3. **All operator-facing scripts that touch keys should print to stderr a banner:** "DO NOT paste this terminal's contents into any chat, document, or screenshot. The PRIVATE_KEY env var is in this shell's memory."
 

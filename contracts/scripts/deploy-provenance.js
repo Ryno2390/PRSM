@@ -38,6 +38,19 @@ async function main() {
   console.log(`FTNS token:       ${ftnsAddress}`);
   console.log(`Network treasury: ${treasury}`);
 
+  // 2026-05-04 ceremony lesson: the operator hit two issues (PRIVATE_KEY
+  // missing 0x prefix; BASE_RPC_URL pointing at ETH mainnet not Base) that
+  // pre-task8-checklist.sh would have caught in 2 seconds. Print a banner
+  // here so future operators are reminded.
+  if (isMainnet) {
+    console.log("");
+    console.log("⚠️  Did you run scripts/pre-task8-checklist.sh first?");
+    console.log("   It catches PRIVATE_KEY format / BASE_RPC_URL chainId /");
+    console.log("   FTNS bytecode / treasury-bytecode issues BEFORE gas burns.");
+    console.log("   If not run yet, abort with Ctrl+C and run it now.");
+    console.log("");
+  }
+
   // ── Phase 1.1 Task 9: preflight ─────────────────────────────────────
   // Constructor args are immutable on RoyaltyDistributor. A typo here is
   // permanent — re-deploy is the only fix. Catch mistakes BEFORE we burn
