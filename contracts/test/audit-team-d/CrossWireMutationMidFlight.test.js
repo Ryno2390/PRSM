@@ -29,19 +29,17 @@ describe("[Team D] D11 — Cross-wire owner mutation breaks in-flight batches", 
     token = await Token.deploy();
     await token.waitForDeployment();
 
-    const Pool = await ethers.getContractFactory("EscrowPool");
-    pool = await Pool.deploy(owner.address, await token.getAddress(), ethers.ZeroAddress);
-    await pool.waitForDeployment();
-
-    pool2 = await Pool.deploy(owner.address, await token.getAddress(), ethers.ZeroAddress);
-    await pool2.waitForDeployment();
-
     const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
     registry = await Registry.deploy(owner.address, WINDOW);
     await registry.waitForDeployment();
 
-    await pool.connect(owner).setSettlementRegistry(await registry.getAddress());
-    await pool2.connect(owner).setSettlementRegistry(await registry.getAddress());
+    const Pool = await ethers.getContractFactory("EscrowPool");
+    pool = await Pool.deploy(owner.address, await token.getAddress(), await registry.getAddress());
+    await pool.waitForDeployment();
+
+    pool2 = await Pool.deploy(owner.address, await token.getAddress(), await registry.getAddress());
+    await pool2.waitForDeployment();
+
     await registry.connect(owner).setEscrowPool(await pool.getAddress());
 
     await token.mint(requester.address, ONE_FTNS * 100n);
@@ -72,7 +70,7 @@ describe("[Team D] D11 — Cross-wire owner mutation breaks in-flight batches", 
     // PENDING with the wrong pool wired. Owner intervention required.
   });
 
-  it("setSettlementRegistry on pool: legitimate registry's finalize reverts CallerNotRegistry", async function () {
+  it("REGRESSION (HIGH-6): owner cannot re-point pool.settlementRegistry mid-flight — field is immutable, attack vector closed", async function () {
     const root = ethers.keccak256(ethers.toUtf8Bytes("root2"));
     const tx = await registry.connect(provider).commitBatch(
       requester.address, root, 1, ONE_FTNS * 10n, 0, ethers.ZeroHash, ""
@@ -80,15 +78,23 @@ describe("[Team D] D11 — Cross-wire owner mutation breaks in-flight batches", 
     const r = await tx.wait();
     const batchId = r.logs.find(l => l.fragment && l.fragment.name === "BatchCommitted").args[0];
 
-    // Owner of pool changes its registry pointer to an arbitrary address.
+    // Pre-fix: owner could have called pool.setSettlementRegistry(evil) here
+    // to break finalize. Post-fix: setter does not exist; low-level call to
+    // the old selector reverts because the function is not in the bytecode.
+    expect(pool.setSettlementRegistry).to.be.undefined;
     const evilRegistry = ethers.Wallet.createRandom().address;
-    await pool.connect(owner).setSettlementRegistry(evilRegistry);
-
-    await time.increase(WINDOW + 1);
-
-    // Real registry can no longer settle.
+    const nukedSelector = ethers.id("setSettlementRegistry(address)").slice(0, 10);
+    const data = nukedSelector + "000000000000000000000000" + evilRegistry.slice(2);
     await expect(
-      registry.finalizeBatch(batchId)
-    ).to.be.revertedWithCustomError(pool, "CallerNotRegistry");
+      owner.sendTransaction({ to: await pool.getAddress(), data })
+    ).to.be.reverted;
+
+    // settlementRegistry value is unchanged — still the legitimate registry.
+    expect(await pool.settlementRegistry()).to.equal(await registry.getAddress());
+
+    // Wait the challenge window — finalize succeeds because the cross-wire
+    // could not be tampered with.
+    await time.increase(WINDOW + 1);
+    await expect(registry.finalizeBatch(batchId)).to.not.be.reverted;
   });
 });

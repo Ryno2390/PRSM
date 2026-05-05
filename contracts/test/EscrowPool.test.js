@@ -237,41 +237,28 @@ describe("EscrowPool", function () {
   });
 
   describe("governance", function () {
-    it("owner can update the settlement registry", async function () {
-      await expect(pool.connect(owner).setSettlementRegistry(impostor.address))
-        .to.emit(pool, "SettlementRegistryUpdated")
-        .withArgs(registry.address, impostor.address);
-      expect(await pool.settlementRegistry()).to.equal(impostor.address);
+    // L2 audit HIGH-6: setSettlementRegistry was REMOVED. settlementRegistry
+    // is now immutable (constructor-only). Tests below assert the new
+    // contract surface: setter is gone, immutability is verifiable.
+    it("REGRESSION (HIGH-6): pool exposes no setSettlementRegistry", async function () {
+      expect(pool.setSettlementRegistry).to.be.undefined;
     });
 
-    it("non-owner cannot update the registry", async function () {
+    it("REGRESSION (HIGH-6): settlementRegistry value matches constructor arg and cannot be re-pointed", async function () {
+      // Initial value matches the constructor arg from beforeEach.
+      expect(await pool.settlementRegistry()).to.equal(registry.address);
+      // No exposed setter via the high-level binding.
+      expect(pool.setSettlementRegistry).to.be.undefined;
+      // Low-level call attempting to invoke a setSettlementRegistry
+      // selector (the old selector that no longer exists) reverts because
+      // the function is not present in the deployed bytecode.
+      const nukedSelector = ethers.id("setSettlementRegistry(address)").slice(0, 10);
+      const data = nukedSelector + "000000000000000000000000" + impostor.address.slice(2);
       await expect(
-        pool.connect(requester).setSettlementRegistry(impostor.address)
+        owner.sendTransaction({ to: await pool.getAddress(), data })
       ).to.be.reverted;
-    });
-
-    it("old registry loses authorization after an update", async function () {
-      await token
-        .connect(requester)
-        .approve(await pool.getAddress(), ONE_FTNS * 100n);
-      await pool.connect(requester).deposit(ONE_FTNS * 100n);
-
-      // Swap registry.
-      await pool.connect(owner).setSettlementRegistry(impostor.address);
-
-      // Old registry can no longer settle.
-      await expect(
-        pool
-          .connect(registry)
-          .settleFromRequester(requester.address, other.address, ONE_FTNS)
-      ).to.be.revertedWithCustomError(pool, "CallerNotRegistry");
-
-      // New registry can.
-      await expect(
-        pool
-          .connect(impostor)
-          .settleFromRequester(requester.address, other.address, ONE_FTNS)
-      ).to.emit(pool, "Settled");
+      // settlementRegistry value is unchanged.
+      expect(await pool.settlementRegistry()).to.equal(registry.address);
     });
 
     it("owner can update the FTNS token address", async function () {

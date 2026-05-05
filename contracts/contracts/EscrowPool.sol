@@ -21,15 +21,13 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
  *   - Anyone can deposit (to their own balance) or withdraw (from
  *     their own balance).
  *   - Only the registered `settlementRegistry` can call
- *     `settleFromRequester`. The registry is set once by the contract
- *     owner at deployment time (or updated via `setSettlementRegistry`
- *     with a published governance notice). The registry contract
- *     itself enforces its own access control on which batches can
- *     invoke settlement.
+ *     `settleFromRequester`. The registry is set ONCE in the constructor
+ *     and is immutable thereafter (L2 audit HIGH-6 / B-CROSS-1 fix).
+ *     The registry contract itself enforces its own access control on
+ *     which batches can invoke settlement.
  *   - The owner (Foundation multi-sig in production) can update the
- *     registry address and the FTNS token address (the latter exists
- *     as a defensive upgrade escape hatch; normal operations hold the
- *     token immutable).
+ *     FTNS token address as a defensive upgrade escape hatch (normal
+ *     operations hold the token immutable).
  *
  * ReentrancyGuard on deposit/withdraw/settle because the FTNS token
  * is an external contract — although the canonical FTNS implementation
@@ -38,7 +36,22 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
  */
 contract EscrowPool is Ownable, ReentrancyGuard, Pausable {
     IERC20 public ftns;
-    address public settlementRegistry;
+
+    /// @dev Settlement registry address. L2 audit HIGH-6 (B-CROSS-1)
+    /// fix: this is now IMMUTABLE — set once at construction, no
+    /// setter. Previously a compromised owner could re-point this to
+    /// an attacker EOA and call settleFromRequester to drain every
+    /// depositor's balance in 3 transactions. Closing this requires
+    /// re-deploying the pool if the registry is ever rotated, which
+    /// is the intended trade-off — the registry is meant to be a
+    /// permanent trust anchor of the protocol.
+    ///
+    /// Deploy ordering implication: BatchSettlementRegistry must be
+    /// deployed BEFORE EscrowPool. Registry's reciprocal pointer
+    /// (its escrowPool field) is set after-the-fact via
+    /// Registry.setEscrowPool — that direction remains mutable
+    /// (separately scoped; see Registry.setEscrowPool semantics).
+    address public immutable settlementRegistry;
 
     /// @dev Per-requester escrow balance. Incremented on deposit,
     /// decremented on withdraw or settlement.
@@ -52,7 +65,6 @@ contract EscrowPool is Ownable, ReentrancyGuard, Pausable {
         uint256 amount,
         address indexed caller  // which registry invoked
     );
-    event SettlementRegistryUpdated(address oldRegistry, address newRegistry);
     event FtnsTokenUpdated(address oldToken, address newToken);
 
     error ZeroAmount();
@@ -67,10 +79,11 @@ contract EscrowPool is Ownable, ReentrancyGuard, Pausable {
         address initialRegistry
     ) Ownable(initialOwner) {
         if (ftnsAddress == address(0)) revert ZeroAddress();
+        // initialRegistry may be address(0) at deploy time only when
+        // running unit tests that don't exercise the settle path —
+        // production deploys MUST set this to the registry's address
+        // since there is no setter to fix it after-the-fact.
         ftns = IERC20(ftnsAddress);
-        // initialRegistry may be address(0) at deploy time — registry
-        // is often deployed after the pool so the owner updates it
-        // via setSettlementRegistry once available.
         settlementRegistry = initialRegistry;
     }
 
@@ -154,17 +167,10 @@ contract EscrowPool is Ownable, ReentrancyGuard, Pausable {
 
     // ── Governance surface ────────────────────────────────────────
 
-    /**
-     * @notice Update the settlement registry address. Owner-only.
-     *         Should be paired with a PRSM-GOV-1 §10.3 14-day notice
-     *         in production governance.
-     * @param newRegistry address of the new BatchSettlementRegistry
-     */
-    function setSettlementRegistry(address newRegistry) external onlyOwner {
-        address old = settlementRegistry;
-        settlementRegistry = newRegistry;
-        emit SettlementRegistryUpdated(old, newRegistry);
-    }
+    // L2 audit HIGH-6 (B-CROSS-1) fix: setSettlementRegistry was
+    // removed. The field is now immutable — set in the constructor.
+    // Rotation requires re-deployment of EscrowPool; this is the
+    // intended trade-off documented at the field declaration above.
 
     /**
      * @notice Update the FTNS token address. Owner-only. Defensive
@@ -193,9 +199,11 @@ contract EscrowPool is Ownable, ReentrancyGuard, Pausable {
     /**
      * @notice Pause deposit / withdraw / settleFromRequester. Owner-only;
      *         intended for incident response per
-     *         docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md. Admin setters
-     *         (setSettlementRegistry, setFtnsToken) remain accessible
-     *         while paused so the owner can perform emergency rotation.
+     *         docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md. The remaining
+     *         admin setter (setFtnsToken) stays accessible while paused
+     *         so the owner can perform emergency token rotation.
+     *         Note: settlementRegistry is immutable post-HIGH-6 — pool
+     *         re-deploy is required for registry rotation.
      */
     function pause() external onlyOwner {
         _pause();

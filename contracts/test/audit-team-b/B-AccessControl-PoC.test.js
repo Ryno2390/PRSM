@@ -10,7 +10,10 @@
  *   B2  one-step transferOwnership — confirmed brick path on typo
  *   B3  role-graph cycles          — defense (admin-of-admin chain bottoms out)
  *   B4  renounceRole reachability  — confirmed: admin can renounce + brick UUPS
- *   B5  cross-wire mutability      — confirmed: owner can re-point cross-wires
+ *   B5  cross-wire mutability      — partial: settlementRegistry NOW
+ *                                     immutable (HIGH-6 fix); FTNS-token
+ *                                     swap + StakeBond.slasher remain
+ *                                     mutable (HIGH-7 territory)
  *   B6  pauser locking             — defense (any PAUSER unpauses)
  *   B7  initializer re-entry       — defense (`_disableInitializers` in ctor)
  *   B8  slasher acceptance         — confirmed: StakeBond.setSlasher accepts EOA
@@ -42,9 +45,12 @@ describe("Team B — Access Control PoC", function () {
       await pool.transferOwnership(typoTarget);
       expect(await pool.owner()).to.equal(typoTarget);
 
-      // Original deployer can no longer perform owner-only ops.
+      // Original deployer can no longer perform owner-only ops. (Note:
+      // post-HIGH-6, setSettlementRegistry was removed; we use the
+      // remaining owner-only setter setFtnsToken to demonstrate the
+      // bricked-ownership state.)
       await expect(
-        pool.connect(deployer).setSettlementRegistry(attacker.address),
+        pool.connect(deployer).setFtnsToken(attacker.address),
       ).to.be.revertedWithCustomError(pool, "OwnableUnauthorizedAccount");
 
       // Contract is permanently bricked: no one can set the registry,
@@ -87,38 +93,58 @@ describe("Team B — Access Control PoC", function () {
   });
 
   // ── B5 ──────────────────────────────────────────────────────────────
-  describe("B5 — cross-wire mutability after handoff", function () {
-    it("CONFIRMED: owner can re-point EscrowPool.settlementRegistry to attacker contract", async function () {
-      const [owner, foundation, attacker] = await ethers.getSigners();
+  describe("B5 — cross-wire mutability after handoff (post-HIGH-6: settlementRegistry now immutable)", function () {
+    it("REGRESSION (HIGH-6): owner CANNOT re-point EscrowPool.settlementRegistry — field is now immutable, no setter exposed", async function () {
+      const [owner, foundation, attacker, registry] = await ethers.getSigners();
       const MockERC20 = await ethers.getContractFactory("MockERC20");
       const ftns = await MockERC20.deploy();
 
+      // Constructor now requires a real registry address — the immutable
+      // field is set once and cannot change. Use `registry` signer as a
+      // stand-in EOA registry so we can demonstrate post-fix surface.
       const Pool = await ethers.getContractFactory("EscrowPool");
-      const pool = await Pool.deploy(owner.address, await ftns.getAddress(), ethers.ZeroAddress);
+      const pool = await Pool.deploy(
+        owner.address,
+        await ftns.getAddress(),
+        registry.address,
+      );
 
       // Simulate handoff: pretend `foundation` is the multi-sig.
       await pool.transferOwnership(foundation.address);
       expect(await pool.owner()).to.equal(foundation.address);
 
-      // A compromised multi-sig (or one signer + bribed second) can
-      // re-point the registry to an attacker-controlled contract.
-      await pool.connect(foundation).setSettlementRegistry(attacker.address);
-      expect(await pool.settlementRegistry()).to.equal(attacker.address);
+      // Post-fix: setSettlementRegistry no longer exists at the high-
+      // level binding. A compromised multi-sig CANNOT re-point.
+      expect(pool.setSettlementRegistry).to.be.undefined;
 
-      // From this point, ANY attacker.address-initiated tx to
-      // pool.settleFromRequester drains a requester's escrow to any
-      // recipient. Funds previously deposited by anyone are at risk.
+      // Low-level call attempting the old selector reverts because the
+      // function is not in the deployed bytecode.
+      const nukedSelector = ethers.id("setSettlementRegistry(address)").slice(0, 10);
+      const data =
+        nukedSelector + "000000000000000000000000" + attacker.address.slice(2);
+      await expect(
+        foundation.sendTransaction({ to: await pool.getAddress(), data }),
+      ).to.be.reverted;
+
+      // settlementRegistry value is unchanged — still the constructor arg.
+      expect(await pool.settlementRegistry()).to.equal(registry.address);
+
+      // attacker.address cannot trigger settleFromRequester even with
+      // funds available, because they are not the immutable registry.
       const TEN = ethers.parseUnits("10", 18);
       await ftns.mint(owner.address, TEN);
       await ftns.connect(owner).approve(await pool.getAddress(), TEN);
       await pool.connect(owner).deposit(TEN);
 
-      await pool
-        .connect(attacker)
-        .settleFromRequester(owner.address, attacker.address, TEN);
+      await expect(
+        pool
+          .connect(attacker)
+          .settleFromRequester(owner.address, attacker.address, TEN),
+      ).to.be.revertedWithCustomError(pool, "CallerNotRegistry");
 
-      expect(await ftns.balanceOf(attacker.address)).to.equal(TEN);
-      expect(await pool.balances(owner.address)).to.equal(0);
+      // Funds untouched.
+      expect(await ftns.balanceOf(attacker.address)).to.equal(0n);
+      expect(await pool.balances(owner.address)).to.equal(TEN);
     });
 
     it("CONFIRMED: owner can replace FTNS token via setFtnsToken, stranding all balances", async function () {

@@ -64,21 +64,19 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
     token = await Token.deploy();
     await token.waitForDeployment();
 
-    const Pool = await ethers.getContractFactory("EscrowPool");
-    escrowPool = await Pool.deploy(
-      owner.address,
-      await token.getAddress(),
-      ethers.ZeroAddress
-    );
-    await escrowPool.waitForDeployment();
-
+    // Post-HIGH-6 deploy ordering: registry first, then pool.
     const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
     registry = await Registry.deploy(owner.address, DEFAULT_WINDOW);
     await registry.waitForDeployment();
 
-    await escrowPool
-      .connect(owner)
-      .setSettlementRegistry(await registry.getAddress());
+    const Pool = await ethers.getContractFactory("EscrowPool");
+    escrowPool = await Pool.deploy(
+      owner.address,
+      await token.getAddress(),
+      await registry.getAddress()
+    );
+    await escrowPool.waitForDeployment();
+
     await registry.connect(owner).setEscrowPool(await escrowPool.getAddress());
 
     const Verifier = await ethers.getContractFactory("MockSignatureVerifier");

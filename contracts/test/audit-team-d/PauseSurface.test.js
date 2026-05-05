@@ -43,19 +43,18 @@ describe("Audit Team D — D-02 regression: pause surface on audit-bundle contra
     token = await Token.deploy();
     await token.waitForDeployment();
 
-    const Pool = await ethers.getContractFactory("EscrowPool");
-    escrowPool = await Pool.deploy(owner.address, await token.getAddress(), ethers.ZeroAddress);
-    await escrowPool.waitForDeployment();
-
     const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
     registry = await Registry.deploy(owner.address, CHALLENGE_WINDOW);
     await registry.waitForDeployment();
+
+    const Pool = await ethers.getContractFactory("EscrowPool");
+    escrowPool = await Pool.deploy(owner.address, await token.getAddress(), await registry.getAddress());
+    await escrowPool.waitForDeployment();
 
     const Bond = await ethers.getContractFactory("StakeBond");
     stakeBond = await Bond.deploy(owner.address, await token.getAddress(), UNBOND_DELAY);
     await stakeBond.waitForDeployment();
 
-    await escrowPool.connect(owner).setSettlementRegistry(await registry.getAddress());
     await registry.connect(owner).setEscrowPool(await escrowPool.getAddress());
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
     await stakeBond.connect(owner).setSlasher(await registry.getAddress());
@@ -90,10 +89,14 @@ describe("Audit Team D — D-02 regression: pause surface on audit-bundle contra
 
     it("admin setters work while paused", async function () {
       await escrowPool.connect(owner).pause();
-      // setSettlementRegistry doesn't revert on EnforcedPause — admin needs it
-      // for emergency rotation. Use a clean address (not the existing wired
-      // registry) to avoid duplicate-set semantics if any.
-      await expect(escrowPool.connect(owner).setSettlementRegistry(challenger.address))
+      // L2 audit HIGH-6: setSettlementRegistry was removed (now immutable).
+      // setFtnsToken is the remaining admin-only setter and must remain
+      // callable while paused so the owner can perform emergency rotation
+      // (e.g., if the FTNS token contract itself is compromised).
+      const Token2 = await ethers.getContractFactory("MockERC20");
+      const altToken = await Token2.deploy();
+      await altToken.waitForDeployment();
+      await expect(escrowPool.connect(owner).setFtnsToken(await altToken.getAddress()))
         .to.not.be.reverted;
     });
 

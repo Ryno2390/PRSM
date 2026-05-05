@@ -96,23 +96,28 @@ async function main() {
   const deployments = {};
   const txHashes = {};
 
-  // ── 1. EscrowPool ───────────────────────────────────────────────────
-  console.log("\n[1/5] Deploying EscrowPool…");
-  const EscrowPool = await hre.ethers.getContractFactory("EscrowPool");
-  // Constructor: (initialOwner, ftnsAddress, initialRegistry). Registry is
-  // deployed next; pass address(0) and wire via setSettlementRegistry below.
-  const escrow = await EscrowPool.deploy(deployer.address, ftnsChecksum, hre.ethers.ZeroAddress);
-  await escrow.waitForDeployment();
-  deployments.EscrowPool = await escrow.getAddress();
-  console.log(`   EscrowPool:          ${deployments.EscrowPool}`);
-
-  // ── 2. BatchSettlementRegistry ─────────────────────────────────────
-  console.log("\n[2/5] Deploying BatchSettlementRegistry…");
+  // ── 1. BatchSettlementRegistry ─────────────────────────────────────
+  // L2 audit HIGH-6 (B-CROSS-1): EscrowPool.settlementRegistry is now
+  // immutable (constructor-only), so Registry MUST deploy first and its
+  // address is passed into EscrowPool's constructor.
+  console.log("\n[1/5] Deploying BatchSettlementRegistry…");
   const Registry = await hre.ethers.getContractFactory("BatchSettlementRegistry");
   const registry = await Registry.deploy(deployer.address, challengeWindow);
   await registry.waitForDeployment();
   deployments.BatchSettlementRegistry = await registry.getAddress();
   console.log(`   BatchSettlementRegistry: ${deployments.BatchSettlementRegistry}`);
+
+  // ── 2. EscrowPool ───────────────────────────────────────────────────
+  console.log("\n[2/5] Deploying EscrowPool…");
+  const EscrowPool = await hre.ethers.getContractFactory("EscrowPool");
+  const escrow = await EscrowPool.deploy(
+    deployer.address,
+    ftnsChecksum,
+    deployments.BatchSettlementRegistry,
+  );
+  await escrow.waitForDeployment();
+  deployments.EscrowPool = await escrow.getAddress();
+  console.log(`   EscrowPool:          ${deployments.EscrowPool}`);
 
   // ── 3. Signature verifier ──────────────────────────────────────────
   let verifierAddress;
@@ -150,12 +155,10 @@ async function main() {
   // ── 5. Cross-wire ───────────────────────────────────────────────────
   console.log("\n[5/5] Cross-wiring…");
 
+  // EscrowPool.settlementRegistry was wired in EscrowPool's constructor
+  // (immutable post-HIGH-6). Only the reverse pointer + verifier + bond
+  // wiring remain.
   let tx;
-
-  tx = await escrow.setSettlementRegistry(deployments.BatchSettlementRegistry);
-  await tx.wait();
-  txHashes.escrow_setSettlementRegistry = tx.hash;
-  console.log(`   EscrowPool.setSettlementRegistry → registry (${tx.hash.slice(0, 10)}…)`);
 
   tx = await registry.setEscrowPool(deployments.EscrowPool);
   await tx.wait();

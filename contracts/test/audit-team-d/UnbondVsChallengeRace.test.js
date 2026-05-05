@@ -41,20 +41,19 @@ describe("[Team D] D3 — Unbond/withdraw races slash under misconfigured window
     token = await Token.deploy();
     await token.waitForDeployment();
 
-    const Pool = await ethers.getContractFactory("EscrowPool");
-    pool = await Pool.deploy(owner.address, await token.getAddress(), ethers.ZeroAddress);
-    await pool.waitForDeployment();
-
     const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
     registry = await Registry.deploy(owner.address, CHALLENGE_WINDOW);
     await registry.waitForDeployment();
+
+    const Pool = await ethers.getContractFactory("EscrowPool");
+    pool = await Pool.deploy(owner.address, await token.getAddress(), await registry.getAddress());
+    await pool.waitForDeployment();
 
     const StakeBond = await ethers.getContractFactory("StakeBond");
     stakeBond = await StakeBond.deploy(owner.address, await token.getAddress(), UNBOND_DELAY);
     await stakeBond.waitForDeployment();
 
     // Wire
-    await pool.connect(owner).setSettlementRegistry(await registry.getAddress());
     await registry.connect(owner).setEscrowPool(await pool.getAddress());
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
     await stakeBond.connect(owner).setSlasher(await registry.getAddress());

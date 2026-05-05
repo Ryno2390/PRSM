@@ -24,25 +24,23 @@ describe("BatchSettlementRegistry", function () {
     token = await Token.deploy();
     await token.waitForDeployment();
 
-    // Deploy EscrowPool with registry address placeholder; update after
-    // registry is deployed.
-    const Pool = await ethers.getContractFactory("EscrowPool");
-    escrowPool = await Pool.deploy(
-      owner.address,
-      await token.getAddress(),
-      ethers.ZeroAddress
-    );
-    await escrowPool.waitForDeployment();
-
-    // Deploy BatchSettlementRegistry.
+    // Post-HIGH-6 deploy ordering: Registry FIRST (because EscrowPool's
+    // settlementRegistry is now immutable), then EscrowPool with the
+    // registry address baked in. Registry's reciprocal pointer is set
+    // after via setEscrowPool — that direction remains mutable.
     const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
     registry = await Registry.deploy(owner.address, DEFAULT_WINDOW);
     await registry.waitForDeployment();
 
-    // Wire the two contracts to each other.
-    await escrowPool
-      .connect(owner)
-      .setSettlementRegistry(await registry.getAddress());
+    const Pool = await ethers.getContractFactory("EscrowPool");
+    escrowPool = await Pool.deploy(
+      owner.address,
+      await token.getAddress(),
+      await registry.getAddress()
+    );
+    await escrowPool.waitForDeployment();
+
+    // Wire the registry's pointer back at the pool.
     await registry
       .connect(owner)
       .setEscrowPool(await escrowPool.getAddress());

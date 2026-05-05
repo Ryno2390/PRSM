@@ -85,13 +85,13 @@ describe("Audit Team C — C-INT-01: INVALID_SIGNATURE adversarial slashing", fu
     token = await Token.deploy();
     await token.waitForDeployment();
 
-    const Pool = await ethers.getContractFactory("EscrowPool");
-    escrowPool = await Pool.deploy(owner.address, await token.getAddress(), ethers.ZeroAddress);
-    await escrowPool.waitForDeployment();
-
     const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
     registry = await Registry.deploy(owner.address, DEFAULT_WINDOW);
     await registry.waitForDeployment();
+
+    const Pool = await ethers.getContractFactory("EscrowPool");
+    escrowPool = await Pool.deploy(owner.address, await token.getAddress(), await registry.getAddress());
+    await escrowPool.waitForDeployment();
 
     // Wire the REAL Ed25519Verifier (not a mock) — the bug exists with the
     // real verifier just as it did with the mock; the mock just made it
@@ -108,7 +108,6 @@ describe("Audit Team C — C-INT-01: INVALID_SIGNATURE adversarial slashing", fu
     await stakeBond.connect(owner).setSlasher(await registry.getAddress());
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
 
-    await escrowPool.connect(owner).setSettlementRegistry(await registry.getAddress());
     await registry.connect(owner).setEscrowPool(await escrowPool.getAddress());
 
     // Provider bonds at the critical (100%) tier.
