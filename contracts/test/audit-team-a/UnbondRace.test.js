@@ -103,16 +103,8 @@ describe("AUDIT-TEAM-A — A02 Unbond/Challenge race lets attacker dodge slash",
     await stakeBond.connect(attacker).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
   });
 
-  it("attacker withdraws stake before challenge, escapes slashing", async function () {
-    // Stash the attacker's pre-attack balance (after bonding the
-    // PREMIUM_STAKE, the wallet still holds PREMIUM_STAKE * 2 - PREMIUM_STAKE
-    // = PREMIUM_STAKE in liquid form).
-    const beforeBal = await token.balanceOf(attacker.address);
-
-    // ---- Step 1: commit a fraudulent batch with one bogus receipt.
-    // We will use DOUBLE_SPEND as the challenge vector. To make
-    // DOUBLE_SPEND provable later, we commit the same leaf TWICE
-    // in two separate batches, both attacker-signed.
+  it("REGRESSION: post-fix, requestUnbond clamps unbond_eligible_at to slasher.challengeWindowSeconds — attacker cannot withdraw before window closes", async function () {
+    // ---- Step 1: commit a fraudulent batch (DOUBLE_SPEND prep).
     const leaf = makeLeaf();
     const root = hashLeaf(leaf);
 
@@ -128,55 +120,60 @@ describe("AUDIT-TEAM-A — A02 Unbond/Challenge race lets attacker dodge slash",
     const r2 = await tx2.wait();
     const batchId2 = r2.logs.find(l => l.fragment && l.fragment.name === "BatchCommitted").args[0];
 
-    // ---- Step 2: at T=0, also requestUnbond. This is the load-bearing
-    // attack move: kick off the unbond timer the same block that
-    // commitBatch lands.
-    await stakeBond.connect(attacker).requestUnbond();
-
-    // ---- Step 3: wait UNBOND_DELAY (1 day), then withdraw stake.
-    await time.increase(UNBOND_DELAY + 1);
-    await stakeBond.connect(attacker).withdraw();
-
-    // Attacker now holds the entire stake back in their wallet.
-    const afterWithdraw = await token.balanceOf(attacker.address);
-    expect(afterWithdraw - beforeBal).to.equal(PREMIUM_STAKE); // stake fully returned
-
-    // Verify state: stake is WITHDRAWN, amount is 0.
+    // ---- Step 2: requestUnbond. Post-fix, unbond_eligible_at is clamped
+    //              to AT LEAST now + challengeWindowSeconds, regardless
+    //              of the local unbondDelaySeconds. The clamp comes from
+    //              StakeBond reading slasher.challengeWindowSeconds().
+    const requestUnbondTx = await stakeBond.connect(attacker).requestUnbond();
+    const requestUnbondBlock = await ethers.provider.getBlock(requestUnbondTx.blockNumber);
     const stake = await stakeBond.stakes(attacker.address);
-    expect(stake.status).to.equal(3); // WITHDRAWN
-    expect(stake.amount).to.equal(0n);
+    const expectedFloor = BigInt(requestUnbondBlock.timestamp) + BigInt(CHALLENGE_WINDOW);
+    expect(stake.unbond_eligible_at).to.equal(expectedFloor);
 
-    // ---- Step 4: at T = UNBOND_DELAY + 1 < CHALLENGE_WINDOW, the
-    // challenger now discovers and challenges. We're still inside
-    // the 7-day challenge window.
-    const leafHash = hashLeaf(leaf);
+    // ---- Step 3: try to withdraw at T = UNBOND_DELAY + 1 (= 1 day + 1s).
+    //              Pre-fix this would succeed. Post-fix it MUST revert
+    //              because unbond_eligible_at is at the 7-day mark.
+    await time.increase(UNBOND_DELAY + 1);
+    await expect(
+      stakeBond.connect(attacker).withdraw()
+    ).to.be.revertedWithCustomError(stakeBond, "UnbondDelayNotElapsed");
+
+    // Attacker still has the stake locked.
+    const stillBonded = await stakeBond.stakes(attacker.address);
+    expect(stillBonded.amount).to.equal(PREMIUM_STAKE);
+    expect(stillBonded.status).to.equal(2); // UNBONDING
+
+    // ---- Step 4: at T = UNBOND_DELAY + 1 (= 1 day + 1s), challenger
+    //              discovers fraud and lands a DOUBLE_SPEND challenge.
+    //              The slasher fires successfully because the stake is
+    //              still UNBONDING (status==2), not WITHDRAWN.
     const auxData = ethers.AbiCoder.defaultAbiCoder().encode(
       ["bytes32", "bytes32[]"],
-      [batchId2, []]  // empty proof works for single-leaf root
+      [batchId2, []]
     );
 
-    // Capture foundation reserve before the challenge.
     const reserveBefore = await stakeBond.foundationReserveBalance();
     const bountyBefore = await stakeBond.slashedBountyPayable(challenger.address);
 
-    // The challenge succeeds (receipt invalidated) but slash silently
-    // reverts inside the try/catch — provider lost no stake.
     await expect(
       registry.connect(challenger).challengeReceipt(
         batchId1, leaf, [], 0, auxData  // 0 = DOUBLE_SPEND
       )
-    ).to.emit(registry, "ReceiptChallenged");
+    ).to.emit(stakeBond, "Slashed");
 
-    // ---- Step 5: assert the slashing was a no-op (the heart of the bug).
+    // ---- Step 5: assert the slashing fired (the fix's economic
+    //              defense). Reserve grew by 30%; bounty grew by 70%.
     const reserveAfter = await stakeBond.foundationReserveBalance();
     const bountyAfter = await stakeBond.slashedBountyPayable(challenger.address);
+    const expectedSlash = PREMIUM_STAKE; // 100% slash rate
+    const expectedBountyDelta = (expectedSlash * 7000n) / 10000n;
+    const expectedReserveDelta = expectedSlash - expectedBountyDelta;
 
-    expect(reserveAfter).to.equal(reserveBefore);
-    expect(bountyAfter).to.equal(bountyBefore);
+    expect(reserveAfter - reserveBefore).to.equal(expectedReserveDelta);
+    expect(bountyAfter - bountyBefore).to.equal(expectedBountyDelta);
 
-    // The attacker walked away with their stake intact even after a
-    // confirmed DOUBLE_SPEND challenge. This is the broken invariant.
+    // Stake fully drained by slash.
     const stakeFinal = await stakeBond.stakes(attacker.address);
-    expect(stakeFinal.amount).to.equal(0n); // already drained pre-challenge
+    expect(stakeFinal.amount).to.equal(0n);
   });
 });

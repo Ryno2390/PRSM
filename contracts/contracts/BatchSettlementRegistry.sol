@@ -237,6 +237,22 @@ contract BatchSettlementRegistry is Ownable {
         uint128 invalidatedValueFTNS
     );
 
+    /// @dev Forensic-observability event for the case where a successful
+    /// challenge's stakeBond.slash() call reverted (e.g., provider already
+    /// fully slashed in a prior challenge, stake withdrawn, or stakeBond
+    /// itself misconfigured). The receipt-invalidation work is preserved
+    /// (the try/catch swallows the revert) but no economic penalty was
+    /// applied. Off-chain monitoring (Forta) should alert on this event
+    /// because it indicates either (a) a benign double-challenge, or (b)
+    /// the L2 audit HIGH-2 race condition resurfacing despite the
+    /// StakeBond.requestUnbond floor fix. Per consolidated.md §3 HIGH-2.
+    event SlashSwallowed(
+        bytes32 indexed batchId,
+        address indexed provider,
+        address indexed challenger,
+        ReasonCode reason
+    );
+
     error InvalidChallengeWindow(uint256 provided);
     error InvalidLookbackWindow(uint256 provided);
     error BatchAlreadyCommitted(bytes32 batchId);
@@ -496,7 +512,10 @@ contract BatchSettlementRegistry is Ownable {
                 // success; bounty credited + foundation reserve updated
             } catch {
                 // swallow — receipt is already invalidated; slash is
-                // best-effort under non-OOG conditions
+                // best-effort under non-OOG conditions. Emit a forensic
+                // event so Forta + off-chain monitoring can alert. See
+                // L2 audit HIGH-2 commentary on the SlashSwallowed event.
+                emit SlashSwallowed(batchId, b.provider, msg.sender, reason);
             }
         }
     }

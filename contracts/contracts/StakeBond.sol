@@ -6,6 +6,21 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
+ * @dev Minimal read-only view of the slasher (BatchSettlementRegistry)
+ *      that StakeBond consults to compute the unbond delay floor. Per
+ *      L2 audit HIGH-2 (A-02/D-01): if `unbondDelay < challengeWindow`,
+ *      a provider can `commitBatch` + `requestUnbond` in the same block,
+ *      `withdraw` after MIN unbondDelay (1 day), and a successful later
+ *      challenge silently no-ops because state is WITHDRAWN. Reading the
+ *      challenge window from the slasher and clamping
+ *      `unbond_eligible_at` to AT LEAST `now + challengeWindowSeconds`
+ *      closes the race regardless of governance parameter pairings.
+ */
+interface ISlasherWithChallengeWindow {
+    function challengeWindowSeconds() external view returns (uint256);
+}
+
+/**
  * @title StakeBond
  * @notice Per-provider FTNS collateral for Phase 7 Tier-C verification.
  *
@@ -206,7 +221,33 @@ contract StakeBond is Ownable, ReentrancyGuard {
             revert NotBonded(msg.sender, s.status);
         }
         s.status = StakeStatus.UNBONDING;
-        s.unbond_eligible_at = uint64(block.timestamp + unbondDelaySeconds);
+
+        // L2 audit HIGH-2 fix: unbond_eligible_at is the MAX of (the local
+        // unbondDelay floor) AND (the slasher's current challenge window).
+        // Closes the slash-evasion race when governance has set
+        // unbondDelaySeconds < challengeWindowSeconds.
+        //
+        // The slasher is the BSR in production. We gate the call on
+        // `slasher.code.length > 0` because a Solidity try/catch does NOT
+        // catch the "returned unexpected amount of data" decode error that
+        // fires when an external call lands on an EOA or non-conforming
+        // contract. If slasher is 0, an EOA, or a contract without
+        // challengeWindowSeconds(), we fall back to the local floor.
+        uint256 localFloor = block.timestamp + unbondDelaySeconds;
+        uint256 effectiveEligibleAt = localFloor;
+        if (slasher != address(0) && slasher.code.length > 0) {
+            try ISlasherWithChallengeWindow(slasher).challengeWindowSeconds() returns (uint256 windowSecs) {
+                uint256 slasherFloor = block.timestamp + windowSecs;
+                if (slasherFloor > effectiveEligibleAt) {
+                    effectiveEligibleAt = slasherFloor;
+                }
+            } catch {
+                // slasher contract doesn't expose challengeWindowSeconds() —
+                // keep local floor. Operationally this branch only fires if
+                // a governance change re-points slasher to a non-BSR target.
+            }
+        }
+        s.unbond_eligible_at = uint64(effectiveEligibleAt);
         emit UnbondRequested(msg.sender, s.unbond_eligible_at);
     }
 

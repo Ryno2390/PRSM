@@ -104,25 +104,27 @@ describe("[Team D] D3 — Unbond/withdraw races slash under misconfigured window
     const r2 = await tx2.wait();
     const batchId2 = r2.logs.find(l => l.fragment && l.fragment.name === "BatchCommitted").args[0];
 
-    // Provider immediately initiates unbond.
+    // Provider immediately initiates unbond. Post-fix, requestUnbond
+    // clamps unbond_eligible_at to AT LEAST now + challengeWindowSeconds.
     await stakeBond.connect(provider).requestUnbond();
+    const stakeAfterUnbondReq = await stakeBond.stakes(provider.address);
 
-    // 1 day passes — unbond delay elapses, challenge window does not.
+    // 1 day passes — local unbondDelay elapsed; challenge-window-floor
+    // has NOT.
     await time.increase(UNBOND_DELAY + 60);
 
-    // Provider withdraws stake. Status -> WITHDRAWN.
-    const balBefore = await token.balanceOf(provider.address);
-    await stakeBond.connect(provider).withdraw();
-    const balAfter = await token.balanceOf(provider.address);
-    expect(balAfter - balBefore).to.equal(STAKE);
+    // Post-fix: withdraw MUST revert because unbond_eligible_at sits at
+    // the 30-day mark (challenge window), not the 1-day mark.
+    await expect(
+      stakeBond.connect(provider).withdraw()
+    ).to.be.revertedWithCustomError(stakeBond, "UnbondDelayNotElapsed");
 
     const stake = await stakeBond.stakes(provider.address);
-    expect(stake.status).to.equal(3); // WITHDRAWN
+    expect(stake.status).to.equal(2); // UNBONDING (NOT WITHDRAWN)
+    expect(stake.amount).to.equal(STAKE);
 
-    // Challenger now fires DOUBLE_SPEND at day 5 — within the 30-day
-    // challenge window. The challenge SUCCEEDS (receipt invalidated)
-    // but the inner slash silently fails because StakeBond reverts
-    // with NotSlashable on WITHDRAWN status — caught by try/catch.
+    // Challenger fires DOUBLE_SPEND at day 5 — slash now SUCCEEDS
+    // because stake is still UNBONDING (slashable).
     const auxData = ethers.AbiCoder.defaultAbiCoder().encode(
       ["bytes32", "bytes32[]"],
       [batchId2, []]
@@ -135,13 +137,15 @@ describe("[Team D] D3 — Unbond/withdraw races slash under misconfigured window
       registry.connect(challenger).challengeReceipt(
         batchId1, leaf, [], 0 /* DOUBLE_SPEND */, auxData
       )
-    )
-      .to.emit(registry, "ReceiptChallenged");
+    ).to.emit(stakeBond, "Slashed");
 
-    // CRITICAL: receipt was invalidated, but provider lost zero stake.
+    // Slashing actually fired: foundation reserve + challenger bounty grew.
     const fdReserveAfter = await stakeBond.foundationReserveBalance();
     const challengerBountyAfter = await stakeBond.slashedBountyPayable(challenger.address);
-    expect(fdReserveAfter).to.equal(fdReserveBefore); // 0 — no slash happened
-    expect(challengerBountyAfter).to.equal(challengerBountyBefore); // 0 bounty
+    const slashAmount = (STAKE * BigInt(TIER_BPS)) / 10000n;
+    const expectedBounty = (slashAmount * 7000n) / 10000n;
+    const expectedReserve = slashAmount - expectedBounty;
+    expect(challengerBountyAfter - challengerBountyBefore).to.equal(expectedBounty);
+    expect(fdReserveAfter - fdReserveBefore).to.equal(expectedReserve);
   });
 });
