@@ -487,7 +487,12 @@ governance; (2) US securities counsel for Prismatica + FTNS classification.
 - KYC vendor decision: §8.1 memo done (task #194)
 - FATF/OFAC sanctions screening: implementation pending
 
-**Status:** Briefing packet ready. **Next action: engage counsel.**
+**Status (2026-05-05):** RFP packet drafted at
+`audits/rfp/L8-legal-counsel-rfp.md`. Two tracks:
+- **Track A (Cayman):** $30K-$80K. Recipients: Mourant + Walkers + Ogier.
+- **Track B (US securities):** $50K-$150K. Recipients: Cooley +
+  Lowenstein + DLx Law.
+Awaiting founder execution of vendor outreach.
 
 ---
 
