@@ -418,7 +418,12 @@ availability + protocol robustness).
 **Output:** Operational security report (L6a–e) + infrastructure pen-test
 report (L6f). Quarterly cadence on L6e; per-major-release on L6f.
 
-**Status:** L6a + L6b done. **L6c, L6d, L6e, L6f are next-action items.**
+**Status (2026-05-05):** L6a + L6b done; L6c (key rotation runbook) +
+L6d (insider-threat policy) shipped 2026-05-05. **L6e (continuous ops
+hygiene) remains a next-action item.** **L6f RFP drafted at
+`audits/rfp/L6f-infrastructure-pentest-rfp.md`** — recipients NCC
+Group + Bishop Fox + Doyensec; budget $20K-$50K, 2-3 weeks. Awaiting
+founder vendor outreach.
 
 ---
 
