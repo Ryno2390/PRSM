@@ -79,9 +79,10 @@ describe("[Team D] D3 — Unbond/withdraw races slash under misconfigured window
       executedAtUnix: (await time.latest()) - 100,
       valueFtns: ethers.parseUnits("10", 18),
       signatureHash: ethers.keccak256(ethers.toUtf8Bytes("sig")),
+      signingMessageHash: ethers.keccak256(ethers.toUtf8Bytes("signing-msg")),
     };
     const leafType =
-      "tuple(bytes32 jobIdHash,uint32 shardIndex,bytes32 providerIdHash,bytes32 providerPubkeyHash,bytes32 outputHash,uint64 executedAtUnix,uint128 valueFtns,bytes32 signatureHash)";
+      "tuple(bytes32 jobIdHash,uint32 shardIndex,bytes32 providerIdHash,bytes32 providerPubkeyHash,bytes32 outputHash,uint64 executedAtUnix,uint128 valueFtns,bytes32 signatureHash,bytes32 signingMessageHash)";
     const leafEnc = ethers.AbiCoder.defaultAbiCoder().encode([leafType], [leaf]);
     const leafHash = ethers.keccak256(leafEnc);
     const merkleRoot = leafHash; // single leaf == root

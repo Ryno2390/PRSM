@@ -36,7 +36,7 @@ from prsm.settlement.accumulator import BatchedReceipt
 # contracts/contracts/BatchSettlementRegistry.sol. Any field-order or
 # type change here requires the same change there (and the Solidity
 # test suite will catch the parity break).
-_LEAF_SIGNATURE = "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)"
+_LEAF_SIGNATURE = "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)"
 
 
 # Bounds for integer fields — match the Solidity uint widths.
@@ -61,6 +61,11 @@ class ReceiptLeaf:
     executed_at_unix: int         # uint64
     value_ftns: int               # uint128
     signature_hash: bytes         # bytes32 — keccak256(b64decode(signature))
+    signing_message_hash: bytes   # bytes32 — build_receipt_signing_payload(...)
+                                  # Bound here so the on-chain INVALID_SIGNATURE
+                                  # challenger cannot pick an arbitrary message
+                                  # that the signature happens not to verify.
+                                  # See L2 audit C-INT-01.
 
     def __post_init__(self):
         _check_bytes32("job_id_hash", self.job_id_hash)
@@ -71,6 +76,7 @@ class ReceiptLeaf:
         _check_uint("executed_at_unix", self.executed_at_unix, _MAX_UINT64)
         _check_uint("value_ftns", self.value_ftns, _MAX_UINT128)
         _check_bytes32("signature_hash", self.signature_hash)
+        _check_bytes32("signing_message_hash", self.signing_message_hash)
 
 
 def _check_bytes32(name: str, value: bytes) -> None:
@@ -106,6 +112,15 @@ def batched_receipt_to_leaf(br: BatchedReceipt) -> ReceiptLeaf:
     Plus from the BatchedReceipt wrapper:
         value_ftns (int wei) → uint128 (bounds-checked)
 
+    Plus the canonical signing-payload hash (per L2 audit C-INT-01):
+        signing_message_hash = keccak256(
+            "{job_id}||{shard_index}||{output_hash}||{executed_at_unix}"
+        )
+    This MUST match what the provider actually signed off-chain
+    (build_receipt_signing_payload). Bound in the leaf so the on-chain
+    INVALID_SIGNATURE challenge cannot be re-targeted to an attacker-
+    chosen message.
+
     Raises ValueError on any out-of-range integer or wrong-length
     output hash; raises binascii.Error on malformed base64.
     """
@@ -124,6 +139,13 @@ def batched_receipt_to_leaf(br: BatchedReceipt) -> ReceiptLeaf:
             f"{len(output_hash_bytes)} bytes from {r.output_hash!r}"
         )
 
+    # Compute the canonical signing payload hash. MUST match
+    # prsm.compute.shard_receipt.build_receipt_signing_payload exactly.
+    signing_payload_raw = (
+        f"{r.job_id}||{r.shard_index}||{r.output_hash}||{r.executed_at_unix}"
+    ).encode("utf-8")
+    signing_message_hash = keccak(signing_payload_raw)
+
     return ReceiptLeaf(
         job_id_hash=keccak(r.job_id.encode("utf-8")),
         shard_index=r.shard_index,
@@ -133,6 +155,7 @@ def batched_receipt_to_leaf(br: BatchedReceipt) -> ReceiptLeaf:
         executed_at_unix=r.executed_at_unix,
         value_ftns=br.value_ftns,
         signature_hash=keccak(b64decode(r.signature)),
+        signing_message_hash=signing_message_hash,
     )
 
 
@@ -151,6 +174,7 @@ def encode_leaf(leaf: ReceiptLeaf) -> bytes:
             leaf.executed_at_unix,
             leaf.value_ftns,
             leaf.signature_hash,
+            leaf.signing_message_hash,
         )],
     )
 

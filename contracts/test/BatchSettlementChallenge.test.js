@@ -23,6 +23,7 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
       executedAtUnix: Math.floor(Date.now() / 1000),
       valueFtns: ONE_FTNS,
       signatureHash: ethers.keccak256(ethers.toUtf8Bytes("signature-bytes")),
+      signingMessageHash: ethers.keccak256(ethers.toUtf8Bytes("signing-msg")),
       ...overrides,
     };
     return leaf;
@@ -31,7 +32,7 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
   function hashLeaf(leaf) {
     const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
       [
-        "tuple(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)",
+        "tuple(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)",
       ],
       [
         [
@@ -43,6 +44,7 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
           leaf.executedAtUnix,
           leaf.valueFtns,
           leaf.signatureHash,
+          leaf.signingMessageHash,
         ],
       ]
     );
@@ -225,9 +227,11 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
 
+      // Post-C-INT-01 remediation: auxData is (publicKey, signature) only.
+      // signingMessageHash is bound in the leaf, not supplied by challenger.
       const aux = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["bytes", "bytes", "bytes"],
-        [ethers.toUtf8Bytes("signing-msg"), pubkey, signature]
+        ["bytes", "bytes"],
+        [pubkey, signature]
       );
 
       await expect(
@@ -252,8 +256,8 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
       const { batchId } = await commitOneLeafBatchWithLeaf(leaf);
 
       const aux = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["bytes", "bytes", "bytes"],
-        [ethers.toUtf8Bytes("signing-msg"), pubkey, signature]
+        ["bytes", "bytes"],
+        [pubkey, signature]
       );
 
       await expect(
@@ -272,9 +276,8 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
       const { batchId } = await commitOneLeafBatchWithLeaf(leaf);
 
       const aux = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["bytes", "bytes", "bytes"],
+        ["bytes", "bytes"],
         [
-          ethers.toUtf8Bytes("msg"),
           wrongPubkey, // mismatch
           ethers.toUtf8Bytes("signature-bytes"),
         ]
@@ -288,8 +291,8 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
       await registry.connect(owner).setSignatureVerifier(ethers.ZeroAddress);
       const { batchId, leaf } = await commitOneLeafBatch();
       const aux = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["bytes", "bytes", "bytes"],
-        [ethers.toUtf8Bytes("m"), ethers.toUtf8Bytes("p"), ethers.toUtf8Bytes("s")]
+        ["bytes", "bytes"],
+        [ethers.toUtf8Bytes("p"), ethers.toUtf8Bytes("s")]
       );
       await expect(
         registry.connect(challenger).challengeReceipt(batchId, leaf, [], 1, aux)

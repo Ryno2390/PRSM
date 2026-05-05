@@ -27,17 +27,18 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
       executedAtUnix: Math.floor(Date.now() / 1000),
       valueFtns: ONE_FTNS,
       signatureHash: ethers.keccak256(ethers.toUtf8Bytes("sig")),
+      signingMessageHash: ethers.keccak256(ethers.toUtf8Bytes("signing-msg")),
       ...overrides,
     };
   }
 
   function hashLeaf(leaf) {
     const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-      ["tuple(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)"],
+      ["tuple(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)"],
       [[
         leaf.jobIdHash, leaf.shardIndex, leaf.providerIdHash,
         leaf.providerPubkeyHash, leaf.outputHash, leaf.executedAtUnix,
-        leaf.valueFtns, leaf.signatureHash,
+        leaf.valueFtns, leaf.signatureHash, leaf.signingMessageHash,
       ]],
     );
     return ethers.keccak256(encoded);
@@ -190,8 +191,8 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
       const batchId = await commitOneLeafBatch(leaf);
 
       const aux = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["bytes", "bytes", "bytes"],
-        [ethers.toUtf8Bytes("signing-msg"), pubkey, signature]
+        ["bytes", "bytes"],
+        [pubkey, signature]
       );
 
       const stakeBefore = await stakeBond.stakeOf(provider.address);

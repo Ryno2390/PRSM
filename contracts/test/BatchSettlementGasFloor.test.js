@@ -33,17 +33,18 @@ describe("BatchSettlementRegistry — §8.7 MIN_SLASH_GAS floor", function () {
       executedAtUnix: Math.floor(Date.now() / 1000),
       valueFtns: ONE_FTNS,
       signatureHash: ethers.keccak256(ethers.toUtf8Bytes("sig")),
+      signingMessageHash: ethers.keccak256(ethers.toUtf8Bytes("signing-msg")),
       ...overrides,
     };
   }
 
   function hashLeaf(leaf) {
     const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
-      ["tuple(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)"],
+      ["tuple(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)"],
       [[
         leaf.jobIdHash, leaf.shardIndex, leaf.providerIdHash,
         leaf.providerPubkeyHash, leaf.outputHash, leaf.executedAtUnix,
-        leaf.valueFtns, leaf.signatureHash,
+        leaf.valueFtns, leaf.signatureHash, leaf.signingMessageHash,
       ]],
     );
     return ethers.keccak256(encoded);

@@ -50,6 +50,12 @@ struct ReceiptLeaf {
     uint64 executedAtUnix;         // receipt.executed_at_unix
     uint128 valueFtns;             // per-receipt quoted price in FTNS base units
     bytes32 signatureHash;         // keccak256(base64decode(receipt.signature))
+    bytes32 signingMessageHash;    // canonical signing-payload hash the provider committed
+                                   // to and signed with their Ed25519 key. Off-chain:
+                                   // keccak256("{job_id}||{shard_index}||{output_hash}||{executed_at_unix}")
+                                   // per build_receipt_signing_payload(). Bound here so the
+                                   // INVALID_SIGNATURE challenge cannot be re-targeted to an
+                                   // attacker-chosen message — see L2 audit C-INT-01.
 }
 
 /**
@@ -528,14 +534,23 @@ contract BatchSettlementRegistry is Ownable {
 
     /**
      * @dev INVALID_SIGNATURE: the receipt's signature doesn't verify under
-     *      its declared pubkey. auxData layout:
-     *        abi.encode(bytes signingMessage, bytes publicKey, bytes signature)
+     *      its declared pubkey for the leaf-committed signing-message hash.
+     *      auxData layout:
+     *        abi.encode(bytes publicKey, bytes signature)
      *      Contract verifies:
      *        - keccak256(publicKey) == leaf.providerPubkeyHash
      *        - keccak256(signature) == leaf.signatureHash
-     *        - ISignatureVerifier.verify returns FALSE
-     *      If verify returns TRUE, the signature is genuinely valid →
-     *      challenge is not proven (challenger wasted gas).
+     *        - ISignatureVerifier.verify(leaf.signingMessageHash, ...) returns FALSE
+     *      If verify returns TRUE, the signature is genuinely valid over the
+     *      committed message → challenge is not proven.
+     *
+     *      The signing-message hash is consumed directly from the leaf rather
+     *      than being supplied by the challenger. This closes L2 audit
+     *      C-INT-01: previously the challenger could supply an arbitrary
+     *      signingMessage that the receipt's signature was NOT over, causing
+     *      the verifier to correctly return FALSE and the contract to slash
+     *      the provider. Binding signingMessageHash in the leaf forces the
+     *      verifier to check the actual committed message.
      */
     function _handleInvalidSignature(
         ReceiptLeaf calldata leaf,
@@ -544,15 +559,18 @@ contract BatchSettlementRegistry is Ownable {
         if (address(signatureVerifier) == address(0)) {
             revert VerifierNotConfigured();
         }
-        (bytes memory signingMessage, bytes memory publicKey, bytes memory signature) =
-            abi.decode(auxData, (bytes, bytes, bytes));
+        (bytes memory publicKey, bytes memory signature) =
+            abi.decode(auxData, (bytes, bytes));
 
         // Bind the submitted pubkey + signature to the leaf-committed hashes.
         if (keccak256(publicKey) != leaf.providerPubkeyHash) return false;
         if (keccak256(signature) != leaf.signatureHash) return false;
 
-        bytes32 messageHash = keccak256(signingMessage);
-        bool valid = signatureVerifier.verify(messageHash, signature, publicKey);
+        // Verify against the leaf-committed signingMessageHash, NOT a
+        // challenger-supplied value. Closes C-INT-01.
+        bool valid = signatureVerifier.verify(
+            leaf.signingMessageHash, signature, publicKey
+        );
         return !valid; // challenge succeeds iff verification fails
     }
 

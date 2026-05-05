@@ -17,10 +17,17 @@ const { ethers } = require("hardhat");
 //   leaf.executedAtUnix        = 1700000000
 //   leaf.valueFtns             = 10**18
 //   leaf.signatureHash         = keccak256("test-signature")
+//   leaf.signingMessageHash    = keccak256("test-signing-msg")
 //
 // Expected leaf hash = Solidity keccak256(abi.encode(leaf))
 //                    = Python keccak(abi_encode(tuple(...)))
-//                    = 0x1683ea2c92a15b838b3d767faff1ad8151b9597e9e1f3f4353eef6424ed04832
+//                    = 0x572b6e5a854385da2e97f9e18542df44d45b75123d40041c9c0960488aa6762a
+//
+// The leaf grew by one bytes32 field (signingMessageHash) per L2 audit
+// C-INT-01 remediation. The previous parity hash
+// (0x1683ea2c92a15b838b3d767faff1ad8151b9597e9e1f3f4353eef6424ed04832) is
+// retained in audits/findings/consolidated.md §2 CRIT-1 as the pre-fix
+// reference.
 
 describe("Solidity ↔ Python ReceiptLeaf parity", function () {
   it("produces the expected leaf hash for the canonical fixture", async function () {
@@ -33,12 +40,13 @@ describe("Solidity ↔ Python ReceiptLeaf parity", function () {
       executedAtUnix: 1700000000,
       valueFtns: 10n ** 18n,
       signatureHash: ethers.keccak256(ethers.toUtf8Bytes("test-signature")),
+      signingMessageHash: ethers.keccak256(ethers.toUtf8Bytes("test-signing-msg")),
     };
 
     // Compute Solidity-equivalent hash via ethers.js ABI encoder.
     const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
       [
-        "tuple(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)",
+        "tuple(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)",
       ],
       [
         [
@@ -50,6 +58,7 @@ describe("Solidity ↔ Python ReceiptLeaf parity", function () {
           leaf.executedAtUnix,
           leaf.valueFtns,
           leaf.signatureHash,
+          leaf.signingMessageHash,
         ],
       ]
     );
@@ -57,7 +66,7 @@ describe("Solidity ↔ Python ReceiptLeaf parity", function () {
 
     // MUST match the Python-computed hash.
     const expectedFromPython =
-      "0x1683ea2c92a15b838b3d767faff1ad8151b9597e9e1f3f4353eef6424ed04832";
+      "0x572b6e5a854385da2e97f9e18542df44d45b75123d40041c9c0960488aa6762a";
 
     expect(solidityHash).to.equal(expectedFromPython);
   });

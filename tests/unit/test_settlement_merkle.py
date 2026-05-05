@@ -50,6 +50,7 @@ def _dummy_leaf(
         executed_at_unix=1700000000 + shard_index,
         value_ftns=value_ftns,
         signature_hash=keccak(b"signature"),
+        signing_message_hash=keccak(b"signing-payload"),
     )
 
 
@@ -94,6 +95,7 @@ def test_receipt_leaf_validates_bytes32_lengths():
             executed_at_unix=1,
             value_ftns=1,
             signature_hash=keccak(b"s"),
+            signing_message_hash=keccak(b"sm"),
         )
 
 
@@ -108,6 +110,7 @@ def test_receipt_leaf_validates_uint32_bound():
             executed_at_unix=1,
             value_ftns=1,
             signature_hash=keccak(b"s"),
+            signing_message_hash=keccak(b"sm"),
         )
 
 
@@ -122,6 +125,7 @@ def test_receipt_leaf_validates_uint64_bound():
             executed_at_unix=2**65,  # over uint64
             value_ftns=1,
             signature_hash=keccak(b"s"),
+            signing_message_hash=keccak(b"sm"),
         )
 
 
@@ -136,6 +140,7 @@ def test_receipt_leaf_validates_uint128_bound():
             executed_at_unix=1,
             value_ftns=2**129,  # over uint128
             signature_hash=keccak(b"s"),
+            signing_message_hash=keccak(b"sm"),
         )
 
 
@@ -150,6 +155,7 @@ def test_receipt_leaf_rejects_negative_uint():
             executed_at_unix=1,
             value_ftns=1,
             signature_hash=keccak(b"s"),
+            signing_message_hash=keccak(b"sm"),
         )
 
 
@@ -166,6 +172,7 @@ def test_receipt_leaf_rejects_bool_for_int():
             executed_at_unix=1,
             value_ftns=1,
             signature_hash=keccak(b"s"),
+            signing_message_hash=keccak(b"sm"),
         )
 
 
