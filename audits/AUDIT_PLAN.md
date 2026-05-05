@@ -451,7 +451,11 @@ revenue model materially change.
 **Gating:** Should complete before mainnet liquidity event (DEX listing, CEX
 listing, Prismatica equity raise).
 
-**Status:** Pending.
+**Status (2026-05-05):** RFP drafted at
+`audits/rfp/L7-economic-game-theory-audit-rfp.md`. Budget $50K-$100K.
+Recipients: Gauntlet + Chaos Labs (commercial track) + BlockScience
+(CADCAD modeling) + MIT DCI (academic track). 7 specific quantitative
+questions enumerated for vendor scope. Awaiting founder vendor outreach.
 
 ---
 
