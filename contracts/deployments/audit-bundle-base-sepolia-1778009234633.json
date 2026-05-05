@@ -1,0 +1,31 @@
+{
+  "bundle": "audit-bundle",
+  "phases": [
+    "3.1",
+    "7",
+    "7.1"
+  ],
+  "network": "base-sepolia",
+  "chainId": "84532",
+  "timestamp": "2026-05-05T19:27:14.632Z",
+  "deployer": "0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0",
+  "params": {
+    "challengeWindowSeconds": "86400",
+    "unbondDelaySeconds": "604800",
+    "verifierKind": "ed25519"
+  },
+  "contracts": {
+    "BatchSettlementRegistry": "0x200B35fCB68678717a355176e22321Dc3e703315",
+    "EscrowPool": "0x4BDf07b2BB23176469bdEFca2B103AdB3DCb3dd2",
+    "SignatureVerifier": "0x1d7fCbC08792D649016703C4Be59635e619097EE",
+    "StakeBond": "0xDea103f33503BC7e73Ea447d43b2Cd7E2710D20A",
+    "FTNSToken": "0xF8d0c1AE75441d3C3Dd2A2420C0789043916412a",
+    "FoundationReserveWallet": "0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0"
+  },
+  "crossWireTxHashes": {
+    "registry_setEscrowPool": "0x77f9503293ca8e9e20551868568a1e2fb18206f6e3b8365a8f03acb0ceae8d37",
+    "registry_setSignatureVerifier": "0x59b9a5c78d8775fbff2c319047e1dd518e79106aff898181926f06b6e4670f2e",
+    "registry_setStakeBond": "0x8d2b8f4eaf5b03aefc7b384e6d151e004a67fb1a2f8193fc5964c41daeb0e11f",
+    "stakeBond_setFoundationReserveWallet": "0x4b3b8b08667308be1eda91a0d99f39dc7bca1dc7b08ec54fc0f65c0c57593a49"
+  }
+}

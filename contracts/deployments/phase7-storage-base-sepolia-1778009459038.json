@@ -1,0 +1,20 @@
+{
+  "bundle": "phase7-storage",
+  "network": "base-sepolia",
+  "chainId": "84532",
+  "timestamp": "2026-05-05T19:30:59.038Z",
+  "deployer": "0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0",
+  "params": {
+    "heartbeatGraceSeconds": "86400"
+  },
+  "contracts": {
+    "StorageSlashing": "0x4FDd792fDcDcEe31861D23A1B0342058Ed32c766",
+    "KeyDistribution": "0xC33ceA03455DB9246716ccF04cE1446EB56B439b",
+    "StakeBond": "0xDea103f33503BC7e73Ea447d43b2Cd7E2710D20A",
+    "AuthorizedVerifier": "0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0"
+  },
+  "postDeployNotes": [
+    "KeyDistribution.release() is gated on IRoyaltyPaymentVerifier; this must be set via KeyDistribution.setRoyaltyVerifier in a follow-up tx.",
+    "StorageSlashing.authorizedVerifier can be rotated via setAuthorizedVerifier (owner-only) if the off-chain prover migrates."
+  ]
+}

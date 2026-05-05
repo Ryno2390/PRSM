@@ -1,0 +1,39 @@
+{
+  "bundle": "phase8-emission-stack",
+  "network": "base-sepolia",
+  "chainId": "84532",
+  "timestamp": "2026-05-05T19:30:30.890Z",
+  "deployer": "0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0",
+  "contracts": {
+    "EmissionController": "0x134552dbe2d235DB60be5A881A2c06d9E42d2613",
+    "CompensationDistributor": "0xFa3610e87027b548B86859B105B1b39B30d9955B"
+  },
+  "constructorArgs": {
+    "EmissionController": {
+      "ftnsToken": "0xF8d0c1AE75441d3C3Dd2A2420C0789043916412a",
+      "epochZeroStartTimestamp": "1778009419",
+      "baselineRatePerSecond": "1000000000000000000",
+      "mintCap": "900000000000000000000000000",
+      "initialOwner": "0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0"
+    },
+    "CompensationDistributor": {
+      "ftnsToken": "0xF8d0c1AE75441d3C3Dd2A2420C0789043916412a",
+      "emissionController": "0x134552dbe2d235DB60be5A881A2c06d9E42d2613",
+      "creatorPool": "0x40C81867987e1e07E5C8c9B3395aBE38EE95C911",
+      "operatorPool": "0x4b5996dF4d05B566c2BFCA17cD7716E74Ae81f32",
+      "grantPool": "0xA1c3B0F9351B1f28B83d2115F2e726756da6752D",
+      "initialWeights": {
+        "creatorPoolBps": 4000,
+        "operatorPoolBps": 4000,
+        "grantPoolBps": 2000
+      },
+      "initialOwner": "0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0"
+    }
+  },
+  "postDeployNotes": [
+    "EmissionController needs MINTER_ROLE on the FTNS token. Grant separately via the FTNS token's grantRole — operator runbook step 3. Until granted, distribute() reverts at mint().",
+    "CompensationDistributor.pullAndDistribute() is permissionless. Anyone can poke it; the gas cost is borne by the caller. For pre-mainnet exercise, the runbook calls it from a scheduled job to keep distribution cadence regular.",
+    "Pool weight changes require MIN_WEIGHT_SCHEDULE_DELAY (90 days) between scheduling and activation per PRSM-GOV-1 §4.1. The distributor owner schedules weights via updateWeights(); anyone can activate after the delay via _applyScheduledWeightsIfActive (called from pullAndDistribute).",
+    "Copy the addresses into prsm/deployments/contract_addresses.json under <network>.emission_controller and <network>.compensation_distributor before merging."
+  ]
+}

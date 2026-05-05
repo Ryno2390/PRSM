@@ -230,6 +230,15 @@ async function main() {
   const emissionAddress = await emission.getAddress();
   console.log(`   EmissionController: ${emissionAddress}`);
 
+  // RPC propagation buffer: some remote RPCs (Alchemy/Infura) return
+  // BAD_DATA on state-read calls immediately after a fresh deploy.
+  // Poll for code presence before reading state.
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const code = await hre.ethers.provider.getCode(emissionAddress);
+    if (code && code.length > 4) break;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+
   // Post-deploy invariant checks
   const onChainOwner = await emission.owner();
   if (onChainOwner.toLowerCase() !== emissionOwner.toLowerCase()) {
@@ -273,6 +282,13 @@ async function main() {
   await distributor.waitForDeployment();
   const distributorAddress = await distributor.getAddress();
   console.log(`   CompensationDistributor: ${distributorAddress}`);
+
+  // RPC propagation buffer (same as EmissionController above)
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const code = await hre.ethers.provider.getCode(distributorAddress);
+    if (code && code.length > 4) break;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
 
   const onChainDistOwner = await distributor.owner();
   if (onChainDistOwner.toLowerCase() !== distributorOwner.toLowerCase()) {

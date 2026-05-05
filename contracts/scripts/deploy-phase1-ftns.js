@@ -86,9 +86,31 @@ async function main() {
   );
   await proxy.waitForDeployment();
   const proxyAddress = await proxy.getAddress();
-  const implAddress = await hre.upgrades.erc1967.getImplementationAddress(
-    proxyAddress,
-  );
+  // Read ERC-1967 impl slot directly with retries. The OZ helper
+  // `hre.upgrades.erc1967.getImplementationAddress` is flaky on
+  // remote RPC nodes with Node.js v25 (storage-slot read returns
+  // empty before block propagation); direct eth_getStorageAt with
+  // a short retry loop is reliable.
+  // bytes32(uint256(keccak256("eip1967.proxy.implementation")) - 1)
+  const ERC1967_IMPL_SLOT =
+    "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+  let implAddress = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    const raw = await hre.ethers.provider.getStorage(proxyAddress, ERC1967_IMPL_SLOT);
+    if (raw && raw !== "0x" && raw !== "0x" + "0".repeat(64)) {
+      implAddress = hre.ethers.getAddress("0x" + raw.slice(-40));
+      break;
+    }
+  }
+  if (!implAddress) {
+    throw new Error(
+      `ERC-1967 impl slot at ${proxyAddress} is empty after 6 retries; ` +
+      `proxy may not have deployed correctly.`
+    );
+  }
 
   console.log(`  FTNSTokenSimple: ${proxyAddress}`);
   console.log(`  implementation:  ${implAddress}`);

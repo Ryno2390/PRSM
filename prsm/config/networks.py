@@ -111,20 +111,20 @@ TESTNET = NetworkConfig(
     chain_id=84532,
     rpc_url_default="https://sepolia.base.org",
     explorer_url="https://sepolia.basescan.org",
-    # T1 deploy fills these in (see docs/2026-05-05-public-testnet-deploy-plan.md):
-    ftns_token=None,                  # TODO post-T1: from contracts/deployments/mock-ftns-base-sepolia-*.json
-    provenance_registry=None,         # TODO post-T1: redeploy with current source
-    royalty_distributor=None,         # TODO post-T1: redeploy with v2 (HIGH-1 burn fix + Pausable + D-04 pull-payment)
-    foundation_safe=None,             # TODO post-T1: deployer EOA address (per §9 ratified decision)
-    escrow_pool=None,                 # TODO post-T1
-    stake_bond=None,                  # TODO post-T1
-    settlement_registry=None,         # TODO post-T1
-    signature_verifier=None,          # TODO post-T1
-    emission_controller=None,         # TODO post-T1 (uses mainnet's 4-year halving; accelerated halving is task T10)
-    compensation_distributor=None,    # TODO post-T1
-    storage_slashing=None,            # TODO post-T1
-    key_distribution=None,            # TODO post-T1
-    publisher_key_anchor=None,        # TODO post-T1 (or reuse Phase 3.x.3 Sepolia deploy if applicable)
+    # T1 deploy 2026-05-05 — all addresses are testnet-FTNS deployed via deployer EOA:
+    ftns_token="0xF8d0c1AE75441d3C3Dd2A2420C0789043916412a",
+    provenance_registry="0x2911f9a0a02896486CdF59d6d369764841DC0eA4",
+    royalty_distributor="0xB790045ff826C76fe02DBc54a6ef0021951Fd892",
+    foundation_safe="0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0",  # deployer EOA per §9 ratified decision
+    escrow_pool="0x4BDf07b2BB23176469bdEFca2B103AdB3DCb3dd2",
+    stake_bond="0xDea103f33503BC7e73Ea447d43b2Cd7E2710D20A",
+    settlement_registry="0x200B35fCB68678717a355176e22321Dc3e703315",
+    signature_verifier="0x1d7fCbC08792D649016703C4Be59635e619097EE",
+    emission_controller="0x134552dbe2d235DB60be5A881A2c06d9E42d2613",
+    compensation_distributor="0xFa3610e87027b548B86859B105B1b39B30d9955B",
+    storage_slashing="0x4FDd792fDcDcEe31861D23A1B0342058Ed32c766",
+    key_distribution="0xC33ceA03455DB9246716ccF04cE1446EB56B439b",
+    publisher_key_anchor=None,  # not yet deployed on Base Sepolia; Phase 3.x.3 Sepolia deploy was on Ethereum Sepolia
     notes=(
         "TESTNET — testnet-FTNS has zero monetary value.",
         "Foundation 'Safe' on testnet is a single deployer EOA, NOT the real 2-of-3 mainnet multisig.",

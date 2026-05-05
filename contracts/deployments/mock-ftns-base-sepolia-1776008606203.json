@@ -1,0 +1,13 @@
+{
+  "network": "base-sepolia",
+  "chainId": "84532",
+  "timestamp": "2026-04-12T15:43:26.202Z",
+  "deployer": "0x8eaA00FF741323bc8B0ab1290c544738D9b2f012",
+  "contracts": {
+    "MockERC20": "0xd979c096BE297F4C3a85175774Bc38C22b95E6a4"
+  },
+  "initialMint": {
+    "to": "0x8eaA00FF741323bc8B0ab1290c544738D9b2f012",
+    "amount": "10000000000000000000000"
+  }
+}
