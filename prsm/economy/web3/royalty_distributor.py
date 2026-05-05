@@ -73,6 +73,33 @@ ROYALTY_DISTRIBUTOR_ABI = [
         "name": "RoyaltyPaid",
         "type": "event",
     },
+    # T6.2 (2026-05-05): pull-payment surface (D-04 refactor).
+    # `claimable(address)` is the auto-generated getter for the public
+    # `mapping(address => uint256) public claimable` field; `claim()`
+    # withdraws msg.sender's accumulated balance.
+    {
+        "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "name": "claimable",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "claim",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "address", "name": "recipient", "type": "address"},
+            {"indexed": False, "internalType": "uint256", "name": "amount", "type": "uint256"},
+        ],
+        "name": "RoyaltyClaimed",
+        "type": "event",
+    },
 ]
 
 # Minimal ERC-20 ABI subset we need (allowance + approve)
@@ -166,6 +193,22 @@ class RoyaltyDistributorClient:
             ).call()
         )
 
+    def claimable(self, address: Optional[str] = None) -> int:
+        """T6.2: read accumulated pull-payment balance for `address`.
+
+        Returns the FTNS amount (in wei) the address can withdraw via
+        claim(). Defaults to the configured signer's address.
+        """
+        if address is None:
+            if not self._account:
+                raise RuntimeError("address required when no signer configured")
+            address = self._account.address
+        return int(
+            self.distributor.functions.claimable(
+                Web3.to_checksum_address(address)
+            ).call()
+        )
+
     # ── Writes ─────────────────────────────────────────────────
 
     def distribute_royalty(
@@ -202,6 +245,24 @@ class RoyaltyDistributorClient:
             tx = self.distributor.functions.distributeRoyalty(
                 content_hash, Web3.to_checksum_address(serving_node), gross
             ).build_transaction(self._tx_overrides())
+            return self._sign_and_send(tx)
+
+    def claim(self) -> Tuple[str, TransferStatus]:
+        """T6.2: withdraw accumulated pull-payment balance for the signer.
+
+        Calls `RoyaltyDistributor.claim()` which transfers the signer's
+        full `claimable[msg.sender]` balance to msg.sender as FTNS,
+        zeroing the mapping entry. No-op (reverts ZeroClaim) if the
+        balance is 0.
+
+        Returns (tx_hash_hex, TransferStatus).
+        """
+        if not self._account:
+            raise RuntimeError("private_key required for claim()")
+        with self._tx_lock:
+            tx = self.distributor.functions.claim().build_transaction(
+                self._tx_overrides()
+            )
             return self._sign_and_send(tx)
 
     # ── Internals ──────────────────────────────────────────────

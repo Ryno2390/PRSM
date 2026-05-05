@@ -5039,5 +5039,237 @@ def daemon_uninstall(yes: bool):
     _uninstall(yes=yes)
 
 
+# ---------------------------------------------------------------------------
+# wallet CLI group (T6.2)
+#
+# Surface real on-chain state to users: FTNS balance + claimable royalties +
+# claim-flow. Reads from prsm/config/networks.py for per-network contract
+# addresses; reads PRIVATE_KEY from env (typically loaded from
+# ~/.prsm/<network>-deployer.env). Without PRIVATE_KEY, view-only mode:
+# can show balance + claimable for any address but can't claim.
+# ---------------------------------------------------------------------------
+
+
+def _wallet_load_signer(network_name: str) -> dict:
+    """Resolve wallet identity for the wallet CLI."""
+    import os
+    from prsm.config.networks import get_network_config
+
+    cfg = get_network_config(network_name)
+    rpc_url = (os.environ.get("BASE_SEPOLIA_RPC_URL")
+               if network_name == "testnet"
+               else os.environ.get("PRSM_BASE_RPC_URL"))
+    if not rpc_url:
+        rpc_url = cfg.rpc_url_default
+
+    pk = (os.environ.get("PRIVATE_KEY")
+          or os.environ.get("FTNS_WALLET_PRIVATE_KEY")
+          or "").strip() or None
+    address = None
+    if pk:
+        try:
+            from eth_account import Account
+            address = Account.from_key(pk).address
+        except Exception as exc:
+            console.print(
+                f"⚠️  could not derive address from PRIVATE_KEY: {exc}",
+                style="yellow")
+
+    return {
+        "network": cfg,
+        "address": address,
+        "private_key": pk,
+        "rpc_url": rpc_url,
+    }
+
+
+def _wallet_read_balance_wei(rpc_url: str, ftns_token: str, address: str) -> int:
+    """Read FTNS balanceOf(address) using a minimal Web3 call."""
+    from web3 import Web3
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    erc20_abi = [{
+        "inputs": [{"name": "owner", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    }]
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address(ftns_token), abi=erc20_abi)
+    return int(contract.functions.balanceOf(
+        Web3.to_checksum_address(address)).call())
+
+
+@main.group()
+def wallet():
+    """On-chain wallet — view balance, claim royalties."""
+    pass
+
+
+@wallet.command("info")
+@click.option(
+    "--network", "network_name",
+    default="testnet",
+    type=click.Choice(["mainnet", "testnet"]),
+    help="Network to query (default: testnet)",
+)
+@click.option(
+    "--address",
+    default=None,
+    help="Override wallet address (default: derive from PRIVATE_KEY env)",
+)
+def wallet_info(network_name: str, address):
+    """Show on-chain wallet state: address, FTNS balance, claimable royalties.
+
+    \b
+    Reads from:
+      - PRIVATE_KEY env (or FTNS_WALLET_PRIVATE_KEY) — derives address
+      - prsm/config/networks.py — for contract addresses
+      - BASE_SEPOLIA_RPC_URL (testnet) or PRSM_BASE_RPC_URL (mainnet)
+
+    \b
+    Example:
+        prsm wallet info --network testnet
+        prsm wallet info --network testnet --address 0xabc...
+    """
+    ctx = _wallet_load_signer(network_name)
+    cfg = ctx["network"]
+
+    addr = address or ctx["address"]
+    if not addr:
+        console.print(
+            "❌ no address available — set PRIVATE_KEY env var "
+            "or pass --address", style="red")
+        raise SystemExit(1)
+    if not cfg.ftns_token:
+        console.print(
+            f"❌ {network_name} FTNS token address not configured in "
+            f"prsm/config/networks.py", style="red")
+        raise SystemExit(1)
+
+    console.print(f"\n[bold]Wallet on {cfg.name}[/bold] (chainId {cfg.chain_id})")
+    console.print(f"Address:        {addr}")
+    console.print(f"Explorer:       {cfg.explorer_url}/address/{addr}")
+    console.print(f"RPC:            {ctx['rpc_url']}")
+    console.print()
+
+    # FTNS balance
+    try:
+        bal_wei = _wallet_read_balance_wei(ctx['rpc_url'], cfg.ftns_token, addr)
+        bal = bal_wei / 1e18
+        console.print(f"FTNS balance:   [bold]{bal:,.6f}[/bold] FTNS  "
+                      f"({cfg.ftns_token[:10]}…)")
+    except Exception as exc:
+        console.print(f"FTNS balance:   ⚠️  read failed: {exc}", style="yellow")
+
+    # Claimable royalties
+    if cfg.royalty_distributor:
+        try:
+            from prsm.economy.web3.royalty_distributor import (
+                RoyaltyDistributorClient,
+            )
+            client = RoyaltyDistributorClient(
+                rpc_url=ctx['rpc_url'],
+                distributor_address=cfg.royalty_distributor,
+                ftns_token_address=cfg.ftns_token,
+                private_key=None,
+            )
+            claimable_wei = client.claimable(addr)
+            claimable = claimable_wei / 1e18
+            color = "bold green" if claimable > 0 else "dim"
+            console.print(f"Claimable:      [{color}]{claimable:,.6f}[/{color}] "
+                          f"FTNS  ({cfg.royalty_distributor[:10]}…)")
+            if claimable > 0:
+                console.print(f"\n  → run [bold]prsm wallet claim --network "
+                              f"{network_name}[/bold] to withdraw")
+        except Exception as exc:
+            console.print(f"Claimable:      ⚠️  read failed: {exc}",
+                          style="yellow")
+    else:
+        console.print(
+            f"Claimable:      (RoyaltyDistributor not configured "
+            f"for {network_name})", style="dim")
+
+    console.print()
+    if network_name == "testnet":
+        for note in cfg.notes:
+            console.print(f"  ℹ {note}", style="dim")
+    console.print()
+
+
+@wallet.command("claim")
+@click.option(
+    "--network", "network_name",
+    default="testnet",
+    type=click.Choice(["mainnet", "testnet"]),
+    help="Network to claim from (default: testnet)",
+)
+@click.confirmation_option(
+    prompt="Submit RoyaltyDistributor.claim() transaction?",
+    help="Skip confirmation prompt with --yes",
+)
+def wallet_claim(network_name: str):
+    """Withdraw accumulated FTNS royalties via RoyaltyDistributor.claim().
+
+    \b
+    The signer's full claimable[address] balance is transferred to their
+    address as FTNS, and the mapping entry is zeroed. Reverts on-chain
+    if claimable is 0.
+
+    \b
+    Required env:
+      PRIVATE_KEY or FTNS_WALLET_PRIVATE_KEY — signs the tx
+    """
+    ctx = _wallet_load_signer(network_name)
+    cfg = ctx["network"]
+
+    if not ctx['private_key']:
+        console.print("❌ PRIVATE_KEY env var required for claim", style="red")
+        raise SystemExit(1)
+    if not cfg.royalty_distributor or not cfg.ftns_token:
+        console.print(
+            f"❌ {network_name}: RoyaltyDistributor or FTNS token "
+            f"address missing in prsm/config/networks.py", style="red")
+        raise SystemExit(1)
+
+    addr = ctx['address']
+    console.print(f"\n[bold]Claiming on {cfg.name}[/bold]")
+    console.print(f"From:           {addr}")
+
+    try:
+        from prsm.economy.web3.royalty_distributor import (
+            RoyaltyDistributorClient,
+        )
+        client = RoyaltyDistributorClient(
+            rpc_url=ctx['rpc_url'],
+            distributor_address=cfg.royalty_distributor,
+            ftns_token_address=cfg.ftns_token,
+            private_key=ctx['private_key'],
+        )
+        # Pre-flight: check claimable so we surface a clean message
+        # instead of an opaque on-chain revert.
+        claimable_wei = client.claimable(addr)
+        if claimable_wei == 0:
+            console.print(
+                f"⚠️  claimable[{addr}] is 0 — nothing to claim "
+                f"(would revert on-chain). Earn royalties first.",
+                style="yellow")
+            raise SystemExit(0)
+        console.print(f"Claimable:      {claimable_wei / 1e18:,.6f} FTNS")
+        console.print()
+        console.print("Submitting claim transaction…")
+        tx_hash, status = client.claim()
+        console.print(f"  Tx hash:       {tx_hash}")
+        console.print(f"  Status:        {status}")
+        console.print(f"  Explorer:      {cfg.explorer_url}/tx/{tx_hash}")
+        console.print(f"\n[bold green]✓ Claim submitted[/bold green]\n")
+    except SystemExit:
+        raise
+    except Exception as exc:
+        console.print(
+            f"❌ claim failed: {type(exc).__name__}: {exc}", style="red")
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     main()
