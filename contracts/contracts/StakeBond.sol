@@ -4,6 +4,7 @@ pragma solidity ^0.8.22;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @dev Minimal read-only view of the slasher (BatchSettlementRegistry)
@@ -50,7 +51,7 @@ interface ISlasherWithChallengeWindow {
  * is the BatchSettlementRegistry's address. Until set, slashing is
  * disabled (challenges still invalidate receipts but don't touch stake).
  */
-contract StakeBond is Ownable, ReentrancyGuard {
+contract StakeBond is Ownable, ReentrancyGuard, Pausable {
     enum StakeStatus {
         NONE,        // never bonded (or fully withdrawn + re-bonded happens via new Stake)
         BONDED,      // active stake backing a tier
@@ -179,7 +180,7 @@ contract StakeBond is Ownable, ReentrancyGuard {
      *        critical=10000 (100%). 0 = no-slash tier (== "open"
      *        tier, typically wouldn't bond).
      */
-    function bond(uint128 amount, uint16 tierSlashRateBps) external nonReentrant {
+    function bond(uint128 amount, uint16 tierSlashRateBps) external nonReentrant whenNotPaused {
         if (amount == 0) revert ZeroAmount();
         if (tierSlashRateBps > 10000) revert InvalidSlashRateBps(tierSlashRateBps);
 
@@ -215,7 +216,7 @@ contract StakeBond is Ownable, ReentrancyGuard {
      *         caught in a challenge after requesting unbond still
      *         forfeits stake.
      */
-    function requestUnbond() external {
+    function requestUnbond() external whenNotPaused {
         Stake storage s = stakes[msg.sender];
         if (s.status != StakeStatus.BONDED) {
             revert NotBonded(msg.sender, s.status);
@@ -257,7 +258,7 @@ contract StakeBond is Ownable, ReentrancyGuard {
      *         stake was partially slashed during UNBONDING, the
      *         current `amount` is what gets returned.
      */
-    function withdraw() external nonReentrant {
+    function withdraw() external nonReentrant whenNotPaused {
         Stake storage s = stakes[msg.sender];
         if (s.status != StakeStatus.UNBONDING) {
             revert NotUnbonding(msg.sender, s.status);
@@ -344,6 +345,31 @@ contract StakeBond is Ownable, ReentrancyGuard {
         emit FoundationReserveWalletUpdated(old, newWallet);
     }
 
+    // ── Pause control (L2 audit HIGH-3 / D-02) ────────────────────
+
+    /**
+     * @notice Pause bond / requestUnbond / withdraw / slash / claimBounty.
+     *         Owner-only; intended for incident response per
+     *         docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md. Admin setters
+     *         (setUnbondDelay, setSlasher, setFoundationReserveWallet)
+     *         and drainFoundationReserve remain accessible while paused
+     *         so the owner can perform emergency rotation.
+     *
+     *         Unbond-timer-during-pause semantics: timestamp-based,
+     *         clock CONTINUES during pause (no reset). When unpaused,
+     *         providers whose unbond_eligible_at has elapsed can
+     *         withdraw immediately. A 30-day pause does NOT extend the
+     *         unbond delay; it freezes the action of withdrawal.
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Resume normal operations after pause.
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
     // ── Slashing (Task 2) ─────────────────────────────────────────
 
     /**
@@ -371,7 +397,7 @@ contract StakeBond is Ownable, ReentrancyGuard {
         address provider,
         address challenger,
         bytes32 reasonId
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         if (msg.sender != slasher) {
             revert CallerNotSlasher(msg.sender, slasher);
         }
@@ -417,7 +443,7 @@ contract StakeBond is Ownable, ReentrancyGuard {
      *         a zero-balance claim reverts rather than emitting a
      *         noise event.
      */
-    function claimBounty() external nonReentrant {
+    function claimBounty() external nonReentrant whenNotPaused {
         uint256 amount = slashedBountyPayable[msg.sender];
         if (amount == 0) revert NothingToClaim(msg.sender);
 

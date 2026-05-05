@@ -1,18 +1,25 @@
-// Team D — D4 PoC: Pause-coverage gap. The four core treasury contracts
-// (BatchSettlementRegistry, EscrowPool, StakeBond, RoyaltyDistributor) have
-// NO pause mechanism. There is no admin button to halt value movement during
-// an exploit-in-progress. The only kill-switch is FTNSToken's pause, which
-// blocks ALL transfers globally including legitimate user activity, and is
-// administratively heavy.
+// Team D — D-02 REGRESSION GUARD (formerly PoC for "no pause surface").
 //
-// This test demonstrates that the "pause cover the full attack surface"
-// invariant (team-prompt §Stated invariants #3) is FALSE for the treasury
-// layer — there is no such surface.
+// Original finding asserted that none of BatchSettlementRegistry,
+// EscrowPool, StakeBond, RoyaltyDistributor exposed a pause mechanism —
+// the "pause covers the full attack surface" invariant (#3) was FALSE.
+//
+// REMEDIATION SHIPPED 2026-05-05:
+//   - BSR + EscrowPool + StakeBond all inherit OZ Pausable.
+//   - State-mutating functions gated on `whenNotPaused`.
+//   - Admin setters intentionally NOT gated (rotation during incident).
+//   - RoyaltyDistributor pause comes with the HIGH-1 v2 re-deploy
+//     (v1 is non-Ownable + non-upgradeable).
+//
+// This test now asserts the inverse: the three audit-bundle contracts
+// DO expose pause()/unpause(), the source does contain whenNotPaused,
+// and the live-mainnet-deployed RoyaltyDistributor v1 still does NOT
+// (documenting the v2-redeploy follow-up).
 
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("[Team D] D4 — No pause surface on treasury contracts", function () {
+describe("[Team D] D-02 regression: pause surface present on audit-bundle contracts", function () {
   let registry, pool, stakeBond, royaltyDistributor, provReg, token;
   let owner;
 
@@ -48,27 +55,37 @@ describe("[Team D] D4 — No pause surface on treasury contracts", function () {
     await royaltyDistributor.waitForDeployment();
   });
 
-  it("BatchSettlementRegistry exposes no pause()/unpause()", async function () {
-    expect(registry.pause).to.be.undefined;
-    expect(registry.paused).to.be.undefined;
+  it("BatchSettlementRegistry NOW exposes pause()/unpause()/paused()", async function () {
+    expect(registry.pause).to.not.be.undefined;
+    expect(registry.unpause).to.not.be.undefined;
+    expect(registry.paused).to.not.be.undefined;
+    expect(await registry.paused()).to.equal(false);
   });
 
-  it("EscrowPool exposes no pause()/unpause()", async function () {
-    expect(pool.pause).to.be.undefined;
-    expect(pool.paused).to.be.undefined;
+  it("EscrowPool NOW exposes pause()/unpause()/paused()", async function () {
+    expect(pool.pause).to.not.be.undefined;
+    expect(pool.unpause).to.not.be.undefined;
+    expect(pool.paused).to.not.be.undefined;
+    expect(await pool.paused()).to.equal(false);
   });
 
-  it("StakeBond exposes no pause()/unpause()", async function () {
-    expect(stakeBond.pause).to.be.undefined;
-    expect(stakeBond.paused).to.be.undefined;
+  it("StakeBond NOW exposes pause()/unpause()/paused()", async function () {
+    expect(stakeBond.pause).to.not.be.undefined;
+    expect(stakeBond.unpause).to.not.be.undefined;
+    expect(stakeBond.paused).to.not.be.undefined;
+    expect(await stakeBond.paused()).to.equal(false);
   });
 
-  it("RoyaltyDistributor exposes no pause()/unpause()", async function () {
+  it("RoyaltyDistributor v1 (live mainnet) still has no pause — pending HIGH-1 v2 re-deploy", async function () {
+    // Documents the deferred fix per consolidated.md §6 + §3 HIGH-1.
+    // RoyaltyDistributor at 0x3E82...D6c2 is non-Ownable + non-upgradeable.
+    // v2 re-deploy with both the burn implementation AND Pausable comes
+    // in Week 2 of the remediation sprint.
     expect(royaltyDistributor.pause).to.be.undefined;
     expect(royaltyDistributor.paused).to.be.undefined;
   });
 
-  it("source contains no whenNotPaused modifier on any state-mutating fn", async function () {
+  it("source contains whenNotPaused on at least one state-mutating fn in each audit-bundle contract", async function () {
     const fs = require("fs");
     const path = require("path");
     const root = path.resolve(__dirname, "../../contracts");
@@ -76,11 +93,9 @@ describe("[Team D] D4 — No pause surface on treasury contracts", function () {
       "BatchSettlementRegistry.sol",
       "EscrowPool.sol",
       "StakeBond.sol",
-      "RoyaltyDistributor.sol",
     ]) {
       const src = fs.readFileSync(path.join(root, f), "utf8");
-      // No literal "whenNotPaused" appears in any treasury contract.
-      expect(src.includes("whenNotPaused"), `${f} unexpectedly has whenNotPaused`).to.equal(false);
+      expect(src.includes("whenNotPaused"), `${f} should have whenNotPaused`).to.equal(true);
     }
   });
 });

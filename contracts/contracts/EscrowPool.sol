@@ -4,6 +4,7 @@ pragma solidity ^0.8.22;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title EscrowPool
@@ -35,7 +36,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  * is a standard ERC-20 without hooks, we can't guarantee the token
  * contract's behavior in every deployment context.
  */
-contract EscrowPool is Ownable, ReentrancyGuard {
+contract EscrowPool is Ownable, ReentrancyGuard, Pausable {
     IERC20 public ftns;
     address public settlementRegistry;
 
@@ -79,7 +80,7 @@ contract EscrowPool is Ownable, ReentrancyGuard {
      *         `amount` of FTNS before calling.
      * @param amount FTNS to deposit in token base units
      */
-    function deposit(uint256 amount) external nonReentrant {
+    function deposit(uint256 amount) external nonReentrant whenNotPaused {
         if (amount == 0) revert ZeroAmount();
 
         // Record the credit before the external transferFrom to keep
@@ -102,7 +103,7 @@ contract EscrowPool is Ownable, ReentrancyGuard {
      *         requester's own funds.
      * @param amount FTNS to withdraw in token base units
      */
-    function withdraw(uint256 amount) external nonReentrant {
+    function withdraw(uint256 amount) external nonReentrant whenNotPaused {
         if (amount == 0) revert ZeroAmount();
         uint256 bal = balances[msg.sender];
         if (bal < amount) {
@@ -130,7 +131,7 @@ contract EscrowPool is Ownable, ReentrancyGuard {
         address requester,
         address recipient,
         uint256 amount
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         if (msg.sender != settlementRegistry) {
             revert CallerNotRegistry(msg.sender, settlementRegistry);
         }
@@ -185,6 +186,24 @@ contract EscrowPool is Ownable, ReentrancyGuard {
         address old = address(ftns);
         ftns = IERC20(newToken);
         emit FtnsTokenUpdated(old, newToken);
+    }
+
+    // ── Pause control (L2 audit HIGH-3 / D-02) ────────────────────
+
+    /**
+     * @notice Pause deposit / withdraw / settleFromRequester. Owner-only;
+     *         intended for incident response per
+     *         docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md. Admin setters
+     *         (setSettlementRegistry, setFtnsToken) remain accessible
+     *         while paused so the owner can perform emergency rotation.
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Resume normal operations after pause.
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     // ── Views ─────────────────────────────────────────────────────

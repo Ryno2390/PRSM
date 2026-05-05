@@ -2,6 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 interface IEscrowPool {
@@ -88,7 +89,7 @@ struct ReceiptLeaf {
  *     operations are permissionless (anyone can commit; anyone can
  *     finalize a pending batch whose window has elapsed).
  */
-contract BatchSettlementRegistry is Ownable {
+contract BatchSettlementRegistry is Ownable, Pausable {
     enum BatchStatus {
         NONEXISTENT, // default — batchId never committed
         PENDING,     // committed; within challenge window
@@ -305,7 +306,7 @@ contract BatchSettlementRegistry is Ownable {
         uint16 tierSlashRateBps,
         bytes32 consensusGroupId,
         string calldata metadataURI
-    ) external returns (bytes32 batchId) {
+    ) external whenNotPaused returns (bytes32 batchId) {
         if (requester == address(0)) revert ZeroRequester();
         if (merkleRoot == bytes32(0)) revert EmptyMerkleRoot();
         if (receiptCount == 0) revert ZeroReceiptCount();
@@ -363,7 +364,7 @@ contract BatchSettlementRegistry is Ownable {
      *
      * @param batchId identifier returned by commitBatch
      */
-    function finalizeBatch(bytes32 batchId) external {
+    function finalizeBatch(bytes32 batchId) external whenNotPaused {
         Batch storage b = batches[batchId];
 
         if (b.status == BatchStatus.NONEXISTENT) revert BatchNotFound(batchId);
@@ -428,7 +429,7 @@ contract BatchSettlementRegistry is Ownable {
         bytes32[] calldata merkleProof,
         ReasonCode reason,
         bytes calldata auxData
-    ) external {
+    ) external whenNotPaused {
         Batch storage b = batches[batchId];
         if (b.status == BatchStatus.NONEXISTENT) revert BatchNotFound(batchId);
         if (b.status != BatchStatus.PENDING) {
@@ -796,6 +797,32 @@ contract BatchSettlementRegistry is Ownable {
         uint256 old = challengeWindowSeconds;
         challengeWindowSeconds = newSeconds;
         emit ChallengeWindowUpdated(old, newSeconds);
+    }
+
+    // ── Pause control (L2 audit HIGH-3 / D-02) ────────────────────
+
+    /**
+     * @notice Pause commitBatch / finalizeBatch / challengeReceipt.
+     *         Owner-only; intended for incident response per
+     *         docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md. Admin setters
+     *         (setEscrowPool, setStakeBond, setSignatureVerifier,
+     *         setChallengeWindowSeconds, setSettlementLookbackWindow)
+     *         remain accessible while paused so the owner can perform
+     *         emergency rotation.
+     *
+     *         Note: pausing BSR also implicitly halts EscrowPool
+     *         settlement (finalizeBatch is the only path that calls it).
+     *         If EscrowPool is paused independently, finalizeBatch on
+     *         this contract will revert at the settle step. Both
+     *         pauses are operationally fine and do not lock funds.
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Resume normal operations after pause.
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     // ── Views ────────────────────────────────────────────────────
