@@ -86,12 +86,18 @@ describe("Audit Team D — D-02 regression: pause surface on audit-bundle contra
         .to.be.revertedWithCustomError(escrowPool, "EnforcedPause");
     });
 
-    it("admin setters work while paused", async function () {
-      await escrowPool.connect(owner).pause();
+    it("admin setters work while paused (post B-CROSS-2: setFtnsToken still owner-only + whenNotPaused-exempt; B-CROSS-2 enforces drain-first invariant orthogonally)", async function () {
       // L2 audit HIGH-6: setSettlementRegistry was removed (now immutable).
-      // setFtnsToken is the remaining admin-only setter and must remain
-      // callable while paused so the owner can perform emergency rotation
-      // (e.g., if the FTNS token contract itself is compromised).
+      // L2 audit HIGH-7: setSlasher (StakeBond) was removed (now immutable).
+      // L2 audit MEDIUM B-CROSS-2: setFtnsToken now requires
+      // totalEscrowedBalance==0. This test verifies that setFtnsToken
+      // remains pause-exempt at the modifier level — drain the
+      // requester's deposit (set up in beforeEach) first to satisfy
+      // B-CROSS-2's invariant, then assert the call succeeds while paused.
+      await escrowPool.connect(requester).withdraw(ONE_FTNS * 100n);
+      expect(await escrowPool.totalEscrowedBalance()).to.equal(0);
+
+      await escrowPool.connect(owner).pause();
       const Token2 = await ethers.getContractFactory("MockERC20");
       const altToken = await Token2.deploy();
       await altToken.waitForDeployment();

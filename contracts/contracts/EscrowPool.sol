@@ -57,6 +57,17 @@ contract EscrowPool is Ownable2Step, ReentrancyGuard, Pausable {
     /// decremented on withdraw or settlement.
     mapping(address requester => uint256) public balances;
 
+    /// @dev L2 audit MEDIUM B-CROSS-2 fix: sum of all per-requester
+    /// balances. Maintained in lockstep with `balances` so the
+    /// emergency setFtnsToken escape hatch can refuse to swap the
+    /// token while there are non-zero balances pending — pre-fix,
+    /// owner could swap to a fake/zero token and strand all user
+    /// funds (pool address still holds the real ERC-20 but the
+    /// pool's `ftns` reference no longer points to it). The earlier
+    /// docstring described "no pending balances" as operational
+    /// policy only; this field makes it on-chain enforceable.
+    uint256 public totalEscrowedBalance;
+
     event Deposited(address indexed requester, uint256 amount, uint256 newBalance);
     event Withdrawn(address indexed requester, uint256 amount, uint256 newBalance);
     event Settled(
@@ -72,6 +83,9 @@ contract EscrowPool is Ownable2Step, ReentrancyGuard, Pausable {
     error InsufficientBalance(address requester, uint256 available, uint256 requested);
     error CallerNotRegistry(address caller, address expectedRegistry);
     error TransferFailed();
+    /// @dev L2 audit MEDIUM B-CROSS-2: setFtnsToken refuses while there
+    ///      are pending requester balances backed by the current token.
+    error PendingBalancesNonZero(uint256 totalEscrowed);
 
     constructor(
         address initialOwner,
@@ -103,6 +117,7 @@ contract EscrowPool is Ownable2Step, ReentrancyGuard, Pausable {
         // zero tokens moved in a conforming ERC-20, but we check the
         // returned bool anyway.
         balances[msg.sender] += amount;
+        totalEscrowedBalance += amount;  // L2 audit MEDIUM B-CROSS-2
 
         bool ok = ftns.transferFrom(msg.sender, address(this), amount);
         if (!ok) revert TransferFailed();
@@ -125,6 +140,7 @@ contract EscrowPool is Ownable2Step, ReentrancyGuard, Pausable {
 
         // Effects before interactions.
         balances[msg.sender] = bal - amount;
+        totalEscrowedBalance -= amount;  // L2 audit MEDIUM B-CROSS-2
 
         bool ok = ftns.transfer(msg.sender, amount);
         if (!ok) revert TransferFailed();
@@ -158,6 +174,7 @@ contract EscrowPool is Ownable2Step, ReentrancyGuard, Pausable {
 
         // Effects before interactions.
         balances[requester] = bal - amount;
+        totalEscrowedBalance -= amount;  // L2 audit MEDIUM B-CROSS-2
 
         bool ok = ftns.transfer(recipient, amount);
         if (!ok) revert TransferFailed();
@@ -176,19 +193,24 @@ contract EscrowPool is Ownable2Step, ReentrancyGuard, Pausable {
      * @notice Update the FTNS token address. Owner-only. Defensive
      *         escape hatch — intended for use only if the FTNS token
      *         contract is ever replaced (e.g., emergency re-deploy).
-     *         Cannot be called if there are non-zero balances pending
-     *         in the pool, because old-token balances would be
-     *         stranded — owner must drain first.
      *
-     *         NOTE: we do NOT track total-balance-sum cheaply, so the
-     *         "no pending balances" check is operational-policy only.
-     *         Owner MUST verify via off-chain indexing before calling.
-     *         Flagged for Task 3 review + potential on-chain
-     *         balance-sum tracking.
+     *         L2 audit MEDIUM B-CROSS-2 fix: refuses while
+     *         `totalEscrowedBalance > 0`. Pre-fix this was operational
+     *         policy only; pre-fix a compromised owner could swap to a
+     *         fake token and strand the real-token balance forever
+     *         (pool address still holds the real ERC-20, but the
+     *         pool's `ftns` reference no longer points to it). The
+     *         on-chain accumulator now enforces the invariant: owner
+     *         must coordinate full unwind (every requester withdraws
+     *         OR every batch finalizes/settles) before swap is
+     *         possible.
      * @param newToken address of the new FTNS-compatible ERC-20
      */
     function setFtnsToken(address newToken) external onlyOwner {
         if (newToken == address(0)) revert ZeroAddress();
+        if (totalEscrowedBalance != 0) {
+            revert PendingBalancesNonZero(totalEscrowedBalance);
+        }
         address old = address(ftns);
         ftns = IERC20(newToken);
         emit FtnsTokenUpdated(old, newToken);

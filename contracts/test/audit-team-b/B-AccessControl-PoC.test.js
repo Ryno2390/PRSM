@@ -172,7 +172,7 @@ describe("Team B — Access Control PoC", function () {
       expect(await pool.balances(owner.address)).to.equal(TEN);
     });
 
-    it("CONFIRMED: owner can replace FTNS token via setFtnsToken, stranding all balances", async function () {
+    it("REGRESSION (MEDIUM B-CROSS-2): owner CANNOT setFtnsToken while pending balances are non-zero — strand attack vector closed", async function () {
       const [owner, requester] = await ethers.getSigners();
       const MockERC20 = await ethers.getContractFactory("MockERC20");
       const realFtns = await MockERC20.deploy();
@@ -181,26 +181,31 @@ describe("Team B — Access Control PoC", function () {
       const Pool = await ethers.getContractFactory("EscrowPool");
       const pool = await Pool.deploy(owner.address, await realFtns.getAddress(), ethers.ZeroAddress);
 
-      // Requester deposits 100 real FTNS.
+      // Requester deposits 100 real FTNS — totalEscrowedBalance now = 100.
       const HUNDRED = ethers.parseUnits("100", 18);
       await realFtns.mint(requester.address, HUNDRED);
       await realFtns.connect(requester).approve(await pool.getAddress(), HUNDRED);
       await pool.connect(requester).deposit(HUNDRED);
       expect(await pool.balances(requester.address)).to.equal(HUNDRED);
+      expect(await pool.totalEscrowedBalance()).to.equal(HUNDRED);
 
-      // Owner swaps to fakeFtns. Operational policy says "drain first";
-      // contract does NOT enforce.
-      await pool.setFtnsToken(await fakeFtns.getAddress());
+      // Pre-fix: owner could swap mid-flight and strand real FTNS.
+      // Post-fix: setFtnsToken reverts because totalEscrowedBalance > 0.
+      await expect(
+        pool.setFtnsToken(await fakeFtns.getAddress()),
+      ).to.be.revertedWithCustomError(pool, "PendingBalancesNonZero");
 
-      // Real FTNS still in pool's address; pool now points at fake.
-      // Requester withdrawing pulls FAKE tokens (pool has zero fake-FTNS
-      // balance → underlying ERC20 revert with insufficient balance).
-      // Real funds stranded.
-      await expect(pool.connect(requester).withdraw(HUNDRED)).to.be.reverted;
-      // Real funds still in pool address, unrecoverable through the
-      // contract's interface.
-      expect(await realFtns.balanceOf(await pool.getAddress())).to.equal(HUNDRED);
-      expect(await fakeFtns.balanceOf(await pool.getAddress())).to.equal(0);
+      // ftns reference unchanged — still real.
+      expect(await pool.ftns()).to.equal(await realFtns.getAddress());
+
+      // Requester can drain via withdraw (totalEscrowedBalance → 0),
+      // and AFTER full unwind the swap is allowed.
+      await pool.connect(requester).withdraw(HUNDRED);
+      expect(await pool.totalEscrowedBalance()).to.equal(0);
+      await expect(
+        pool.setFtnsToken(await fakeFtns.getAddress()),
+      ).to.not.be.reverted;
+      expect(await pool.ftns()).to.equal(await fakeFtns.getAddress());
     });
 
     it("REGRESSION (HIGH-7): owner CANNOT re-point StakeBond.slasher — field is now immutable, no setter exposed", async function () {
