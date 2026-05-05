@@ -47,7 +47,7 @@ describe("[Team D] D11 — Cross-wire owner mutation breaks in-flight batches", 
     await pool.connect(requester).deposit(ONE_FTNS * 100n);
   });
 
-  it("setEscrowPool after commit: finalize attempts settle from EMPTY new pool, reverts", async function () {
+  it("REGRESSION (MEDIUM D-03): setEscrowPool after commit does NOT re-route in-flight batches — per-batch escrowPool snapshot is load-bearing", async function () {
     const root = ethers.keccak256(ethers.toUtf8Bytes("root"));
     const tx = await registry.connect(provider).commitBatch(
       requester.address, root, 1, ONE_FTNS * 10n, 0, ethers.ZeroHash, ""
@@ -55,19 +55,21 @@ describe("[Team D] D11 — Cross-wire owner mutation breaks in-flight batches", 
     const r = await tx.wait();
     const batchId = r.logs.find(l => l.fragment && l.fragment.name === "BatchCommitted").args[0];
 
-    // Owner reroutes to a different (empty) pool MID-FLIGHT, with no notice.
+    // Owner reroutes to a different (empty) pool MID-FLIGHT.
+    // Pre-D-03: this would have soft-bricked finalize against pool2.
+    // Post-D-03: finalize reads b.escrowPoolAtCommit (= original pool)
+    // and settles cleanly against it, ignoring the live mutable pointer.
     await registry.connect(owner).setEscrowPool(await pool2.getAddress());
 
     // Wait the challenge window.
     await time.increase(WINDOW + 1);
 
-    // Finalize tries to pull from pool2 — requester has no balance there.
-    await expect(
-      registry.finalizeBatch(batchId)
-    ).to.be.revertedWithCustomError(pool2, "InsufficientBalance");
+    // Finalize succeeds against the snapshot pool, not the live one.
+    await expect(registry.finalizeBatch(batchId)).to.emit(registry, "BatchFinalized");
 
-    // Provider's settlement is now soft-bricked: the batch is stuck in
-    // PENDING with the wrong pool wired. Owner intervention required.
+    // Funds moved from the original pool's accounting, not pool2.
+    expect(await pool.balances(requester.address)).to.equal(ONE_FTNS * 90n); // 100 - 10
+    expect(await pool2.balances(requester.address)).to.equal(0n);
   });
 
   it("REGRESSION (HIGH-6): owner cannot re-point pool.settlementRegistry mid-flight — field is immutable, attack vector closed", async function () {

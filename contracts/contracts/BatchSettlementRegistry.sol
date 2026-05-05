@@ -139,6 +139,19 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
                                       // that retroactive-shrink primitive even if the owner is later
                                       // compromised; only the global `challengeWindowSeconds`
                                       // governance setter remains for FUTURE batches.
+        // L2 audit MEDIUM D-03 fix: snapshot the 3 cross-wire pointers
+        // (escrowPool, stakeBond, signatureVerifier) at commit time.
+        // Pre-fix, mid-flight setEscrowPool / setStakeBond /
+        // setSignatureVerifier soft-bricked in-flight batches —
+        // finalizeBatch tried to settle from the new pool (empty),
+        // challenge.slash hit the new bond (or reverted on EOA),
+        // verification swapped to a malicious verifier mid-challenge.
+        // Per-batch snapshots make these immutable for the batch's
+        // lifecycle; setters affect only FUTURE commits, mirroring the
+        // D-05 challengeWindowSecondsAtCommit pattern.
+        address escrowPoolAtCommit;
+        address stakeBondAtCommit;
+        address signatureVerifierAtCommit;
         string  metadataURI;          // optional IPFS pointer (see §10.7 of design)
     }
 
@@ -346,24 +359,31 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
             revert BatchAlreadyCommitted(batchId);
         }
 
-        batches[batchId] = Batch({
-            provider: msg.sender,
-            requester: requester,
-            merkleRoot: merkleRoot,
-            receiptCount: receiptCount,
-            totalValueFTNS: totalValueFTNS,
-            invalidatedValueFTNS: 0,
-            commitTimestamp: uint64(block.timestamp),
-            status: BatchStatus.PENDING,
-            tier_slash_rate_bps: tierSlashRateBps,
-            consensus_group_id: consensusGroupId,
-            // L2 audit MEDIUM D-05 fix: snapshot the live window at commit
-            // time so subsequent governance changes via
-            // setChallengeWindowSeconds cannot retroactively shorten the
-            // dispute period for batches already in PENDING.
-            challengeWindowSecondsAtCommit: uint64(challengeWindowSeconds),
-            metadataURI: metadataURI
-        });
+        // Construct Batch via storage-pointer assignment rather than a
+        // single struct literal — Solidity struct-literal codegen blows
+        // the local-variable stack with this many fields (D-03 + D-05
+        // snapshots pushed it over). Behaviour-equivalent.
+        Batch storage b = batches[batchId];
+        b.provider = msg.sender;
+        b.requester = requester;
+        b.merkleRoot = merkleRoot;
+        b.receiptCount = receiptCount;
+        b.totalValueFTNS = totalValueFTNS;
+        // invalidatedValueFTNS defaults to 0
+        b.commitTimestamp = uint64(block.timestamp);
+        b.status = BatchStatus.PENDING;
+        b.tier_slash_rate_bps = tierSlashRateBps;
+        b.consensus_group_id = consensusGroupId;
+        // L2 audit MEDIUM D-05 fix: snapshot the live window at commit
+        // time so subsequent governance changes via
+        // setChallengeWindowSeconds cannot retroactively shorten the
+        // dispute period for batches already in PENDING.
+        b.challengeWindowSecondsAtCommit = uint64(challengeWindowSeconds);
+        // L2 audit MEDIUM D-03 fix: snapshot cross-wire pointers.
+        b.escrowPoolAtCommit = address(escrowPool);
+        b.stakeBondAtCommit = address(stakeBond);
+        b.signatureVerifierAtCommit = address(signatureVerifier);
+        b.metadataURI = metadataURI;
 
         emit BatchCommitted(
             batchId,
@@ -422,10 +442,14 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         // finalValue=0 (pathological case where every receipt was
         // invalidated) skips the transfer but still finalizes state.
         if (finalValue > 0) {
-            if (address(escrowPool) == address(0)) {
+            // L2 audit MEDIUM D-03 fix: settle against the per-batch
+            // snapshot, not the live mutable pointer. Owner cannot
+            // re-route in-flight settlements by calling setEscrowPool.
+            address poolAtCommit = b.escrowPoolAtCommit;
+            if (poolAtCommit == address(0)) {
                 revert EscrowPoolNotConfigured();
             }
-            escrowPool.settleFromRequester(b.requester, b.provider, finalValue);
+            IEscrowPool(poolAtCommit).settleFromRequester(b.requester, b.provider, finalValue);
         }
 
         emit BatchFinalized(
@@ -489,7 +513,7 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         if (reason == ReasonCode.DOUBLE_SPEND) {
             proven = _handleDoubleSpend(leaf, leafHash, auxData);
         } else if (reason == ReasonCode.INVALID_SIGNATURE) {
-            proven = _handleInvalidSignature(leaf, auxData);
+            proven = _handleInvalidSignature(leaf, auxData, b.signatureVerifierAtCommit);
         } else if (reason == ReasonCode.NO_ESCROW) {
             proven = _handleNoEscrow(b);
         } else if (reason == ReasonCode.EXPIRED) {
@@ -516,8 +540,11 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         // Slashing is best-effort: if stakeBond is unconfigured, or if the
         // provider has no stake, the challenge still succeeds and the
         // receipt stays invalidated.
+        // L2 audit MEDIUM D-03 fix: slash against the per-batch
+        // snapshot of stakeBond, not the live mutable pointer.
+        address bondAtCommit = b.stakeBondAtCommit;
         if (
-            address(stakeBond) != address(0)
+            bondAtCommit != address(0)
             && b.tier_slash_rate_bps > 0
             && (
                 reason == ReasonCode.DOUBLE_SPEND
@@ -543,7 +570,7 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
             // reverts now are legitimate slash-ineligibility conditions
             // (NotSlashable, NothingToSlash, CallerNotSlasher) that
             // should NOT unwind the challenge.
-            try stakeBond.slash(b.provider, msg.sender, batchId) {
+            try IStakeBond(bondAtCommit).slash(b.provider, msg.sender, batchId) {
                 // success; bounty credited + foundation reserve updated
             } catch {
                 // swallow — receipt is already invalidated; slash is
@@ -608,9 +635,14 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
      */
     function _handleInvalidSignature(
         ReceiptLeaf calldata leaf,
-        bytes calldata auxData
+        bytes calldata auxData,
+        address verifierAtCommit
     ) internal view returns (bool) {
-        if (address(signatureVerifier) == address(0)) {
+        // L2 audit MEDIUM D-03 fix: verify against the per-batch
+        // snapshot of signatureVerifier, not the live mutable pointer.
+        // Owner cannot rotate to a malicious verifier mid-flight to
+        // forge or invalidate signatures on already-PENDING batches.
+        if (verifierAtCommit == address(0)) {
             revert VerifierNotConfigured();
         }
         (bytes memory publicKey, bytes memory signature) =
@@ -622,7 +654,7 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
 
         // Verify against the leaf-committed signingMessageHash, NOT a
         // challenger-supplied value. Closes C-INT-01.
-        bool valid = signatureVerifier.verify(
+        bool valid = ISignatureVerifier(verifierAtCommit).verify(
             leaf.signingMessageHash, signature, publicKey
         );
         return !valid; // challenge succeeds iff verification fails

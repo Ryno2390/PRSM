@@ -55,7 +55,14 @@ module.exports = {
       optimizer: {
         enabled: true,
         runs: 200
-      }
+      },
+      // viaIR enabled per L2 audit MEDIUM D-03 + D-05 fixes:
+      // BatchSettlementRegistry.Batch struct now carries per-batch
+      // snapshots (escrowPool, stakeBond, signatureVerifier,
+      // challengeWindowSecondsAtCommit) to immutably bind cross-wires
+      // for in-flight batches. Field count exceeds the legacy stack
+      // limit; viaIR's IR-level codegen handles it cleanly.
+      viaIR: true
     }
   },
   networks: {

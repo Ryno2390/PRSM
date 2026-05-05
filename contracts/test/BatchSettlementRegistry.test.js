@@ -264,12 +264,34 @@ describe("BatchSettlementRegistry", function () {
       expect(await token.balanceOf(provider.address)).to.equal(providerBalBefore);
     });
 
-    it("reverts on finalize when escrowPool is not configured and value > 0", async function () {
-      // Commit a batch, unset the escrow pool, then try to finalize.
+    it("REGRESSION (MEDIUM D-03): mid-flight setEscrowPool(0) does NOT brick in-flight finalize — per-batch snapshot is load-bearing", async function () {
+      // Pre-D-03: this test asserted finalize reverts with
+      // EscrowPoolNotConfigured because the LIVE pointer was zero at
+      // finalize time. Post-D-03: finalize reads the per-batch
+      // escrowPoolAtCommit snapshot, which is unaffected by mid-flight
+      // setEscrowPool calls. The in-flight batch settles cleanly
+      // against its committed-time pool.
       await registry.connect(owner).setEscrowPool(ethers.ZeroAddress);
       await time.increase(DEFAULT_WINDOW);
+      await expect(registry.finalizeBatch(batchId)).to.emit(registry, "BatchFinalized");
+    });
+
+    it("REGRESSION (MEDIUM D-03): finalize reverts EscrowPoolNotConfigured if AT-COMMIT pool was zero", async function () {
+      // Re-validate the EscrowPoolNotConfigured revert path with the
+      // new per-batch semantics: commit a NEW batch while pool is
+      // unset, and that batch's snapshot is zero — finalize reverts.
+      await registry.connect(owner).setEscrowPool(ethers.ZeroAddress);
+      const newRoot = ethers.keccak256(ethers.toUtf8Bytes("after-zero"));
+      const tx = await registry.connect(provider).commitBatch(
+        requester.address, newRoot, 1, ONE_FTNS, 0, ethers.ZeroHash, ""
+      );
+      const r = await tx.wait();
+      const newId = r.logs.find(
+        (l) => l.fragment && l.fragment.name === "BatchCommitted",
+      ).args[0];
+      await time.increase(DEFAULT_WINDOW);
       await expect(
-        registry.finalizeBatch(batchId)
+        registry.finalizeBatch(newId),
       ).to.be.revertedWithCustomError(registry, "EscrowPoolNotConfigured");
     });
 
