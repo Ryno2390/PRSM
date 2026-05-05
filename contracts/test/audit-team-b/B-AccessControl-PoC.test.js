@@ -32,35 +32,53 @@ const { ethers, upgrades } = require("hardhat");
 
 describe("Team B — Access Control PoC", function () {
   // ── B2 ──────────────────────────────────────────────────────────────
-  describe("B2 — single-step transferOwnership brick risk", function () {
-    it("CONFIRMED: typo in transferOwnership target permanently bricks Ownable contract", async function () {
+  describe("B2 — Ownable2Step prevents transferOwnership-typo brick (post-MEDIUM B-OWNABLE-1)", function () {
+    it("REGRESSION (MEDIUM B-OWNABLE-1): typo in transferOwnership target only sets pendingOwner; original owner retains control until acceptOwnership", async function () {
+      // L2 audit MEDIUM B-OWNABLE-1 fix: Ownable → Ownable2Step across
+      // all 7 contracts. transferOwnership(target) now only sets the
+      // pendingOwner; ownership transfer completes only when target
+      // calls acceptOwnership. A typo to a dead address simply sets
+      // pendingOwner to that address — the original owner retains
+      // control and can re-call transferOwnership to fix the typo.
       const [deployer, attacker] = await ethers.getSigners();
+
+      // Need a real registry address for EscrowPool's immutable
+      // settlementRegistry constructor arg (post-HIGH-6). Deploy a
+      // throwaway registry first.
+      const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
+      const registry = await Registry.deploy(deployer.address, 86400);
+
       const MockERC20 = await ethers.getContractFactory("MockERC20");
       const ftns = await MockERC20.deploy();
-
       const Pool = await ethers.getContractFactory("EscrowPool");
-      const pool = await Pool.deploy(deployer.address, await ftns.getAddress(), ethers.ZeroAddress);
+      const pool = await Pool.deploy(
+        deployer.address, await ftns.getAddress(), await registry.getAddress(),
+      );
 
-      // Operator typos one hex digit. This address has no signer in scope.
-      // ethers v6 still validates checksum, so we use a checksummed address
-      // that simply isn't controlled by anyone in this fixture.
       const typoTarget = "0x000000000000000000000000000000000000dEaD";
 
-      // Single-step Ownable accepts any non-zero target with no acceptance step.
+      // transferOwnership now sets pendingOwner ONLY. Owner is unchanged.
       await pool.transferOwnership(typoTarget);
-      expect(await pool.owner()).to.equal(typoTarget);
+      expect(await pool.owner()).to.equal(deployer.address);
+      expect(await pool.pendingOwner()).to.equal(typoTarget);
 
-      // Original deployer can no longer perform owner-only ops. (Note:
-      // post-HIGH-6, setSettlementRegistry was removed; we use the
-      // remaining owner-only setter setFtnsToken to demonstrate the
-      // bricked-ownership state.)
+      // Original deployer still controls the contract — can still
+      // perform owner-only ops while the typo'd handoff is pending.
+      const Token2 = await ethers.getContractFactory("MockERC20");
+      const altToken = await Token2.deploy();
       await expect(
-        pool.connect(deployer).setFtnsToken(attacker.address),
-      ).to.be.revertedWithCustomError(pool, "OwnableUnauthorizedAccount");
+        pool.connect(deployer).setFtnsToken(await altToken.getAddress()),
+      ).to.not.be.reverted;
 
-      // Contract is permanently bricked: no one can set the registry,
-      // settle from requesters, or update the FTNS token escape hatch.
-      // Ownable2Step would have prevented this by requiring acceptOwnership.
+      // And — critically — deployer can RE-CALL transferOwnership to
+      // overwrite the typo'd pendingOwner with the correct multisig.
+      await pool.transferOwnership(attacker.address);  // attacker stands in for "correct multisig"
+      expect(await pool.pendingOwner()).to.equal(attacker.address);
+
+      // Pre-fix Ownable would have permanently bricked at the typo
+      // step. Post-fix, the brick path requires the operator to ALSO
+      // get the new owner to call acceptOwnership() — a 2-step
+      // confirmation that surfaces the typo before it's permanent.
     });
   });
 
@@ -115,7 +133,9 @@ describe("Team B — Access Control PoC", function () {
       );
 
       // Simulate handoff: pretend `foundation` is the multi-sig.
+      // Post-MEDIUM B-OWNABLE-1: Ownable2Step requires acceptOwnership.
       await pool.transferOwnership(foundation.address);
+      await pool.connect(foundation).acceptOwnership();
       expect(await pool.owner()).to.equal(foundation.address);
 
       // Post-fix: setSettlementRegistry no longer exists at the high-

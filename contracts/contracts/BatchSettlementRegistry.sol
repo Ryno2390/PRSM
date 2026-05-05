@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
@@ -99,7 +99,7 @@ struct ReceiptLeaf {
  *     operations are permissionless (anyone can commit; anyone can
  *     finalize a pending batch whose window has elapsed).
  */
-contract BatchSettlementRegistry is Ownable, Pausable {
+contract BatchSettlementRegistry is Ownable2Step, Pausable {
     enum BatchStatus {
         NONEXISTENT, // default — batchId never committed
         PENDING,     // committed; within challenge window

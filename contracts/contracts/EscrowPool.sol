@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 
@@ -34,7 +34,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
  * is a standard ERC-20 without hooks, we can't guarantee the token
  * contract's behavior in every deployment context.
  */
-contract EscrowPool is Ownable, ReentrancyGuard, Pausable {
+contract EscrowPool is Ownable2Step, ReentrancyGuard, Pausable {
     IERC20 public ftns;
 
     /// @dev Settlement registry address. L2 audit HIGH-6 (B-CROSS-1)

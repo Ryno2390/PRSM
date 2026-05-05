@@ -80,11 +80,17 @@ async function transferOne(contractName, address, multisig, deployer) {
   if (code === "0x" || code === "0x0") {
     throw new Error(`${contractName} at ${checksum}: no contract code`);
   }
-  // Use minimal Ownable ABI to avoid contract-factory artifact dependency.
+  // L2 audit MEDIUM B-OWNABLE-1 fix: contracts now use Ownable2Step.
+  // transferOwnership only sets pendingOwner; the multisig must call
+  // acceptOwnership separately to complete the handoff. This script
+  // performs only the deployer-side transferOwnership step and
+  // verifies pendingOwner — the multisig's acceptOwnership ceremony
+  // is a separate Foundation Safe operation documented in the runbook.
   const ownable = new hre.ethers.Contract(
     checksum,
     [
       "function owner() view returns (address)",
+      "function pendingOwner() view returns (address)",
       "function transferOwnership(address newOwner)",
     ],
     deployer,
@@ -103,27 +109,58 @@ async function transferOne(contractName, address, multisig, deployer) {
       `(${multisig}) — aborting to avoid trampling unexpected state`,
     );
   }
+  // If pendingOwner is already set to the target multisig, this
+  // ceremony has been run before but the multisig hasn't yet
+  // accepted. Skip the redundant on-chain call (idempotent re-runs).
+  const currentPending = await ownable.pendingOwner();
+  if (currentPending.toLowerCase() === multisig.toLowerCase()) {
+    console.log(
+      `   ⏭  ${contractName}: pendingOwner already set to multi-sig — ` +
+      `awaiting Foundation Safe acceptOwnership; skipping`,
+    );
+    return {
+      contractName,
+      address: checksum,
+      oldOwner: currentOwner,
+      pendingOwner: multisig,
+      txHash: null,
+      blockNumber: null,
+      note: "pending — multisig must acceptOwnership",
+    };
+  }
   console.log(
-    `   → ${contractName} (${checksum}): owner ${currentOwner} → ${multisig}`,
+    `   → ${contractName} (${checksum}): pendingOwner → ${multisig}`,
   );
   const tx = await ownable.transferOwnership(multisig);
   const rcpt = await tx.wait();
-  // Verify post-transfer.
+  // Verify post-transfer: owner should still be deployer; pendingOwner
+  // should now be the multisig.
   const newOwner = await ownable.owner();
-  if (newOwner.toLowerCase() !== multisig.toLowerCase()) {
+  const pending = await ownable.pendingOwner();
+  if (newOwner.toLowerCase() !== deployer.address.toLowerCase()) {
     throw new Error(
       `${contractName} at ${checksum}: post-transfer owner is ${newOwner}, ` +
+      `expected deployer ${deployer.address} (Ownable2Step semantics)`,
+    );
+  }
+  if (pending.toLowerCase() !== multisig.toLowerCase()) {
+    throw new Error(
+      `${contractName} at ${checksum}: post-transfer pendingOwner is ${pending}, ` +
       `expected ${multisig}`,
     );
   }
   console.log(`     ✅  tx ${tx.hash} (block ${rcpt.blockNumber})`);
+  console.log(
+    `     ⏳  Foundation Safe must call acceptOwnership() to complete handoff`,
+  );
   return {
     contractName,
     address: checksum,
     oldOwner: currentOwner,
-    newOwner: multisig,
+    pendingOwner: multisig,
     txHash: tx.hash,
     blockNumber: rcpt.blockNumber,
+    note: "pending — multisig must acceptOwnership",
   };
 }
 

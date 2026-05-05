@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -46,7 +46,7 @@ interface IEmissionControllerView {
     function mintAuthorized(uint256 amount) external;
 }
 
-contract CompensationDistributor is Ownable, ReentrancyGuard {
+contract CompensationDistributor is Ownable2Step, ReentrancyGuard {
     // -------------------------------------------------------------------------
     // Types
     // -------------------------------------------------------------------------

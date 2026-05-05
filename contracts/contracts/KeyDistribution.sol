@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
@@ -66,7 +66,7 @@ interface IRoyaltyPaymentVerifier {
  *     calls by the same recipient emit additional events but cost
  *     nothing beyond gas).
  */
-contract KeyDistribution is Ownable, ReentrancyGuard {
+contract KeyDistribution is Ownable2Step, ReentrancyGuard {
     // -------------------------------------------------------------------------
     // Types
     // -------------------------------------------------------------------------

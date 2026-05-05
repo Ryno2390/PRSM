@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 
@@ -57,7 +57,7 @@ interface ISlasherWithChallengeWindow {
  * call slash() against arbitrary providers (50%-100% bond capture
  * + 70% bounty net to the attacker).
  */
-contract StakeBond is Ownable, ReentrancyGuard, Pausable {
+contract StakeBond is Ownable2Step, ReentrancyGuard, Pausable {
     enum StakeStatus {
         NONE,        // never bonded (or fully withdrawn + re-bonded happens via new Stake)
         BONDED,      // active stake backing a tier

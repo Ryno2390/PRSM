@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
@@ -38,7 +38,7 @@ interface IFTNSMinter {
     function mintReward(address to, uint256 amount) external;
 }
 
-contract EmissionController is Ownable, ReentrancyGuard {
+contract EmissionController is Ownable2Step, ReentrancyGuard {
     // -------------------------------------------------------------------------
     // Immutable configuration
     // -------------------------------------------------------------------------

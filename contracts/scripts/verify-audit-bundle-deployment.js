@@ -213,17 +213,32 @@ async function main() {
   // Pre-handoff: owners == deployer.
   // Post-handoff: owners == EXPECTED_OWNER (typically Foundation Safe).
   // If EXPECTED_OWNER is unset, log the values without comparing.
+  // L2 audit MEDIUM B-OWNABLE-1: contracts are now Ownable2Step.
+  // After transfer-ownership.js runs, owner() is still deployer until
+  // the multisig calls acceptOwnership(). pendingOwner() is what's
+  // changed mid-ceremony. Surface both fields so operators can tell
+  // which stage of the handoff they're verifying.
   console.log(`\nOwnership`);
   const expectedOwner = process.env.EXPECTED_OWNER;
+  const ownerAbi = [
+    "function owner() view returns (address)",
+    "function pendingOwner() view returns (address)",
+  ];
   const ownerChecks = [
-    { name: "EscrowPool", getter: () => escrow.owner() },
-    { name: "BatchSettlementRegistry", getter: () => registry.owner() },
-    { name: "StakeBond", getter: () => stakeBond.owner() },
+    { name: "EscrowPool", address: expected.EscrowPool },
+    { name: "BatchSettlementRegistry", address: expected.BatchSettlementRegistry },
+    { name: "StakeBond", address: expected.StakeBond },
   ];
   for (const c of ownerChecks) {
-    let actualOwner;
+    let actualOwner, pending;
     try {
-      actualOwner = await c.getter();
+      const ctr = new hre.ethers.Contract(c.address, ownerAbi, hre.ethers.provider);
+      actualOwner = await ctr.owner();
+      try {
+        pending = await ctr.pendingOwner();
+      } catch (_e) {
+        pending = null; // contract is not Ownable2Step
+      }
     } catch (e) {
       fail(`${c.name}.owner(): getter reverted`);
       continue;
@@ -231,13 +246,20 @@ async function main() {
     if (expectedOwner) {
       if (actualOwner.toLowerCase() === expectedOwner.toLowerCase()) {
         ok(`${c.name}.owner(): ${actualOwner} (matches EXPECTED_OWNER)`);
+      } else if (pending && pending.toLowerCase() === expectedOwner.toLowerCase()) {
+        console.log(
+          `  ⏳ ${c.name}: owner=${actualOwner}, pendingOwner=${pending} ` +
+          `(handoff in progress — multisig must acceptOwnership)`,
+        );
       } else {
-        fail(`${c.name}.owner(): on-chain=${actualOwner} != EXPECTED_OWNER=${expectedOwner}`);
+        fail(`${c.name}.owner(): on-chain=${actualOwner} != EXPECTED_OWNER=${expectedOwner}` +
+          (pending ? ` (pendingOwner=${pending})` : ""));
       }
     } else {
       console.log(
-        `  ℹ ${c.name}.owner(): ${actualOwner} ` +
-        `(no EXPECTED_OWNER set — pre-handoff is normal; post-handoff set EXPECTED_OWNER=Foundation Safe)`,
+        `  ℹ ${c.name}.owner(): ${actualOwner}` +
+        (pending && pending !== hre.ethers.ZeroAddress ? `, pendingOwner=${pending}` : "") +
+        ` (no EXPECTED_OWNER set — pre-handoff is normal; post-handoff set EXPECTED_OWNER=Foundation Safe)`,
       );
     }
   }
