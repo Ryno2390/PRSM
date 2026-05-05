@@ -134,6 +134,58 @@ def _derive_creator_address(ftns_ledger: Optional[Any]) -> Optional[str]:
     return None
 
 
+def _build_provenance_client_or_none():
+    """T6 (2026-05-05): construct an on-chain ProvenanceRegistryClient
+    if all required env vars are set. Returns None on any miss — the
+    caller treats None as "skip on-chain registration."
+
+    Required env vars:
+      PRSM_ONCHAIN_PROVENANCE=1
+      PRSM_PROVENANCE_REGISTRY_ADDRESS=<0x...>
+      FTNS_WALLET_PRIVATE_KEY=<0x...>
+      PRSM_BASE_RPC_URL=<https://...>  (optional; defaults to Base mainnet)
+
+    Mirrors content_economy.py's _get_provenance_client() pattern but
+    constructed eagerly at node-startup so the resulting client is
+    available to ContentUploader at upload-time without a lazy-init
+    race.
+    """
+    if os.getenv("PRSM_ONCHAIN_PROVENANCE", "").lower() not in ("1", "true", "yes"):
+        return None
+    addr = os.getenv("PRSM_PROVENANCE_REGISTRY_ADDRESS", "").strip()
+    pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip()
+    if not addr or not pk:
+        if not addr:
+            logger.info(
+                "PRSM_ONCHAIN_PROVENANCE=1 but PRSM_PROVENANCE_REGISTRY_ADDRESS "
+                "not set — uploads will not register on-chain."
+            )
+        if not pk:
+            logger.info(
+                "PRSM_ONCHAIN_PROVENANCE=1 but FTNS_WALLET_PRIVATE_KEY not "
+                "set — cannot sign on-chain registerContent calls."
+            )
+        return None
+    try:
+        from prsm.economy.web3.provenance_registry import ProvenanceRegistryClient
+        rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+        client = ProvenanceRegistryClient(
+            rpc_url=rpc_url,
+            contract_address=addr,
+            private_key=pk,
+        )
+        logger.info(
+            f"on-chain ProvenanceRegistry wired: {addr} via {rpc_url}"
+        )
+        return client
+    except Exception as exc:
+        logger.warning(
+            f"failed to construct ProvenanceRegistryClient: "
+            f"{type(exc).__name__}: {exc} — uploads will not register on-chain."
+        )
+        return None
+
+
 class _StakingFTNSAdapter:
     """Bridges node ledger to the FTNS interface expected by StakingManager."""
 
@@ -454,6 +506,14 @@ class PRSMNode:
             node_id=self.identity.node_id,
         )
 
+        # T6 (2026-05-05): on-chain ProvenanceRegistry client. Lazy-init at
+        # node construction so ContentUploader can register content on-chain
+        # at upload-time. Same env-var contract as content_economy.py:
+        # PRSM_ONCHAIN_PROVENANCE=1 + PRSM_PROVENANCE_REGISTRY_ADDRESS +
+        # FTNS_WALLET_PRIVATE_KEY. Returns None gracefully when any required
+        # piece is missing — the upload still succeeds locally.
+        provenance_client = _build_provenance_client_or_none()
+
         self.content_uploader = ContentUploader(
             identity=self.identity,
             gossip=self.gossip,
@@ -465,6 +525,7 @@ class PRSMNode:
             semantic_index_path=_semantic_index_path,
             content_provider=self.content_provider,
             creator_address=_derive_creator_address(self.ftns_ledger),
+            provenance_client=provenance_client,
         )
 
         # ── Ledger Sync ──────────────────────────────────────────

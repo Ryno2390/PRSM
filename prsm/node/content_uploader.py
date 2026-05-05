@@ -169,6 +169,11 @@ class UploadedContent:
     # (keccak256(creator_address || sha3_256(file_bytes))).
     # None when the uploader was constructed without a creator_address.
     provenance_hash: Optional[str] = None  # 0x-prefixed hex
+    # T6 (2026-05-05): tx hash from on-chain ProvenanceRegistry.registerContent
+    # call. Set when the content was registered on chain via the wired
+    # ProvenanceRegistryClient. None when on-chain registration was skipped
+    # (no client wired) or failed (logged separately; doesn't block upload).
+    provenance_tx_hash: Optional[str] = None  # 0x-prefixed hex
 
 
 class ContentUploader:
@@ -197,6 +202,7 @@ class ContentUploader:
         ipfs_api_url: str = "http://127.0.0.1:5001",
         creator_address: Optional[str] = None,
         content_provider: Optional["ContentProvider"] = None,
+        provenance_client: Optional[Any] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -221,6 +227,13 @@ class ContentUploader:
         # production callers and the serve path returns not_found for every
         # uploaded CID. None disables the wiring (used by legacy unit tests).
         self._content_provider = content_provider
+
+        # T6 (2026-05-05): on-chain ProvenanceRegistry client for
+        # creator-bound content registration. None disables on-chain
+        # registration — uploads still succeed locally but no on-chain
+        # provenance record is created (so downstream royalty distribution
+        # via RoyaltyDistributor cannot resolve creator from contentHash).
+        self._provenance_client = provenance_client
 
         # Sharding configuration
         self.sharding_threshold = sharding_threshold
@@ -263,6 +276,78 @@ class ContentUploader:
                 "provenance_hash": uploaded.provenance_hash,
             },
         )
+
+    def _register_on_chain(
+        self,
+        provenance_hash_hex: Optional[str],
+        royalty_rate: float,
+        cid: str,
+    ) -> Optional[str]:
+        """T6 — register content on the on-chain ProvenanceRegistry.
+
+        Returns the tx hash on success, None on skip or failure.
+
+        Skip conditions (returns None silently):
+          - no provenance_client wired
+          - no provenance_hash_hex computed (no creator_address)
+          - content already registered on-chain (idempotent)
+
+        Failure conditions (returns None + logs warning):
+          - rpc / signing errors (BroadcastFailedError, etc.)
+          - on-chain revert
+          - any other exception during the call
+
+        On-chain registration is best-effort: the upload itself does NOT
+        fail if the on-chain call fails. The local provenance record + IPFS
+        copy still exist; on-chain registration can be retried later via a
+        backfill script.
+        """
+        if self._provenance_client is None:
+            return None
+        if not provenance_hash_hex:
+            return None
+        try:
+            content_hash_bytes = bytes.fromhex(provenance_hash_hex.removeprefix("0x"))
+            if len(content_hash_bytes) != 32:
+                logger.warning(
+                    f"provenance_hash_hex has invalid length "
+                    f"({len(content_hash_bytes)} bytes, expected 32); "
+                    f"skipping on-chain registration"
+                )
+                return None
+
+            # Idempotent: skip if already registered. Saves gas + avoids
+            # the inevitable revert on duplicate registerContent.
+            if self._provenance_client.is_registered(content_hash_bytes):
+                logger.info(
+                    f"content_hash {provenance_hash_hex[:18]}… already "
+                    f"registered on-chain; skipping"
+                )
+                return None
+
+            # Convert float royalty_rate (e.g. 0.05 = 5%) to bps (500).
+            # ProvenanceRegistry caps at MAX_ROYALTY_RATE_BPS = 9800.
+            royalty_rate_bps = round(max(0.0, min(0.98, royalty_rate)) * 10000)
+            metadata_uri = f"ipfs://{cid}"
+
+            tx_hash, status = self._provenance_client.register_content(
+                content_hash=content_hash_bytes,
+                royalty_rate_bps=royalty_rate_bps,
+                metadata_uri=metadata_uri,
+            )
+            logger.info(
+                f"on-chain provenance registered: tx={tx_hash} "
+                f"status={status} hash={provenance_hash_hex[:18]}…"
+            )
+            return tx_hash
+        except Exception as exc:
+            # Any failure (broadcast, revert, RPC error) — log but don't
+            # propagate. The upload itself stays valid.
+            logger.warning(
+                f"on-chain provenance registration failed for cid {cid}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            return None
 
     async def _get_embedding(self, content: bytes) -> "Optional[np.ndarray]":
         """Attempt to generate a semantic embedding for content.
@@ -393,6 +478,13 @@ class ContentUploader:
 
         embedding_id = f"emb:{cid}" if embedding is not None else None
 
+        # T6: on-chain provenance registration. Best-effort; doesn't block.
+        provenance_tx_hash = self._register_on_chain(
+            provenance_hash_hex=provenance_hash_hex,
+            royalty_rate=rate,
+            cid=cid,
+        )
+
         # Create provenance record
         # NOTE (Phase 1.3 Task 3d): wire-format keys must match reader
         # expectations — `cid` / `parent_cids`, not `content_id` /
@@ -432,6 +524,7 @@ class ContentUploader:
             near_duplicate_of=near_dup_cid,
             near_duplicate_similarity=near_dup_sim,
             provenance_hash=provenance_hash_hex,
+            provenance_tx_hash=provenance_tx_hash,
         )
         self.uploaded_content[cid] = uploaded
         self._register_with_provider(uploaded)  # Phase 1.3: populate provider._local_content
@@ -538,6 +631,14 @@ class ContentUploader:
 
             size_bytes = len(content)
 
+            # T6: on-chain provenance registration (sharded variant).
+            # Same best-effort semantics as the monolithic path.
+            sharded_provenance_tx_hash = self._register_on_chain(
+                provenance_hash_hex=provenance_hash_hex,
+                royalty_rate=royalty_rate,
+                cid=manifest_cid,
+            )
+
             # Create provenance record for the sharded content
             # The manifest content ID serves as the primary identifier for sharded content
             embedding_id = f"emb:{manifest_cid}" if embedding is not None else None
@@ -582,6 +683,7 @@ class ContentUploader:
                 near_duplicate_of=near_dup_cid,
                 near_duplicate_similarity=near_dup_sim,
                 provenance_hash=provenance_hash_hex,
+                provenance_tx_hash=sharded_provenance_tx_hash,
             )
             self.uploaded_content[manifest_cid] = uploaded
             self._register_with_provider(uploaded)  # Phase 1.3: populate provider._local_content
