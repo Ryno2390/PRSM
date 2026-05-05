@@ -591,21 +591,24 @@ describe("FTNSTokenSimple", function () {
         .to.not.be.reverted;
     });
 
-    it("Should handle role transfer scenario", async function () {
+    it("Should handle role transfer scenario (post-HIGH-5: revokeRole, not renounceRole)", async function () {
       const { ftnsToken, owner, newAdmin } = await loadFixture(deployFTNSTokenFixture);
-      
+
       const adminRole = await ftnsToken.DEFAULT_ADMIN_ROLE();
       const minterRole = await ftnsToken.MINTER_ROLE();
-      
-      // Transfer admin role
+
+      // Transfer admin role: grantRole(new) + revokeRole(old). Note that
+      // post-HIGH-5 renounceRole(DEFAULT_ADMIN_ROLE) is blocked; the
+      // canonical handoff path is grant + revoke, which keeps the new
+      // admin in place atomically with the old admin's removal.
       await ftnsToken.connect(owner).grantRole(adminRole, newAdmin.address);
-      await ftnsToken.connect(owner).renounceRole(adminRole, owner.address);
-      
+      await ftnsToken.connect(owner).revokeRole(adminRole, owner.address);
+
       // New admin should have control
       await expect(
         ftnsToken.connect(newAdmin).grantRole(minterRole, newAdmin.address)
       ).to.not.be.reverted;
-      
+
       // Old admin should not have control
       await expect(
         ftnsToken.connect(owner).grantRole(minterRole, owner.address)

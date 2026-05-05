@@ -116,6 +116,40 @@ contract FTNSTokenSimple is
     {}
 
     /**
+     * @dev L2 audit HIGH-5 (B-RENOUNCE-1) fix: block renouncing
+     *      DEFAULT_ADMIN_ROLE. OZ AccessControl exposes renounceRole
+     *      reachable on every role-holder, including the sole admin.
+     *      A single bad multi-sig transaction renouncing admin
+     *      permanently disables:
+     *        - _authorizeUpgrade (no more UUPS upgrades — storage
+     *          layout permanently locked)
+     *        - grantRole(MINTER_ROLE, ...) for Phase 8 emission wiring
+     *        - All future role rotations of MINTER/BURNER/PAUSER
+     *
+     *      Genuine admin handoff must use grantRole(newAdmin) +
+     *      revokeRole(oldAdmin) — both still available; renounce is the
+     *      foot-gun we eliminate.
+     *
+     *      Note on B-PAUSE-1 (MEDIUM, bundled): the related
+     *      "all-PAUSERs renounce while paused → permanent freeze" edge
+     *      case is closed transitively by this fix. The dangerous
+     *      precondition required admin renounce + paused + every
+     *      PAUSER_ROLE holder renouncing. Blocking admin renounce
+     *      eliminates the precondition: even if every PAUSER renounces
+     *      while paused, admin retains the ability to grant PAUSER_ROLE
+     *      to a fresh address, which can then unpause.
+     */
+    function renounceRole(bytes32 role, address callerConfirmation)
+        public
+        override(AccessControlUpgradeable)
+    {
+        if (role == DEFAULT_ADMIN_ROLE) {
+            revert("DEFAULT_ADMIN_ROLE renounce disabled - use grantRole(new) + revokeRole(old)");
+        }
+        super.renounceRole(role, callerConfirmation);
+    }
+
+    /**
      * @dev See {IERC165-supportsInterface}.
      */
     function supportsInterface(bytes4 interfaceId)

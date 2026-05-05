@@ -55,7 +55,7 @@ describe("Team B — Access Control PoC", function () {
 
   // ── B4 ──────────────────────────────────────────────────────────────
   describe("B4 — renounceRole reachability on FTNSTokenSimple", function () {
-    it("CONFIRMED: sole DEFAULT_ADMIN_ROLE holder can renounce and permanently brick mint/upgrade/role-grant", async function () {
+    it("REGRESSION: post-HIGH-5, renounceRole(DEFAULT_ADMIN_ROLE) reverts on the contract layer", async function () {
       const [admin, treasury] = await ethers.getSigners();
       const FTNS = await ethers.getContractFactory("FTNSTokenSimple");
       const ftns = await upgrades.deployProxy(
@@ -70,28 +70,19 @@ describe("Team B — Access Control PoC", function () {
       // Admin holds DEFAULT_ADMIN_ROLE per initialize().
       expect(await ftns.hasRole(ADMIN, admin.address)).to.equal(true);
 
-      // Admin renounces DEFAULT_ADMIN_ROLE on themselves WITHOUT first
-      // granting it to anyone else. OZ AccessControl allows this.
-      await ftns.connect(admin).renounceRole(ADMIN, admin.address);
-      expect(await ftns.hasRole(ADMIN, admin.address)).to.equal(false);
+      // Post-fix: renounceRole(DEFAULT_ADMIN_ROLE) reverts. The script-
+      // layer guard in transfer-ftns-roles.js is now backed by a
+      // contract-layer guard, eliminating (a) script-bypass, (b) direct
+      // call to renounceRole, and (c) multi-sig-self-renounce.
+      await expect(
+        ftns.connect(admin).renounceRole(ADMIN, admin.address),
+      ).to.be.revertedWith("DEFAULT_ADMIN_ROLE renounce disabled - use grantRole(new) + revokeRole(old)");
 
-      // Now no one can grant MINTER_ROLE to EmissionController, no one
-      // can `_authorizeUpgrade`, no one can rotate any role.
+      // Admin still holds the role; can still grant other roles.
+      expect(await ftns.hasRole(ADMIN, admin.address)).to.equal(true);
       await expect(
         ftns.connect(admin).grantRole(MINTER, treasury.address),
-      ).to.be.revertedWithCustomError(ftns, "AccessControlUnauthorizedAccount");
-
-      // The contract is bricked from a governance perspective. Existing
-      // MINTER/PAUSER/BURNER role-holders can still operate, but no one
-      // can ever revoke them, add new ones, or push a UUPS upgrade.
-      // CRITICAL operational risk: transfer-ftns-roles.js step 2 has a
-      // belt-and-braces guard ("refusing to renounce DEFAULT_ADMIN_ROLE
-      // on deployer because multi-sig does not yet hold it"). But:
-      // (a) the guard lives in the script, not the contract.
-      // (b) anyone holding admin can still call renounceRole directly
-      //     bypassing the script.
-      // (c) the multi-sig itself, once it owns admin, can renounce
-      //     without further check.
+      ).to.not.be.reverted;
     });
   });
 
@@ -218,8 +209,8 @@ describe("Team B — Access Control PoC", function () {
       expect(await ftns.paused()).to.equal(false);
     });
 
-    it("CONFIRMED edge case: if DEFAULT_ADMIN renounces AND every PAUSER renounces while paused, transfers are permanently frozen", async function () {
-      const [admin, treasury] = await ethers.getSigners();
+    it("REGRESSION (B-PAUSE-1, transitive via HIGH-5): admin cannot renounce DEFAULT_ADMIN_ROLE, so all-PAUSERs-renounce-while-paused does NOT permanently freeze transfers", async function () {
+      const [admin, treasury, freshPauser] = await ethers.getSigners();
       const FTNS = await ethers.getContractFactory("FTNSTokenSimple");
       const ftns = await upgrades.deployProxy(
         FTNS,
@@ -231,22 +222,28 @@ describe("Team B — Access Control PoC", function () {
 
       await ftns.connect(admin).pause();
 
-      // Admin renounces both PAUSER (themselves) and DEFAULT_ADMIN_ROLE.
-      // Now no one can ever grant PAUSER again, and the existing PAUSER
-      // (admin) is gone.
+      // Admin renounces PAUSER (themselves). Allowed — only the dangerous
+      // ADMIN renounce is blocked.
       await ftns.connect(admin).renounceRole(PAUSER, admin.address);
-      await ftns.connect(admin).renounceRole(ADMIN, admin.address);
+      expect(await ftns.hasRole(PAUSER, admin.address)).to.equal(false);
 
-      // Token transfers are blocked permanently: _update reverts on whenNotPaused.
+      // Admin attempts to renounce DEFAULT_ADMIN_ROLE. Post-HIGH-5 this
+      // reverts — closing the precondition that made B-PAUSE-1 dangerous.
+      await expect(
+        ftns.connect(admin).renounceRole(ADMIN, admin.address),
+      ).to.be.revertedWith("DEFAULT_ADMIN_ROLE renounce disabled - use grantRole(new) + revokeRole(old)");
+
+      // Admin still holds DEFAULT_ADMIN_ROLE → can grant fresh PAUSER.
+      await ftns.connect(admin).grantRole(PAUSER, freshPauser.address);
+
+      // Fresh PAUSER unpauses. Transfers resume.
+      await ftns.connect(freshPauser).unpause();
+      expect(await ftns.paused()).to.equal(false);
+
       const ONE = ethers.parseUnits("1", 18);
       await expect(
         ftns.connect(treasury).transfer(admin.address, ONE),
-      ).to.be.revertedWithCustomError(ftns, "EnforcedPause");
-
-      // No path exists to ever unpause:
-      await expect(
-        ftns.connect(treasury).unpause(),
-      ).to.be.revertedWithCustomError(ftns, "AccessControlUnauthorizedAccount");
+      ).to.not.be.reverted;
     });
   });
 
