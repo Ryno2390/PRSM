@@ -835,8 +835,16 @@ Post-DEX-listing: **Mandatory.** External cover at minimum 2× max-single-user
 position. This is required to maintain credible TVL backstop for institutional
 participants.
 
-**Status:** No engagement. **Action item: add Foundation council ratification
-of treasury reserve policy** to next governance agenda.
+**Status (2026-05-05):** Policy drafted at
+`docs/governance/2026-05-05-treasury-reserve-and-risk-transfer-policy.md`
+(PRSM-POL-1). 14 sections covering reserve floors ($2M / $10M target),
+risk-transfer triggers (1% single-user position OR $5M TVL OR
+50%-treasury-depletion-on-payout), insurance-product evaluation,
+disbursement authorization (founder→council escalation tiers), annual
+allocation, reporting cadence, breach protocol, amendment process. **5
+open ratification questions enumerated for council deliberation.**
+Awaiting Foundation council 2-of-3 ratification at next governance
+agenda.
 
 ---
 
