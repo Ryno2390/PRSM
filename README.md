@@ -309,6 +309,13 @@ pytest --timeout=120    # Run test suite
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
+## Reporting Security Issues
+
+Found a vulnerability? See [SECURITY.md](SECURITY.md) for the disclosure
+policy, scope, and bounty information. **Do not** file public issues for
+security reports — use [GitHub Security Advisories](https://github.com/prsm-network/PRSM/security/advisories/new)
+or `security@prsm-network.com`.
+
 ---
 
 ## Third-Party Components

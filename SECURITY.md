@@ -1,308 +1,215 @@
 # Security Policy
 
-## Overview
+**Last updated:** 2026-05-05
+**Related documents:** [`audits/AUDIT_PLAN.md`](audits/AUDIT_PLAN.md) (master audit plan, §12 disclosure policy) · [`docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md`](docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md) (incident response)
+
+## What we protect
 
-The security of PRSM (Protocol for Research, Storage, and Modeling) is of paramount importance. As a platform handling AI research, distributed systems, and scientific data, we take security seriously and appreciate the community's help in identifying and addressing potential vulnerabilities.
+PRSM (Protocol for Research, Storage, and Modeling) defends nine attack
+surfaces, listed in `audits/AUDIT_PLAN.md` §3. The on-chain attack surface
+includes live treasury infrastructure on Base mainnet:
 
-## 🛡️ Security Model
+| Contract | Address | Role |
+|----------|---------|------|
+| Foundation Safe (2-of-3 Gnosis Safe) | `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` | Treasury custodian |
+| ProvenanceRegistry | `0xdF470BFa9eF310B196801D5105468515d0069915` | Content registration |
+| RoyaltyDistributor | `0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2` | Payment-split executor |
+| FTNSTokenSimple | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` | Native protocol token |
 
-PRSM implements a comprehensive security framework across multiple layers:
+Off-chain we protect: bootstrap and relay nodes, the inference pipeline
+(`prsm/inference/`, `prsm/chain_rpc/`, `prsm/streaming/`), the marketplace
+listing surface, and the storage/proofs layer.
 
-### **AI Safety Architecture**
-- **Circuit Breaker Network**: Real-time threat detection and automatic response
-- **Safety Monitor**: Continuous validation of AI model outputs
-- **Democratic Governance**: Community oversight of safety policies
-- **Audit Trails**: Complete transparency and traceability
-
-### **Distributed System Security**
-- **Byzantine Fault Tolerance**: Resilience against malicious nodes
-- **Cryptographic Verification**: Model integrity validation
-- **Secure P2P Communication**: Encrypted network protocols
-- **Identity Management**: Secure user and node authentication
-
-### **Data Protection**
-- **Zero-Knowledge Proofs**: Privacy-preserving research data handling
-- **IPFS Security**: Content-addressed storage with integrity verification
-- **Access Controls**: Token-based authorization and permissions
-- **Data Provenance**: Complete tracking of data lineage
-
-## 🚨 Reporting Security Vulnerabilities
-
-### **For Security Issues**
-
-**DO NOT** create public GitHub issues for security vulnerabilities. Instead:
-
-1. **Report privately** via GitHub Security Advisories: 
-   - Go to the [Security tab](https://github.com/prsm-network/PRSM/security/advisories)
-   - Click "Report a vulnerability"
-
-2. **Email directly** for urgent issues:
-   - Send to: security@prsm-network.com (if available)
-   - Include "PRSM SECURITY" in the subject line
-
-### **Information to Include**
-
-Please provide as much detail as possible:
-
-- **Vulnerability Type**: What kind of security issue is this?
-- **Affected Components**: Which PRSM components are impacted?
-- **Attack Vector**: How could this vulnerability be exploited?
-- **Impact Assessment**: What damage could result from exploitation?
-- **Reproduction Steps**: Detailed steps to reproduce the issue
-- **Proof of Concept**: Code or screenshots demonstrating the vulnerability
-- **Suggested Fix**: If you have ideas for remediation
-
-### **Response Timeline**
-
-We are committed to addressing security issues promptly:
-
-- **24 hours**: Initial acknowledgment of your report
-- **72 hours**: Preliminary assessment and severity classification  
-- **7 days**: Detailed analysis and remediation plan
-- **30 days**: Security fix implementation and testing
-- **Public disclosure**: After fix deployment and affected users notification
-
-## 🔍 Supported Versions
-
-We provide security updates for the following versions:
-
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.0.x   | ✅ Yes             |
-| < 1.0   | ❌ No              |
-
-**Note**: As PRSM is currently in beta, we focus security efforts on the main release branch. Upon stable release, we will maintain security support for the latest major version and the previous major version.
-
-## 🔒 Security Best Practices
-
-### **For Users**
-
-#### **Environment Security**
-```bash
-# Use virtual environments
-python -m venv prsm-env
-source prsm-env/bin/activate
-
-# Keep dependencies updated
-pip install --upgrade -r requirements.txt
-
-# Verify checksums for downloaded models
-```
-
-#### **Configuration Security**
-```python
-# Never commit API keys or secrets
-# Use environment variables for sensitive data
-import os
-api_key = os.getenv('PRSM_API_KEY')
-
-# Enable safety monitoring
-safety_config = {
-    'strict_mode': True,
-    'audit_logging': True,
-    'circuit_breaker_enabled': True
-}
-```
-
-#### **Network Security**
-- **Use HTTPS/TLS** for all API communications
-- **Verify peer identities** in P2P network participation
-- **Monitor node behavior** for suspicious activity
-- **Keep software updated** with latest security patches
-
-### **For Developers**
-
-#### **Code Security**
-```python
-# Input validation
-async def process_query(self, user_input: str) -> PRSMResponse:
-    # Validate and sanitize all inputs
-    validated_input = self.safety_monitor.validate_input(user_input)
-    
-    # Use parameterized queries for data access
-    # Never construct queries with string concatenation
-    
-    # Implement proper error handling
-    try:
-        result = await self.orchestrator.process(validated_input)
-        return result
-    except Exception as e:
-        # Log security events without exposing sensitive data
-        self.security_logger.warning("Query processing failed", 
-                                    extra={"user_id": user_id, "error_type": type(e).__name__})
-        raise
-```
-
-#### **Dependency Management**
-```bash
-# Regular security audits
-pip-audit
-
-# Dependency scanning
-safety check
-
-# Keep dependencies minimal and updated
-pip-compile --upgrade requirements.in
-```
-
-### **For Node Operators**
-
-#### **Infrastructure Security**
-- **Isolate PRSM processes** using containers or VMs
-- **Monitor system resources** for unusual usage patterns
-- **Implement network firewalls** with minimal required ports
-- **Regular security updates** for operating system and dependencies
-- **Backup and recovery** procedures for critical data
-
-#### **P2P Network Participation**
-- **Verify peer reputations** before accepting connections
-- **Monitor consensus participation** for Byzantine behavior
-- **Report suspicious nodes** to the network governance
-- **Maintain node security** with regular audits
-
-## 🚨 Security Incident Response
-
-### **Detection and Assessment**
-
-PRSM includes built-in security monitoring:
-
-- **Circuit Breaker Network**: Automatic threat detection
-- **Safety Monitor**: Real-time output validation  
-- **Governance System**: Community-driven incident response
-- **Audit Logging**: Complete activity tracking
-
-### **Incident Response Process**
-
-1. **Detection**: Automated monitoring or community reporting
-2. **Assessment**: Severity evaluation and impact analysis
-3. **Containment**: Immediate steps to limit damage
-4. **Investigation**: Root cause analysis and forensics
-5. **Remediation**: Security fix development and deployment
-6. **Recovery**: System restoration and validation
-7. **Lessons Learned**: Process improvement and prevention
-
-### **Communication**
-
-During security incidents:
-
-- **Affected users** will be notified directly
-- **Security advisories** will be published on GitHub
-- **Remediation guidance** will be provided
-- **Timeline updates** will be shared regularly
-
-## 🔧 Security Features
-
-### **Built-in Security Controls**
-
-#### **Sandboxed Compute**
-All WASM mobile agents execute in Wasmtime sandboxes (`prsm/compute/wasm/`) with enforced fuel, memory, and output-size limits. Sandboxes have no filesystem, no network, and no state after execution — agents literally cannot persist data.
-
-#### **Access Control**
-```python
-# FTNS budget enforcement on compute jobs
-from prsm.economy.tokenomics.ftns_service import FTNSService
-
-ftns = FTNSService()
-user_balance = await ftns.get_balance(user_id)
-
-if user_balance < required_tokens:
-    raise InsufficientFundsError("Access denied: insufficient FTNS tokens")
-```
-
-#### **Data Integrity**
-```python
-# Storage proofs + Ring 10 integrity verification
-from prsm.storage.content_store import ContentStore
-
-store = ContentStore()
-content, metadata = await store.retrieve(content_id, verify=True)
-# ContentStore raises on hash mismatch or signature verification failure
-```
-
-### **Network Security**
-
-#### **P2P Protocol Security**
-- **TLS encryption** for all peer communications
-- **Identity verification** using cryptographic signatures
-- **Message authentication** preventing tampering
-- **Reputation systems** for peer trust management
-
-#### **Consensus Security**
-- **Byzantine fault tolerance** up to 33% malicious nodes
-- **Economic penalties** for malicious behavior
-- **Multi-round validation** for critical decisions
-- **Emergency governance** for rapid threat response
-
-## 📋 Security Checklist
-
-### **Before Deployment**
-
-- [ ] All dependencies scanned for vulnerabilities
-- [ ] Security configuration reviewed and hardened
-- [ ] Access controls properly configured
-- [ ] Monitoring and alerting systems active
-- [ ] Backup and recovery procedures tested
-- [ ] Incident response plan validated
-
-### **Regular Maintenance**
-
-- [ ] Security updates applied promptly
-- [ ] Dependency vulnerabilities monitored
-- [ ] Access logs reviewed regularly
-- [ ] Security configurations audited
-- [ ] Penetration testing performed annually
-- [ ] Security training kept current
-
-## 🤝 Security Community
-
-### **Responsible Disclosure**
-
-We believe in responsible disclosure and will:
-
-- **Acknowledge** security researchers publicly (with permission)
-- **Provide attribution** in security advisories
-- **Consider bounties** for significant vulnerability discoveries
-- **Collaborate** on fixes and prevention measures
-
-### **Bug Bounty Program**
-
-We are considering implementing a bug bounty program for PRSM. Interested security researchers should watch for announcements.
-
-### **Security Research**
-
-We welcome academic security research on PRSM:
-
-- **Coordinated disclosure** for published research
-- **Collaboration opportunities** with security researchers
-- **Conference presentations** on PRSM security
-- **Grant funding** for security-focused research
-
-## 📞 Contact Information
-
-### **Security Team**
-- **GitHub Security Advisories**: [Report Vulnerability](https://github.com/prsm-network/PRSM/security/advisories/new)
-- **Email**: security@prsm-network.com (if available)
-- **PGP Key**: Available upon request for encrypted communication
-
-### **General Security Questions**
-- **GitHub Discussions**: Use the security category
-- **Documentation**: Review security sections in docs/
-- **Community**: Engage with security-minded community members
+The audit-bundle stack (EscrowPool, BatchSettlementRegistry, StakeBond,
+SignatureVerifier) is **pre-mainnet** pending external sign-off; reports
+against pre-deploy code are still in scope.
+
+## Reporting a vulnerability
+
+### Channels
+
+- **GitHub Security Advisory** (preferred): [Report a vulnerability](https://github.com/prsm-network/PRSM/security/advisories/new)
+- **Email** (for time-sensitive issues): `security@prsm-network.com`
+  - **PGP key:** *Pending publication.* Until the foundation PGP key is
+    published, encrypt sensitive details with the GitHub Security Advisory
+    flow (which is end-to-end encrypted between reporter and maintainers).
+- **DO NOT** open a public GitHub issue for security vulnerabilities.
+
+### What to include
+
+- Affected component (contract address, file path, or service).
+- Attack scenario — what does the attacker control, what's the sequence
+  of calls, what does the attacker gain?
+- Proof of concept — runnable test, transaction trace, or call log.
+- Impact assessment — funds at risk, scope of compromise, severity estimate.
+- Suggested remediation if known.
+
+## Disclosure timeline (post-mainnet)
+
+We follow a **90-day coordinated disclosure window** as defined in
+`audits/AUDIT_PLAN.md` §12.
+
+| Day | Phase | Action |
+|-----|-------|--------|
+| 0 | Receipt | Reporter submits via GHSA or email |
+| 0–2 | Triage | Acknowledgment + severity assignment |
+| 2–14 | Reproduction | Foundation engineering reproduces and confirms |
+| 14–60 | Remediation | Fix development + audit of the fix |
+| 60–75 | Coordinated deploy | Fix deployed; integrators privately notified ≥72 hours pre-disclosure |
+| 75–90 | Public disclosure | GHSA + blog post + bounty payout |
+| 90 | Hard cap | Public disclosure even if remediation is incomplete |
+
+### Critical-severity exception
+
+For findings with **active exploitation** OR **>50% TVL at imminent risk**:
+
+- Hour 0–2: Pause-transaction templates from
+  [`docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md`](docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md)
+  executed by the Foundation Safe.
+- Hour 2–24: Private notification to known integrators + Forta alert
+  subscribers.
+- Hour 24–48: Public disclosure on Foundation channels + GHSA.
+- Day 7+: Post-mortem published.
+
+The 90-day window does **not** apply to actively-exploited bugs.
+
+## Pre-mainnet (current state)
+
+Until `audits/AUDIT_PLAN.md` Gate B clears (audit-bundle stack + Phase 8
+contracts + L4 contest + L3 specialist crypto audit), the disclosure model is:
+
+- Findings on **live mainnet contracts** (Phase 1.3 Task 8): full 90-day
+  policy above + critical-severity exception applies.
+- Findings on **audit-bundle pre-deploy code** or **off-chain Python**:
+  reported confidentially, fixed pre-deploy, disclosed at Gate B clearance + 30
+  days alongside the consolidated audit report.
+- **Self-discovered findings** (internal review L0 / static-analysis L1):
+  triaged internally; no external disclosure required pre-mainnet.
+
+## Bounty program
+
+Pre-mainnet bounty program design is at `audits/AUDIT_PLAN.md` §5 L9
+(pending; cannot launch until L4 contest first-pass complete).
+
+When live, payout scale follows Immunefi conventions:
+
+| Severity | Range | Examples |
+|----------|-------|----------|
+| Critical | $50K–$1M | Funds drainable, mint forgery, total treasury compromise |
+| High | $10K–$50K | Conditional fund loss, signature forgery on challenge path |
+| Medium | $2K–$10K | Best-practice violation with conditional exploit, griefing |
+| Low | $500–$2K | Minor invariant breach, no direct exploit path |
+| Informational | $0–$500 | Code quality, docs, naming |
+
+Payout in USDC from Foundation Safe within 14 days of fix deployment.
+Researchers credited (with consent) in `audits/hall-of-fame.md` at L9 launch.
+
+### Duplicate handling
+
+First valid report wins, determined by submission timestamp on
+`security@prsm-network.com` inbox or GHSA timestamp. Subsequent identical
+reports receive acknowledgment but no bounty.
+
+## Scope
+
+### In scope
+
+- Smart contracts under `contracts/contracts/` (live mainnet + audit-bundle
+  pre-deploy).
+- Deploy ceremony scripts under `contracts/scripts/` (deploy-provenance.js,
+  transfer-ownership.js, verify-audit-bundle-deployment.js, sweep-deployer.py).
+- Off-chain Python services in `prsm/inference/`, `prsm/chain_rpc/`,
+  `prsm/streaming/`, `prsm/node/`, `prsm/storage/`.
+- The bootstrap node infrastructure
+  (`wss://bootstrap1.prsm-network.com:8765`).
+- The on-chain monitoring + alert routing
+  (`ops/monitoring/forta-bots/`).
+- Foundation Safe operational security — phishing surface targeting signers,
+  ceremony manipulation paths, etc. (responsible-disclosure paths only;
+  social-engineering tests against signers are **NOT** authorized).
+
+### Out of scope
+
+- Issues already documented in `audits/findings/` or in the threat models
+  (`docs/2026-04-22-r3-threat-model.md`,
+  `docs/2026-04-30-phase3.x.11-threat-model-addendum.md`).
+- Deprecated branches (`v1.5.x` and earlier).
+- Spam, low-impact informational issues already known.
+- Issues requiring physical access to a hardware wallet, an active social
+  engineering attack against a Foundation signer, or compromise of a third-
+  party service we use (these are non-PRSM attack surfaces).
+- Best-practice / code-quality suggestions without an exploit (these are
+  welcome as PRs or discussions, but not bounty-eligible).
+
+## Defense-in-depth posture
+
+The full defense matrix is in `audits/AUDIT_PLAN.md`. Eleven audit layers
+cover the nine attack surfaces. Key continuously-active layers:
+
+- **L0** — internal review gates (per-phase merge-ready tags).
+- **L1** — static + symbolic tooling (Slither, Aderyn, Mythril, Halmos,
+  Echidna; CI integration in progress).
+- **L10a** — Forta detection bots monitoring live mainnet contracts for
+  anomalous transfers, role grants, pause events, and distribution failures.
+- **L10b** — exploit-response playbook with pre-staged pause transactions.
+
+Pending external layers (per `audits/AUDIT_PLAN.md` §6 Gate B):
+- **L3** — specialist Ed25519 crypto audit
+- **L4** — external smart-contract audit (Code4rena + solo firm)
+- **L5** — off-chain ML supply-chain audit
+- **L6f** — network infrastructure pen-test
+- **L7** — economic / game-theory audit
+- **L8** — legal / regulatory review
+- **L9** — public bug bounty (post-L4)
+
+## Supported versions
+
+| Version | Status | Security support |
+|---------|--------|------------------|
+| `main` (current) | Active development | Full |
+| `v1.6.x` (latest tagged) | Active maintenance | Full |
+| `v1.5.x` and earlier | Superseded | None |
+
+The on-chain treasury layer (deployed 2026-05-04, Phase 1.3 Task 8) is
+non-Ownable and non-upgradeable; "version" semantics for those contracts
+are governed by the manifest at
+`contracts/deployments/provenance-base-1777917793612.json` and the milestone
+tag `phase1.3-task8-complete-20260504`.
+
+## Authorization clarification
+
+This policy authorizes good-faith security research within scope. It does
+**not** authorize:
+
+- Attacks against the live infrastructure that disrupt service (DoS testing
+  against bootstrap nodes, etc.) — please coordinate first.
+- Social engineering against Foundation employees, signers, or contributors.
+- Physical attacks against any party.
+- Testing on user systems without explicit authorization.
+
+Out-of-scope research conducted in good faith and reported responsibly will
+not be pursued legally; coordinate with us before testing edge cases.
+
+## Acknowledgments
+
+PRSM thanks the security research community. Researchers who report valid
+findings are credited (with consent) in `audits/hall-of-fame.md` after fix
+deployment. Significant findings receive bounty payout per the scale above
+once the L9 program launches.
 
 ---
 
-## 🙏 Acknowledgments
+## Operationalization status (operator-facing notes)
 
-We thank the security research community for their dedication to making open source software safer for everyone. Special recognition to:
+The following are pending engineering/operations actions, tracked in the
+PRSM task list:
 
-- Security researchers who have reported vulnerabilities
-- Community members who contribute security improvements  
-- Academic institutions conducting security research on PRSM
-- Organizations providing security tools and resources
+- [ ] `security@prsm-network.com` inbox setup (DNS/MX + email provider).
+- [ ] Foundation PGP keypair generation + publication.
+- [ ] `audits/hall-of-fame.md` initial commit (empty roster).
+- [ ] L9 Immunefi listing draft (post-L4 first-pass clearance).
+- [ ] L10a alert routing wired to PagerDuty + Foundation council Slack.
 
----
-
-> _"Security is not a product, but a process. Thank you for helping us make PRSM secure for the global research community."_
-
-**Last Updated**: June 5, 2025  
-**Next Review**: Every 6 months or after significant releases
+Until these complete, the GHSA channel is the primary reporting path and
+all operational claims above should be read as "policy-target" rather than
+"already-operational."
