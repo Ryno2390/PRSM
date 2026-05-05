@@ -143,7 +143,7 @@ async function main() {
       "function escrowPool() view returns (address)",
       "function signatureVerifier() view returns (address)",
       "function stakeBond() view returns (address)",
-      "function challengeWindow() view returns (uint256)",
+      "function challengeWindowSeconds() view returns (uint256)",
       "function owner() view returns (address)",
     ],
     hre.ethers.provider,
@@ -153,8 +153,8 @@ async function main() {
     [
       "function slasher() view returns (address)",
       "function foundationReserveWallet() view returns (address)",
-      "function unbondDelay() view returns (uint256)",
-      "function ftnsToken() view returns (address)",
+      "function unbondDelaySeconds() view returns (uint256)",
+      "function ftns() view returns (address)",
       "function owner() view returns (address)",
     ],
     hre.ethers.provider,
@@ -190,21 +190,21 @@ async function main() {
   await compare("registry.stakeBond", () => registry.stakeBond(), expected.StakeBond);
   await compare("stakeBond.slasher", () => stakeBond.slasher(), expected.BatchSettlementRegistry);
   await compare("stakeBond.foundationReserveWallet", () => stakeBond.foundationReserveWallet(), expected.FoundationReserveWallet);
-  await compare("stakeBond.ftnsToken", () => stakeBond.ftnsToken(), expected.FTNSToken);
+  await compare("stakeBond.ftns", () => stakeBond.ftns(), expected.FTNSToken);
 
   // ── 3. Initialization params match manifest ────────────────────────
   console.log(`\nInitialization params`);
   if (manifest.params && manifest.params.challengeWindowSeconds) {
     await compare(
-      "registry.challengeWindow",
-      () => registry.challengeWindow(),
+      "registry.challengeWindowSeconds",
+      () => registry.challengeWindowSeconds(),
       BigInt(manifest.params.challengeWindowSeconds),
     );
   }
   if (manifest.params && manifest.params.unbondDelaySeconds) {
     await compare(
-      "stakeBond.unbondDelay",
-      () => stakeBond.unbondDelay(),
+      "stakeBond.unbondDelaySeconds",
+      () => stakeBond.unbondDelaySeconds(),
       BigInt(manifest.params.unbondDelaySeconds),
     );
   }
