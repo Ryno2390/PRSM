@@ -54,7 +54,25 @@ describe("RoyaltyDistributor", function () {
           expectedNode
         );
 
+      // L2 audit MEDIUM D-04 fix: pull-payment. distributeRoyalty
+      // credits per-recipient `claimable` balances; recipients pull via
+      // claim(). Direct token balances are unchanged until claim().
+      expect(await token.balanceOf(creator.address)).to.equal(0n);
+      expect(await token.balanceOf(treasury.address)).to.equal(0n);
+      expect(await token.balanceOf(servingNode.address)).to.equal(0n);
+      expect(await distributor.claimable(creator.address)).to.equal(expectedCreator);
+      expect(await distributor.claimable(treasury.address)).to.equal(expectedNetwork);
+      expect(await distributor.claimable(servingNode.address)).to.equal(expectedNode);
+
+      // Each recipient claims independently.
+      await expect(distributor.connect(creator).claim())
+        .to.emit(distributor, "RoyaltyClaimed")
+        .withArgs(creator.address, expectedCreator);
       expect(await token.balanceOf(creator.address)).to.equal(expectedCreator);
+      expect(await distributor.claimable(creator.address)).to.equal(0n);
+
+      await distributor.connect(treasury).claim();
+      await distributor.connect(servingNode).claim();
       expect(await token.balanceOf(treasury.address)).to.equal(expectedNetwork);
       expect(await token.balanceOf(servingNode.address)).to.equal(expectedNode);
     });
@@ -89,9 +107,9 @@ describe("RoyaltyDistributor", function () {
       const gross = ONE * 100n;
       await distributor.connect(payer).distributeRoyalty(contentHash, servingNode.address, gross);
 
-      expect(await token.balanceOf(creator.address)).to.equal(0);
-      expect(await token.balanceOf(treasury.address)).to.equal((gross * 200n) / 10000n);
-      expect(await token.balanceOf(servingNode.address)).to.equal(gross - (gross * 200n) / 10000n);
+      expect(await distributor.claimable(creator.address)).to.equal(0);
+      expect(await distributor.claimable(treasury.address)).to.equal((gross * 200n) / 10000n);
+      expect(await distributor.claimable(servingNode.address)).to.equal(gross - (gross * 200n) / 10000n);
     });
 
     it("handles max royalty (creator + network = 100%, node gets 0)", async function () {
@@ -101,9 +119,47 @@ describe("RoyaltyDistributor", function () {
       const gross = ONE * 100n;
       await distributor.connect(payer).distributeRoyalty(contentHash, servingNode.address, gross);
 
-      expect(await token.balanceOf(creator.address)).to.equal((gross * 9800n) / 10000n);
-      expect(await token.balanceOf(treasury.address)).to.equal((gross * 200n) / 10000n);
-      expect(await token.balanceOf(servingNode.address)).to.equal(0);
+      expect(await distributor.claimable(creator.address)).to.equal((gross * 9800n) / 10000n);
+      expect(await distributor.claimable(treasury.address)).to.equal((gross * 200n) / 10000n);
+      expect(await distributor.claimable(servingNode.address)).to.equal(0);
+    });
+
+    it("REGRESSION (MEDIUM D-04): claims are independent — one recipient's claim() does not affect another's accrual", async function () {
+      // The load-bearing property of pull-payment: distribute credits
+      // each recipient's claimable balance independently. A claim() by
+      // any one recipient zeroes only their own slot. If recipient X
+      // never claims (or their address is a contract that reverts on
+      // receive), recipients Y and Z still get paid in full when they
+      // claim. Pre-fix push-payment would have failed the entire
+      // distribute on a single reverting recipient.
+      const contentHash = ethers.keccak256(ethers.toUtf8Bytes("isolated-claim"));
+      await registry.connect(creator).registerContent(contentHash, 800, "ipfs://I");
+
+      const gross = ONE * 100n;
+      const expectedCreator = (gross * 800n) / 10000n;
+      const expectedNetwork = (gross * 200n) / 10000n;
+      const expectedNode = gross - expectedCreator - expectedNetwork;
+
+      await distributor.connect(payer).distributeRoyalty(
+        contentHash, servingNode.address, gross,
+      );
+
+      // Treasury claims first.
+      await distributor.connect(treasury).claim();
+      expect(await token.balanceOf(treasury.address)).to.equal(expectedNetwork);
+      expect(await distributor.claimable(treasury.address)).to.equal(0n);
+      // Creator + servingNode untouched.
+      expect(await distributor.claimable(creator.address)).to.equal(expectedCreator);
+      expect(await distributor.claimable(servingNode.address)).to.equal(expectedNode);
+
+      // Treasury double-claim reverts (idempotent zero-balance guard).
+      await expect(distributor.connect(treasury).claim()).to.be.revertedWith("Nothing to claim");
+
+      // Creator + node can still claim normally.
+      await distributor.connect(creator).claim();
+      await distributor.connect(servingNode).claim();
+      expect(await token.balanceOf(creator.address)).to.equal(expectedCreator);
+      expect(await token.balanceOf(servingNode.address)).to.equal(expectedNode);
     });
 
     // Phase 1.1: the registry now caps rates at MAX_ROYALTY_RATE_BPS = 9800

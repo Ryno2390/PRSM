@@ -53,17 +53,15 @@ describe("[Team D] D5 — Royalty push-payment architectural risk", function () 
     await distributor.waitForDeployment();
   });
 
-  it("creator transfer to non-receiving contract permanently strands creator-share", async function () {
-    // Register content with 50% royalty.
+  it("REGRESSION (MEDIUM D-04): creator transfer to non-receiving contract does NOT brick distribute — pull-payment isolates the bad-recipient slot", async function () {
+    // Register content with 50% royalty, transfer ownership to the
+    // distributor itself (a contract that cannot externally claim its
+    // own balance — worst case for the bad-recipient scenario).
     const contentHash = ethers.keccak256(ethers.toUtf8Bytes("content-1"));
     await provReg.connect(creator).registerContent(contentHash, 5000, "ipfs://meta");
-
-    // Transfer ownership to the RoyaltyDistributor itself — a known address
-    // that holds no logic to forward FTNS onward. (Realistically, a creator
-    // could transfer to any contract that locks tokens.)
     await provReg.connect(creator).transferContentOwnership(
       contentHash,
-      await distributor.getAddress()
+      await distributor.getAddress(),
     );
 
     // Payer pays.
@@ -71,24 +69,44 @@ describe("[Team D] D5 — Royalty push-payment architectural risk", function () 
     await token.mint(payer.address, gross);
     await token.connect(payer).approve(await distributor.getAddress(), gross);
 
-    const balDistributorBefore = await token.balanceOf(await distributor.getAddress());
-    await distributor.connect(payer).distributeRoyalty(contentHash, servingNode.address, gross);
-    const balDistributorAfter = await token.balanceOf(await distributor.getAddress());
+    // Pre-D-04 (push-payment) would have blocked the entire distribute
+    // on the creator transfer if creator reverted on receive. Even
+    // when creator silently accepts (as in the original test), the
+    // funds were "stranded" because they sat in the recipient address
+    // as untracked balance. Post-D-04, distribute always succeeds —
+    // the entire gross sits in the distributor as escrow, and each
+    // recipient's claimable slot is set independently.
+    const distAddr = await distributor.getAddress();
+    const balDistributorBefore = await token.balanceOf(distAddr);
+    await distributor.connect(payer).distributeRoyalty(
+      contentHash, servingNode.address, gross,
+    );
+    const balDistributorAfter = await token.balanceOf(distAddr);
+    expect(balDistributorAfter - balDistributorBefore).to.equal(gross);
 
-    // 50% of 100 = 50 stranded inside RoyaltyDistributor with no recovery
-    // function (RoyaltyDistributor has no withdraw/sweep). Tokens are lost
-    // forever.
-    const creatorShare = ethers.parseUnits("50", 18);
-    expect(balDistributorAfter - balDistributorBefore).to.equal(creatorShare);
+    // Treasury + servingNode can claim cleanly — bad-creator slot does
+    // NOT block them. This is the core D-04 fix: claim isolation.
+    const networkShare = (gross * 200n) / 10000n;       // 2 FTNS
+    const creatorShare = (gross * 5000n) / 10000n;      // 50 FTNS
+    const nodeShare = gross - creatorShare - networkShare;  // 48 FTNS
+    expect(await distributor.claimable(treasury.address)).to.equal(networkShare);
+    expect(await distributor.claimable(servingNode.address)).to.equal(nodeShare);
+    expect(await distributor.claimable(distAddr)).to.equal(creatorShare);
 
-    // The contract has no admin / withdraw / sweep — these tokens are dead.
-    const fns = ["withdraw", "sweep", "rescue", "recover", "drain"];
-    for (const fn of fns) {
-      expect(distributor[fn], `unexpected ${fn} present`).to.be.undefined;
-    }
+    await distributor.connect(treasury).claim();
+    await distributor.connect(servingNode).claim();
+    expect(await token.balanceOf(treasury.address)).to.equal(networkShare);
+    expect(await token.balanceOf(servingNode.address)).to.equal(nodeShare);
+
+    // The bad-creator slot (claimable[distributor]) is operationally
+    // stranded — distributor has no path to call its own claim() — but
+    // this is now an OPERATOR misuse confined to the bad slot, not a
+    // contagion that voids the entire payment. The creator could be
+    // recovered via a future transferContentOwnership back to a real
+    // EOA (not done here — this test pins the isolation property).
   });
 
-  it("servingNode = RoyaltyDistributor itself causes self-trap of node share", async function () {
+  it("REGRESSION (MEDIUM D-04): servingNode = RoyaltyDistributor self-recipient does NOT brick treasury+creator — pull-payment isolates the bad slot", async function () {
     const contentHash = ethers.keccak256(ethers.toUtf8Bytes("content-2"));
     await provReg.connect(creator).registerContent(contentHash, 1000, "ipfs://meta2"); // 10% royalty
 
@@ -96,15 +114,30 @@ describe("[Team D] D5 — Royalty push-payment architectural risk", function () 
     await token.mint(payer.address, gross);
     await token.connect(payer).approve(await distributor.getAddress(), gross);
 
-    // Caller passes the distributor's own address as servingNode — caller
-    // is griefing themselves but the RoyaltyDistributor accepts it (no
-    // self-recipient check).
-    const balBefore = await token.balanceOf(await distributor.getAddress());
-    await distributor.connect(payer).distributeRoyalty(contentHash, await distributor.getAddress(), gross);
-    const balAfter = await token.balanceOf(await distributor.getAddress());
+    const distAddr = await distributor.getAddress();
 
-    // 88% of gross (100 - 10 creator - 2 network = 88) is stranded.
-    const stranded = ethers.parseUnits("88", 18);
-    expect(balAfter - balBefore).to.equal(stranded);
+    // Caller passes the distributor's own address as servingNode.
+    // Pre-D-04: the entire payment flowed to distributor untracked.
+    // Post-D-04: claim isolation — treasury + creator still get paid.
+    await distributor.connect(payer).distributeRoyalty(contentHash, distAddr, gross);
+
+    const creatorShare = (gross * 1000n) / 10000n;     // 10 FTNS
+    const networkShare = (gross * 200n) / 10000n;      // 2 FTNS
+    const nodeShare = gross - creatorShare - networkShare;  // 88 FTNS
+
+    // Distributor holds the entire gross as escrow.
+    expect(await token.balanceOf(distAddr)).to.equal(gross);
+    // Per-recipient slots:
+    expect(await distributor.claimable(creator.address)).to.equal(creatorShare);
+    expect(await distributor.claimable(treasury.address)).to.equal(networkShare);
+    expect(await distributor.claimable(distAddr)).to.equal(nodeShare);
+
+    // Creator + treasury claim normally. The 88 FTNS stranded in the
+    // distributor-as-node slot is an operator-misuse confinement, not
+    // a contagion that voids the entire transaction.
+    await distributor.connect(creator).claim();
+    await distributor.connect(treasury).claim();
+    expect(await token.balanceOf(creator.address)).to.equal(creatorShare);
+    expect(await token.balanceOf(treasury.address)).to.equal(networkShare);
   });
 });

@@ -87,9 +87,11 @@ describe("AUDIT-TEAM-A — A01 RoyaltyDistributor split breaks PRSM-TOK-1 §8.1"
     // Headline numeric proof: with §8.1 invariant, treasury should hold
     // 1.6% = 16 FTNS. Contract instead pays 2.0% = 20 FTNS — a 25%
     // over-payment to the network treasury at every transaction.
-    const treasuryBal = await token.balanceOf(treasury.address);
-    expect(treasuryBal).to.equal((gross * 200n) / 10000n); // 20 FTNS, contract behavior
-    expect(treasuryBal).to.not.equal((gross * 160n) / 10000n); // 16 FTNS, §8.1 spec
+    // (Post-MEDIUM D-04 the share is in `claimable[treasury]`, not yet
+    // claimed; the split invariant is identical, just deferred.)
+    const treasuryShare = await distributor.claimable(treasury.address);
+    expect(treasuryShare).to.equal((gross * 200n) / 10000n); // 20 FTNS, contract behavior
+    expect(treasuryShare).to.not.equal((gross * 160n) / 10000n); // 16 FTNS, §8.1 spec
   });
 
   it("serving node is over-paid by ~19.6 percentage points vs §8.1", async function () {
@@ -99,15 +101,17 @@ describe("AUDIT-TEAM-A — A01 RoyaltyDistributor split breaks PRSM-TOK-1 §8.1"
     const gross = ONE * 10000n; // 10,000 FTNS
     await distributor.connect(payer).distributeRoyalty(contentHash, servingNode.address, gross);
 
-    const nodeBal = await token.balanceOf(servingNode.address);
+    // Post-MEDIUM D-04: the share lives in `claimable[node]` until
+    // claim(); the split invariant is identical, just deferred.
+    const nodeShare = await distributor.claimable(servingNode.address);
 
     // §8.1 says serving node = 72% = 7,200 FTNS.
     // Contract pays node = gross - creator(8%) - network(2%) = 90% = 9,000 FTNS.
-    expect(nodeBal).to.equal(ONE * 9000n);
-    expect(nodeBal).to.not.equal(ONE * 7200n);
+    expect(nodeShare).to.equal(ONE * 9000n);
+    expect(nodeShare).to.not.equal(ONE * 7200n);
 
     // Over-payment magnitude: 1,800 FTNS per 10,000 = 18% over §8.1.
-    const overpayment = nodeBal - ONE * 7200n;
+    const overpayment = nodeShare - ONE * 7200n;
     expect(overpayment).to.equal(ONE * 1800n);
   });
 
@@ -124,12 +128,14 @@ describe("AUDIT-TEAM-A — A01 RoyaltyDistributor split breaks PRSM-TOK-1 §8.1"
     await distributor.connect(payer).distributeRoyalty(contentHash, servingNode.address, gross);
     const supplyAfter = await token.totalSupply();
 
+    // Post-MEDIUM D-04: shares live in `claimable[*]` until claim();
+    // the split invariant is identical, just deferred.
     // Creator now matches §8.1's 6.4% = 640 FTNS.
-    expect(await token.balanceOf(creator.address)).to.equal(ONE * 640n);
+    expect(await distributor.claimable(creator.address)).to.equal(ONE * 640n);
     // Treasury still mismatches (2% vs 1.6%).
-    expect(await token.balanceOf(treasury.address)).to.equal(ONE * 200n); // 2%
+    expect(await distributor.claimable(treasury.address)).to.equal(ONE * 200n); // 2%
     // Serving node still mismatches (91.6% vs 72%).
-    expect(await token.balanceOf(servingNode.address)).to.equal(ONE * 9160n);
+    expect(await distributor.claimable(servingNode.address)).to.equal(ONE * 9160n);
     // Burn still 0.
     expect(supplyAfter).to.equal(supplyBefore);
   });

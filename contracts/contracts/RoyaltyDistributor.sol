@@ -17,14 +17,36 @@ interface IProvenanceRegistry {
 
 /**
  * @title RoyaltyDistributor
- * @notice Atomic three-way splitter for FTNS payments tied to registered content.
- * @dev Stateless. Pulls FTNS from msg.sender via transferFrom, so the payer must
- *      have approved this contract for at least `gross` first. Splits:
+ * @notice Three-way splitter for FTNS payments tied to registered content.
+ * @dev Pulls FTNS from msg.sender via transferFrom and credits each
+ *      recipient's `claimable` balance for later claim() — pull-payment
+ *      pattern mirroring StakeBond.slashedBountyPayable + claimBounty.
+ *
+ *      L2 audit MEDIUM D-04 fix (this version, post-mainnet v1):
+ *      Pre-fix, distributeRoyalty PUSHED FTNS to creator, networkTreasury,
+ *      and servingNode in the same tx. A reverting recipient (e.g., a
+ *      contract creator that reverts on ERC-20 receive, or a content
+ *      ownership change mid-flight via ProvenanceRegistry's
+ *      transferContentOwnership) would soft-brick the entire distribute
+ *      call AND strand any in-flight share. Post-fix, distribute credits
+ *      claimableBalance[recipient]; recipients pull via claim() at their
+ *      convenience. A reverting/changed creator no longer brick-holds
+ *      the entire payment, and the creator at distribute-time keeps
+ *      their accrued share even if ownership transfers afterwards.
+ *
+ *      Splits:
  *        creator share = gross * royaltyRateBps / 10000  (from registry)
  *        network share = gross * NETWORK_FEE_BPS / 10000 (constant 2%)
  *        serving node share = gross - creator - network
  *      Reverts if creator + network share exceed gross
  *      (i.e. royaltyRateBps + 200 > 10000).
+ *
+ *      DEPLOYMENT NOTE: mainnet v1 (deployed 2026-05-04) ships the
+ *      pre-fix push-payment behaviour. This pull-payment version is the
+ *      v2 source-of-truth, intended to ship as part of the Week 2 v2
+ *      re-deploy bundled with HIGH-1 (A-01 burn fix) + HIGH-3-deferred
+ *      (Pausable). networkTreasury is immutable so a v2 deploy is
+ *      required regardless of which fix lands first.
  */
 contract RoyaltyDistributor is ReentrancyGuard {
     IERC20 public immutable ftns;
@@ -33,6 +55,10 @@ contract RoyaltyDistributor is ReentrancyGuard {
 
     /// @dev 2% network fee, basis points
     uint16 public constant NETWORK_FEE_BPS = 200;
+
+    /// @dev Per-recipient claimable balance accumulated across all
+    /// distributeRoyalty calls. Zeroed on claim().
+    mapping(address recipient => uint256) public claimable;
 
     event RoyaltyPaid(
         bytes32 indexed contentHash,
@@ -43,6 +69,7 @@ contract RoyaltyDistributor is ReentrancyGuard {
         uint256 networkAmount,
         uint256 servingNodeAmount
     );
+    event RoyaltyClaimed(address indexed recipient, uint256 amount);
 
     constructor(address _ftns, address _registry, address _networkTreasury) {
         require(_ftns != address(0), "Zero ftns");
@@ -54,7 +81,9 @@ contract RoyaltyDistributor is ReentrancyGuard {
     }
 
     /**
-     * @notice Pull `gross` FTNS from msg.sender and split it 3 ways.
+     * @notice Pull `gross` FTNS from msg.sender and credit the 3-way split
+     *         into per-recipient `claimable` balances. Recipients claim
+     *         via claim() at their convenience.
      * @param contentHash content registered in ProvenanceRegistry
      * @param servingNode address of node that served the content
      * @param gross total FTNS amount being distributed (in token base units)
@@ -75,17 +104,18 @@ contract RoyaltyDistributor is ReentrancyGuard {
         require(creatorAmt + networkAmt <= gross, "Rate plus fee exceeds 100%");
         uint256 nodeAmt = gross - creatorAmt - networkAmt;
 
-        // Pull full amount once, then push to recipients.
+        // Pull full amount once, then credit to claimable pools.
+        // No outbound transfers — recipients pull via claim().
         require(ftns.transferFrom(msg.sender, address(this), gross), "Pull failed");
 
         if (creatorAmt > 0) {
-            require(ftns.transfer(creator, creatorAmt), "Creator xfer failed");
+            claimable[creator] += creatorAmt;
         }
         if (networkAmt > 0) {
-            require(ftns.transfer(networkTreasury, networkAmt), "Network xfer failed");
+            claimable[networkTreasury] += networkAmt;
         }
         if (nodeAmt > 0) {
-            require(ftns.transfer(servingNode, nodeAmt), "Node xfer failed");
+            claimable[servingNode] += nodeAmt;
         }
 
         emit RoyaltyPaid(
@@ -97,6 +127,19 @@ contract RoyaltyDistributor is ReentrancyGuard {
             networkAmt,
             nodeAmt
         );
+    }
+
+    /**
+     * @notice Claim accumulated royalty balance to the caller. Idempotent:
+     *         a zero-balance call reverts rather than emitting noise.
+     */
+    function claim() external nonReentrant {
+        uint256 amount = claimable[msg.sender];
+        require(amount > 0, "Nothing to claim");
+        // Effects before interaction.
+        claimable[msg.sender] = 0;
+        require(ftns.transfer(msg.sender, amount), "Claim transfer failed");
+        emit RoyaltyClaimed(msg.sender, amount);
     }
 
     /**
