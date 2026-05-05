@@ -395,8 +395,13 @@ ceremonies, and rotates signers.
 
 **L6e — Continuous ops hygiene:**
 - Quarterly review of signer addresses, hardware status, seed-storage location,
-  emergency contacts.
-- Documented in `docs/PRODUCTION_OPERATIONS_MANUAL.md`.
+  emergency contacts, treasury floor compliance, contract operational state,
+  and Forta routing health.
+- Template: `docs/security/L6E_OPS_HYGIENE_REVIEW.md` (shipped 2026-05-05).
+- Per-quarter signed instances archive in `docs/security/L6E-reviews/YYYY-Qx.md`.
+- Annual key-rotation drill folds into the Q4 review each year.
+- Infrastructure-side operational surface remains in
+  `docs/PRODUCTION_OPERATIONS_MANUAL.md` (kubectl, deploys, etc.).
 
 **L6f — Network infrastructure pen-test (🔴 pending):**
 - Bootstrap-node availability: DDoS resilience of `wss://bootstrap1.prsm-network.com:8765`
@@ -419,8 +424,9 @@ availability + protocol robustness).
 report (L6f). Quarterly cadence on L6e; per-major-release on L6f.
 
 **Status (2026-05-05):** L6a + L6b done; L6c (key rotation runbook) +
-L6d (insider-threat policy) shipped 2026-05-05. **L6e (continuous ops
-hygiene) remains a next-action item.** **L6f RFP drafted at
+L6d (insider-threat policy) + L6e (ops-hygiene template + review
+archive directory) shipped 2026-05-05. First L6e review window
+2026-07-01 → 2026-07-14. **L6f RFP drafted at
 `audits/rfp/L6f-infrastructure-pentest-rfp.md`** — recipients NCC
 Group + Bishop Fox + Doyensec; budget $20K-$50K, 2-3 weeks. Awaiting
 founder vendor outreach.

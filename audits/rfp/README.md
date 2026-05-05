@@ -70,7 +70,7 @@ Outreach order priority (for founder bandwidth):
 | L6b | ✅ Hardware wallet diversity | Ledger + Trezor + OneKey verified |
 | L6c | ✅ Key rotation runbook | `docs/security/KEY_ROTATION_RUNBOOK.md` |
 | L6d | ✅ Insider threat policy | `docs/security/INSIDER_THREAT_AND_COLLUSION_POLICY.md` |
-| L6e | ⏳ Continuous ops hygiene | Quarterly review cadence; first review pending |
+| L6e | ✅ Continuous ops hygiene template + archive dir | `docs/security/L6E_OPS_HYGIENE_REVIEW.md` + `docs/security/L6E-reviews/` (first review window 2026-07-01 → 2026-07-14) |
 | L10a | ✅ Forta routing wired | Discord + Slack + PagerDuty + email; smoke-test CLI |
 | L10d | ✅ SECURITY.md + PGP | Published 2026-05-05 |
 | L11 (policy) | ✅ Treasury policy drafted | `docs/governance/2026-05-05-treasury-reserve-and-risk-transfer-policy.md` (PRSM-POL-1) |

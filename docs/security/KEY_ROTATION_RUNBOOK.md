@@ -126,8 +126,9 @@ before rotation completes.
 ### A.3 Post-rotation review (Week 1–2)
 
 - ☐ Document what was lost, when, and why in incident timeline.
-- ☐ Update operational hygiene checklist (L6e) if the loss revealed a
-  process gap.
+- ☐ Update operational hygiene checklist (L6e — see
+  [`L6E_OPS_HYGIENE_REVIEW.md`](L6E_OPS_HYGIENE_REVIEW.md)) if the loss
+  revealed a process gap.
 - ☐ Verify deputy-founder has up-to-date access information for the new
   signer set (D7 protocol).
 
@@ -296,9 +297,11 @@ Regardless of which scenario applies:
 
 ## 9. Drill cadence
 
-This runbook should be **drilled** annually (per L6e quarterly hygiene
-review, dropped to annual for full rotation drill given the cost). Drill
-procedure:
+This runbook should be **drilled** annually, folded into the Q4 L6e
+quarterly hygiene review (see
+[`L6E_OPS_HYGIENE_REVIEW.md`](L6E_OPS_HYGIENE_REVIEW.md) §5). Annual
+cadence reflects the cost of a full rotation drill vs. the lighter
+quarterly checklist. Drill procedure:
 
 - Use a testnet Safe (Base Sepolia) with the same threshold structure.
 - Simulate Scenario A (lost device) + execute full A.2 rotation.
