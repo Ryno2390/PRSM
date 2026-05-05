@@ -461,17 +461,116 @@ These need a founder yes/no before T1 can run:
 
 ---
 
-## 9. Decision needed from founder
+## 9. Decisions ratified by founder (2026-05-05)
 
-To proceed with T1, please confirm:
+- [x] **Redeploy fresh MockFTNS** on Sepolia (clean slate; 30-second cost; no migration users).
+- [x] **Deployer EOA acts as Foundation "Safe"** on testnet. Audit-bundle contracts behave identically with EOA vs. Safe owner; multi-sig ceremony layer was already validated on mainnet 2026-05-04. Testnet docs must loudly disclaim that mainnet uses the real 2-of-3.
+- [x] **Same bootstrap droplet handles mainnet + testnet** with network-tagged contract bundles in the response. Less ops burden; current sizing fine.
+- [x] **Manual faucet (Option A)** for first 2 weeks. Re-evaluate at 20-user threshold.
+- [⚠️] **Accelerated halving** — ratified in principle but **deferred** due to a contract finding (see §10).
 
-- [ ] Yes, deploy fresh MockFTNS on Sepolia (vs. reuse existing).
-- [ ] Yes, deployer EOA acts as Foundation "Safe" on testnet.
-- [ ] Yes, accelerated halving (1-day epoch, 14-day halving) on testnet.
-- [ ] Yes, same droplet handles both mainnet + testnet bootstrap.
-- [ ] Yes, manual faucet (Option A) for first 2 weeks.
+## 10. Contract finding — `EPOCH_DURATION_SECONDS` is `constant`, not `immutable`
 
-Once all five are confirmed, T1 can run today.
+`contracts/contracts/EmissionController.sol:64`:
+```solidity
+uint256 public constant EPOCH_DURATION_SECONDS = 4 * 365 days;
+```
+
+Solidity `constant` is baked into bytecode and cannot be overridden via
+inheritance or constructor args. So accelerated testnet halving requires
+one of:
+
+- **Option X (refactor):** change `constant` → `immutable` + add a
+  constructor arg. Same bytecode shape, different deploy parameter for
+  testnet vs. mainnet. **Cost:** small contract change + test updates;
+  affects audit-bundle 1 day before vendor RFPs ship. **Cleanest
+  long-term.**
+- **Option Y (sibling contract):** write `EmissionControllerTestnet.sol`
+  as a ~250-LoC copy with the constant changed to `14 days`. **Cost:**
+  code duplication + extra hardhat tests; mainnet contract unchanged.
+- **Option Z (defer):** deploy mainnet's 4-year halving on testnet
+  today; revisit accelerated halving as a follow-up task. **Cost:**
+  testnet users won't observe a halving event within typical test
+  windows. Everything else (earning, spending, claiming, scarcity-
+  capped supply) works identically.
+
+**Decision for T1:** **Option Z.** Ship T1 today with mainnet's 4-year
+halving. Add accelerated-halving as task **T10** (post-launch follow-up).
+Rationale: T1's value is "users can run PRSM and earn real on-chain
+testnet-FTNS." Halving visibility is marketing-educational, not
+functional. Don't churn the audit-bundle code 1 day before RFPs ship.
+
+When T10 is later executed, recommend **Option X (refactor)** rather than
+Option Y (duplicate) — single source of truth, single audit review,
+identical mainnet bytecode when constructor-arg is the original 4-year
+value.
+
+## 11. T1 — explicit run command
+
+**Pre-flight checks (founder must complete before running):**
+
+```bash
+# 1. Have a funded Base Sepolia EOA. Fund via:
+#    https://www.coinbase.com/faucets/base-sepolia-faucet
+#    OR https://sepoliafaucet.com (Sepolia ETH bridges to Base Sepolia)
+#    Need ~0.5 Sepolia ETH minimum for full deploy + verification.
+
+# 2. Have ETHERSCAN_API_KEY (for Basescan verification). The same key
+#    works for mainnet + Sepolia per Etherscan V2 unified API.
+
+# 3. Have BASE_SEPOLIA_RPC_URL — default https://sepolia.base.org works
+#    but rate-limits at scale; consider Alchemy/Infura/QuickNode.
+
+# 4. Confirm git tip is `cumulative-audit-prep-20260505-j` (or later).
+git log -1 --oneline
+```
+
+**Run:**
+
+```bash
+# Set env vars (substitute real values):
+export PRIVATE_KEY=0x...                          # deployer EOA private key
+export BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
+export ETHERSCAN_API_KEY=...                       # for verification
+
+# Get the deployer's address for use in subsequent vars:
+export DEPLOYER_ADDR=$(cd contracts && npx hardhat run --network base-sepolia <<<'console.log((await hre.ethers.getSigners())[0].address)' 2>/dev/null | tail -1)
+echo "Deployer: $DEPLOYER_ADDR"
+
+# Per §9: deployer EOA acts as Foundation Safe on testnet.
+export FOUNDATION_RESERVE_WALLET=$DEPLOYER_ADDR
+export EMISSION_OWNER=$DEPLOYER_ADDR
+export DISTRIBUTOR_OWNER=$DEPLOYER_ADDR
+
+# Per §9: redeploy fresh MockFTNS. Skip pre-existing FTNS_TOKEN_ADDRESS
+# so rehearse-deploy.sh provisions a fresh one.
+unset FTNS_TOKEN_ADDRESS
+
+# Run the rehearsal in real-network mode:
+NETWORK=base-sepolia ./scripts/rehearse-deploy.sh
+```
+
+The script orchestrates the full deploy chain (MockFTNS → audit-bundle →
+Phase 8 emission → Phase 7-storage) with cross-wire + invariant
+post-checks. Output is committed to `contracts/deployments/*-base-sepolia-*.json`
+files.
+
+**Verification (after T1 completes):**
+
+```bash
+cd contracts && node scripts/verify-audit-bundle-deployment.js --network base-sepolia
+```
+
+**Then commit the deployment manifests:**
+
+```bash
+git add contracts/deployments/*-base-sepolia-*.json
+git commit -m "T1: audit-bundle + emission + storage deployed to Base Sepolia"
+```
+
+**After T1, hand back to me with the addresses.** I'll fill in T3
+(`prsm/config/networks.py`) which is already scaffolded with placeholders
+(see commit). T4-T9 then proceed in order.
 
 ---
 
