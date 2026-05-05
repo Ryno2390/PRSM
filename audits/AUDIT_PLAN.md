@@ -299,8 +299,20 @@ Task 9). Without this layer, the audit-bundle stack stays in pre-deploy state.
 Total: ~$90K. Comparable to a single solo-firm engagement but with cross-
 checking by independent groups.
 
-**Status:** Pending. Next action: **send RFPs to top-3 from shortlist + open
-Code4rena scoping conversation.**
+**Status (2026-05-05):** RFP packets drafted. Awaiting founder
+execution of vendor outreach.
+
+- **Code4rena contest packet:** `audits/rfp/L4-code4rena-contest-scope.md`
+  (~$40K target pool; 14-day public contest; in-scope = 9 contracts,
+  ~2,300 SLOC; out-of-scope = Ed25519Lib + Sha512 = L3).
+- **Firm RFP refresh:** `audits/rfp/L4-firm-rfp-addendum-20260505.md`
+  layered on top of the original 2026-04-23 shortlist doc. Pulls in
+  L1-wired + L2-closed + MEDIUM-cleanup state and narrows the firm scope
+  to cross-contract composition + Phase 7-storage + Phase 8 + UUPS
+  upgrade surface (~$60-80K).
+
+Next action: **founder sends RFPs to top-3 firms + opens Code4rena
+intake conversation.**
 
 ---
 
