@@ -523,7 +523,11 @@ self-hosted disclosure channel (security@prsm.dev) for off-chain reports.
 **Gating:** Cannot launch until L4 first-pass complete (otherwise the bounty
 becomes the audit, which is more expensive than just doing the audit).
 
-**Status:** Pending.
+**Status (2026-05-05):** Design spec drafted at
+`audits/rfp/L9-bug-bounty-program-design.md`. Two-channel structure
+(Immunefi for on-chain ~$50K + self-hosted security@ for off-chain
+~$25K). Activation gated on L4 contest + firm pair-review completion;
+target activation 2026-08-15.
 
 ---
 
