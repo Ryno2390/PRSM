@@ -350,6 +350,12 @@ ML systems).
 **Gating:** Must complete before any user runs Tier C inference against
 unfamiliar relay nodes at scale.
 
+**Status (2026-05-05):** RFP drafted at
+`audits/rfp/L5-ml-supply-chain-audit-rfp.md`. Tier 1 scope ~28K LoC
+(security-load-bearing); Tier 2 ~7K LoC. Budget $40K-$80K. Recipients:
+Trail of Bits ML Assurance + NCC Group ML (commercial track) + Berkeley
+RDI + CMU CyLab (academic track). Awaiting founder vendor outreach.
+
 **Status:** Pending.
 
 ---
