@@ -196,6 +196,13 @@ hand-rolled Ed25519 would not be caught by a contest. The standard practice
 for hand-rolled crypto is engagement of a specialist firm (e.g., Trail of
 Bits, NCC Group, Cure53, Kudelski Security).
 
+**Status (2026-05-05):** Decision ratified — engage specialist audit on
+existing Ed25519Lib + Sha512. See `audits/decisions/L3-ed25519-decision.md`.
+RFP packet drafted at `audits/rfp/L3-ed25519-crypto-rfp.md`. Pre-engagement
+artifacts complete (RFC 8032 + FIPS 180-4 vectors + upstream port diff +
+caller-assumptions memo at `audits/findings/L3-crypto/`). Awaiting vendor
+outreach to Trail of Bits + NCC Group.
+
 **Decision criteria (replace vs audit):**
 
 The choice between replacing Ed25519Lib.sol and auditing it must be made

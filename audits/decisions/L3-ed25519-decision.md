@@ -6,9 +6,11 @@ re-architect the protocol's signature surface.
 
 **Date:** 2026-05-05
 **Author:** Founder
-**Decision lifecycle:** Draft → Foundation council ratification → action
+**Decision lifecycle:** Draft → Founder ratification → Foundation council acknowledgement
 **Supersedes:** Open question in `AUDIT_PLAN.md` §5 L3
-**Status:** Draft (this memo). Pending foundation review.
+**Status:** Founder-ratified 2026-05-05. RFP packet drafted at
+`audits/rfp/L3-ed25519-crypto-rfp.md`. Pending vendor outreach +
+Foundation council acknowledgement of the engagement & budget envelope.
 
 ---
 
@@ -121,6 +123,17 @@ governance. If a better-audited Ed25519 verifier emerges later (or if a Base
 Ed25519 precompile ships, or if our specialist audit finds a fixable bug),
 we deploy a replacement and call `setSignatureVerifier`. No migration of
 in-flight receipts required because off-chain Ed25519 keys are unchanged.
+
+**Post-MEDIUM D-03 refinement (2026-05-05):** The Batch struct now
+snapshots `signatureVerifierAtCommit` per-batch. Mid-flight verifier
+swaps therefore affect FUTURE batches only — already-PENDING batches
+continue to use the verifier address that was live at commit time.
+This is the desired semantics: a fixable verifier bug rolls forward
+to new traffic immediately, while in-flight challenges remain
+adjudicated by the verifier the participants relied on at commit
+time. The hot-swap claim in this memo is preserved, but its scope is
+now NEW-BATCH-ONLY — which is also the only safe scope under
+adversarial assumptions about owner key compromise.
 
 **This drastically reduces the lock-in risk of the current decision.** The
 Ed25519Lib choice is reversible.
@@ -264,9 +277,12 @@ The Foundation council should ratify or push back on:
    - **Test summary:** 29 tests passing across Ed25519Verifier, Ed25519Lib,
      and Sha512 (existing 7 + new 22).
 2. **Vendor outreach** (founder, parallel with above):
-   - RFP to Trail of Bits Cryptography practice
-   - RFP to NCC Group Cryptography Services
-   - Quotes back within ~1 week
+   - ✅ RFP packet drafted at `audits/rfp/L3-ed25519-crypto-rfp.md`
+     (2026-05-05) — covers scope of work, deliverables, engagement
+     terms, vendor preferences, pre-engagement artifacts.
+   - ☐ Send RFP to Trail of Bits Cryptography practice
+   - ☐ Send RFP to NCC Group Cryptography Services
+   - ☐ Quotes back within ~1 week (target: 2026-05-19)
 3. **Engagement** (vendor, 2–4 weeks): contracted scope of §4 above.
 4. **Triage + remediation** (founder + vendor, 1–2 weeks): fix any
    findings; re-run vendor delta-review on fixes.
