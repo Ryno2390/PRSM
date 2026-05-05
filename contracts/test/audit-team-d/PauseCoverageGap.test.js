@@ -30,16 +30,16 @@ describe("[Team D] D-02 regression: pause surface present on audit-bundle contra
     token = await Token.deploy();
     await token.waitForDeployment();
 
-    const Pool = await ethers.getContractFactory("EscrowPool");
-    pool = await Pool.deploy(owner.address, await token.getAddress(), ethers.ZeroAddress);
-    await pool.waitForDeployment();
-
     const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
     registry = await Registry.deploy(owner.address, 3 * 24 * 60 * 60);
     await registry.waitForDeployment();
 
+    const Pool = await ethers.getContractFactory("EscrowPool");
+    pool = await Pool.deploy(owner.address, await token.getAddress(), await registry.getAddress());
+    await pool.waitForDeployment();
+
     const StakeBond = await ethers.getContractFactory("StakeBond");
-    stakeBond = await StakeBond.deploy(owner.address, await token.getAddress(), 7 * 24 * 60 * 60);
+    stakeBond = await StakeBond.deploy(owner.address, await token.getAddress(), 7 * 24 * 60 * 60, await registry.getAddress());
     await stakeBond.waitForDeployment();
 
     const ProvReg = await ethers.getContractFactory("ProvenanceRegistry");

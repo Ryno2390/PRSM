@@ -82,9 +82,9 @@ describe("BatchSettlementRegistry — §8.7 MIN_SLASH_GAS floor", function () {
     const Bond = await ethers.getContractFactory("StakeBond");
     stakeBond = await Bond.deploy(
       owner.address, await token.getAddress(), DEFAULT_UNBOND_DELAY,
+      await registry.getAddress(),
     );
     await stakeBond.waitForDeployment();
-    await stakeBond.connect(owner).setSlasher(await registry.getAddress());
     await stakeBond.connect(owner).setFoundationReserveWallet(
       foundation.address,
     );

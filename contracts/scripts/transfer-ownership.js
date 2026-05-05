@@ -8,10 +8,12 @@
  * checked under deployer ownership.
  *
  * Why two-phase rather than constructor-set: setters like
- * Registry.setEscrowPool / StakeBond.setSlasher are owner-only. If
- * initialOwner were the multi-sig, every cross-wire tx would need a
- * 2-of-3 signature ceremony — the audit-bundle alone has 5 cross-wires
- * (post-HIGH-6 immutable EscrowPool.settlementRegistry) + owner-only
+ * Registry.setEscrowPool / Registry.setStakeBond /
+ * Registry.setSignatureVerifier / setFoundationReserveWallet are
+ * owner-only. If initialOwner were the multi-sig, every cross-wire tx
+ * would need a 2-of-3 signature ceremony — the audit-bundle alone has
+ * 4 cross-wires (post-HIGH-6/HIGH-7 immutable
+ * EscrowPool.settlementRegistry + StakeBond.slasher) + owner-only
  * setters across 4 contracts. The two-phase model lets the deployer
  * hot key do the mechanical wiring under hardhat-tested invariants,
  * THEN hands ownership over to the multi-sig in a single commit-and-

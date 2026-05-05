@@ -145,9 +145,17 @@ async function main() {
   console.log(`   SignatureVerifier:   ${verifierAddress}  (${verifierKind})`);
 
   // ── 4. StakeBond ────────────────────────────────────────────────────
+  // L2 audit HIGH-7 (B-CROSS-3): StakeBond.slasher is now immutable —
+  // the registry address is passed into the constructor. Registry was
+  // already deployed in step 1 (post-HIGH-6 ordering).
   console.log("\n[4/5] Deploying StakeBond…");
   const StakeBond = await hre.ethers.getContractFactory("StakeBond");
-  const stakeBond = await StakeBond.deploy(deployer.address, ftnsChecksum, unbondDelay);
+  const stakeBond = await StakeBond.deploy(
+    deployer.address,
+    ftnsChecksum,
+    unbondDelay,
+    deployments.BatchSettlementRegistry,
+  );
   await stakeBond.waitForDeployment();
   deployments.StakeBond = await stakeBond.getAddress();
   console.log(`   StakeBond:           ${deployments.StakeBond}`);
@@ -156,8 +164,9 @@ async function main() {
   console.log("\n[5/5] Cross-wiring…");
 
   // EscrowPool.settlementRegistry was wired in EscrowPool's constructor
-  // (immutable post-HIGH-6). Only the reverse pointer + verifier + bond
-  // wiring remain.
+  // (immutable post-HIGH-6). StakeBond.slasher was wired in StakeBond's
+  // constructor (immutable post-HIGH-7). Only the reverse pointers +
+  // verifier + foundation-wallet wiring remain.
   let tx;
 
   tx = await registry.setEscrowPool(deployments.EscrowPool);
@@ -174,11 +183,6 @@ async function main() {
   await tx.wait();
   txHashes.registry_setStakeBond = tx.hash;
   console.log(`   Registry.setStakeBond → stakeBond (${tx.hash.slice(0, 10)}…)`);
-
-  tx = await stakeBond.setSlasher(deployments.BatchSettlementRegistry);
-  await tx.wait();
-  txHashes.stakeBond_setSlasher = tx.hash;
-  console.log(`   StakeBond.setSlasher → registry (${tx.hash.slice(0, 10)}…)`);
 
   tx = await stakeBond.setFoundationReserveWallet(foundationChecksum);
   await tx.wait();

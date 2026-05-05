@@ -69,14 +69,14 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
     await verifier.waitForDeployment();
     await registry.connect(owner).setSignatureVerifier(await verifier.getAddress());
 
-    // Phase 7: deploy StakeBond + wire it into Registry as the slasher.
+    // Phase 7: deploy StakeBond with the registry as immutable slasher
+    // (HIGH-7). Registry already deployed above.
     const Bond = await ethers.getContractFactory("StakeBond");
     stakeBond = await Bond.deploy(
-      owner.address, await token.getAddress(), DEFAULT_UNBOND_DELAY
+      owner.address, await token.getAddress(), DEFAULT_UNBOND_DELAY, await registry.getAddress()
     );
     await stakeBond.waitForDeployment();
 
-    await stakeBond.connect(owner).setSlasher(await registry.getAddress());
     await stakeBond.connect(owner).setFoundationReserveWallet(foundation.address);
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
 

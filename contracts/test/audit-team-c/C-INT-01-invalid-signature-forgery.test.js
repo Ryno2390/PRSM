@@ -101,11 +101,10 @@ describe("Audit Team C — C-INT-01: INVALID_SIGNATURE adversarial slashing", fu
     await verifier.waitForDeployment();
     await registry.connect(owner).setSignatureVerifier(await verifier.getAddress());
 
-    // Wire StakeBond so the slashing path actually fires.
+    // Wire StakeBond with the registry as immutable slasher (HIGH-7).
     const Bond = await ethers.getContractFactory("StakeBond");
-    stakeBond = await Bond.deploy(owner.address, await token.getAddress(), 1 * 24 * 60 * 60);
+    stakeBond = await Bond.deploy(owner.address, await token.getAddress(), 1 * 24 * 60 * 60, await registry.getAddress());
     await stakeBond.waitForDeployment();
-    await stakeBond.connect(owner).setSlasher(await registry.getAddress());
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
 
     await registry.connect(owner).setEscrowPool(await escrowPool.getAddress());

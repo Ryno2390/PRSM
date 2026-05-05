@@ -86,10 +86,9 @@ describe("AUDIT-TEAM-A — A02 Unbond/Challenge race lets attacker dodge slash",
     await registry.connect(owner).setEscrowPool(await escrowPool.getAddress());
 
     const Bond = await ethers.getContractFactory("StakeBond");
-    stakeBond = await Bond.deploy(owner.address, await token.getAddress(), UNBOND_DELAY);
+    stakeBond = await Bond.deploy(owner.address, await token.getAddress(), UNBOND_DELAY, await registry.getAddress());
     await stakeBond.waitForDeployment();
 
-    await stakeBond.connect(owner).setSlasher(await registry.getAddress());
     await stakeBond.connect(owner).setFoundationReserveWallet(foundation.address);
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
 

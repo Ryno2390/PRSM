@@ -10,13 +10,18 @@
  *   B2  one-step transferOwnership — confirmed brick path on typo
  *   B3  role-graph cycles          — defense (admin-of-admin chain bottoms out)
  *   B4  renounceRole reachability  — confirmed: admin can renounce + brick UUPS
- *   B5  cross-wire mutability      — partial: settlementRegistry NOW
- *                                     immutable (HIGH-6 fix); FTNS-token
- *                                     swap + StakeBond.slasher remain
- *                                     mutable (HIGH-7 territory)
+ *   B5  cross-wire mutability      — mostly closed: settlementRegistry
+ *                                     (HIGH-6) + StakeBond.slasher
+ *                                     (HIGH-7) NOW immutable; only
+ *                                     FTNS-token swap remains mutable
+ *                                     (defensive escape hatch by design)
  *   B6  pauser locking             — defense (any PAUSER unpauses)
  *   B7  initializer re-entry       — defense (`_disableInitializers` in ctor)
- *   B8  slasher acceptance         — confirmed: StakeBond.setSlasher accepts EOA
+ *   B8  slasher acceptance         — closed (HIGH-7): setSlasher REMOVED;
+ *                                     constructor still accepts any
+ *                                     non-zero address with no interface
+ *                                     check, but rotation is no longer
+ *                                     possible after deployment
  *   B9  Foundation Safe owners     — out-of-scope for hardhat (on-chain check)
  *   B10 constructor poisoning      — defense (zero-address checks)
  *
@@ -178,13 +183,20 @@ describe("Team B — Access Control PoC", function () {
       expect(await fakeFtns.balanceOf(await pool.getAddress())).to.equal(0);
     });
 
-    it("CONFIRMED: owner can re-point StakeBond.slasher to attacker, slashing arbitrary providers", async function () {
-      const [owner, provider, foundation, attacker] = await ethers.getSigners();
+    it("REGRESSION (HIGH-7): owner CANNOT re-point StakeBond.slasher — field is now immutable, no setter exposed", async function () {
+      const [owner, provider, foundation, attacker, legitSlasher] = await ethers.getSigners();
       const MockERC20 = await ethers.getContractFactory("MockERC20");
       const ftns = await MockERC20.deploy();
 
+      // Constructor now requires a slasher arg. Use legitSlasher signer
+      // as a stand-in EOA "registry" so we can demonstrate post-fix
+      // surface — the slash() path itself reverts on EOA caller-not-
+      // slasher mismatch, but the immutability of the field is the
+      // load-bearing assertion.
       const Bond = await ethers.getContractFactory("StakeBond");
-      const bond = await Bond.deploy(owner.address, await ftns.getAddress(), 7 * 24 * 60 * 60);
+      const bond = await Bond.deploy(
+        owner.address, await ftns.getAddress(), 7 * 24 * 60 * 60, legitSlasher.address
+      );
 
       // Provider stakes 10K FTNS at standard tier (50% slash).
       const STAKE = ethers.parseUnits("10000", 18);
@@ -192,23 +204,30 @@ describe("Team B — Access Control PoC", function () {
       await ftns.connect(provider).approve(await bond.getAddress(), STAKE);
       await bond.connect(provider).bond(STAKE, 5000);
 
-      // Owner sets slasher to attacker EOA. There is no contract-side
-      // sanity check that the slasher is actually a Registry contract.
-      await bond.setSlasher(attacker.address);
-      expect(await bond.slasher()).to.equal(attacker.address);
+      // Post-fix: setSlasher no longer exists at the high-level binding.
+      expect(bond.setSlasher).to.be.undefined;
 
-      // Attacker calls slash() with arbitrary provider + claims bounty.
+      // Low-level call attempting the old selector reverts because the
+      // function is not in the deployed bytecode.
+      const nukedSelector = ethers.id("setSlasher(address)").slice(0, 10);
+      const data = nukedSelector + "000000000000000000000000" + attacker.address.slice(2);
+      await expect(
+        owner.sendTransaction({ to: await bond.getAddress(), data }),
+      ).to.be.reverted;
+
+      // slasher value is unchanged — still legitSlasher.
+      expect(await bond.slasher()).to.equal(legitSlasher.address);
+
+      // Attacker calling slash() reverts CallerNotSlasher.
       const reasonId = ethers.id("fabricated-batch-id");
-      await bond.connect(attacker).slash(provider.address, attacker.address, reasonId);
+      await expect(
+        bond.connect(attacker).slash(provider.address, attacker.address, reasonId),
+      ).to.be.revertedWithCustomError(bond, "CallerNotSlasher");
 
-      // 50% of 10K = 5K slashed; attacker gets 70% bounty = 3.5K claimable.
-      const bounty = await bond.slashedBountyPayable(attacker.address);
-      expect(bounty).to.equal(ethers.parseUnits("3500", 18));
-
-      // The slasher cross-wire HAS NO ALLOW-LIST and NO INTERFACE CHECK.
-      // After handoff, this is a single multi-sig call away from
-      // arbitrary slashing. The whole stake-bond honesty model rests on
-      // multi-sig integrity at this point.
+      // Provider's stake untouched; attacker bounty unaccrued.
+      const stake = await bond.stakeOf(provider.address);
+      expect(stake.amount).to.equal(STAKE);
+      expect(await bond.slashedBountyPayable(attacker.address)).to.equal(0n);
     });
   });
 
@@ -299,25 +318,36 @@ describe("Team B — Access Control PoC", function () {
   });
 
   // ── B8 ──────────────────────────────────────────────────────────────
-  describe("B8 — slasher acceptance pattern", function () {
-    it("CONFIRMED: StakeBond.slasher accepts any address — no IBatchSettlementRegistry interface check", async function () {
+  describe("B8 — slasher acceptance pattern (post-HIGH-7: setter REMOVED)", function () {
+    it("REGRESSION (HIGH-7): no setSlasher exists; constructor accepts any address but rotation is impossible after deploy", async function () {
       const [owner, eoa] = await ethers.getSigners();
       const MockERC20 = await ethers.getContractFactory("MockERC20");
       const ftns = await MockERC20.deploy();
 
+      // Constructor accepts an EOA (no interface check) — this is the
+      // residual permissiveness, but rotation is now impossible. The
+      // operational defense moves entirely to checksum review at signing
+      // time, just as for RoyaltyDistributor.networkTreasury.
       const Bond = await ethers.getContractFactory("StakeBond");
-      const bond = await Bond.deploy(owner.address, await ftns.getAddress(), 7 * 24 * 60 * 60);
+      const bondWithEOA = await Bond.deploy(
+        owner.address, await ftns.getAddress(), 7 * 24 * 60 * 60, eoa.address
+      );
+      expect(await bondWithEOA.slasher()).to.equal(eoa.address);
 
-      // Pure EOA — no contract code at all. setSlasher accepts.
-      await bond.setSlasher(eoa.address);
-      expect(await bond.slasher()).to.equal(eoa.address);
+      // Constructor accepts zero (slashing-disabled mode for tests).
+      const bondNoSlasher = await Bond.deploy(
+        owner.address, await ftns.getAddress(), 7 * 24 * 60 * 60, ethers.ZeroAddress
+      );
+      expect(await bondNoSlasher.slasher()).to.equal(ethers.ZeroAddress);
 
-      // Even zero-address (slashing-disabled mode) is accepted by the
-      // setter — but the comment says "Address(0) disables slashing"
-      // which IS intentional. Documenting that the only validation is
-      // implicit; setter is permissive by design.
-      await bond.setSlasher(ethers.ZeroAddress);
-      expect(await bond.slasher()).to.equal(ethers.ZeroAddress);
+      // Post-fix: high-level binding has no setter; low-level call to
+      // the removed selector reverts.
+      expect(bondWithEOA.setSlasher).to.be.undefined;
+      const nukedSelector = ethers.id("setSlasher(address)").slice(0, 10);
+      const data = nukedSelector + "000000000000000000000000" + owner.address.slice(2);
+      await expect(
+        owner.sendTransaction({ to: await bondWithEOA.getAddress(), data })
+      ).to.be.reverted;
     });
   });
 
@@ -379,7 +409,7 @@ describe("Team B — Access Control PoC", function () {
       const registry = await Registry.deploy(deployer.address, 86400);
 
       const Bond = await ethers.getContractFactory("StakeBond");
-      const bond = await Bond.deploy(deployer.address, await ftns.getAddress(), 7 * 24 * 60 * 60);
+      const bond = await Bond.deploy(deployer.address, await ftns.getAddress(), 7 * 24 * 60 * 60, await registry.getAddress());
 
       // The verifier script's ABI claims these getters. Build a Contract
       // with that exact ABI and confirm calls revert (no such function).

@@ -47,9 +47,15 @@ interface ISlasherWithChallengeWindow {
  * unbonding is still accountable for misbehavior caught within the
  * delay window. Prevents the challenge-then-unbond race escape.
  *
- * Slasher authorization: owner-settable. In production, the slasher
- * is the BatchSettlementRegistry's address. Until set, slashing is
- * disabled (challenges still invalidate receipts but don't touch stake).
+ * Slasher authorization: L2 audit HIGH-7 (B-CROSS-3) fix — the slasher
+ * address is now IMMUTABLE, set once at construction. In production it
+ * is the BatchSettlementRegistry's address. Constructor address(0) is
+ * permitted for tests/local dev where slashing is intentionally
+ * disabled — production deploys MUST set this since rotation requires
+ * re-deploying StakeBond. Closes the post-handoff drain vector where
+ * a compromised owner could re-point slasher to an attacker EOA and
+ * call slash() against arbitrary providers (50%-100% bond capture
+ * + 70% bounty net to the attacker).
  */
 contract StakeBond is Ownable, ReentrancyGuard, Pausable {
     enum StakeStatus {
@@ -75,11 +81,11 @@ contract StakeBond is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant MIN_UNBOND_DELAY_SECONDS = 1 days;
     uint256 public constant MAX_UNBOND_DELAY_SECONDS = 30 days;
 
-    /// @dev Authorized slasher address. Only this contract can call
-    /// slash(). Default address(0) = slashing disabled. Owner updates
-    /// via setSlasher. In production, the slasher is the
-    /// BatchSettlementRegistry.
-    address public slasher;
+    /// @dev Authorized slasher address. L2 audit HIGH-7 (B-CROSS-3) fix:
+    /// IMMUTABLE — set once at construction, no setter. address(0) =
+    /// slashing intentionally disabled (test/dev only); production
+    /// MUST set this to the BatchSettlementRegistry.
+    address public immutable slasher;
 
     /// @dev Per-provider stake record. Re-bonding after a full withdraw
     /// overwrites the prior record.
@@ -123,7 +129,6 @@ contract StakeBond is Ownable, ReentrancyGuard, Pausable {
         uint128 amount
     );
     event UnbondDelayUpdated(uint256 oldDelay, uint256 newDelay);
-    event SlasherUpdated(address oldSlasher, address newSlasher);
     event FoundationReserveWalletUpdated(address oldWallet, address newWallet);
     event Slashed(
         address indexed provider,
@@ -155,15 +160,21 @@ contract StakeBond is Ownable, ReentrancyGuard, Pausable {
     constructor(
         address initialOwner,
         address ftnsAddress,
-        uint256 initialUnbondDelay
+        uint256 initialUnbondDelay,
+        address initialSlasher
     ) Ownable(initialOwner) {
         if (ftnsAddress == address(0)) revert ZeroAddress();
         if (initialUnbondDelay < MIN_UNBOND_DELAY_SECONDS ||
             initialUnbondDelay > MAX_UNBOND_DELAY_SECONDS) {
             revert InvalidUnbondDelay(initialUnbondDelay);
         }
+        // initialSlasher MAY be address(0) at deploy time only when
+        // running unit tests / local dev that don't exercise the slash
+        // path — production deploys MUST set this to the registry's
+        // address since there is no setter to fix it after-the-fact.
         ftns = IERC20(ftnsAddress);
         unbondDelaySeconds = initialUnbondDelay;
+        slasher = initialSlasher;
     }
 
     // ── Provider lifecycle ────────────────────────────────────────
@@ -323,17 +334,10 @@ contract StakeBond is Ownable, ReentrancyGuard, Pausable {
         emit UnbondDelayUpdated(old, newDelay);
     }
 
-    /**
-     * @notice Set the authorized slasher address. Owner-only. In
-     *         production this is the BatchSettlementRegistry. Setting
-     *         to address(0) disables slashing — tests or emergency
-     *         governance pause.
-     */
-    function setSlasher(address newSlasher) external onlyOwner {
-        address old = slasher;
-        slasher = newSlasher;
-        emit SlasherUpdated(old, newSlasher);
-    }
+    // L2 audit HIGH-7 (B-CROSS-3) fix: setSlasher was removed. The
+    // slasher field is now immutable — set in the constructor.
+    // Rotation requires re-deployment of StakeBond; this is the
+    // intended trade-off documented at the field declaration above.
 
     /**
      * @notice Set the destination wallet for drainFoundationReserve.
@@ -351,9 +355,11 @@ contract StakeBond is Ownable, ReentrancyGuard, Pausable {
      * @notice Pause bond / requestUnbond / withdraw / slash / claimBounty.
      *         Owner-only; intended for incident response per
      *         docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md. Admin setters
-     *         (setUnbondDelay, setSlasher, setFoundationReserveWallet)
-     *         and drainFoundationReserve remain accessible while paused
-     *         so the owner can perform emergency rotation.
+     *         (setUnbondDelay, setFoundationReserveWallet) and
+     *         drainFoundationReserve remain accessible while paused so
+     *         the owner can perform emergency rotation. Note: slasher
+     *         is immutable post-HIGH-7 — bond re-deploy required for
+     *         slasher rotation.
      *
      *         Unbond-timer-during-pause semantics: timestamp-based,
      *         clock CONTINUES during pause (no reset). When unpaused,

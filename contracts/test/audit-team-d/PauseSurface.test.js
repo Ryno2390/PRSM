@@ -52,12 +52,11 @@ describe("Audit Team D — D-02 regression: pause surface on audit-bundle contra
     await escrowPool.waitForDeployment();
 
     const Bond = await ethers.getContractFactory("StakeBond");
-    stakeBond = await Bond.deploy(owner.address, await token.getAddress(), UNBOND_DELAY);
+    stakeBond = await Bond.deploy(owner.address, await token.getAddress(), UNBOND_DELAY, await registry.getAddress());
     await stakeBond.waitForDeployment();
 
     await registry.connect(owner).setEscrowPool(await escrowPool.getAddress());
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
-    await stakeBond.connect(owner).setSlasher(await registry.getAddress());
 
     // Fund a depositor + a provider.
     await token.mint(requester.address, ONE_FTNS * 1000n);

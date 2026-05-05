@@ -25,11 +25,17 @@ describe("StakeBond — lifecycle", function () {
     token = await Token.deploy();
     await token.waitForDeployment();
 
+    // L2 audit HIGH-7: slasher is now immutable. The lifecycle tests
+    // don't exercise the slash path; pass slasher.address as the
+    // immutable initialSlasher so tests that DO read bond.slasher() see
+    // a non-zero value. The slash gate in requestUnbond ignores EOA
+    // slashers (slasher.code.length > 0 check) so they won't perturb.
     const Bond = await ethers.getContractFactory("StakeBond");
     bond = await Bond.deploy(
       owner.address,
       await token.getAddress(),
-      DEFAULT_UNBOND_DELAY
+      DEFAULT_UNBOND_DELAY,
+      slasher.address
     );
     await bond.waitForDeployment();
 
@@ -50,14 +56,14 @@ describe("StakeBond — lifecycle", function () {
     it("reverts on zero FTNS address", async function () {
       const Bond = await ethers.getContractFactory("StakeBond");
       await expect(
-        Bond.deploy(owner.address, ethers.ZeroAddress, DEFAULT_UNBOND_DELAY)
+        Bond.deploy(owner.address, ethers.ZeroAddress, DEFAULT_UNBOND_DELAY, slasher.address)
       ).to.be.revertedWithCustomError(bond, "ZeroAddress");
     });
 
     it("reverts on unbond delay below minimum", async function () {
       const Bond = await ethers.getContractFactory("StakeBond");
       await expect(
-        Bond.deploy(owner.address, await token.getAddress(), 3600)
+        Bond.deploy(owner.address, await token.getAddress(), 3600, slasher.address)
       ).to.be.revertedWithCustomError(bond, "InvalidUnbondDelay");
     });
 
@@ -65,8 +71,17 @@ describe("StakeBond — lifecycle", function () {
       const Bond = await ethers.getContractFactory("StakeBond");
       const tooLong = 60 * 24 * 60 * 60; // 60 days
       await expect(
-        Bond.deploy(owner.address, await token.getAddress(), tooLong)
+        Bond.deploy(owner.address, await token.getAddress(), tooLong, slasher.address)
       ).to.be.revertedWithCustomError(bond, "InvalidUnbondDelay");
+    });
+
+    it("REGRESSION (HIGH-7): permits zero-address slasher at construction (slashing disabled mode)", async function () {
+      const Bond = await ethers.getContractFactory("StakeBond");
+      const b = await Bond.deploy(
+        owner.address, await token.getAddress(), DEFAULT_UNBOND_DELAY, ethers.ZeroAddress
+      );
+      await b.waitForDeployment();
+      expect(await b.slasher()).to.equal(ethers.ZeroAddress);
     });
   });
 
@@ -320,24 +335,26 @@ describe("StakeBond — lifecycle", function () {
     });
   });
 
-  describe("governance: setSlasher", function () {
-    it("owner can set the slasher", async function () {
-      await expect(bond.connect(owner).setSlasher(slasher.address))
-        .to.emit(bond, "SlasherUpdated")
-        .withArgs(ethers.ZeroAddress, slasher.address);
+  describe("governance: slasher (immutable post-HIGH-7)", function () {
+    // L2 audit HIGH-7 (B-CROSS-3): setSlasher was REMOVED. slasher is
+    // now immutable (constructor-only). Tests below assert the new
+    // contract surface: setter is gone, immutability is verifiable.
+    it("REGRESSION (HIGH-7): bond exposes no setSlasher", async function () {
+      expect(bond.setSlasher).to.be.undefined;
+    });
+
+    it("REGRESSION (HIGH-7): slasher value matches constructor arg and cannot be re-pointed", async function () {
+      // Initial value matches the constructor arg from beforeEach.
       expect(await bond.slasher()).to.equal(slasher.address);
-    });
-
-    it("non-owner cannot set the slasher", async function () {
+      // Low-level call attempting the old setSlasher selector reverts
+      // because the function is not present in the deployed bytecode.
+      const nukedSelector = ethers.id("setSlasher(address)").slice(0, 10);
+      const data = nukedSelector + "000000000000000000000000" + other.address.slice(2);
       await expect(
-        bond.connect(provider).setSlasher(slasher.address)
+        owner.sendTransaction({ to: await bond.getAddress(), data })
       ).to.be.reverted;
-    });
-
-    it("accepts zero-address slasher (disables slashing)", async function () {
-      await bond.connect(owner).setSlasher(slasher.address);
-      await bond.connect(owner).setSlasher(ethers.ZeroAddress);
-      expect(await bond.slasher()).to.equal(ethers.ZeroAddress);
+      // slasher value is unchanged.
+      expect(await bond.slasher()).to.equal(slasher.address);
     });
   });
 });
@@ -364,16 +381,16 @@ describe("StakeBond — slash + bounty", function () {
     token = await Token.deploy();
     await token.waitForDeployment();
 
+    // L2 audit HIGH-7: slasher is immutable. Authorize the `slasher`
+    // signer at construction time.
     const Bond = await ethers.getContractFactory("StakeBond");
     bond = await Bond.deploy(
       owner.address,
       await token.getAddress(),
-      DEFAULT_UNBOND_DELAY
+      DEFAULT_UNBOND_DELAY,
+      slasher.address
     );
     await bond.waitForDeployment();
-
-    // Authorize the `slasher` signer to call slash().
-    await bond.connect(owner).setSlasher(slasher.address);
 
     // Fund + approve the provider's stake.
     await token.mint(provider.address, PREMIUM_STAKE * 2n);
@@ -411,14 +428,11 @@ describe("StakeBond — slash + bounty", function () {
       ).to.emit(bond, "Slashed");
     });
 
-    it("old slasher loses authorization after setSlasher rotation", async function () {
-      await bond.connect(owner).setSlasher(other.address);
-      await expect(
-        bond
-          .connect(slasher)
-          .slash(provider.address, challenger.address, REASON_ID)
-      ).to.be.revertedWithCustomError(bond, "CallerNotSlasher");
-    });
+    // L2 audit HIGH-7: setSlasher rotation no longer exists. The old
+    // "rotation loses authorization" test would have asserted a now-
+    // impossible operation; removing it is intentional. See
+    // describe("governance: slasher (immutable post-HIGH-7)") for the
+    // replacement immutability assertions.
   });
 
   describe("slash — amount + split", function () {
