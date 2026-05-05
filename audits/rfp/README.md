@@ -3,6 +3,9 @@
 **Status:** All vendor-track RFPs drafted as of 2026-05-05. Awaiting
 founder execution of vendor outreach.
 
+**Outreach packet:** [`outreach-emails.md`](outreach-emails.md) — one
+email per recipient (~22 firms across 8 RFPs), ready to copy/paste.
+
 **Master plan:** `audits/AUDIT_PLAN.md` v1.1
 **Disclosure policy:** `SECURITY.md`
 
