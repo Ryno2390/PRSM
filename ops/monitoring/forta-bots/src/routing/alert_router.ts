@@ -4,10 +4,12 @@
  * Routes Forta findings to the configured war-room channels per
  * Exploit Response Playbook §3 communication protocol.
  *
- * Channels:
- * - Discord war-room webhook (primary, fast)
- * - Optional: PagerDuty (post-mainnet, paged on-call)
- * - Optional: Email backup
+ * Channels (per AUDIT_PLAN.md L10a):
+ * - Discord war-room webhook (primary ops channel — fast, all severities ≥ P3)
+ * - Foundation council Slack webhook (governance awareness — P0/P1 only,
+ *   keeps council informed without overloading the ops war-room)
+ * - PagerDuty (P0/P1 only — pages on-call rotation per playbook §3.2)
+ * - Email backup (P0 only — last-resort if Discord+Slack+PD all fail)
  *
  * Severity mapping:
  * - Forta CRITICAL → Playbook P0 (active drain / key compromise / known exploit executing)
@@ -15,6 +17,16 @@
  * - Forta MEDIUM   → Playbook P2 (suspected anomaly; investigation needed)
  * - Forta LOW      → Playbook P3 (hardening opportunity)
  * - Forta INFO     → no paging; logged only
+ *
+ * Channel selection by severity:
+ *
+ *   | Severity | Discord | Slack (council) | PagerDuty | Email |
+ *   |----------|---------|-----------------|-----------|-------|
+ *   | P0       |   ✓     |        ✓        |     ✓     |   ✓   |
+ *   | P1       |   ✓     |        ✓        |     ✓     |       |
+ *   | P2       |   ✓     |                 |           |       |
+ *   | P3       |   ✓     |                 |           |       |
+ *   | INFO     |         |                 |           |       |
  *
  * Webhook URLs are runtime-configured via env vars; never committed.
  */
@@ -25,6 +37,9 @@ export type PagerSeverity = "P0" | "P1" | "P2" | "P3" | "INFO";
 
 export interface RouterConfig {
   discordWebhookUrl?: string;
+  /// L10a: Foundation council Slack webhook. Distinct from Discord
+  /// war-room — Slack is governance/council awareness, not ops triage.
+  slackWebhookUrl?: string;
   pagerDutyIntegrationKey?: string;
   emailRecipientList?: string[];
   dryRun?: boolean;  // log only, do not POST
@@ -36,6 +51,7 @@ export class AlertRouter {
   constructor(config: RouterConfig = {}) {
     this.config = {
       discordWebhookUrl: process.env.PRSM_DISCORD_WEBHOOK_URL,
+      slackWebhookUrl: process.env.PRSM_SLACK_WEBHOOK_URL,
       pagerDutyIntegrationKey: process.env.PRSM_PAGERDUTY_KEY,
       emailRecipientList: (process.env.PRSM_ALERT_EMAILS || "")
         .split(",")
@@ -64,6 +80,9 @@ export class AlertRouter {
     const tasks: Promise<void>[] = [];
     if (this.config.discordWebhookUrl && severity !== "INFO") {
       tasks.push(this.sendDiscord(finding, severity));
+    }
+    if (this.config.slackWebhookUrl && (severity === "P0" || severity === "P1")) {
+      tasks.push(this.sendSlack(finding, severity));
     }
     if (this.config.pagerDutyIntegrationKey && (severity === "P0" || severity === "P1")) {
       tasks.push(this.sendPagerDuty(finding, severity));
@@ -143,6 +162,90 @@ export class AlertRouter {
       }
     } catch (e) {
       console.error(`Discord webhook error:`, e);
+    }
+  }
+
+  /**
+   * Slack Incoming Webhook — Foundation council channel.
+   *
+   * P0/P1 only — keeps council informed of fund-loss / exploit-class
+   * incidents without flooding the channel with P2/P3 ops noise. Uses
+   * Slack Block Kit for structured rendering. Failure is best-effort:
+   * we log + continue so a Slack outage does NOT mute Discord/PagerDuty.
+   */
+  private async sendSlack(finding: Finding, severity: PagerSeverity): Promise<void> {
+    if (!this.config.slackWebhookUrl) return;
+
+    // Slack color bar: red for P0, dark orange for P1.
+    const color = severity === "P0" ? "#ff0000" : "#ff8c00";
+
+    // Top-tier metadata fields shown inline (Slack truncates long values
+    // visually, so cap each at 200 chars to keep the council message
+    // scannable). We deliberately keep this distinct from Discord's
+    // 1024-char field cap — council readers want the gist, not the
+    // forensic detail (that lives in Discord war-room).
+    const metaFields = Object.entries(finding.metadata || {})
+      .slice(0, 6)
+      .map(([k, v]) => ({
+        type: "mrkdwn",
+        text: `*${k}*\n${String(v).slice(0, 200)}`,
+      }));
+
+    const payload = {
+      text: `[${severity}] ${finding.name}`,  // fallback for notifications
+      attachments: [
+        {
+          color,
+          blocks: [
+            {
+              type: "header",
+              text: {
+                type: "plain_text",
+                text: `🚨 [${severity}] ${finding.name}`,
+                emoji: true,
+              },
+            },
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: finding.description.slice(0, 2900),  // Slack section limit
+              },
+            },
+            {
+              type: "section",
+              fields: [
+                { type: "mrkdwn", text: `*Alert ID*\n${finding.alertId || "n/a"}` },
+                { type: "mrkdwn", text: `*Protocol*\n${finding.protocol || "PRSM"}` },
+                { type: "mrkdwn", text: `*Severity*\n${severity}` },
+                ...(metaFields.length > 0 ? metaFields : []),
+              ],
+            },
+            {
+              type: "context",
+              elements: [
+                {
+                  type: "mrkdwn",
+                  text: `PRSM Forta · Playbook §3 · ${new Date().toISOString()}`,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    try {
+      const res = await fetch(this.config.slackWebhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        console.error(`Slack webhook failed: ${res.status} ${res.statusText}`);
+      }
+    } catch (e) {
+      console.error(`Slack webhook error:`, e);
     }
   }
 

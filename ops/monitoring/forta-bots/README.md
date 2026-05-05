@@ -7,19 +7,26 @@
 Watches PRSM contracts on Base mainnet, Base Sepolia, Ethereum mainnet, and Ethereum Sepolia for anomalies that match known smart-contract exploit patterns or deviate from normal protocol operation. Findings emit to:
 
 1. **Forta network** (public, persistent on-chain record)
-2. **Discord war-room webhook** (private, fast)
-3. **PagerDuty** (P0/P1 only, post-mainnet)
-4. **Email** (P0 backup, post-mainnet)
+2. **Discord war-room webhook** (ops triage — fast; all severities ≥ P3)
+3. **Foundation council Slack webhook** (governance awareness — P0/P1 only)
+4. **PagerDuty** (on-call rotation — P0/P1 only, post-mainnet)
+5. **Email** (P0 backup, post-mainnet)
 
-Severity mapping — Forta to Exploit Response Playbook:
+Severity mapping — Forta to Exploit Response Playbook (per AUDIT_PLAN.md L10a):
 
-| Forta severity | Playbook | Channel |
-|---|---|---|
-| Critical | P0 | Discord + PagerDuty + Email |
-| High | P1 | Discord + PagerDuty |
-| Medium | P2 | Discord |
-| Low | P3 | Discord |
-| Info | n/a | Forta network only |
+| Forta severity | Playbook | Discord (ops) | Slack (council) | PagerDuty | Email |
+|---|---|---|---|---|---|
+| Critical | P0 | ✓ | ✓ | ✓ | ✓ |
+| High     | P1 | ✓ | ✓ | ✓ |   |
+| Medium   | P2 | ✓ |   |   |   |
+| Low      | P3 | ✓ |   |   |   |
+| Info     | —  |   |   |   |   |
+
+**Why Discord AND Slack:** Discord = ops triage (fast, noisy, high-cadence,
+includes all severities). Slack = Foundation council governance awareness
+(curated, P0/P1 only — keeps council informed of fund-loss-class
+incidents without flooding them with operational noise that the on-call
+ops rotation already handles).
 
 ## Detectors
 
@@ -44,11 +51,16 @@ npm run build
 
 # Configure environment
 export PRSM_DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'
+export PRSM_SLACK_WEBHOOK_URL='https://hooks.slack.com/services/...'
 export PRSM_PAGERDUTY_KEY='xxxxxxxx'
 export PRSM_ALERT_EMAILS='security@prsm.foundation'
 
 # Or test in dry-run mode (no actual webhooks)
 export PRSM_ALERT_DRY_RUN=1
+
+# Validate routing end-to-end (L10a deploy-time readiness check)
+npm run smoke-test                   # tests P0/P1/P2/P3
+npm run smoke-test -- --severity P0  # single severity
 
 # Run against a specific tx for testing
 npm run tx 0xabcd...
@@ -105,15 +117,54 @@ Per Q4 ratification, threshold modifications follow the council 30-day-timelock 
 
 ## Pre-mainnet checklist
 
-Per Exploit Response Playbook §11:
+Per Exploit Response Playbook §11 + AUDIT_PLAN.md L10a:
 - [ ] Forta keyfile generated + secured
 - [ ] Discord webhook configured (`PRSM_DISCORD_WEBHOOK_URL`)
-- [ ] PagerDuty integration key configured (post-mainnet)
+- [ ] Foundation council Slack webhook configured (`PRSM_SLACK_WEBHOOK_URL`)
+- [ ] PagerDuty integration key configured (`PRSM_PAGERDUTY_KEY`)
+- [ ] Email backup recipients configured (`PRSM_ALERT_EMAILS`)
+- [ ] **`npm run smoke-test` passes — all 4 channels acknowledge synthetic findings at P0/P1/P2/P3 (L10a readiness gate)**
+- [ ] On-call rotation defined in `docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md` §3.2
+- [ ] PagerDuty service has at least 2 on-call responders (no single-person SPOF)
 - [ ] Bot pushed to Forta network in dry-run mode
 - [ ] All 5 detectors validated against synthetic-attack test fixtures
 - [ ] Alert latency measured: target <30s from on-chain event to Discord delivery
 - [ ] Quarterly tabletop exercise §1 (active drain) passes detection within first 30 seconds
 - [ ] Mainnet contract addresses populated in `contracts.ts` post-Phase-1.3 deploy
+
+### L10a routing-channel setup runbook
+
+**One-time per channel:**
+
+1. **Discord war-room** — create a dedicated channel (recommend
+   `#prsm-warroom-active`); under Edit Channel → Integrations → Webhooks,
+   create a webhook; copy the URL into `PRSM_DISCORD_WEBHOOK_URL`.
+2. **Foundation council Slack** — create a dedicated channel (recommend
+   `#prsm-incidents-council`); under App Manager → Incoming Webhooks,
+   add to the channel; copy the URL into `PRSM_SLACK_WEBHOOK_URL`.
+3. **PagerDuty** — create a service named "PRSM Forta Monitoring"; add
+   an Events API v2 integration; copy the routing key into
+   `PRSM_PAGERDUTY_KEY`. Configure escalation policy: primary on-call
+   (15min ack window) → secondary (30min) → council-wide page (45min).
+4. **Email backup** — comma-separate addresses in `PRSM_ALERT_EMAILS`.
+   The current implementation logs but doesn't actually send — full
+   email integration is deferred to Phase 5 vendor selection (SES /
+   SendGrid / Postmark). Until then, treat email as a no-op channel.
+
+**Validation:** run `npm run smoke-test` and confirm:
+- Discord receives 4 messages (P0–P3)
+- Slack receives 2 messages (P0, P1 only)
+- PagerDuty creates 2 incidents (P0, P1)
+- Logs show 1 email-stub line (P0)
+- Smoke test exits 0
+
+**Ongoing operations:**
+- Quarterly: re-run smoke test to verify webhooks haven't been
+  rotated/revoked.
+- After any Slack/PagerDuty rotation, re-run smoke test before next
+  mainnet deploy.
+- After any tabletop exercise, capture the alert-receipt timestamps
+  and flag any > 30s latency for tuning.
 
 ## What this bot does NOT do
 

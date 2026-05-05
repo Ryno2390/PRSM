@@ -33,52 +33,52 @@ export const NETWORKS: Record<string, NetworkChainId> = {
  */
 export const CONTRACT_ADDRESSES: Record<string, Record<NetworkChainId, string | null>> = {
   FTNSToken: {
-    [NETWORKS.ETH_SEPOLIA]: "0xd979c096BE297F4C3a85175774Bc38C22b95E6a4",
-    [NETWORKS.ETH_MAINNET]: null,
-    [NETWORKS.BASE_SEPOLIA]: null,
+    11155111: "0xd979c096BE297F4C3a85175774Bc38C22b95E6a4",
+    1: null,
+    84532: null,
     // Canonical FTNSTokenSimple, deployed pre-2026-04-30, verified live.
-    [NETWORKS.BASE_MAINNET]: "0x5276a3756C85f2E9e46f6D34386167a209aa16e5",
+    8453: "0x5276a3756C85f2E9e46f6D34386167a209aa16e5",
   },
   ProvenanceRegistry: {
-    [NETWORKS.BASE_SEPOLIA]: "0x3744D1104c236f0Bd68473E35927587EB919198B",
+    84532: "0x3744D1104c236f0Bd68473E35927587EB919198B",
     // Phase 1.3 Task 8 ceremony 2026-05-04, Basescan-verified.
-    [NETWORKS.BASE_MAINNET]: "0xdF470BFa9eF310B196801D5105468515d0069915",
-    [NETWORKS.ETH_SEPOLIA]: null,
-    [NETWORKS.ETH_MAINNET]: null,
+    8453: "0xdF470BFa9eF310B196801D5105468515d0069915",
+    11155111: null,
+    1: null,
   },
   RoyaltyDistributor: {
-    [NETWORKS.BASE_SEPOLIA]: "0x95F59fA1EDe8958407f7b003d2B089730109BD54",
+    84532: "0x95F59fA1EDe8958407f7b003d2B089730109BD54",
     // Phase 1.3 Task 8 ceremony 2026-05-04, Basescan-verified.
     // networkTreasury → Foundation Safe 0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791
-    [NETWORKS.BASE_MAINNET]: "0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2",
-    [NETWORKS.ETH_SEPOLIA]: null,
-    [NETWORKS.ETH_MAINNET]: null,
+    8453: "0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2",
+    11155111: null,
+    1: null,
   },
   // Phase 3.1 contracts — populate Sepolia when deploy artifacts confirmed
   BatchSettlementRegistry: {
-    [NETWORKS.BASE_SEPOLIA]: null,
-    [NETWORKS.BASE_MAINNET]: null,
-    [NETWORKS.ETH_SEPOLIA]: null,
-    [NETWORKS.ETH_MAINNET]: null,
+    84532: null,
+    8453: null,
+    11155111: null,
+    1: null,
   },
   EscrowPool: {
-    [NETWORKS.BASE_SEPOLIA]: null,
-    [NETWORKS.BASE_MAINNET]: null,
-    [NETWORKS.ETH_SEPOLIA]: null,
-    [NETWORKS.ETH_MAINNET]: null,
+    84532: null,
+    8453: null,
+    11155111: null,
+    1: null,
   },
   // Phase 8 contracts — populate when Phase 8 deploys
   EmissionController: {
-    [NETWORKS.BASE_SEPOLIA]: null,
-    [NETWORKS.BASE_MAINNET]: null,
-    [NETWORKS.ETH_SEPOLIA]: null,
-    [NETWORKS.ETH_MAINNET]: null,
+    84532: null,
+    8453: null,
+    11155111: null,
+    1: null,
   },
   CompensationDistributor: {
-    [NETWORKS.BASE_SEPOLIA]: null,
-    [NETWORKS.BASE_MAINNET]: null,
-    [NETWORKS.ETH_SEPOLIA]: null,
-    [NETWORKS.ETH_MAINNET]: null,
+    84532: null,
+    8453: null,
+    11155111: null,
+    1: null,
   },
 };
 
