@@ -29,11 +29,21 @@ interface IStakeBond {
 interface ISignatureVerifier {
     /// @return true iff `signature` is a valid signature of `messageHash`
     ///         under `publicKey` according to the implementing scheme.
+    /// @dev L2 audit MEDIUM C-INT-02 fix: `pure` (was `view`). Signature
+    ///      verification is a deterministic function of inputs only —
+    ///      no chain state read should ever be needed. Forcing `pure`
+    ///      at the interface level prevents a future implementation
+    ///      from sneaking in state-dependent behavior (e.g., reading a
+    ///      revocation list mid-verify) that would bypass on-chain
+    ///      reasoning about challenge outcomes. If a stateful verifier
+    ///      is ever genuinely needed (key rotation, revocation), it
+    ///      should live behind a separate `IStatefulSignatureVerifier`
+    ///      interface with explicit caller awareness.
     function verify(
         bytes32 messageHash,
         bytes calldata signature,
         bytes calldata publicKey
-    ) external view returns (bool);
+    ) external pure returns (bool);
 }
 
 /// @notice Canonical on-chain representation of a Phase 2 ShardExecutionReceipt,
@@ -118,6 +128,17 @@ contract BatchSettlementRegistry is Ownable, Pausable {
                                       // provider keys (not one provider + one requester) to trigger.
                                       // Zero means "not part of a consensus group" — DOUBLE_SPEND /
                                       // INVALID_SIGNATURE challenges still work unchanged.
+        uint64  challengeWindowSecondsAtCommit;  // L2 audit MEDIUM D-05 fix: snapshot of
+                                      // `challengeWindowSeconds` at commit time. finalizeBatch +
+                                      // challengeReceipt + isPastChallengeWindow + secondsUntilFinalizable
+                                      // all consult THIS field, NOT the live mutable storage value.
+                                      // Pre-fix, owner could shorten the global window mid-flight and
+                                      // retroactively allow already-PENDING batches to finalize before
+                                      // their original window elapsed — robbing challengers of the time
+                                      // they were promised at commit. Snapshotting per-batch closes
+                                      // that retroactive-shrink primitive even if the owner is later
+                                      // compromised; only the global `challengeWindowSeconds`
+                                      // governance setter remains for FUTURE batches.
         string  metadataURI;          // optional IPFS pointer (see §10.7 of design)
     }
 
@@ -336,6 +357,11 @@ contract BatchSettlementRegistry is Ownable, Pausable {
             status: BatchStatus.PENDING,
             tier_slash_rate_bps: tierSlashRateBps,
             consensus_group_id: consensusGroupId,
+            // L2 audit MEDIUM D-05 fix: snapshot the live window at commit
+            // time so subsequent governance changes via
+            // setChallengeWindowSeconds cannot retroactively shorten the
+            // dispute period for batches already in PENDING.
+            challengeWindowSecondsAtCommit: uint64(challengeWindowSeconds),
             metadataURI: metadataURI
         });
 
@@ -372,10 +398,14 @@ contract BatchSettlementRegistry is Ownable, Pausable {
             revert BatchNotPending(batchId, b.status);
         }
 
+        // L2 audit MEDIUM D-05 fix: read the per-batch snapshot, not the
+        // live mutable global. Owner cannot retroactively shorten the
+        // window for already-PENDING batches.
         uint256 elapsed = block.timestamp - b.commitTimestamp;
-        if (elapsed < challengeWindowSeconds) {
+        uint256 batchWindow = b.challengeWindowSecondsAtCommit;
+        if (elapsed < batchWindow) {
             revert ChallengeWindowNotElapsed(
-                batchId, b.commitTimestamp, challengeWindowSeconds
+                batchId, b.commitTimestamp, batchWindow
             );
         }
 
@@ -435,8 +465,12 @@ contract BatchSettlementRegistry is Ownable, Pausable {
         if (b.status != BatchStatus.PENDING) {
             revert BatchNotPending(batchId, b.status);
         }
+        // L2 audit MEDIUM D-05 fix: per-batch snapshot, not live global.
+        // Owner cannot retroactively LENGTHEN the challenge window via
+        // setChallengeWindowSeconds either — once committed, the
+        // dispute period is fixed, in both directions.
         uint256 elapsed = block.timestamp - b.commitTimestamp;
-        if (elapsed >= challengeWindowSeconds) {
+        if (elapsed >= b.challengeWindowSecondsAtCommit) {
             // Cannot challenge after window elapses — finalize is
             // eligible.  Challengers must act within the window.
             revert ChallengeWindowElapsed(batchId);
@@ -768,24 +802,21 @@ contract BatchSettlementRegistry is Ownable, Pausable {
 
     /**
      * @notice Update the challenge-window duration. Owner-only.
-     *         Does NOT affect batches already in PENDING state — they
-     *         retain the window value at their commit time, which is
-     *         derived from the old challengeWindowSeconds at commit.
+     *         Affects ONLY future commitBatch calls. L2 audit MEDIUM
+     *         D-05 fix: every Batch struct snapshots
+     *         `challengeWindowSecondsAtCommit` at commit time;
+     *         finalization + challenge eligibility consult that
+     *         per-batch field. Pre-fix, owner could shorten the live
+     *         global mid-flight and retroactively allow already-PENDING
+     *         batches to finalize before their original window
+     *         elapsed — robbing challengers of promised time. Post-fix,
+     *         the only effect of this setter is on batches committed
+     *         AFTER the change.
      *
-     *         Subtle: storage holds batches keyed by commitTimestamp;
-     *         finalization reads the CURRENT challengeWindowSeconds. So
-     *         a post-change finalization of an already-pending batch
-     *         uses the NEW window. Acceptable because:
-     *           1. Shrinking the window lets older pending batches
-     *              finalize sooner (favorable to provider; no one loses
-     *              value).
-     *           2. Expanding the window delays older pending batches'
-     *              finalization — a governance decision, publicly
-     *              announced per PRSM-GOV-1 §10.3 (14-day notice period
-     *              for non-emergency on-chain transactions).
-     *         Callers relying on a specific finalization horizon must
-     *         read challengeWindowSeconds at commit time AND monitor for
-     *         governance-event adjustments.
+     *         Operational note: PRSM-GOV-1 §10.3 (14-day advance notice
+     *         for non-emergency on-chain governance) still applies, but
+     *         the on-chain enforcement is now a per-batch immutable
+     *         field rather than a notice-period social commitment.
      *
      * @param newSeconds new window duration in seconds
      */
@@ -834,19 +865,23 @@ contract BatchSettlementRegistry is Ownable, Pausable {
 
     /// @notice True iff the batch exists + is PENDING + window has elapsed.
     /// @dev Lightweight pre-check for would-be finalizers.
+    /// @dev L2 audit MEDIUM D-05 fix: reads per-batch snapshot, not
+    ///      live mutable global. Mirrors finalizeBatch logic.
     function isFinalizable(bytes32 batchId) external view returns (bool) {
         Batch storage b = batches[batchId];
         if (b.status != BatchStatus.PENDING) return false;
-        return (block.timestamp - b.commitTimestamp) >= challengeWindowSeconds;
+        return (block.timestamp - b.commitTimestamp) >= b.challengeWindowSecondsAtCommit;
     }
 
     /// @notice Seconds remaining until a PENDING batch can be finalized.
     ///         Returns 0 if the window has elapsed or the batch isn't PENDING.
+    /// @dev L2 audit MEDIUM D-05 fix: per-batch snapshot, not live global.
     function secondsUntilFinalizable(bytes32 batchId) external view returns (uint256) {
         Batch storage b = batches[batchId];
         if (b.status != BatchStatus.PENDING) return 0;
         uint256 elapsed = block.timestamp - b.commitTimestamp;
-        if (elapsed >= challengeWindowSeconds) return 0;
-        return challengeWindowSeconds - elapsed;
+        uint256 batchWindow = b.challengeWindowSecondsAtCommit;
+        if (elapsed >= batchWindow) return 0;
+        return batchWindow - elapsed;
     }
 }

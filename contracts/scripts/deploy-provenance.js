@@ -24,6 +24,16 @@ const path = require("path");
 // Verified 2026-04-30 via direct Base RPC: symbol=FTNS,
 // totalSupply=100M, name="PRSM Fungible Tokens for Node Support".
 const CANONICAL_FTNS_BASE_MAINNET = "0x5276a3756C85f2E9e46f6D34386167a209aa16e5";
+
+// L2 audit MEDIUM B-TREASURY-1 fix: pin the canonical Foundation Safe
+// address. Pre-fix, the script verified treasury was *a* contract on
+// mainnet but accepted ANY contract — a typo to a different deployed
+// contract (random ERC-20, random Safe) would permanently route the
+// 2% network fee elsewhere since networkTreasury is immutable on
+// RoyaltyDistributor. Belt-and-suspenders mirror of the FTNS pin
+// above. Foundation Safe deployed 2026-05-04 (Phase 1.3 Task 8).
+const CANONICAL_FOUNDATION_SAFE_BASE_MAINNET = "0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791";
+
 const BASE_MAINNET_CHAIN_ID = 8453n;
 
 async function main() {
@@ -162,6 +172,30 @@ async function main() {
       );
     }
     console.log(`  Treasury bytecode: ${(treasuryCode.length / 2 - 1)} bytes (contract ✓)`);
+
+    // 7b. L2 audit MEDIUM B-TREASURY-1 fix: refuse NETWORK_TREASURY that
+    //     doesn't match the canonical pinned Foundation Safe. The
+    //     bytecode-only check above accepts ANY contract (random ERC-20,
+    //     a different Safe, etc.) — without this pin, a typo to such an
+    //     address would permanently route the 2% network fee elsewhere
+    //     since networkTreasury is immutable on RoyaltyDistributor.
+    //     Operator can override via FORCE_NONCANONICAL_TREASURY=1 if/when
+    //     the Foundation Safe is intentionally rotated (re-deploy of
+    //     RoyaltyDistributor required, since networkTreasury is
+    //     immutable).
+    if (treasuryChecksum.toLowerCase() !== CANONICAL_FOUNDATION_SAFE_BASE_MAINNET.toLowerCase()) {
+      if (process.env.FORCE_NONCANONICAL_TREASURY !== "1") {
+        throw new Error(
+          `NETWORK_TREASURY=${treasuryChecksum} does not match the canonical ` +
+          `Base mainnet Foundation Safe at ${CANONICAL_FOUNDATION_SAFE_BASE_MAINNET}. ` +
+          `If this is intentional (rotated Safe), set FORCE_NONCANONICAL_TREASURY=1 ` +
+          `to override. Otherwise, FIX THE TYPO before proceeding.`
+        );
+      }
+      console.log(`  ⚠️  using non-canonical treasury (FORCE_NONCANONICAL_TREASURY=1 set)`);
+    } else {
+      console.log(`  Treasury matches canonical Foundation Safe ✓`);
+    }
   }
 
   // 1. Registry

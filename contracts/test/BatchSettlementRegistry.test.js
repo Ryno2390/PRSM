@@ -315,16 +315,45 @@ describe("BatchSettlementRegistry", function () {
       ).to.be.revertedWithCustomError(registry, "InvalidChallengeWindow");
     });
 
-    it("shorter post-commit window lets older pending batches finalize sooner", async function () {
+    it("REGRESSION (MEDIUM D-05): shortening the global window does NOT retroactively shorten an already-PENDING batch's window — per-batch snapshot is load-bearing", async function () {
       const tx = await registry
         .connect(provider)
         .commitBatch(requester.address, DUMMY_ROOT, 10, ONE_FTNS,  0, ethers.ZeroHash, "");
       const r = await tx.wait();
       const id = r.logs.find((l) => l.fragment && l.fragment.name === "BatchCommitted").args[0];
 
+      // Snapshot at commit was 3 days (DEFAULT_WINDOW). Owner shortens
+      // global to 1 hour mid-flight; finalize must STILL refuse until
+      // the original 3-day window elapses.
       await time.increase(1 * 24 * 60 * 60);
       await registry.connect(owner).setChallengeWindowSeconds(60 * 60);
 
+      // Pre-D-05: finalize would succeed because elapsed (1d) >= live
+      // window (1h). Post-D-05: finalize reverts because elapsed (1d)
+      // < per-batch snapshot (3d).
+      await expect(registry.finalizeBatch(id))
+        .to.be.revertedWithCustomError(registry, "ChallengeWindowNotElapsed");
+
+      // After original 3-day snapshot elapses, finalize succeeds.
+      await time.increase(2 * 24 * 60 * 60 + 60);
+      await expect(registry.finalizeBatch(id)).to.emit(registry, "BatchFinalized");
+    });
+
+    it("REGRESSION (MEDIUM D-05): lengthening the global window does NOT retroactively lengthen an already-PENDING batch's window either", async function () {
+      // Symmetric test — challenges submitted within the original window
+      // succeed even if global was extended afterwards.
+      const tx = await registry
+        .connect(provider)
+        .commitBatch(requester.address, DUMMY_ROOT, 10, ONE_FTNS, 0, ethers.ZeroHash, "");
+      const r = await tx.wait();
+      const id = r.logs.find((l) => l.fragment && l.fragment.name === "BatchCommitted").args[0];
+
+      // Snapshot at commit was 3 days. Owner extends global to 7 days.
+      await registry.connect(owner).setChallengeWindowSeconds(7 * 24 * 60 * 60);
+
+      // After original 3-day snapshot elapses, finalize succeeds even
+      // though the LIVE global is now 7 days.
+      await time.increase(3 * 24 * 60 * 60 + 60);
       await expect(registry.finalizeBatch(id)).to.emit(registry, "BatchFinalized");
     });
   });
