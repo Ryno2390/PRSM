@@ -34,6 +34,14 @@ Thumbs.db
 test-results/
 test-report.xml
 
+# L1 static-tooling local outputs (CI uploads as artifacts;
+# see audits/L1-static-tooling/README.md)
+slither.sarif
+aderyn-report.md
+mythril-reports/
+halmos-reports/
+echidna-reports/
+
 # Temporary files
 *.tmp
 *.temp

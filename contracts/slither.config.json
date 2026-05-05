@@ -1,0 +1,12 @@
+{
+  "filter_paths": "node_modules|test/|@openzeppelin|contracts/test/",
+  "solc_remaps": [
+    "@openzeppelin/=node_modules/@openzeppelin/"
+  ],
+  "solc_version": "0.8.22",
+  "disable_color": true,
+  "exclude_informational": true,
+  "exclude_low": true,
+  "exclude_optimization": true,
+  "detectors_to_exclude": "naming-convention,pragma,solc-version,assembly,low-level-calls,timestamp"
+}

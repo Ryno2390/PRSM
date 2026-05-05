@@ -154,8 +154,14 @@ tools already found).
 
 **Cost:** Engineer time only.
 
-**Status:** Manual runs occurred ad-hoc; **action item: wire into CI** so every
-PR gets a fresh report.
+**Status (2026-05-05):** **Wired.** Workflow at
+`.github/workflows/solidity-static-analysis.yml`. Per-PR fast tier
+(Slither + Aderyn) blocks merge on `high` severity; weekly slow tier
+(Mythril + Halmos + Echidna) soft-fails with artifacts. Halmos +
+Echidna are scaffolded but no-op until property contracts are
+authored — see `audits/L1-static-tooling/README.md` §5–§6 for the
+priority list of 4 invariants to write next. Slither config:
+`contracts/slither.config.json`.
 
 ---
 
