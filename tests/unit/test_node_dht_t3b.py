@@ -11,6 +11,7 @@ availability.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -288,3 +289,184 @@ class TestPRSMNodeSurface:
         node.config = SimpleNamespace(listen_host="127.0.0.1")  # type: ignore[attr-defined]
         # Should not raise — early return.
         node._start_dht_components_if_present()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# T3c — production PublisherKeyAnchorClient wiring
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestT3cAnchorClientHelper:
+    """Verifies the env-driven _build_publisher_key_anchor_client_or_none
+    helper introduced by T3c. Mirrors the pattern of the existing
+    _build_provenance_client_or_none — env-driven, fail-soft."""
+
+    def test_returns_none_when_address_unset(self, monkeypatch):
+        from prsm.node.node import _build_publisher_key_anchor_client_or_none
+        monkeypatch.delenv("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", raising=False)
+        assert _build_publisher_key_anchor_client_or_none() is None
+
+    def test_returns_none_when_address_blank(self, monkeypatch):
+        from prsm.node.node import _build_publisher_key_anchor_client_or_none
+        monkeypatch.setenv("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "   ")
+        assert _build_publisher_key_anchor_client_or_none() is None
+
+    def test_returns_none_when_address_malformed(self, monkeypatch):
+        """Invalid address string surfaces as a construction failure
+        in PublisherKeyAnchorClient → caller logs warning + returns
+        None. Node continues without the production anchor."""
+        from prsm.node.node import _build_publisher_key_anchor_client_or_none
+        monkeypatch.setenv(
+            "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "not-a-valid-address",
+        )
+        monkeypatch.setenv(
+            "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+        )
+        # Web3.to_checksum_address throws on malformed input → caught
+        # by the helper, returns None.
+        assert _build_publisher_key_anchor_client_or_none() is None
+
+    def test_returns_client_with_valid_address(self, monkeypatch):
+        """When the address env var parses as a valid hex address, the
+        helper returns a real PublisherKeyAnchorClient (not None).
+        The RPC URL doesn't have to be live — Web3 construction with
+        an HTTPProvider doesn't actually connect until first call."""
+        from prsm.node.node import _build_publisher_key_anchor_client_or_none
+        from prsm.security.publisher_key_anchor.client import (
+            PublisherKeyAnchorClient,
+        )
+        monkeypatch.setenv(
+            "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS",
+            "0x" + "ab" * 20,
+        )
+        monkeypatch.setenv("PRSM_BASE_RPC_URL", "http://127.0.0.1:1")
+        out = _build_publisher_key_anchor_client_or_none()
+        assert out is not None
+        assert isinstance(out, PublisherKeyAnchorClient)
+        assert out.address.lower() == ("0x" + "ab" * 20)
+
+
+class TestT3cWiringIntoComponents:
+    """End-to-end check that _build_dht_components_or_none threads the
+    production anchor into DHTNodeComponents when env vars are set,
+    and falls back to _FailClosedAnchor otherwise."""
+
+    def test_falls_back_to_failclosed_anchor_when_env_unset(
+        self, tmp_path, monkeypatch,
+    ):
+        from prsm.node.node import (
+            _build_dht_components_or_none, _FailClosedAnchor,
+        )
+        monkeypatch.delenv("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", raising=False)
+        identity = generate_node_identity("a")
+        out = _build_dht_components_or_none(
+            identity=identity,
+            listen_host="127.0.0.1",
+            dht_listen_port=0,
+            manifest_index=_make_manifest_index(tmp_path),
+            embedding_index=None,
+        )
+        assert out is not None
+        assert isinstance(out._t3b_anchor, _FailClosedAnchor)
+
+    def test_uses_production_anchor_when_env_set(
+        self, tmp_path, monkeypatch,
+    ):
+        from prsm.node.node import _build_dht_components_or_none
+        from prsm.security.publisher_key_anchor.client import (
+            PublisherKeyAnchorClient,
+        )
+        monkeypatch.setenv(
+            "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS",
+            "0x" + "cd" * 20,
+        )
+        monkeypatch.setenv("PRSM_BASE_RPC_URL", "http://127.0.0.1:1")
+        identity = generate_node_identity("a")
+        out = _build_dht_components_or_none(
+            identity=identity,
+            listen_host="127.0.0.1",
+            dht_listen_port=0,
+            manifest_index=_make_manifest_index(tmp_path),
+            embedding_index=None,
+        )
+        assert out is not None
+        assert isinstance(out._t3b_anchor, PublisherKeyAnchorClient)
+
+    def test_creator_pubkey_for_remains_fail_closed_pre_resolver(
+        self, tmp_path, monkeypatch,
+    ):
+        """T3c only wires the manifest-side anchor. The
+        creator_pubkey_for resolver for embedding-DHT verification
+        still needs a content-hash → creator-node-id mapping that
+        isn't yet ratified — confirm it remains the fail-closed stub
+        even with PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS configured.
+        """
+        from prsm.node.node import (
+            _build_dht_components_or_none,
+            _fail_closed_creator_pubkey_for,
+        )
+        monkeypatch.setenv(
+            "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS",
+            "0x" + "ef" * 20,
+        )
+        monkeypatch.setenv("PRSM_BASE_RPC_URL", "http://127.0.0.1:1")
+        identity = generate_node_identity("a")
+        out = _build_dht_components_or_none(
+            identity=identity,
+            listen_host="127.0.0.1",
+            dht_listen_port=0,
+            manifest_index=None,
+            embedding_index=_make_embedding_index(tmp_path),
+        )
+        assert out is not None
+        assert (
+            out._t3b_creator_pubkey_for is _fail_closed_creator_pubkey_for
+        )
+
+
+class TestT3cAnchorContractIntegration:
+    """T3c lights up real anchor verification end-to-end. Spin up a
+    PublisherKeyAnchor on local Hardhat, register a known publisher
+    key, point the helper at it, confirm lookup() returns the
+    expected base64 pubkey. This is the live-chain equivalent of the
+    component-level fail-closed test above.
+
+    Skipped unless PRSM_T3C_LIVE_HARDHAT_RPC + corresponding contract
+    address are set in the environment — keeps CI fast while letting
+    operators verify the wiring against a real contract.
+    """
+
+    def test_lookup_returns_registered_pubkey_against_local_anchor(
+        self, monkeypatch,
+    ):
+        rpc_url = os.environ.get("PRSM_T3C_LIVE_HARDHAT_RPC", "").strip()
+        anchor_address = os.environ.get(
+            "PRSM_T3C_LIVE_PUBLISHER_KEY_ANCHOR_ADDRESS", "",
+        ).strip()
+        if not rpc_url or not anchor_address:
+            pytest.skip(
+                "PRSM_T3C_LIVE_HARDHAT_RPC + "
+                "PRSM_T3C_LIVE_PUBLISHER_KEY_ANCHOR_ADDRESS env vars "
+                "required — set them after deploying "
+                "PublisherKeyAnchor and registering a test publisher.",
+            )
+        monkeypatch.setenv(
+            "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", anchor_address,
+        )
+        monkeypatch.setenv("PRSM_BASE_RPC_URL", rpc_url)
+        from prsm.node.node import _build_publisher_key_anchor_client_or_none
+        client = _build_publisher_key_anchor_client_or_none()
+        assert client is not None
+        # Expectation: a publisher with the test node_id has been
+        # registered. The exercise script (T3c follow-on) handles the
+        # registration; this assertion just confirms the lookup path
+        # works against a real contract.
+        test_node_id = os.environ.get(
+            "PRSM_T3C_LIVE_TEST_NODE_ID", "",
+        ).strip()
+        if test_node_id:
+            result = client.lookup(test_node_id)
+            assert result is not None, (
+                f"expected registered pubkey for node_id={test_node_id} "
+                f"at anchor {anchor_address}"
+            )

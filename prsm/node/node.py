@@ -186,11 +186,89 @@ def _build_provenance_client_or_none():
         return None
 
 
+class _FailClosedAnchor:
+    """Pre-T3c stub: every lookup returns None, so cross-node manifest
+    verification refuses to trust. Used when no production
+    PublisherKeyAnchor address is configured. The fail-closed default
+    is intentional: better to refuse than to accept unverified bytes.
+
+    Hoisted to module scope (was previously nested in
+    ``_build_dht_components_or_none``) so test code can detect the
+    pre-anchor-wired path via isinstance.
+    """
+
+    def lookup(self, node_id):  # noqa: ARG002
+        return None
+
+
+def _fail_closed_creator_pubkey_for(content_hash):  # noqa: ARG001
+    """Pre-T3c stub for EmbeddingDHT creator-pubkey resolution.
+
+    The production resolver needs an authoritative content_hash →
+    creator_node_id mapping (likely via on-chain ProvenanceRegistry
+    + an EVM-address → node-id index that is not yet ratified). Until
+    that mapping ships, every embedding-DHT signature verification
+    returns None → SignatureVerificationError → reject. Cold-start
+    correctness preserved at the cost of cross-node embedding fetch.
+    """
+    return None
+
+
+def _build_publisher_key_anchor_client_or_none():
+    """T3c — construct a PublisherKeyAnchorClient from env vars.
+
+    Mirrors ``_build_provenance_client_or_none``: env-driven, fail-soft.
+    Returns None when any required piece is missing OR when the web3
+    construction itself fails — the caller falls back to the
+    fail-closed anchor in that case.
+
+    Required env vars:
+      PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS=<0x…>
+      PRSM_BASE_RPC_URL=<https://…>  (optional; defaults to Base mainnet
+                                       so the same env var that drives
+                                       the provenance client also drives
+                                       the anchor client)
+
+    The anchor is read-only on the verifier side — no private_key is
+    passed. Read-only mode supports lookup() but rejects register_self()
+    (the publisher side has its own anchor instance for that with
+    PRSM_FTNS_WALLET_PRIVATE_KEY).
+    """
+    addr = os.getenv("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "").strip()
+    if not addr:
+        logger.debug(
+            "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS not set — DHT manifest "
+            "verification will use fail-closed anchor."
+        )
+        return None
+    rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+    try:
+        from prsm.security.publisher_key_anchor.client import (
+            PublisherKeyAnchorClient,
+        )
+        client = PublisherKeyAnchorClient(
+            contract_address=addr,
+            rpc_url=rpc_url,
+        )
+        logger.info(
+            f"PublisherKeyAnchorClient wired: {addr} via {rpc_url}"
+        )
+        return client
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"PublisherKeyAnchorClient construction failed: "
+            f"{type(exc).__name__}: {exc} — falling back to "
+            f"fail-closed anchor."
+        )
+        return None
+
+
 def _build_dht_components_or_none(
     *, identity, listen_host, dht_listen_port,
     manifest_index, embedding_index,
 ):
-    """PRSM-DHT-TRANSPORT T3b — opt-in construction of DHTNodeComponents.
+    """PRSM-DHT-TRANSPORT T3b/T3c — opt-in construction of
+    :class:`DHTNodeComponents`.
 
     Returns ``None`` when DHT is disabled or when the prerequisites
     can't be satisfied. The node continues to function without the
@@ -204,13 +282,19 @@ def _build_dht_components_or_none(
       - ``PRSM_DHT_ENABLED=1`` env var is set (operator-side override).
 
     Trust inputs:
-      - ``anchor`` is a stub anchor that fails-closed (returns None
-        for every lookup) until a production PublisherKeyAnchorClient
-        construction is wired in T3c. The fail-closed default means
-        any cross-node manifest fetch will refuse to verify, which is
-        correct behavior pre-anchor-wiring: better to refuse than to
-        accept unverified bytes.
-      - ``creator_pubkey_for`` is the same fail-closed stub.
+      - ``anchor`` for ManifestDHT verification — T3c wires
+        :class:`PublisherKeyAnchorClient` from
+        ``PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS`` + ``PRSM_BASE_RPC_URL``.
+        When the address env var is unset, falls back to
+        :class:`_FailClosedAnchor` so the node still boots, but
+        cross-node manifest verification refuses every signature.
+      - ``creator_pubkey_for`` for EmbeddingDHT — still
+        :func:`_fail_closed_creator_pubkey_for`. Production wiring
+        needs a content-hash → creator-node-id mapping that isn't
+        ratified yet (the on-chain ProvenanceRegistry stores
+        creator-as-EVM-address; the corresponding PRSM node_id mapping
+        is the gap). Tracked as a follow-on; T3c lights up the
+        manifest path without it.
       - ``verify_signature`` is real Ed25519 from cryptography.hazmat.
     """
     if manifest_index is None and embedding_index is None:
@@ -229,18 +313,6 @@ def _build_dht_components_or_none(
         )
         return None
 
-    class _FailClosedAnchor:
-        """T3b stub: every lookup returns None, so cross-node manifest
-        verification refuses to trust. Replaced by
-        PublisherKeyAnchorClient in T3c when production trust-input
-        wiring lands."""
-
-        def lookup(self, node_id):  # noqa: ARG002
-            return None
-
-    def _fail_closed_creator_pubkey_for(content_hash):  # noqa: ARG001
-        return None
-
     def _real_verify_signature(pubkey_bytes, message, signature) -> bool:
         if not pubkey_bytes:
             return False
@@ -254,6 +326,23 @@ def _build_dht_components_or_none(
             return False
         return True
 
+    # T3c: try the production anchor first; fall back to
+    # _FailClosedAnchor if the env vars aren't configured. Either way
+    # the same .lookup(node_id) → Optional[str] interface — the
+    # ManifestDHT verifier doesn't need to care which it got.
+    if manifest_index is not None:
+        anchor_for_manifest = (
+            _build_publisher_key_anchor_client_or_none()
+            or _FailClosedAnchor()
+        )
+    else:
+        anchor_for_manifest = None
+
+    creator_pubkey_for = (
+        _fail_closed_creator_pubkey_for
+        if embedding_index is not None else None
+    )
+
     try:
         components = DHTNodeComponents.build(
             my_node_id=identity.node_id,
@@ -263,23 +352,20 @@ def _build_dht_components_or_none(
             listen_host=listen_host or "0.0.0.0",
             local_manifest_index=manifest_index,
             local_embedding_index=embedding_index,
-            anchor=_FailClosedAnchor() if manifest_index is not None else None,
-            creator_pubkey_for=(
-                _fail_closed_creator_pubkey_for
-                if embedding_index is not None else None
-            ),
+            anchor=anchor_for_manifest,
+            creator_pubkey_for=creator_pubkey_for,
             verify_signature=(
                 _real_verify_signature if embedding_index is not None else None
             ),
         )
         # Stash the verifier inputs on the instance so start() can
         # forward them — keeps build() pure of trust state, while
-        # avoiding a second hop through env.
-        components._t3b_anchor = _FailClosedAnchor() if manifest_index is not None else None  # noqa: SLF001
-        components._t3b_creator_pubkey_for = (  # noqa: SLF001
-            _fail_closed_creator_pubkey_for
-            if embedding_index is not None else None
-        )
+        # avoiding a second hop through env. (Field name kept as
+        # _t3b_* so the existing test suite continues to introspect
+        # via stable attribute names; the underlying anchor is now
+        # the production PublisherKeyAnchorClient when configured.)
+        components._t3b_anchor = anchor_for_manifest  # noqa: SLF001
+        components._t3b_creator_pubkey_for = creator_pubkey_for  # noqa: SLF001
         components._t3b_verify_signature = (  # noqa: SLF001
             _real_verify_signature if embedding_index is not None else None
         )
