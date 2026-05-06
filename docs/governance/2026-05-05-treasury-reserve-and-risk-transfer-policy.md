@@ -1,11 +1,18 @@
 # PRSM-POL-1: Treasury Reserve & Risk-Transfer Policy
 
 **Document ID:** PRSM-POL-1
-**Type:** Foundation council governance policy (proposed for ratification)
+**Version:** 1.0
+**Type:** Foundation council governance policy
 **Issued:** 2026-05-05
+**Ratified:** 2026-05-06 by founder (sole council member pending
+council expansion to 2-of-3) per Council Resolution
+[`PRSM-CR-2026-05-06-1`](PRSM-CR-2026-05-06-1.md). All five §12 open
+questions ratified at their drafted defaults.
 **Author:** Founder (drafted for council review)
-**Status:** Draft — pending Foundation council ratification at next
-governance agenda
+**Status:** **Ratified — v1.0** (effective 2026-05-06). Subject to
+re-ratification by the full 2-of-3 Foundation council upon expansion;
+the §6 annual review cadence allows in-place re-confirmation without
+full re-drafting.
 
 **Companion docs:**
 - `audits/AUDIT_PLAN.md` §11 (risk-transfer layer rationale)
@@ -273,46 +280,68 @@ This policy is reviewed:
 
 ---
 
-## 12. Open ratification questions
+## 12. Ratified parameters (was: open ratification questions)
 
-For council deliberation:
+The five parameters below were ratified at their drafted defaults
+on 2026-05-06 by founder as sole council member. Each is subject to
+the §10 amendment process (council vote with 30-day public notice
+for material amendments) and the §7.2 annual review.
 
-1. **Floor reserve at $2M:** sized to ~6 months operations + small-
-   incident reserve. Council should ratify or counter-propose.
-2. **Target reserve at $10M:** sized for external-coverage viability.
-   Sensible? Or adjust to $5M / $20M?
-3. **Trigger #1 threshold (1% of treasury):** appropriate for
-   max-single-user-position trigger? Or 0.5% / 2%?
-4. **Disbursement authorization tiers (§5.2):** thresholds calibrated?
-   Or adjust for Foundation operational scale?
-5. **Annual allocation percentages (§6):** Operations 40% /
-   Self-insurance 30% / Strategic 20% / Coverage 10%. Sensible
-   starting point?
+1. **✅ Floor reserve: $2,000,000 USD-equivalent.** Sized to ~6
+   months Foundation operations + small-incident victim
+   reimbursement reserve.
+2. **✅ Target reserve: $10,000,000 USD-equivalent.** Threshold
+   above which external coverage purchase becomes viable.
+3. **✅ Trigger #1 threshold: 1% of treasury** for max-single-user-
+   position concentration. Standard treasury-management threshold.
+4. **✅ Disbursement authorization tiers (§5.2):** ratified as
+   drafted (< $10K founder + 1 signer; $10K–$100K 7-day notice;
+   $100K–$500K 14-day; > $500K 30-day + member vote).
+5. **✅ Annual allocation: 40 / 30 / 20 / 10** (Operations /
+   Self-insurance / Strategic / Coverage premium). Re-ratified
+   annually per §6.
+
+**Pre-mainnet caveat:** with mainnet TVL effectively zero (audit-
+bundle not yet deployed) the $2M floor and 1% concentration
+threshold are forward-looking; they bind when treasury inflows from
+the 2% network fee begin accumulating post-mainnet.
 
 ---
 
 ## 13. Effective date + ratification
 
-**Proposed effective date:** Date of Foundation council ratification.
+**Effective date:** 2026-05-06.
 
-**Required for ratification:** 2-of-3 council signature on this
-document (or equivalent council resolution referencing this
-document by ID PRSM-POL-1 + commit hash).
+**Ratification record:** Council Resolution
+[`PRSM-CR-2026-05-06-1`](PRSM-CR-2026-05-06-1.md). The ratifying
+resolution identifies this policy by ID `PRSM-POL-1` and references
+the commit at which the ratified content lives (see resolution
+§4 for commit hash).
+
+**Council composition at ratification:** 1-of-1 (founder as sole
+council member). This satisfies the council-resolution path of §13
+above; the policy commits the Foundation to expanding to 2-of-3
+council membership and re-confirming this ratification with full
+quorum once seats #2 and #3 are filled. See PRSM-CR-2026-05-06-1
+§3 for the council-expansion commitment timeline.
 
 **Stewardship:** Founder is policy steward until Foundation Director
 of Engineering hire. Steward proposes amendments + monitors compliance.
 
 ---
 
-## 14. Signoff (post-ratification)
+## 14. Signoff
 
-(To be signed by 2-of-3 council members upon ratification.)
+| Council member         | Signature                              | Date       |
+|------------------------|----------------------------------------|------------|
+| Ryne Schultz (Founder) | See PRSM-CR-2026-05-06-1 §5            | 2026-05-06 |
+| Council seat 2         | _Vacant — pending council expansion_   | _pending_  |
+| Council seat 3         | _Vacant — pending council expansion_   | _pending_  |
 
-| Council member | Signature | Date |
-|----------------|-----------|------|
-| (Founder)      | _________ | ____ |
-| (Council member 2) | _____ | ____ |
-| (Council member 3) | _____ | ____ |
+Sole-founder ratification is the legitimate ratification path under
+§13 ("council resolution referencing this document by ID PRSM-POL-1 +
+commit hash") at council size 1. The two empty seats are a council-
+expansion commitment, not a ratification deficiency.
 
 ---
 

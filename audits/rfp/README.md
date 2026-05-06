@@ -76,7 +76,7 @@ Outreach order priority (for founder bandwidth):
 | L6e | ✅ Continuous ops hygiene template + archive dir | `docs/security/L6E_OPS_HYGIENE_REVIEW.md` + `docs/security/L6E-reviews/` (first review window 2026-07-01 → 2026-07-14) |
 | L10a | ✅ Forta routing wired | Discord + Slack + PagerDuty + email; smoke-test CLI |
 | L10d | ✅ SECURITY.md + PGP | Published 2026-05-05 |
-| L11 (policy) | ✅ Treasury policy drafted | `docs/governance/2026-05-05-treasury-reserve-and-risk-transfer-policy.md` (PRSM-POL-1) |
+| L11 (policy) | ✅ Treasury policy ratified 2026-05-06 | `docs/governance/2026-05-05-treasury-reserve-and-risk-transfer-policy.md` (PRSM-POL-1 v1.0) + Council Resolution `docs/governance/PRSM-CR-2026-05-06-1.md` |
 
 ---
 
