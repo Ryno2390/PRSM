@@ -101,11 +101,26 @@ def _round_trip(
     )
     print(f"    tx_hash: {tx_hash} status: {status}")
 
-    # Read back to confirm the on-chain commitment matches.
-    onchain = client.get_content(content_hash)
+    # Read back to confirm the on-chain commitment matches. Production
+    # public RPCs (Alchemy, Infura) load-balance reads across replicas
+    # that may lag the write-side replica by 1-2 seconds even after a
+    # confirmed tx receipt — retry on empty until the replica catches
+    # up. ~10s ceiling is enough for every public testnet RPC observed.
+    onchain = None
+    for attempt in range(10):
+        onchain = client.get_content(content_hash)
+        if onchain is not None:
+            if attempt > 0:
+                print(
+                    f"    (read replica caught up after "
+                    f"{attempt + 1} attempts)",
+                )
+            break
+        time.sleep(1.0)
     if onchain is None:
         print(
-            f"ERROR: get_content({label!r}) returned None after register",
+            f"ERROR: get_content({label!r}) returned None after register "
+            f"(10s replica-propagation budget exhausted)",
             file=sys.stderr,
         )
         sys.exit(3)
@@ -200,6 +215,25 @@ def main() -> int:
         fingerprint_kind=ZERO_BYTES32,
     )
     print(f"    tx_hash: {tx_hash} status: {status}")
+    # Same replica-propagation issue as positive register — wait for
+    # the legacy registration to be visible on the read side before
+    # asserting on its dispute behavior.
+    for attempt in range(10):
+        if client.is_registered(legacy_hash):
+            if attempt > 0:
+                print(
+                    f"    (read replica caught up after "
+                    f"{attempt + 1} attempts)",
+                )
+            break
+        time.sleep(1.0)
+    else:
+        print(
+            "ERROR: legacy content never became visible on read "
+            "replica (10s budget exhausted)",
+            file=sys.stderr,
+        )
+        return 7
     # Verify directly against the contract: claimed=zero, on-chain=zero,
     # but the anti-zero-forgery short-circuit must return false anyway.
     is_match = client.verify_embedding_commitment(

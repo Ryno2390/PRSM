@@ -91,6 +91,35 @@ async function main() {
   // ── Post-deploy invariant checks ───────────────────────────────────
   console.log(`\nPost-deploy invariant checks…`);
 
+  // Public RPCs (Alchemy, Infura) load-balance reads across replicas
+  // that may lag the write-side replica by 1-2 seconds even after a
+  // confirmed deploy. The contract IS deployed by the time getAddress()
+  // returns, but the read replica we hit next may not yet see the
+  // bytecode. Poll until either getCode returns non-empty or the
+  // budget expires.
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let codeBytes = "0x";
+  for (let attempt = 0; attempt < 15; attempt++) {
+    codeBytes = await hre.ethers.provider.getCode(registryAddress);
+    if (codeBytes !== "0x") {
+      if (attempt > 0) {
+        console.log(
+          `   read replica caught up after ${attempt + 1} attempts ` +
+          `(${(attempt + 1) * 1000}ms)`
+        );
+      }
+      break;
+    }
+    await sleep(1000);
+  }
+  if (codeBytes === "0x") {
+    throw new Error(
+      `getCode(${registryAddress}) returned empty after 15s — ` +
+      `replica may be unrecoverably lagging. Re-verify with ` +
+      `${network} block explorer manually before proceeding.`
+    );
+  }
+
   // MAX_ROYALTY_RATE_BPS must equal 10000 - NETWORK_FEE_BPS (200) = 9800.
   // Mismatch here would indicate a constant-drift bug that has to be
   // caught at deploy-time — the off-chain royalty split assumes this.
