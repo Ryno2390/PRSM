@@ -128,6 +128,12 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
                                       // provider keys (not one provider + one requester) to trigger.
                                       // Zero means "not part of a consensus group" — DOUBLE_SPEND /
                                       // INVALID_SIGNATURE challenges still work unchanged.
+        uint64  totalPausedAtBatchOrigin;        // L4 self-audit HIGH-2 (B-01) fix: snapshot of
+                                      // `totalPausedSeconds` at commit. Subtracting this from the
+                                      // current `totalPausedSeconds` gives the seconds of paused-time
+                                      // that have elapsed SINCE this batch was committed. The
+                                      // effective-elapsed calculation subtracts that from the wall-clock
+                                      // delta so pause does NOT consume the batch's challenge window.
         uint64  challengeWindowSecondsAtCommit;  // L2 audit MEDIUM D-05 fix: snapshot of
                                       // `challengeWindowSeconds` at commit time. finalizeBatch +
                                       // challengeReceipt + isPastChallengeWindow + secondsUntilFinalizable
@@ -215,6 +221,46 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
 
     /// @dev Primary state: all committed batches keyed by deterministic batchId.
     mapping(bytes32 batchId => Batch) public batches;
+
+    /// @dev L4 self-audit HIGH-1 (A-01 ≡ D-01) fix: per-provider
+    ///      monotonic tracker of `commitTimestamp + challengeWindowSecondsAtCommit`
+    ///      across this provider's PENDING batches. Maintained by
+    ///      commitBatch (max-update); never decremented (a stale value
+    ///      below `block.timestamp` is naturally ignored by callers
+    ///      because the unbond floor is `max(localFloor, thisValue)`
+    ///      and a past timestamp is dominated).
+    ///
+    /// Read by `StakeBond.requestUnbond` via the
+    /// `ISlasherWithProviderExpiry` interface to enforce that the
+    /// unbond floor reflects the LONGEST-PINNED challenge window of any
+    /// PENDING batch — NOT the live mutable `challengeWindowSeconds`.
+    /// Closes the L4 self-audit HIGH-1 composition gap where a
+    /// `setChallengeWindowSeconds` reduction after a high-window batch
+    /// commit would let the provider unbond before that batch's pinned
+    /// window elapsed (re-opening the original A-02/D-01 slash-evasion
+    /// race).
+    mapping(address provider => uint64) public lastPendingBatchExpiry;
+
+    /// @dev L4 self-audit HIGH-2 (B-01) fix: cumulative seconds the
+    ///      contract has been paused since deployment. Incremented only
+    ///      by `_unpause()` (so it reflects COMPLETED pauses; the
+    ///      currently-active pause, if any, is not counted — and is
+    ///      irrelevant for finalize/challenge math because both gate on
+    ///      `whenNotPaused`).
+    ///
+    /// Each batch snapshots this at commit time as
+    /// `b.totalPausedAtBatchOrigin`. The effective-elapsed calculation
+    /// then subtracts `(totalPausedSeconds - b.totalPausedAtBatchOrigin)`
+    /// from the wall-clock delta so that pause time does NOT consume
+    /// the batch's challenge window. Closes the HIGH-2 vector where a
+    /// compromised owner could pause through a batch's window to deny
+    /// challengers their dispute period.
+    uint256 public totalPausedSeconds;
+
+    /// @dev Wall-clock timestamp of the most recent `_pause()`. Read by
+    ///      `_unpause()` to compute the duration to add to
+    ///      `totalPausedSeconds`. Cleared on unpause.
+    uint256 public pauseStartedAt;
 
     /// @dev Minimum and maximum allowed challenge window values. Prevents
     /// governance from setting pathological values (e.g., 0 = no challenge
@@ -379,11 +425,26 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         // setChallengeWindowSeconds cannot retroactively shorten the
         // dispute period for batches already in PENDING.
         b.challengeWindowSecondsAtCommit = uint64(challengeWindowSeconds);
+        // L4 self-audit HIGH-2 (B-01) fix: snapshot the cumulative
+        // pause-time at commit. The effective-elapsed calc later
+        // subtracts pauses that occur AFTER this commit so they
+        // don't consume the challenge window.
+        b.totalPausedAtBatchOrigin = uint64(totalPausedSeconds);
         // L2 audit MEDIUM D-03 fix: snapshot cross-wire pointers.
         b.escrowPoolAtCommit = address(escrowPool);
         b.stakeBondAtCommit = address(stakeBond);
         b.signatureVerifierAtCommit = address(signatureVerifier);
         b.metadataURI = metadataURI;
+
+        // L4 self-audit HIGH-1 (A-01 ≡ D-01) fix: maintain the
+        // per-provider monotonic max-pending-expiry tracker so
+        // StakeBond.requestUnbond can clamp against the LONGEST pinned
+        // window of any PENDING batch (not the live mutable global).
+        // Stale values are naturally ignored by callers via max-of-floors.
+        uint64 newExpiry = uint64(block.timestamp + uint256(b.challengeWindowSecondsAtCommit));
+        if (newExpiry > lastPendingBatchExpiry[msg.sender]) {
+            lastPendingBatchExpiry[msg.sender] = newExpiry;
+        }
 
         emit BatchCommitted(
             batchId,
@@ -421,7 +482,10 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         // L2 audit MEDIUM D-05 fix: read the per-batch snapshot, not the
         // live mutable global. Owner cannot retroactively shorten the
         // window for already-PENDING batches.
-        uint256 elapsed = block.timestamp - b.commitTimestamp;
+        // L4 self-audit HIGH-2 (B-01) fix: elapsed calc subtracts
+        // pause-time-since-commit so a sustained pause cannot consume
+        // the challenge window.
+        uint256 elapsed = _effectiveElapsed(b);
         uint256 batchWindow = b.challengeWindowSecondsAtCommit;
         if (elapsed < batchWindow) {
             revert ChallengeWindowNotElapsed(
@@ -493,7 +557,9 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         // Owner cannot retroactively LENGTHEN the challenge window via
         // setChallengeWindowSeconds either — once committed, the
         // dispute period is fixed, in both directions.
-        uint256 elapsed = block.timestamp - b.commitTimestamp;
+        // L4 self-audit HIGH-2 (B-01) fix: elapsed subtracts paused
+        // time so a sustained pause cannot consume the window.
+        uint256 elapsed = _effectiveElapsed(b);
         if (elapsed >= b.challengeWindowSecondsAtCommit) {
             // Cannot challenge after window elapses — finalize is
             // eligible.  Challengers must act within the window.
@@ -902,18 +968,68 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
     function isFinalizable(bytes32 batchId) external view returns (bool) {
         Batch storage b = batches[batchId];
         if (b.status != BatchStatus.PENDING) return false;
-        return (block.timestamp - b.commitTimestamp) >= b.challengeWindowSecondsAtCommit;
+        return _effectiveElapsed(b) >= b.challengeWindowSecondsAtCommit;
     }
 
     /// @notice Seconds remaining until a PENDING batch can be finalized.
     ///         Returns 0 if the window has elapsed or the batch isn't PENDING.
     /// @dev L2 audit MEDIUM D-05 fix: per-batch snapshot, not live global.
+    /// @dev L4 self-audit HIGH-2 (B-01) fix: pause-aware elapsed.
     function secondsUntilFinalizable(bytes32 batchId) external view returns (uint256) {
         Batch storage b = batches[batchId];
         if (b.status != BatchStatus.PENDING) return 0;
-        uint256 elapsed = block.timestamp - b.commitTimestamp;
+        uint256 elapsed = _effectiveElapsed(b);
         uint256 batchWindow = b.challengeWindowSecondsAtCommit;
         if (elapsed >= batchWindow) return 0;
         return batchWindow - elapsed;
+    }
+
+    /// @dev L4 self-audit HIGH-2 (B-01) helper: compute the elapsed
+    ///      time since `b.commitTimestamp`, MINUS pause-time that
+    ///      occurred since the commit. Used by finalizeBatch,
+    ///      challengeReceipt, isFinalizable, and secondsUntilFinalizable
+    ///      to ensure that pausing the contract during a batch's
+    ///      challenge window does NOT consume that window.
+    ///
+    /// `totalPausedSeconds` only increments on `_unpause()` (so it
+    /// reflects COMPLETED pauses; an in-progress pause is not counted).
+    /// Both finalizeBatch and challengeReceipt are gated on
+    /// `whenNotPaused`, so they cannot fire during an in-progress pause
+    /// anyway. The view functions (isFinalizable, secondsUntilFinalizable)
+    /// will momentarily UNDER-report during an in-progress pause, but
+    /// callers can't act on that information until the contract is
+    /// unpaused — at which point `totalPausedSeconds` catches up
+    /// atomically.
+    function _effectiveElapsed(Batch storage b) internal view returns (uint256) {
+        uint256 wall = block.timestamp - uint256(b.commitTimestamp);
+        uint256 pausedSinceCommit = totalPausedSeconds - uint256(b.totalPausedAtBatchOrigin);
+        // pausedSinceCommit is bounded by wall (every paused second
+        // counted in `totalPausedSeconds - totalPausedAtBatchOrigin`
+        // has to have elapsed between commit and now), so the
+        // subtraction is safe in Solidity 0.8 checked arithmetic. We
+        // still defensive-clamp to handle any future code path that
+        // could violate the invariant.
+        return wall > pausedSinceCommit ? wall - pausedSinceCommit : 0;
+    }
+
+    /// @dev L4 self-audit HIGH-2 (B-01) fix: override OZ Pausable's
+    ///      `_pause` to record the wall-clock at which pause started.
+    ///      The accumulator update happens on `_unpause` — that's when
+    ///      we know the duration.
+    function _pause() internal override {
+        pauseStartedAt = block.timestamp;
+        super._pause();
+    }
+
+    /// @dev L4 self-audit HIGH-2 (B-01) fix: override OZ Pausable's
+    ///      `_unpause` to add the just-completed pause's duration to
+    ///      `totalPausedSeconds`. Subsequent commits' batches will
+    ///      record this incremented value as their
+    ///      `totalPausedAtBatchOrigin`, so they correctly start with
+    ///      "0 paused-time since their commit."
+    function _unpause() internal override {
+        totalPausedSeconds += block.timestamp - pauseStartedAt;
+        pauseStartedAt = 0;
+        super._unpause();
     }
 }

@@ -22,6 +22,25 @@ interface ISlasherWithChallengeWindow {
 }
 
 /**
+ * @dev L4 self-audit HIGH-1 (A-01 ≡ D-01) fix interface: per-provider
+ *      maximum challenge-window expiry across PENDING batches. The
+ *      LIVE `challengeWindowSeconds` (above) is insufficient as an
+ *      unbond floor because the L2 D-05 fix per-batch snapshots the
+ *      window at commit time; a subsequent governance reduction would
+ *      let a provider unbond before any high-window batch's pinned
+ *      window elapses, re-opening the original A-02 slash-evasion
+ *      race. This interface exposes the BSR-side tracker so StakeBond
+ *      can clamp against the LONGEST-PINNED PENDING expiry.
+ *
+ * Stale values (where `lastPendingBatchExpiry(provider) < block.timestamp`)
+ * are naturally ignored by StakeBond's max-of-floors logic: a past
+ * timestamp is dominated by the local floor `now + unbondDelay`.
+ */
+interface ISlasherWithProviderExpiry {
+    function lastPendingBatchExpiry(address provider) external view returns (uint64);
+}
+
+/**
  * @title StakeBond
  * @notice Per-provider FTNS collateral for Phase 7 Tier-C verification.
  *
@@ -257,6 +276,35 @@ contract StakeBond is Ownable2Step, ReentrancyGuard, Pausable {
                 // slasher contract doesn't expose challengeWindowSeconds() —
                 // keep local floor. Operationally this branch only fires if
                 // a governance change re-points slasher to a non-BSR target.
+            }
+
+            // L4 self-audit HIGH-1 (A-01 ≡ D-01) fix: clamp against the
+            // BSR-side `lastPendingBatchExpiry` tracker. This reads the
+            // MAXIMUM expiry across this provider's currently-PENDING
+            // batches, which is the correct floor regardless of any
+            // post-commit `setChallengeWindowSeconds` reduction.
+            // Without this, the L2 HIGH-2 + D-05 fixes compose
+            // incorrectly: HIGH-2 reads the LIVE window (small after
+            // reduction); D-05 keeps each PENDING batch's PINNED window
+            // (still large). A provider could unbond + withdraw before
+            // their pinned window elapsed, then a successful challenge
+            // hits WITHDRAWN status and the slash silently swallows.
+            // Clamping against the per-provider max-pending-expiry
+            // closes that composition gap.
+            //
+            // Stale values (past timestamps from already-finalized
+            // batches) are naturally dominated by `localFloor` (which
+            // is always strictly in the future). No explicit
+            // stale-check needed.
+            try ISlasherWithProviderExpiry(slasher).lastPendingBatchExpiry(msg.sender) returns (uint64 maxExpiry) {
+                if (uint256(maxExpiry) > effectiveEligibleAt) {
+                    effectiveEligibleAt = uint256(maxExpiry);
+                }
+            } catch {
+                // slasher contract doesn't expose lastPendingBatchExpiry() —
+                // fall back to whatever floor we already have. Operationally
+                // this branch only fires if the slasher is a pre-HIGH-1-fix
+                // BSR build OR a non-BSR contract entirely.
             }
         }
         s.unbond_eligible_at = uint64(effectiveEligibleAt);
