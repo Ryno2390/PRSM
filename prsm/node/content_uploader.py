@@ -466,6 +466,7 @@ class ContentUploader:
         provenance_client: Optional[Any] = None,
         embedding_model_id: Optional[str] = None,
         embedding_dht_client: Optional[Any] = None,
+        embedding_index: Optional[Any] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -514,6 +515,15 @@ class ContentUploader:
         # wires the real ``EmbeddingDHTClient``.
         self._embedding_model_id = embedding_model_id
         self._embedding_dht_client = embedding_dht_client
+        # T3.6 (PRSM-PROV-1): the LocalEmbeddingIndex this node serves
+        # to peers via the EmbeddingDHT. Populated by
+        # _register_local_embedding() on every successful upload that
+        # produced an embedding AND has an on-chain provenance_hash
+        # (no anchor → no peer can verify our signature → MUST NOT
+        # offer the embedding for cross-node dedup). None disables
+        # this side of the wire — the local _SemanticIndex still works,
+        # but peers won't find embeddings on this node via the DHT.
+        self._embedding_index = embedding_index
         peer_candidates_fn = (
             self._make_peer_candidates_fn(content_index)
             if (embedding_dht_client is not None and content_index is not None)
@@ -533,6 +543,101 @@ class ContentUploader:
 
     async def close(self) -> None:
         pass
+
+    def _register_local_embedding(
+        self,
+        embedding: "np.ndarray",
+        provenance_hash_hex: Optional[str],
+    ) -> None:
+        """T3.6: register a successfully-generated embedding with the
+        local EmbeddingDHT-backed store so peers can fetch it.
+
+        Builds the canonical signing payload (matching the DHT wire
+        format), signs it with the local NodeIdentity (the creator's
+        Ed25519 private key), wraps it in a LocalEmbeddingRecord, and
+        registers it with the LocalEmbeddingIndex.
+
+        Skip conditions (returns silently — never breaks the upload):
+          - no embedding_index wired at construction
+          - no embedding_model_id wired (cross-model partition would
+            be ambiguous)
+          - no provenance_hash_hex (no on-chain anchor → no peer can
+            verify our signature — see trust model in dht_client.py)
+          - numpy not available
+          - any registration error (logged at warning, not raised)
+
+        Trust model: the signature here is by the *creator* of the
+        content, which is this node's NodeIdentity. A peer fetching
+        this embedding via the DHT verifies the signature against the
+        on-chain creator pubkey (the PublisherKeyAnchor). A non-creator
+        node serving someone else's record relays the bytes verbatim
+        — it cannot forge the signature.
+        """
+        if self._embedding_index is None:
+            return
+        if not self._embedding_model_id:
+            return
+        if not provenance_hash_hex:
+            return
+        if not _HAS_NUMPY:
+            return
+        try:
+            from prsm.network.embedding_dht.local_index import (
+                LocalEmbeddingRecord,
+            )
+            from prsm.network.embedding_dht.protocol import (
+                canonical_signing_payload,
+            )
+        except ImportError as exc:
+            logger.debug(
+                f"embedding_dht not importable; skipping local "
+                f"embedding registration: {exc}"
+            )
+            return
+
+        try:
+            vec = np.asarray(embedding, dtype=np.float32)
+            if vec.ndim != 1 or vec.shape[0] <= 0:
+                logger.debug(
+                    f"embedding has unexpected shape {vec.shape}; "
+                    f"skipping DHT registration"
+                )
+                return
+            vector_bytes = vec.tobytes(order="C")
+            dimension = vec.shape[0]
+            created_at = time.time()
+
+            payload = canonical_signing_payload(
+                content_hash=provenance_hash_hex,
+                model_id=self._embedding_model_id,
+                dimension=dimension,
+                dtype="float32",
+                vector_bytes=vector_bytes,
+                created_at=created_at,
+            )
+            signature_b64 = self.identity.sign(payload)
+
+            record = LocalEmbeddingRecord(
+                content_hash=provenance_hash_hex,
+                model_id=self._embedding_model_id,
+                dimension=dimension,
+                dtype="float32",
+                vector_b64=base64.b64encode(vector_bytes).decode("ascii"),
+                creator_id=self.identity.node_id,
+                created_at=created_at,
+                signature_b64=signature_b64,
+            )
+            self._embedding_index.register(record)
+            logger.debug(
+                f"EmbeddingDHT: registered local embedding for "
+                f"content_hash={provenance_hash_hex[:18]} under "
+                f"model_id={self._embedding_model_id!r}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"local embedding registration failed (will not block "
+                f"upload): {type(exc).__name__}: {exc}"
+            )
 
     @staticmethod
     def _make_peer_candidates_fn(
@@ -896,6 +1001,9 @@ class ContentUploader:
         # Register embedding so future uploads can be checked against this one
         if embedding is not None:
             self._semantic_index.store(cid, embedding, self.identity.node_id)
+            # T3.6: also register with the cross-node EmbeddingDHT so
+            # peers can fetch this embedding for their own dedup check.
+            self._register_local_embedding(embedding, provenance_hash_hex)
 
         # Gossip provenance registration
         await self.gossip.publish(GOSSIP_PROVENANCE_REGISTER, {
@@ -1055,6 +1163,8 @@ class ContentUploader:
             # Register embedding for future deduplication checks
             if embedding is not None:
                 self._semantic_index.store(manifest_cid, embedding, self.identity.node_id)
+                # T3.6: also register with the cross-node EmbeddingDHT.
+                self._register_local_embedding(embedding, provenance_hash_hex)
 
             # Gossip provenance registration
             await self.gossip.publish(GOSSIP_PROVENANCE_REGISTER, {

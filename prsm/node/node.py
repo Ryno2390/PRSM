@@ -455,14 +455,46 @@ class PRSMNode:
 
         # Optionally attach semantic embedding for near-duplicate detection
         _embedding_fn = None
+        _embedding_model_id: Optional[str] = None
         if _HAS_EMBEDDING_API:
             try:
                 _embed_api = RealEmbeddingAPI()
                 _embedding_fn = _embed_api.generate_embedding
+                # T3.6 (PRSM-PROV-1): the model_id used to key the
+                # cross-node EmbeddingDHT. Sourced from the same
+                # RealEmbeddingAPI that produces vectors here so the
+                # (vector, model_id) tuple is internally consistent.
+                # Falls back to the env-configured local model name
+                # when no remote provider is wired (Item 1 fallback
+                # path).
+                _embedding_model_id = getattr(
+                    _embed_api, "_st_model_name", None,
+                )
             except Exception as _e:
                 logger.debug(f"Embedding API unavailable, semantic dedup disabled: {_e}")
 
         _semantic_index_path = Path.home() / ".prsm" / "semantic_index.json"
+
+        # T3.6 (PRSM-PROV-1): LocalEmbeddingIndex backs the
+        # EmbeddingDHT — every successful upload + embedding gets a
+        # creator-signed record persisted here, so peers querying us
+        # via the DHT can verify and serve them. Stored under
+        # ~/.prsm/embedding_index/. None disables the registration
+        # path (existing behavior preserved when the embedding_dht
+        # subpackage is unavailable).
+        _embedding_index = None
+        try:
+            from prsm.network.embedding_dht.local_index import (
+                LocalEmbeddingIndex,
+            )
+            _embedding_index_path = Path.home() / ".prsm" / "embedding_index"
+            _embedding_index_path.mkdir(parents=True, exist_ok=True)
+            _embedding_index = LocalEmbeddingIndex(_embedding_index_path)
+        except Exception as _e:  # noqa: BLE001
+            logger.debug(
+                f"EmbeddingDHT local index unavailable, cross-node "
+                f"dedup-serve disabled: {_e}"
+            )
 
         # ── Content Provider (Cross-Node Retrieval) ───────────────────────
         # Phase 1.3: ContentProvider is constructed BEFORE ContentUploader so
@@ -526,6 +558,17 @@ class PRSMNode:
             content_provider=self.content_provider,
             creator_address=_derive_creator_address(self.ftns_ledger),
             provenance_client=provenance_client,
+            # T3.6 (PRSM-PROV-1): cross-node embedding gossip wiring.
+            # embedding_dht_client stays None until the Phase 6 P2P
+            # transport is wired into a Kademlia routing table at the
+            # node level — at which point peer-side fetch will engage
+            # without further uploader changes (T3.5's escalation
+            # path is gated on a real client). Local-side store is
+            # active now: every signed embedding lands in
+            # _embedding_index so future peer fetches succeed.
+            embedding_model_id=_embedding_model_id,
+            embedding_dht_client=None,
+            embedding_index=_embedding_index,
         )
 
         # ── Ledger Sync ──────────────────────────────────────────
