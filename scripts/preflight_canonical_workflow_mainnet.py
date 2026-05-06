@@ -53,7 +53,11 @@ EXPLORER = os.environ.get("PRSM_EXPLORER", "https://basescan.org")
 
 # Trace parameters — must match the exercise script.
 GROSS_FTNS = 10
-ETH_GAS_BUDGET = 0.005  # ETH
+# Base mainnet gas is ~0.01 gwei; the trace's ~3 contract calls cost
+# well under 0.00001 ETH total. 0.00005 ETH = ~5× headroom over the
+# expected burn for the trace. The earlier 0.005 threshold was an L1-
+# era overprovision; on Base it would mean ~$15 of unnecessary funding.
+ETH_GAS_BUDGET = 0.00005  # ETH
 
 
 def _required(name: str) -> str:
@@ -101,7 +105,8 @@ def main() -> int:
     )
     if eth < ETH_GAS_BUDGET:
         print(
-            f"\n   To fund: transfer ≥ 0.005 Base mainnet ETH to {payer}",
+            f"\n   To fund: transfer ≥ {ETH_GAS_BUDGET} Base mainnet ETH "
+            f"to {payer}",
             file=sys.stderr,
         )
         return 3
