@@ -31,17 +31,26 @@
  *       npx hardhat run scripts/deploy-provenance-registry-v2.js \
  *           --network sepolia
  *
- * After a successful Sepolia deploy, copy the address printed in the
+ *   # Base mainnet deploy (authorized 2026-05-06 by PRSM-CR-2026-05-06-2):
+ *   PRIVATE_KEY=0x... \
+ *   BASE_RPC_URL=https://... \
+ *   AUTO_VERIFY=1 ETHERSCAN_API_KEY=... \
+ *       npx hardhat run scripts/deploy-provenance-registry-v2.js \
+ *           --network base
+ *
+ * After a successful deploy, copy the address printed in the
  * "DEPLOY COMPLETE" block into prsm/deployments/contract_addresses.json
- * under sepolia.provenance_registry_v2 and commit. The Python V2 client
+ * under <network>.provenance_registry_v2 and commit. The Python V2 client
  * (prsm/economy/web3/provenance_registry_v2.py) reads the address from
  * the env var PRSM_PROVENANCE_REGISTRY_V2_ADDRESS at construction
  * time; the deployments file is the source-of-truth that operators
  * copy into their env.
  *
- * Mainnet deploy of ProvenanceRegistryV2 is BLOCKED until L4 audit
- * firm sign-off. Do not flip --network base / mainnet without that
- * gate.
+ * Authorization for mainnet deploy: PRSM-CR-2026-05-06-2 ratified the
+ * V2 mainnet deploy on existing evidence (Hardhat 15-test suite +
+ * Python 33-unit-test suite + Sepolia live exercise on
+ * 0xe75F0c24a9e63B63456d170d99F03Ab7fC3450A7). The L4 audit firm gate
+ * was discharged by council resolution; see docs/governance/.
  */
 const hre = require("hardhat");
 const fs = require("fs");
@@ -50,18 +59,23 @@ const path = require("path");
 async function main() {
   const network = hre.network.name;
 
-  // Hard fail on direct mainnet attempt — prevents accidental
-  // pre-audit deploy. Operators who actually need mainnet must
-  // delete this block in a separate PR after L4 sign-off so the
-  // gate is reviewable.
-  if (network === "base" || network === "mainnet") {
+  // Mainnet authorization: PRSM-CR-2026-05-06-2 ratified the V2
+  // mainnet deploy on existing evidence (Hardhat + Python + Sepolia
+  // live exercise). The previous unconditional block on
+  // "base" / "mainnet" is removed per that resolution.
+  //
+  // Ethereum mainnet (chain 1) was never an intended target for V2 —
+  // PRSM is Base-native — so it is still fail-fast'd here. Operators
+  // who actually want to deploy V2 to Ethereum mainnet must remove
+  // this guard in a separate, council-ratified PR.
+  if (network === "mainnet") {
     throw new Error(
-      `Direct deploy to ${network} is BLOCKED pre-L4-audit. ` +
-      `ProvenanceRegistryV2 mainnet deployment is gated behind L4 ` +
-      `audit firm review per PRSM-PROV-1 plan §4.5 + PRSM-POL-1 §5. ` +
-      `Use sepolia or base-sepolia for live exercise; mainnet deploy ` +
-      `requires deleting this guard in a follow-up PR after audit ` +
-      `sign-off.`
+      `Direct deploy to ${network} (Ethereum mainnet, chain 1) is ` +
+      `BLOCKED. PRSM is Base-native; V2 mainnet authorization in ` +
+      `PRSM-CR-2026-05-06-2 covers Base mainnet ("base", chain 8453) ` +
+      `only. Either use --network base for the intended target, or ` +
+      `obtain a separate council resolution for Ethereum mainnet ` +
+      `before removing this guard.`
     );
   }
 
@@ -185,8 +199,10 @@ async function main() {
       "+ embedding commitment.",
       "v1 (Base mainnet 0xdF47...9915) is unaffected by this deploy. " +
       "Both registries co-exist; off-chain readers consult both.",
-      "Mainnet deploy of v2 is blocked pre-L4-audit per PRSM-PROV-1 " +
-      "plan §4.5 + PRSM-POL-1 §5. Sepolia deploy is unrestricted.",
+      "Base mainnet deploy of v2 authorized 2026-05-06 by " +
+      "PRSM-CR-2026-05-06-2 (council ratification on existing " +
+      "evidence). Ethereum mainnet is still blocked unless a separate " +
+      "resolution authorizes it.",
       "Copy this address into prsm/deployments/contract_addresses.json " +
       "under <network>.provenance_registry_v2 before merging.",
       "Operators who run V2Client set " +
@@ -206,7 +222,8 @@ async function main() {
   const verifyEnabled = process.env.AUTO_VERIFY === "1";
   const verifySupported =
     network === "sepolia" ||
-    network === "base-sepolia";
+    network === "base-sepolia" ||
+    network === "base";
   if (verifyEnabled && verifySupported) {
     console.log(`\nVerifying on block explorer…`);
     try {
@@ -224,8 +241,7 @@ async function main() {
   } else if (verifyEnabled) {
     console.log(
       `\nVerification skipped: network=${network} not in supported ` +
-      `list (sepolia, base-sepolia). Mainnet verify only after L4 ` +
-      `audit unblock.`
+      `list (sepolia, base-sepolia, base).`
     );
   }
 

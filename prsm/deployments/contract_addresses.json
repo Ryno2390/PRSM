@@ -21,8 +21,14 @@
     "_provenance_registry_v2_exercise_status": "live dispute round-trip (positive + negative + anti-zero-forgery) verified 2026-05-06 against deployed address"
   },
   "base": {
-    "_comment": "Base mainnet. DO NOT populate until Phase 3.x.3 audit clears AND admin is set to the production Foundation multisig per design plan §1.2. ProvenanceRegistryV2 is BLOCKED at the deploy script level until L4 audit firm sign-off per PRSM-PROV-1 plan §4.5 + PRSM-POL-1 §5.",
+    "_comment": "Base mainnet. PublisherKeyAnchor still gated on Phase 3.x.3 audit. ProvenanceRegistryV2 mainnet deploy authorized 2026-05-06 by PRSM-CR-2026-05-06-2 (council ratification on existing evidence: Hardhat 15-test suite + Python 33-unit-test suite + Sepolia live exercise).",
     "publisher_key_anchor": null,
-    "provenance_registry_v2": null
+    "provenance_registry_v2": "0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf",
+    "provenance_registry_v2_deployed_at": "2026-05-06T20:36:58Z",
+    "provenance_registry_v2_deployer": "0x8eaA00FF741323bc8B0ab1290c544738D9b2f012",
+    "provenance_registry_v2_chain_id": 8453,
+    "provenance_registry_v2_basescan": "https://basescan.org/address/0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf#code",
+    "_provenance_registry_v2_authorization": "PRSM-CR-2026-05-06-2",
+    "_provenance_registry_v2_invariants_verified_at_deploy": "MAX_ROYALTY_RATE_BPS=9800 AND verifyEmbeddingCommitment(zero,zero)==false (anti-zero-forgery guard)"
   }
 }
