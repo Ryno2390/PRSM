@@ -11,6 +11,10 @@ Public surface (re-exported from submodules as they land):
 For now, only ``protocol`` is wired up — Tasks 2-6 add the rest.
 """
 
+from prsm.network.embedding_dht.local_index import (
+    LocalEmbeddingIndex,
+    LocalEmbeddingRecord,
+)
 from prsm.network.embedding_dht.protocol import (
     ALLOWED_DTYPES,
     EMBEDDING_DHT_PROTOCOL_VERSION,
@@ -36,6 +40,8 @@ from prsm.network.embedding_dht.protocol import (
 )
 
 __all__ = [
+    "LocalEmbeddingIndex",
+    "LocalEmbeddingRecord",
     "ALLOWED_DTYPES",
     "EMBEDDING_DHT_PROTOCOL_VERSION",
     "MAX_MESSAGE_BYTES",
