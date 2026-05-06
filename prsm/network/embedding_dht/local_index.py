@@ -220,6 +220,34 @@ class LocalEmbeddingIndex:
         """Sorted list of all (content_hash, model_id) keys."""
         return sorted(self._entries.keys())
 
+    def lookup_creator_by_content_hash(
+        self, content_hash: str,
+    ) -> Optional[str]:
+        """Return the ``creator_id`` of any record matching
+        ``content_hash``, regardless of ``model_id``. Used by the
+        EmbeddingDHT verifier (PRSM-DHT-TRANSPORT T3d, option (a)) to
+        resolve content_hash → creator-node-id → on-chain pubkey
+        lookup, without needing the verifier to know which model the
+        embedding was indexed under.
+
+        If multiple model_ids carry the same content_hash, the chosen
+        record is deterministic across calls (sorted by model_id).
+        Records signed by *different* creator_ids under the same
+        content_hash should never legitimately exist — registerContent
+        binds a single creator on-chain — but if they do, the
+        deterministic tiebreaker keeps the resolver behavior stable
+        rather than oscillating.
+        """
+        if not _is_safe_key_part(content_hash):
+            return None
+        candidates = sorted(
+            (m, r) for (ch, m), r in self._entries.items()
+            if ch == content_hash
+        )
+        if not candidates:
+            return None
+        return candidates[0][1].creator_id
+
     def __contains__(self, key: Tuple[str, str]) -> bool:
         if not isinstance(key, tuple) or len(key) != 2:
             return False

@@ -202,16 +202,64 @@ class _FailClosedAnchor:
 
 
 def _fail_closed_creator_pubkey_for(content_hash):  # noqa: ARG001
-    """Pre-T3c stub for EmbeddingDHT creator-pubkey resolution.
+    """Fallback creator-pubkey resolver. Returns None for every input.
 
-    The production resolver needs an authoritative content_hash →
-    creator_node_id mapping (likely via on-chain ProvenanceRegistry
-    + an EVM-address → node-id index that is not yet ratified). Until
-    that mapping ships, every embedding-DHT signature verification
-    returns None → SignatureVerificationError → reject. Cold-start
-    correctness preserved at the cost of cross-node embedding fetch.
+    Used when no LocalEmbeddingIndex is configured (no T3d resolver
+    can be built) or when the T3d wiring fails. Every embedding-DHT
+    signature verification then returns None → SignatureVerification
+    Error → reject. Cold-start correctness preserved at the cost of
+    cross-node embedding fetch.
     """
     return None
+
+
+def _make_creator_pubkey_for(embedding_index, anchor):
+    """T3d (option (a)) — content_hash → creator_node_id → pubkey resolver.
+
+    The verifier hands ``creator_pubkey_for`` a content_hash. We:
+      1. look up the local LocalEmbeddingIndex for any record with that
+         content_hash → creator_node_id (populated at upload time on
+         the publisher node, or after a verified cross-node fetch on a
+         relay node)
+      2. anchor.lookup(creator_node_id) → base64 pubkey on-chain
+      3. base64-decode → bytes for ed25519 verify
+
+    Limitation (intentional): only resolves for content this node has
+    previously seen. Cold-start cross-node embedding fetch — content
+    B has never seen — still returns None → reject. This is the
+    correct fail-closed behavior pre-(b)-extension. Once any node in
+    the swarm has cached the (content_hash, creator_id) record, that
+    node serves as a relay for verification.
+
+    Returns the same fail-closed stub if either dependency is missing
+    (defensive — the caller is responsible for not constructing the
+    resolver in that case, but we don't trust the caller).
+    """
+    if embedding_index is None or anchor is None:
+        return _fail_closed_creator_pubkey_for
+
+    def _resolve(content_hash):
+        try:
+            creator_id = embedding_index.lookup_creator_by_content_hash(
+                content_hash,
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        if not creator_id:
+            return None
+        try:
+            pubkey_b64 = anchor.lookup(creator_id)
+        except Exception:  # noqa: BLE001
+            return None
+        if not pubkey_b64 or not isinstance(pubkey_b64, str):
+            return None
+        try:
+            import base64
+            return base64.b64decode(pubkey_b64, validate=True)
+        except Exception:  # noqa: BLE001
+            return None
+
+    return _resolve
 
 
 def _build_publisher_key_anchor_client_or_none():
@@ -326,22 +374,27 @@ def _build_dht_components_or_none(
             return False
         return True
 
-    # T3c: try the production anchor first; fall back to
-    # _FailClosedAnchor if the env vars aren't configured. Either way
-    # the same .lookup(node_id) → Optional[str] interface — the
-    # ManifestDHT verifier doesn't need to care which it got.
-    if manifest_index is not None:
-        anchor_for_manifest = (
-            _build_publisher_key_anchor_client_or_none()
-            or _FailClosedAnchor()
+    # T3c+T3d: build a single anchor instance shared between both
+    # DHT paths. The anchor itself is constructed once — production
+    # PublisherKeyAnchorClient when env vars are set, _FailClosedAnchor
+    # otherwise. Both downstream paths inherit the same trust posture.
+    shared_anchor = (
+        _build_publisher_key_anchor_client_or_none()
+        or _FailClosedAnchor()
+    )
+
+    anchor_for_manifest = shared_anchor if manifest_index is not None else None
+
+    # T3d (option (a)): when only the embedding DHT is enabled, the
+    # local-index resolver still needs an anchor for the on-chain
+    # creator-pubkey lookup. Reuse the shared anchor.
+    if embedding_index is not None:
+        creator_pubkey_for = _make_creator_pubkey_for(
+            embedding_index=embedding_index,
+            anchor=shared_anchor,
         )
     else:
-        anchor_for_manifest = None
-
-    creator_pubkey_for = (
-        _fail_closed_creator_pubkey_for
-        if embedding_index is not None else None
-    )
+        creator_pubkey_for = None
 
     try:
         components = DHTNodeComponents.build(
