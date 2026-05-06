@@ -16,13 +16,23 @@ handler pair has been retired here; ContentProvider is the canonical
 serve path and ContentProvider.request_content is the client path.
 """
 
+import base64
 import hashlib
 import json
 import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+)
 
 if TYPE_CHECKING:
     from prsm.node.content_provider import ContentProvider
@@ -121,15 +131,82 @@ class _SemanticIndex:
     DERIVATIVE_THRESHOLD: float = 0.92
     DUPLICATE_THRESHOLD: float = 0.99
 
-    def __init__(self, persist_path: Optional[Path] = None) -> None:
+    # Default upper bound on remote embedding pulls per find_nearest()
+    # call. Each pull is a network round-trip; this caps the worst-case
+    # blocking time on a sub-threshold local search. The chosen value
+    # is a soft heuristic and may need tuning once we have testnet
+    # corpus data (Item 6 calibration territory).
+    DEFAULT_MAX_REMOTE_PULLS_PER_QUERY: int = 32
+
+    def __init__(
+        self,
+        persist_path: Optional[Path] = None,
+        *,
+        model_id: Optional[str] = None,
+        dht_client: Optional[Any] = None,
+        peer_candidates_fn: Optional[
+            Callable[[], Iterable[Tuple[str, str]]]
+        ] = None,
+        max_remote_pulls_per_query: Optional[int] = None,
+    ) -> None:
+        """Construct a semantic index, optionally wired to the
+        EmbeddingDHT for cross-node escalation (PRSM-PROV-1 Item 3 T3.5).
+
+        Args:
+            persist_path: JSON path the in-memory index persists to.
+            model_id: Local node's embedding model identifier (e.g.
+                ``"sentence-transformers/all-MiniLM-L6-v2"``). Required
+                for DHT escalation — the EmbeddingDHT keys by
+                ``(content_hash, model_id)`` to enforce cross-model
+                isolation. ``None`` disables DHT escalation entirely.
+            dht_client: An ``EmbeddingDHTClient`` (duck-typed: any object
+                exposing ``find_providers(content_hash, model_id) -> list``
+                and ``fetch_embedding(provider, content_hash, model_id)
+                -> EmbeddingResponse``). ``None`` disables escalation.
+            peer_candidates_fn: A callable returning an iterable of
+                ``(content_id, content_hash)`` pairs known via gossip
+                whose embeddings could be pulled from the DHT.
+                ``content_id`` is the local cache key (CID).
+                ``content_hash`` is the on-chain identifier used as
+                the DHT lookup key. ``None`` disables escalation.
+            max_remote_pulls_per_query: Cap on remote embedding pulls
+                per ``find_nearest()`` invocation. Defaults to
+                ``DEFAULT_MAX_REMOTE_PULLS_PER_QUERY``.
+
+        Trust model: this code path inherits the
+        ``EmbeddingDHTClient`` invariant — it requires a verifier
+        (creator-pubkey lookup + Ed25519 verifier). Fetched embeddings
+        that fail signature verification are dropped silently with a
+        debug log; we do NOT cache poisoned vectors. Failures of any
+        kind degrade to local-only behavior — they never break the
+        upload path.
+        """
         # content_id → (normalised_embedding, creator_id)
         self._index: Dict[str, Tuple] = {}
         self._persist_path = persist_path
         if persist_path and persist_path.exists():
             self._load()
 
+        self._model_id = model_id
+        self._dht_client = dht_client
+        self._peer_candidates_fn = peer_candidates_fn
+        self._max_remote_pulls_per_query = (
+            max_remote_pulls_per_query
+            if max_remote_pulls_per_query is not None
+            else self.DEFAULT_MAX_REMOTE_PULLS_PER_QUERY
+        )
+
     def __len__(self) -> int:
         return len(self._index)
+
+    @property
+    def dht_enabled(self) -> bool:
+        """True iff DHT escalation is fully wired."""
+        return (
+            self._dht_client is not None
+            and self._peer_candidates_fn is not None
+            and self._model_id is not None
+        )
 
     def store(self, content_id: str, embedding: "np.ndarray", creator_id: str) -> None:
         """Normalise and store an embedding keyed by content ID."""
@@ -142,20 +219,166 @@ class _SemanticIndex:
             self._save()
 
     def find_nearest(self, embedding: "np.ndarray") -> Optional[Tuple[str, float, str]]:
-        """Return (content_id, cosine_similarity, creator_id) for the closest stored
-        embedding, or None if the index is empty."""
-        if not _HAS_NUMPY or not self._index:
+        """Return (content_id, cosine_similarity, creator_id) for the
+        closest stored embedding, or None if the index is empty.
+
+        T3.5: If DHT escalation is wired (model_id + dht_client +
+        peer_candidates_fn all set) and the local best similarity is
+        below ``DERIVATIVE_THRESHOLD``, pull peer embeddings into the
+        local cache and re-scan. Bounded by
+        ``max_remote_pulls_per_query`` per call.
+        """
+        if not _HAS_NUMPY:
             return None
         norm = float(np.linalg.norm(embedding))
         if norm == 0:
             return None
         query = embedding / norm
+
+        local_best = self._scan_index(query)
+
+        # DHT escalation: only when local result is weak (no match or
+        # sub-derivative). A strong local hit is already a sufficient
+        # signal — no point burning network round-trips.
+        if (
+            self.dht_enabled
+            and (local_best is None or local_best[1] < self.DERIVATIVE_THRESHOLD)
+        ):
+            pulled = self._pull_remote_embeddings()
+            if pulled > 0:
+                # Re-scan over the augmented index. A peer's embedding
+                # may now be the new closest match.
+                local_best = self._scan_index(query)
+
+        return local_best
+
+    def _scan_index(
+        self, normalised_query: "np.ndarray"
+    ) -> Optional[Tuple[str, float, str]]:
+        """O(n) cosine-similarity scan against the local index.
+
+        Caller is responsible for L2-normalising the query vector. The
+        stored vectors are normalised at ``store()`` time so the scan
+        is a pure dot product.
+        """
+        if not self._index:
+            return None
         best_content_id, best_sim, best_creator = None, -1.0, ""
         for content_id, (stored, creator) in self._index.items():
-            sim = float(np.dot(query, stored))
+            sim = float(np.dot(normalised_query, stored))
             if sim > best_sim:
                 best_sim, best_content_id, best_creator = sim, content_id, creator
         return (best_content_id, best_sim, best_creator)
+
+    def _pull_remote_embeddings(self) -> int:
+        """Walk peer-candidates and pull missing embeddings from the
+        DHT into the local index.
+
+        Returns the count of embeddings actually inserted. Bounded by
+        ``self._max_remote_pulls_per_query``. Idempotent — peers whose
+        embedding is already cached locally are skipped.
+
+        Failure modes (all logged at debug, all silently skipped — we
+        NEVER raise out of this path because find_nearest() runs on the
+        upload-critical path):
+            - peer_candidates_fn raises
+            - find_providers raises
+            - no providers available
+            - fetch_embedding raises (transport / parse error)
+            - signature verification fails (poisoned response)
+            - server returns NOT_FOUND under our model_id
+            - vector decoding fails (malformed base64 / wrong dimension)
+        """
+        if not self.dht_enabled:
+            return 0
+        try:
+            candidates = list(self._peer_candidates_fn())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                f"peer_candidates_fn raised; skipping DHT escalation: {exc}"
+            )
+            return 0
+
+        inserted = 0
+        for content_id, content_hash in candidates:
+            if inserted >= self._max_remote_pulls_per_query:
+                break
+            if not isinstance(content_id, str) or not content_id:
+                continue
+            if not isinstance(content_hash, str) or not content_hash:
+                continue
+            if content_id in self._index:
+                continue
+
+            record = self._fetch_one_embedding(content_hash)
+            if record is None:
+                continue
+
+            try:
+                vector_bytes = base64.b64decode(
+                    record.vector_b64, validate=True,
+                )
+                if len(vector_bytes) != record.dimension * 4:
+                    raise ValueError(
+                        f"vector_b64 decodes to {len(vector_bytes)} bytes; "
+                        f"expected dimension*4={record.dimension * 4}"
+                    )
+                vector = np.frombuffer(
+                    vector_bytes, dtype=np.float32,
+                ).copy()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    f"DHT vector decode failed for "
+                    f"content_hash={content_hash[:18]}: {exc}"
+                )
+                continue
+
+            self.store(content_id, vector, record.creator_id)
+            inserted += 1
+
+        if inserted:
+            logger.info(
+                f"EmbeddingDHT: pulled {inserted} peer embeddings "
+                f"into local semantic index"
+            )
+        return inserted
+
+    def _fetch_one_embedding(self, content_hash: str) -> Optional[Any]:
+        """Find providers + try them in order until one returns a
+        signature-verified embedding for ``(content_hash, model_id)``.
+
+        Returns the verified ``EmbeddingResponse`` or None on any
+        failure path (no providers, all providers failed, NOT_FOUND,
+        signature verification failed for every candidate).
+        """
+        try:
+            providers = self._dht_client.find_providers(
+                content_hash, self._model_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                f"find_providers raised for content_hash="
+                f"{content_hash[:18]}: {exc}"
+            )
+            return None
+
+        for provider in providers:
+            try:
+                return self._dht_client.fetch_embedding(
+                    provider, content_hash, self._model_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # EmbeddingNotFoundError, TransportFailureError,
+                # SignatureVerificationError all land here. Try the
+                # next provider — the DHT client raises on each
+                # poisoning vector independently, so a malicious
+                # peer cannot block fetching from honest peers.
+                logger.debug(
+                    f"fetch_embedding from {getattr(provider, 'node_id', '?')}"
+                    f" failed: {exc}"
+                )
+                continue
+        return None
 
     def _save(self) -> None:
         try:
@@ -241,6 +464,8 @@ class ContentUploader:
         creator_address: Optional[str] = None,
         content_provider: Optional["ContentProvider"] = None,
         provenance_client: Optional[Any] = None,
+        embedding_model_id: Optional[str] = None,
+        embedding_dht_client: Optional[Any] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -279,7 +504,27 @@ class ContentUploader:
         # Semantic deduplication
         # embedding_fn: async (text: str) -> np.ndarray  — optional, skipped if None
         self._embedding_fn: Optional[Callable] = embedding_fn
-        self._semantic_index = _SemanticIndex(persist_path=semantic_index_path)
+
+        # T3.5 (PRSM-PROV-1): cross-node embedding gossip via the
+        # EmbeddingDHT. The DHT keys by (content_hash, model_id), so
+        # all three of (model_id, dht_client, content_index) must be
+        # wired for cross-node escalation to engage; otherwise the
+        # local-only path is used unchanged. ``embedding_dht_client``
+        # is duck-typed so legacy unit tests can stub it; production
+        # wires the real ``EmbeddingDHTClient``.
+        self._embedding_model_id = embedding_model_id
+        self._embedding_dht_client = embedding_dht_client
+        peer_candidates_fn = (
+            self._make_peer_candidates_fn(content_index)
+            if (embedding_dht_client is not None and content_index is not None)
+            else None
+        )
+        self._semantic_index = _SemanticIndex(
+            persist_path=semantic_index_path,
+            model_id=embedding_model_id,
+            dht_client=embedding_dht_client,
+            peer_candidates_fn=peer_candidates_fn,
+        )
 
         self.uploaded_content: Dict[str, UploadedContent] = {}
 
@@ -288,6 +533,46 @@ class ContentUploader:
 
     async def close(self) -> None:
         pass
+
+    @staticmethod
+    def _make_peer_candidates_fn(
+        content_index: Any,
+    ) -> Callable[[], Iterable[Tuple[str, str]]]:
+        """Build a peer-candidates supplier for ``_SemanticIndex``.
+
+        Walks the supplied ``ContentIndex._records`` map and yields
+        ``(cid, provenance_hash)`` for records that:
+          - have a non-empty ``provenance_hash`` (the on-chain
+            identifier the EmbeddingDHT keys by),
+          - declare an ``embedding_id`` (so we know the creator
+            actually generated and gossiped a vector for this CID).
+
+        The function is invoked lazily inside
+        ``_SemanticIndex._pull_remote_embeddings`` so it picks up new
+        peer advertisements between successive uploads without any
+        wiring changes here.
+
+        Records without ``provenance_hash`` are silently skipped: a
+        peer that uploaded without ``creator_address`` produces no
+        on-chain anchor, and the DHT has no way to verify that
+        peer's signature, so we MUST NOT trust their embedding.
+        """
+        def _supplier() -> Iterable[Tuple[str, str]]:
+            records = getattr(content_index, "_records", None)
+            if records is None:
+                return []
+            out: List[Tuple[str, str]] = []
+            for cid, record in records.items():
+                provenance_hash = getattr(record, "provenance_hash", None)
+                embedding_id = getattr(record, "embedding_id", None)
+                if not provenance_hash or not embedding_id:
+                    continue
+                if not isinstance(cid, str) or not cid:
+                    continue
+                out.append((cid, provenance_hash))
+            return out
+
+        return _supplier
 
     def _register_with_provider(self, uploaded: "UploadedContent") -> None:
         """Forward a successfully uploaded record into ContentProvider._local_content.
