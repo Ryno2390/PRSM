@@ -23,17 +23,20 @@ def _clean_env(monkeypatch):
 
 
 def test_local_provider_appears_in_fallback_order_when_lib_available():
-    """sentence_transformers should sit between openai and mock."""
+    """sentence_transformers should be in the auto-fallback chain.
+
+    Updated for Item 2: mock is no longer in fallback_order by default
+    (only via PRSM_ALLOW_MOCK_EMBEDDING_FALLBACK=1), so we just verify
+    sentence_transformers is registered.
+    """
     from prsm.data.embeddings import real_embedding_api as mod
     with patch.object(mod, "HAS_SENTENCE_TRANSFORMERS", True):
         api = mod.RealEmbeddingAPI()
     assert "sentence_transformers" in api.providers
-    # Mock should still exist (Item 2 will remove it later)
+    assert "sentence_transformers" in api.fallback_order
+    # Mock remains available as opt-in but NOT in the auto-fallback chain
     assert "mock" in api.providers
-    # Order: sentence_transformers comes before mock
-    st_idx = api.fallback_order.index("sentence_transformers")
-    mock_idx = api.fallback_order.index("mock")
-    assert st_idx < mock_idx
+    assert "mock" not in api.fallback_order
 
 
 def test_local_provider_excluded_when_disabled_via_env(monkeypatch):

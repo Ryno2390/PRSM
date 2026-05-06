@@ -134,10 +134,20 @@ class RealEmbeddingAPI:
                 f"(model={self._st_model_name}, lazy-loaded on first use)"
             )
 
-        # Local/mock provider as last-resort fallback. Will be replaced
-        # with a hard error in Item 2 follow-up; for now retained so
-        # tests that explicitly request preferred_provider='mock' still
-        # work.
+        # Item 2 (2026-05-06): mock provider is no longer in the
+        # auto-fallback chain. Previously it was the last-resort
+        # provider, which silently produced semantically meaningless
+        # hash-based vectors when no real provider was available —
+        # giving callers confident WRONG answers. Now:
+        #   * If neither openai nor sentence_transformers is available,
+        #     generate_embeddings raises a hard RuntimeError. Callers
+        #     must explicitly opt in to mock.
+        #   * The mock provider remains available via
+        #     preferred_provider='mock' for test code that wants
+        #     deterministic output.
+        # To restore the old auto-fallback behavior (e.g., for an env
+        # genuinely unable to install sentence-transformers AND without
+        # an OpenAI key), set PRSM_ALLOW_MOCK_EMBEDDING_FALLBACK=1.
         self.providers['mock'] = EmbeddingProvider(
             name='mock',
             api_key='none',
@@ -147,12 +157,30 @@ class RealEmbeddingAPI:
             cost_per_1k_tokens=0.0,
             embedding_dimension=384
         )
-        self.fallback_order.append('mock')
-        
-        if not self.providers:
-            logger.warning("No embedding providers available")
+        if os.getenv("PRSM_ALLOW_MOCK_EMBEDDING_FALLBACK", "").lower() in (
+            "1", "true", "yes"
+        ):
+            self.fallback_order.append('mock')
+            logger.warning(
+                "PRSM_ALLOW_MOCK_EMBEDDING_FALLBACK=1 — mock provider "
+                "is in the auto-fallback chain. Mock embeddings are "
+                "hash-based pseudo-random vectors with NO semantic "
+                "meaning; dedup will produce confident wrong answers."
+            )
+
+        if not self.fallback_order:
+            logger.error(
+                "No real embedding provider available (no OPENAI_API_KEY, "
+                "no sentence_transformers, no fallback override). "
+                "generate_embeddings() will raise on every call. "
+                "Install sentence-transformers OR set OPENAI_API_KEY."
+            )
         else:
-            logger.info(f"Initialized {len(self.providers)} embedding providers: {list(self.providers.keys())}")
+            logger.info(
+                f"Initialized {len(self.providers)} embedding providers: "
+                f"{list(self.providers.keys())} "
+                f"(fallback_order={self.fallback_order})"
+            )
     
     async def generate_embedding(self, text: str, 
                                preferred_provider: str = None) -> np.ndarray:

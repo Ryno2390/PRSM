@@ -61,6 +61,44 @@ NETWORK_FEE_SHARE = 0.05          # 5% network fee
 # Default sharding threshold: 10MB - files larger than this will be sharded
 DEFAULT_SHARDING_THRESHOLD = 10 * 1024 * 1024  # 10MB
 
+# Item 5 (2026-05-06) — chunked embedding parameters.
+# Long documents (papers, books, large datasets) get split into
+# overlapping chunks before embedding, then mean-pooled into a single
+# document-level vector. Tuned for OpenAI text-embedding-ada-002's
+# 8191-token limit (~32k chars) with margin: 16k-char chunks fit
+# comfortably and overlap covers chunk-boundary phrasing.
+_MIN_EMBEDDING_CHARS = 50          # below this, no embedding generated
+_CHUNK_SIZE_CHARS = 16_000          # max chars per chunk
+_CHUNK_OVERLAP_CHARS = 2_000        # overlap between consecutive chunks
+_MAX_CHUNKS = 50                    # cap so a 100MB plaintext upload
+                                    # doesn't fan out to 6000 API calls
+
+
+def _split_for_embedding(text: str) -> List[str]:
+    """Split text into overlapping chunks for chunked embedding.
+
+    Returns a list of substrings of length ≤ _CHUNK_SIZE_CHARS. Each
+    consecutive pair of chunks shares _CHUNK_OVERLAP_CHARS chars to
+    preserve cross-boundary semantic continuity. Hard-capped at
+    _MAX_CHUNKS to bound API cost on adversarial uploads.
+
+    For text ≤ _CHUNK_SIZE_CHARS this returns [text] unchanged so the
+    common case is a single embedding call (no pooling cost).
+    """
+    if len(text) <= _CHUNK_SIZE_CHARS:
+        return [text]
+    chunks: List[str] = []
+    stride = _CHUNK_SIZE_CHARS - _CHUNK_OVERLAP_CHARS
+    if stride <= 0:
+        # Defensive: if mis-configured so overlap >= chunk size, fall
+        # back to non-overlapping chunking.
+        stride = _CHUNK_SIZE_CHARS
+    pos = 0
+    while pos < len(text) and len(chunks) < _MAX_CHUNKS:
+        chunks.append(text[pos:pos + _CHUNK_SIZE_CHARS])
+        pos += stride
+    return chunks
+
 
 class _SemanticIndex:
     """In-memory semantic similarity index for near-duplicate detection on upload.
@@ -358,15 +396,55 @@ class ContentUploader:
         - content is not valid text (binary blobs)
         - the text is too short to be meaningful (<50 chars)
         - the embedding call fails for any reason (non-fatal)
+
+        Item 5 (2026-05-06) — chunked embedding for long docs:
+        Previously this method truncated to 32k chars and embedded the
+        prefix only, causing two versions of the same paper differing
+        only in (e.g.) the abstract to register as separate originals
+        despite 99% body overlap. Now: text > _CHUNK_SIZE_CHARS is
+        split into overlapping chunks, each is embedded independently,
+        and the chunk vectors are mean-pooled + L2-renormalized into a
+        single document-level vector. This preserves the
+        Optional[np.ndarray] return contract that _SemanticIndex
+        expects (1D vector, normalised) while making long-document
+        dedup correct.
         """
         if self._embedding_fn is None or not _HAS_NUMPY:
             return None
         try:
             text = content.decode("utf-8", errors="ignore").strip()
-            if len(text) < 50:
+            if len(text) < _MIN_EMBEDDING_CHARS:
                 return None
-            # Truncate to ~32 k chars to stay within typical embedding token limits
-            return await self._embedding_fn(text[:32_000])
+
+            chunks = _split_for_embedding(text)
+            if len(chunks) == 1:
+                # Common case: text fits in one chunk. Single API call.
+                return await self._embedding_fn(chunks[0])
+
+            # Long doc: embed each chunk + mean-pool. The aggregate is
+            # the document-level fingerprint used for dedup.
+            chunk_vectors = []
+            for chunk in chunks:
+                vec = await self._embedding_fn(chunk)
+                if vec is None:
+                    continue
+                chunk_vectors.append(np.asarray(vec, dtype=np.float32))
+            if not chunk_vectors:
+                return None
+
+            stacked = np.stack(chunk_vectors, axis=0)
+            pooled = stacked.mean(axis=0)
+            # Renormalize so _SemanticIndex's cosine-similarity scan
+            # stays numerically stable. L2 norm of mean-pooled chunks
+            # is < 1 in general, so this is necessary.
+            norm = float(np.linalg.norm(pooled))
+            if norm > 0:
+                pooled = pooled / norm
+            logger.debug(
+                f"Chunked embedding: {len(chunks)} chunks pooled into "
+                f"single {pooled.shape[0]}-dim vector"
+            )
+            return pooled
         except Exception as exc:
             logger.debug(f"Embedding generation skipped: {exc}")
             return None
