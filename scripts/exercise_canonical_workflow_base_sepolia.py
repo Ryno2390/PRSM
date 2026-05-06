@@ -49,12 +49,30 @@ from prsm.economy.web3.royalty_distributor import (
 )
 
 
-# ── Base Sepolia testnet contract pins (from prsm/config/networks.py) ──
-FTNS_TOKEN = "0xF8d0c1AE75441d3C3Dd2A2420C0789043916412a"
-PROVENANCE_REGISTRY = "0x2911f9a0a02896486CdF59d6d369764841DC0eA4"
-ROYALTY_DISTRIBUTOR = "0xB790045ff826C76fe02DBc54a6ef0021951Fd892"
-EXPLORER = "https://sepolia.basescan.org"
-CHAIN_ID = 84532
+# ── Network selection ────────────────────────────────────────────────
+# Defaults are Base Sepolia testnet (the network this script was
+# originally written against). Override via env for Base mainnet —
+# see docs/2026-05-06-canonical-workflow-base-mainnet-runbook.md §4.1.
+# All five env vars must be set together to hit a different network;
+# mixing testnet + mainnet addresses will revert at the contract layer
+# but with confusing error messages, so the script script-name
+# remains "*_base_sepolia.py" and the mainnet bring-up explicitly
+# overrides all five via the mainnet env file.
+FTNS_TOKEN = os.environ.get(
+    "PRSM_FTNS_TOKEN", "0xF8d0c1AE75441d3C3Dd2A2420C0789043916412a",
+)
+PROVENANCE_REGISTRY = os.environ.get(
+    "PRSM_PROVENANCE_REGISTRY",
+    "0x2911f9a0a02896486CdF59d6d369764841DC0eA4",
+)
+ROYALTY_DISTRIBUTOR = os.environ.get(
+    "PRSM_ROYALTY_DISTRIBUTOR",
+    "0xB790045ff826C76fe02DBc54a6ef0021951Fd892",
+)
+EXPLORER = os.environ.get(
+    "PRSM_EXPLORER", "https://sepolia.basescan.org",
+)
+CHAIN_ID = int(os.environ.get("PRSM_CHAIN_ID", "84532"))
 
 # ── Demo parameters ───────────────────────────────────────────────────
 ROYALTY_RATE_BPS = 1000     # 10%
