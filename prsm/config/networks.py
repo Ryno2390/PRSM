@@ -83,7 +83,7 @@ MAINNET = NetworkConfig(
     # Phase 1.3 Task 8 deploys (2026-05-04):
     ftns_token="0x5276a3756C85f2E9e46f6D34386167a209aa16e5",
     provenance_registry="0xdF470BFa9eF310B196801D5105468515d0069915",
-    royalty_distributor=None,  # TODO: pin v1 address from contracts/deployments/provenance-base-1777917793612.json or fill in v2 post-redeploy
+    royalty_distributor="0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2",
     foundation_safe="0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791",
     # Audit-bundle (gated on L4 firm pair-review; not yet deployed):
     escrow_pool=None,
