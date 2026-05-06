@@ -138,15 +138,18 @@ def main() -> int:
     print(f"RoyaltyDistributor:     {ROYALTY_DISTRIBUTOR}")
 
     # ── Step 0: pre-flight ────────────────────────────────────────────
+    # Threshold tuned for Base mainnet (~0.01 gwei gas price). Three
+    # contract calls cost well under 0.00001 ETH total; 0.00005 = ~5×
+    # headroom. Original 0.005 was an L1-era over-provision.
     print(f"\n[0/4] Pre-flight…")
     eth_bal = web3.eth.get_balance(deployer)
     print(
         f"   ETH:  {Web3.from_wei(eth_bal, 'ether')} "
-        f"(need ~0.01 for ~3 txs)",
+        f"(need ≥ 0.00005 for ~3 txs on Base)",
     )
-    if eth_bal < Web3.to_wei(0.005, "ether"):
+    if eth_bal < Web3.to_wei(0.00005, "ether"):
         print(
-            "ERROR: deployer ETH balance too low — need ~0.005 minimum",
+            "ERROR: deployer ETH balance too low — need ≥ 0.00005 minimum",
             file=sys.stderr,
         )
         return 3
@@ -404,36 +407,68 @@ def main() -> int:
         )
         return 5
 
-    # Confirm pull-payment balances landed in each claimable[].
-    print(f"   claimable balances on RoyaltyDistributor:")
-    creator_claimable = royalty_client.claimable(creator_addr)
-    treasury_claimable = royalty_client.claimable(treasury_addr)
-    node_claimable = royalty_client.claimable(serving_node_addr)
-    print(f"     creator      ({creator_addr}): {creator_claimable/10**18:.4f} FTNS")
-    print(f"     treasury     ({treasury_addr}): {treasury_claimable/10**18:.4f} FTNS")
-    print(f"     serving node ({serving_node_addr}): {node_claimable/10**18:.4f} FTNS")
-    if creator_claimable < preview.creator_amount:
+    # Settlement-pattern detection. Two RoyaltyDistributor variants exist
+    # in the wild:
+    #   - Pull-payment (Sepolia 2026-05-05+): claimable[address] mapping
+    #     accumulates; recipient calls claim(). RoyaltyDistributor holds
+    #     funds in escrow between distribute and claim.
+    #   - Push-payment (mainnet 2026-05-04 deploy): tokens routed directly
+    #     to recipient EOAs in the same tx. RoyaltyDistributor never holds
+    #     a balance.
+    # Try claimable() first; if it reverts (push variant), fall through to
+    # direct ERC-20 balanceOf checks against the recipient EOAs.
+    print(f"   verifying settlement landing zone…")
+    try:
+        creator_claimable = royalty_client.claimable(creator_addr)
+        treasury_claimable = royalty_client.claimable(treasury_addr)
+        node_claimable = royalty_client.claimable(serving_node_addr)
+        settlement_pattern = "pull"
+        creator_amount = creator_claimable
+        treasury_amount = treasury_claimable
+        node_amount = node_claimable
+    except Exception:
+        settlement_pattern = "push"
+        # Read raw FTNS balanceOf for each recipient.
+        def _direct_ftns_balance(addr: str) -> int:
+            sel = Web3.keccak(text="balanceOf(address)")[:4]
+            data = sel + b"\x00" * 12 + bytes.fromhex(addr[2:])
+            raw = web3.eth.call(
+                {"to": Web3.to_checksum_address(FTNS_TOKEN), "data": data}
+            )
+            return int.from_bytes(raw, "big")
+
+        creator_amount = _direct_ftns_balance(creator_addr)
+        treasury_amount = _direct_ftns_balance(treasury_addr)
+        node_amount = _direct_ftns_balance(serving_node_addr)
+
+    print(f"   settlement pattern detected: {settlement_pattern}-payment")
+    label = "claimable" if settlement_pattern == "pull" else "direct FTNS balance"
+    print(f"   {label}:")
+    print(f"     creator      ({creator_addr}): {creator_amount/10**18:.4f} FTNS")
+    print(f"     treasury     ({treasury_addr}): {treasury_amount/10**18:.4f} FTNS")
+    print(f"     serving node ({serving_node_addr}): {node_amount/10**18:.4f} FTNS")
+    if creator_amount < preview.creator_amount:
         print(
-            f"ERROR: creator claimable {creator_claimable} < expected "
+            f"ERROR: creator amount {creator_amount} < expected "
             f"{preview.creator_amount}",
             file=sys.stderr,
         )
         return 5
-    if treasury_claimable < preview.network_amount:
+    if treasury_amount < preview.network_amount:
         print(
-            f"ERROR: treasury claimable {treasury_claimable} < expected "
+            f"ERROR: treasury amount {treasury_amount} < expected "
             f"{preview.network_amount}",
             file=sys.stderr,
         )
         return 5
-    if node_claimable < preview.serving_node_amount:
+    if node_amount < preview.serving_node_amount:
         print(
-            f"ERROR: serving node claimable {node_claimable} < expected "
+            f"ERROR: serving node amount {node_amount} < expected "
             f"{preview.serving_node_amount}",
             file=sys.stderr,
         )
         return 5
-    print(f"   ✓ all three claimable balances ≥ preview amounts")
+    print(f"   ✓ all three recipients received ≥ preview amounts")
 
     # Also verify the single ERC-20 Transfer (payer → distributor).
     transfers = _decode_transfer_events(receipt, FTNS_TOKEN)
