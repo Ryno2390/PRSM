@@ -186,6 +186,112 @@ def _build_provenance_client_or_none():
         return None
 
 
+def _build_dht_components_or_none(
+    *, identity, listen_host, dht_listen_port,
+    manifest_index, embedding_index,
+):
+    """PRSM-DHT-TRANSPORT T3b — opt-in construction of DHTNodeComponents.
+
+    Returns ``None`` when DHT is disabled or when the prerequisites
+    can't be satisfied. The node continues to function without the
+    DHT (FilesystemModelRegistry falls back to local-only lookup,
+    ContentUploader skips cross-node embedding gossip) — same
+    fail-soft behavior as ``_build_provenance_client_or_none`` above.
+
+    Enabled when EITHER:
+      - ``NodeConfig.dht_enabled == True`` (caller passes already
+        through the indexes / identity), OR
+      - ``PRSM_DHT_ENABLED=1`` env var is set (operator-side override).
+
+    Trust inputs:
+      - ``anchor`` is a stub anchor that fails-closed (returns None
+        for every lookup) until a production PublisherKeyAnchorClient
+        construction is wired in T3c. The fail-closed default means
+        any cross-node manifest fetch will refuse to verify, which is
+        correct behavior pre-anchor-wiring: better to refuse than to
+        accept unverified bytes.
+      - ``creator_pubkey_for`` is the same fail-closed stub.
+      - ``verify_signature`` is real Ed25519 from cryptography.hazmat.
+    """
+    if manifest_index is None and embedding_index is None:
+        return None
+    try:
+        from prsm.network.dht_components import DHTNodeComponents
+        from prsm.node.transport_adapter import DirectAdapter
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PublicKey,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            f"DHT components unavailable (import failed): "
+            f"{type(exc).__name__}: {exc}",
+        )
+        return None
+
+    class _FailClosedAnchor:
+        """T3b stub: every lookup returns None, so cross-node manifest
+        verification refuses to trust. Replaced by
+        PublisherKeyAnchorClient in T3c when production trust-input
+        wiring lands."""
+
+        def lookup(self, node_id):  # noqa: ARG002
+            return None
+
+    def _fail_closed_creator_pubkey_for(content_hash):  # noqa: ARG001
+        return None
+
+    def _real_verify_signature(pubkey_bytes, message, signature) -> bool:
+        if not pubkey_bytes:
+            return False
+        try:
+            Ed25519PublicKey.from_public_bytes(pubkey_bytes).verify(
+                signature, message,
+            )
+        except InvalidSignature:
+            return False
+        except Exception:  # noqa: BLE001
+            return False
+        return True
+
+    try:
+        components = DHTNodeComponents.build(
+            my_node_id=identity.node_id,
+            my_host=listen_host or "127.0.0.1",
+            dht_listen_port=dht_listen_port,
+            transport_adapter=DirectAdapter(),
+            listen_host=listen_host or "0.0.0.0",
+            local_manifest_index=manifest_index,
+            local_embedding_index=embedding_index,
+            anchor=_FailClosedAnchor() if manifest_index is not None else None,
+            creator_pubkey_for=(
+                _fail_closed_creator_pubkey_for
+                if embedding_index is not None else None
+            ),
+            verify_signature=(
+                _real_verify_signature if embedding_index is not None else None
+            ),
+        )
+        # Stash the verifier inputs on the instance so start() can
+        # forward them — keeps build() pure of trust state, while
+        # avoiding a second hop through env.
+        components._t3b_anchor = _FailClosedAnchor() if manifest_index is not None else None  # noqa: SLF001
+        components._t3b_creator_pubkey_for = (  # noqa: SLF001
+            _fail_closed_creator_pubkey_for
+            if embedding_index is not None else None
+        )
+        components._t3b_verify_signature = (  # noqa: SLF001
+            _real_verify_signature if embedding_index is not None else None
+        )
+        return components
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"DHTNodeComponents.build failed: "
+            f"{type(exc).__name__}: {exc} — node will run without DHT.",
+        )
+        return None
+
+
 class _StakingFTNSAdapter:
     """Bridges node ledger to the FTNS interface expected by StakingManager."""
 
@@ -298,6 +404,10 @@ class PRSMNode:
         self.bt_manifest_store: Optional[TorrentManifestStore] = None
         self.bt_provider: Optional[BitTorrentProvider] = None
         self.bt_requester: Optional[BitTorrentRequester] = None
+
+        # PRSM-DHT-TRANSPORT T3b: opt-in DHT stack (Manifest + Embedding)
+        # Constructed in initialize() iff dht_enabled or PRSM_DHT_ENABLED=1.
+        self.dht_components: Optional[Any] = None
 
         self._started = False
         self._start_time: Optional[float] = None
@@ -495,6 +605,43 @@ class PRSMNode:
                 f"EmbeddingDHT local index unavailable, cross-node "
                 f"dedup-serve disabled: {_e}"
             )
+
+        # PRSM-DHT-TRANSPORT T3b — construct DHTNodeComponents if the
+        # operator opted in. Off-by-default; enable via NodeConfig.dht_enabled
+        # or PRSM_DHT_ENABLED=1. The components run their own asyncio loop
+        # in a daemon thread (DHTLoopRunner) so the Node's existing event
+        # loop is unaffected.
+        _dht_enabled = (
+            self.config.dht_enabled
+            or os.getenv("PRSM_DHT_ENABLED", "").lower() in ("1", "true", "yes")
+        )
+        if _dht_enabled:
+            _manifest_index = None
+            try:
+                from prsm.network.manifest_dht.local_index import (
+                    LocalManifestIndex,
+                )
+                _manifest_index_path = Path.home() / ".prsm" / "manifest_index"
+                _manifest_index_path.mkdir(parents=True, exist_ok=True)
+                _manifest_index = LocalManifestIndex(_manifest_index_path)
+            except Exception as _e:  # noqa: BLE001
+                logger.debug(
+                    f"ManifestDHT local index unavailable, cross-node "
+                    f"manifest-serve disabled: {_e}"
+                )
+            self.dht_components = _build_dht_components_or_none(
+                identity=self.identity,
+                listen_host=self.config.listen_host,
+                dht_listen_port=self.config.dht_listen_port,
+                manifest_index=_manifest_index,
+                embedding_index=_embedding_index,
+            )
+            if self.dht_components is not None:
+                logger.info(
+                    "DHT components constructed "
+                    f"(manifest={_manifest_index is not None}, "
+                    f"embedding={_embedding_index is not None})"
+                )
 
         # ── Content Provider (Cross-Node Retrieval) ───────────────────────
         # Phase 1.3: ContentProvider is constructed BEFORE ContentUploader so
@@ -1029,6 +1176,38 @@ class PRSMNode:
 
         logger.info("Node initialized — all subsystems ready")
 
+    def _start_dht_components_if_present(self) -> None:
+        """T3b — start the DHT components stack on its own loop thread.
+
+        Idempotent. Logs the bound port at INFO so operators can verify
+        the listener is reachable. A failed start is logged at WARNING
+        but does NOT fail the Node.start() — the rest of the node
+        continues to run with the DHT in degraded "library-only" mode.
+        """
+        if self.dht_components is None:
+            return
+        try:
+            port = self.dht_components.start(
+                anchor=getattr(self.dht_components, "_t3b_anchor", None),
+                creator_pubkey_for=getattr(
+                    self.dht_components, "_t3b_creator_pubkey_for", None,
+                ),
+                verify_signature=getattr(
+                    self.dht_components, "_t3b_verify_signature", None,
+                ),
+            )
+            logger.info(
+                f"DHT listener bound on "
+                f"{self.config.listen_host}:{port}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"DHT components start failed: "
+                f"{type(exc).__name__}: {exc} — "
+                f"continuing without inbound DHT listener.",
+            )
+            self.dht_components = None
+
     async def start(self) -> None:
         """Start all subsystems concurrently."""
         if self._started:
@@ -1037,6 +1216,9 @@ class PRSMNode:
         await self.transport.start()
         await self.gossip.start()
         await self.discovery.start()
+        # T3b: bring up the DHT listener + clients on their own
+        # asyncio loop thread. Idempotent + non-fatal on failure.
+        self._start_dht_components_if_present()
 
         # Initialize native content storage
         try:
@@ -1246,6 +1428,17 @@ class PRSMNode:
 
         if self.discovery:
             await self.discovery.stop()
+        # T3b: stop the DHT components before transport so any in-flight
+        # outbound DHT RPC has the underlying transport adapter still
+        # available during teardown. Idempotent.
+        if self.dht_components is not None:
+            try:
+                self.dht_components.stop()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    f"DHT components stop failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
         if self.gossip:
             await self.gossip.stop()
         if self.transport:

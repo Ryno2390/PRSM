@@ -53,6 +53,16 @@ class NodeConfig:
     listen_host: str = "0.0.0.0"
     p2p_port: int = 9001
     api_port: int = 8000
+
+    # DHT transport (PRSM-DHT-TRANSPORT T1-T5; T3b wiring)
+    # Off by default — opt in via PRSM_DHT_ENABLED=1 or by setting
+    # dht_enabled=True. When enabled, the node binds an additional TCP
+    # listener for inbound ManifestDHT + EmbeddingDHT requests and
+    # constructs the corresponding sync clients for upload-critical-path
+    # code. Port 0 lets the kernel assign one — operators who need a
+    # stable port (firewall rule, NAT mapping) should set explicitly.
+    dht_enabled: bool = False
+    dht_listen_port: int = 0
     bootstrap_nodes: List[str] = field(default_factory=lambda: list(DEFAULT_BOOTSTRAP_NODES))
     bootstrap_connect_timeout: float = 5.0
     bootstrap_retry_attempts: int = 2
