@@ -1,0 +1,155 @@
+# PRSM-PROV-1 Item 6 T6.1 — per-fingerprint-kind dedup thresholds.
+#
+# Edited 2026-05-06 alongside the PRSM-PROV-1 Content Provenance
+# Correctness plan (`docs/2026-05-06-content-provenance-correctness-plan.md`).
+#
+# Layout:
+#   defaults:
+#     <kind>:
+#       derivative: <similarity threshold for "near-duplicate"
+#                    auto-attribution>
+#       duplicate:  <similarity threshold for "effectively re-upload"
+#                    warning>
+#   content_type_multipliers:
+#     <hint>:
+#       <kind>:
+#         derivative: <multiplier — >1.0 tightens, <1.0 loosens>
+#         duplicate:  <multiplier>
+#   floors:
+#     <kind>:
+#       derivative: <minimum allowed effective threshold; multiplier
+#                    cannot push below this>
+#
+# Conventions:
+#   - text-vector / image-phash / audio-chromaprint / video-multihash:
+#     thresholds are similarity scores in [0, 1] (higher = more
+#     similar). For image-phash this is `1 - hamming_distance_bits/64`
+#     so the same scale comparison applies.
+#   - structural: exact-match only. derivative tier does not exist;
+#     duplicate threshold is implicitly 1.0. Excluded from this file.
+#
+# Calibration status: T6.4 will replace these with empirically-tuned
+# values once 30+ days of testnet upload traffic provide a real
+# similarity-distribution dataset (gated per the 2026-05-06 PRSM-PROV-1
+# decision ratification). Until then these are the conservative
+# starting points described in plan §5.2.
+
+defaults:
+  # Phase 1 / 2 fallback (legacy class-constant values). Used when
+  # no model_id is set — keeps the pre-PRSM-PROV-1 behavior intact.
+  text-vector:
+    derivative: 0.92
+    duplicate: 0.99
+
+  # OpenAI text-embedding-ada-002 (1536-dim). General text;
+  # tuned for the broader Sprint 4 corpus.
+  text-vector/openai/text-embedding-ada-002:
+    derivative: 0.92
+    duplicate: 0.99
+
+  # OpenAI text-embedding-3-small (1536-dim). Newer model, slightly
+  # tighter clusters than ada-002 — bump derivative up by 0.01.
+  text-vector/openai/text-embedding-3-small:
+    derivative: 0.93
+    duplicate: 0.99
+
+  # sentence-transformers/all-MiniLM-L6-v2 (384-dim). Looser
+  # similarity distribution than OpenAI; lower derivative cutoff
+  # to maintain comparable false-positive rate.
+  text-vector/sentence-transformers/all-MiniLM-L6-v2:
+    derivative: 0.85
+    duplicate: 0.97
+
+  # Image perceptual hash (pHash, 64 bits). Threshold expressed as
+  # 1 - hamming_distance/64 to keep the [0,1] similarity convention.
+  # 12 bits diff → 0.81 derivative; 4 bits diff → 0.94 duplicate.
+  image-phash:
+    derivative: 0.81   # ≤ 12 bits differ
+    duplicate: 0.94    # ≤ 4 bits differ
+
+  # Chromaprint acoustic fingerprint. Score is fingerprint-overlap.
+  audio-chromaprint:
+    derivative: 0.75
+    duplicate: 0.92
+
+  # 8-keyframe video multihash. Score is matched_keyframes / 8 with
+  # per-keyframe Hamming ≤ 6 bits required.
+  video-multihash:
+    derivative: 0.625  # ≥ 5/8 keyframes match
+    duplicate: 0.875   # ≥ 7/8 keyframes match
+
+# Per-content-type advisory multipliers. Optional — uploaders may
+# pass `metadata: {"content_type_hint": "<hint>"}` to apply a
+# hint-specific tightening or loosening of the kind default.
+#
+# These are bounded by `floors` below — a malicious uploader cannot
+# push the effective threshold arbitrarily low to slip past dedup.
+content_type_multipliers:
+  scientific_abstract:
+    text-vector:
+      derivative: 1.05   # cluster very tightly even for unrelated
+                         # papers — tighten to suppress false-positive
+                         # derivative claims
+      duplicate: 1.00
+    text-vector/openai/text-embedding-ada-002:
+      derivative: 1.05
+      duplicate: 1.00
+    text-vector/openai/text-embedding-3-small:
+      derivative: 1.04
+      duplicate: 1.00
+    text-vector/sentence-transformers/all-MiniLM-L6-v2:
+      derivative: 1.06
+      duplicate: 1.00
+  code:
+    text-vector:
+      derivative: 1.03   # boilerplate-heavy; modest tighten
+      duplicate: 1.00
+    text-vector/openai/text-embedding-ada-002:
+      derivative: 1.03
+      duplicate: 1.00
+    text-vector/openai/text-embedding-3-small:
+      derivative: 1.03
+      duplicate: 1.00
+    text-vector/sentence-transformers/all-MiniLM-L6-v2:
+      derivative: 1.04
+      duplicate: 1.00
+  prose:
+    # No adjustment — defaults are tuned for prose.
+    text-vector:
+      derivative: 1.00
+      duplicate: 1.00
+  multilingual:
+    text-vector/sentence-transformers/all-MiniLM-L6-v2:
+      derivative: 0.97   # MiniLM has wider distribution across
+                         # languages — loosen slightly
+      duplicate: 1.00
+
+# Floor thresholds — hint multipliers cannot push the effective
+# value below these. Defends against grief-uploads that abuse
+# content_type_hint to evade dedup.
+#
+# Set as a fraction of the kind default — values below 1.0 only.
+# (A floor of 0.85/0.92 means the effective derivative cannot drop
+# below 0.85 even if the hint multiplier would pull it lower.)
+floors:
+  text-vector:
+    derivative: 0.85
+    duplicate: 0.97
+  text-vector/openai/text-embedding-ada-002:
+    derivative: 0.85
+    duplicate: 0.97
+  text-vector/openai/text-embedding-3-small:
+    derivative: 0.86
+    duplicate: 0.97
+  text-vector/sentence-transformers/all-MiniLM-L6-v2:
+    derivative: 0.78
+    duplicate: 0.95
+  image-phash:
+    derivative: 0.75
+    duplicate: 0.91
+  audio-chromaprint:
+    derivative: 0.70
+    duplicate: 0.90
+  video-multihash:
+    derivative: 0.55
+    duplicate: 0.85
