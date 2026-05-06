@@ -11,6 +11,14 @@ Public surface (re-exported from submodules as they land):
 For now, only ``protocol`` is wired up — Tasks 2-6 add the rest.
 """
 
+from prsm.network.embedding_dht.dht_client import (
+    EmbeddingDHTClient,
+    EmbeddingDHTClientError,
+    EmbeddingNotFoundError,
+    SignatureVerificationError,
+    TransportFailureError,
+)
+from prsm.network.embedding_dht.dht_server import EmbeddingDHTServer
 from prsm.network.embedding_dht.local_index import (
     LocalEmbeddingIndex,
     LocalEmbeddingRecord,
@@ -40,6 +48,12 @@ from prsm.network.embedding_dht.protocol import (
 )
 
 __all__ = [
+    "EmbeddingDHTClient",
+    "EmbeddingDHTClientError",
+    "EmbeddingDHTServer",
+    "EmbeddingNotFoundError",
+    "SignatureVerificationError",
+    "TransportFailureError",
     "LocalEmbeddingIndex",
     "LocalEmbeddingRecord",
     "ALLOWED_DTYPES",
