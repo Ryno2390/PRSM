@@ -141,35 +141,38 @@ Other surfaces evaluated and cleared (no findings):
 
 Per the policy, the founder must decide for each HIGH: **remediate** OR **accept with recorded rationale**. Recommendations:
 
-| Finding | Recommended disposition | Estimated engineering cost | Rationale |
-|---|---|---|---|
-| **HIGH-1** | **Remediate (preferred fix)** | ~1-2 days | Cross-team convergence (A+D) signals real bug. Fix is structural and one-time. Forta defense-in-depth helps but isn't a substitute. |
-| **HIGH-2** | **Remediate (full fix preferred)** | ~1 day | Compromised-Safe is in scope per HIGH-6/HIGH-7 precedent. Full fix is mechanically straightforward (mirror D-05 pattern for pause-time accumulator). |
-| MED-3 | Remediate | ~30 min | One struct field + setter capture. Mirrors D-05 pattern. |
-| MED-4 | Remediate | ~1 hr | Three-line setter validation + canonical pin. |
-| MED-6 | Remediate | ~10 min | Constructor require non-zero. Cheap defense against permanent brick. |
-| MED-7 | Remediate | ~1 hr | Setter validation with `code.length > 0` + interface check. |
-| MED-1 | **Accept with rationale** for this deploy round | (would require new ConsensusGroupRegistry) | Preserve push for now; revisit if k=2 consensus is widely deployed. Stop-gap option (`challenger == requester`) is a reasonable middle path if appetite for engineering exists. |
-| MED-2 | **Accept with rationale** for this deploy round | (would require deposit-time auth-set commit) | Multi-receipt cherry-pick is an off-chain dispute concern; on-chain fix is invasive. Document as known limitation. |
-| MED-5 | **Documentation-only** | ~30 min | Update docstrings + threat model; full on-chain fix not justified. |
-| LOW-1, LOW-2, LOW-3 | Remediate when convenient | ~1 hr each | Defensive cleanups, batchable. |
-| INFO-1 to INFO-5 | Remediate when touching adjacent code | minutes | Code/doc quality. |
+| Finding | Recommended disposition | Estimated engineering cost | Rationale | Status |
+|---|---|---|---|---|
+| **HIGH-1** | **Remediate (preferred fix)** | ~1-2 days | Cross-team convergence (A+D) signals real bug. Fix is structural and one-time. Forta defense-in-depth helps but isn't a substitute. | **REMEDIATED 2026-05-06** (`lastPendingBatchExpiry` per-provider tracker + `ISlasherWithProviderExpiry` reader; regression tests in `test/L4SelfAuditFixes.test.js`). |
+| **HIGH-2** | **Remediate (full fix preferred)** | ~1 day | Compromised-Safe is in scope per HIGH-6/HIGH-7 precedent. Full fix is mechanically straightforward (mirror D-05 pattern for pause-time accumulator). | **REMEDIATED 2026-05-06** (`totalPausedSeconds` accumulator + `totalPausedAtBatchOrigin` per-batch snapshot + `_effectiveElapsed` helper). |
+| MED-3 | Remediate | ~30 min | One struct field + setter capture. Mirrors D-05 pattern. | **REMEDIATED 2026-05-06** (`lookbackWindowSecondsAtCommit` Batch field; `_handleExpired` consults snapshot). |
+| MED-4 | Remediate | ~1 hr | Three-line setter validation + canonical pin. | **REMEDIATED 2026-05-06** (`setFoundationReserveWallet` rejects zero + EOA + adds `whenNotPaused`; `WalletNotContract` error). |
+| MED-6 | Remediate | ~10 min | Constructor require non-zero. Cheap defense against permanent brick. | **REMEDIATED 2026-05-06** (StakeBond + EscrowPool constructors hard-reject `address(0)` for slasher / initialRegistry). |
+| MED-7 | Remediate | ~1 hr | Setter validation with `code.length > 0` + interface check. | **REMEDIATED 2026-05-06** (`setEscrowPool` / `setStakeBond` / `setSignatureVerifier` enforce `code.length > 0` for non-zero values; `address(0)` disable mode preserved). |
+| MED-1 | **Accept with rationale** for this deploy round | (would require new ConsensusGroupRegistry) | Preserve push for now; revisit if k=2 consensus is widely deployed. Stop-gap option (`challenger == requester`) is a reasonable middle path if appetite for engineering exists. | Accepted. |
+| MED-2 | **Accept with rationale** for this deploy round | (would require deposit-time auth-set commit) | Multi-receipt cherry-pick is an off-chain dispute concern; on-chain fix is invasive. Document as known limitation. | Accepted. |
+| MED-5 | **Documentation-only** | ~30 min | Update docstrings + threat model; full on-chain fix not justified. | Pending docstring update. |
+| LOW-1, LOW-2 | Remediate when convenient | ~1 hr each | Defensive cleanups, batchable. | Pending. |
+| LOW-3 | Remediate when convenient | ~1 hr | Defensive cleanups, batchable. | **REMEDIATED 2026-05-06** (`drainFoundationReserve` now `whenNotPaused`). |
+| INFO-1 to INFO-5 | Remediate when touching adjacent code | minutes | Code/doc quality. | Pending. |
 
 ## 7. Recommended next workstream
 
 Before audit-bundle mainnet deploy under POL-2 §4 framework:
 
-1. **Fix HIGH-1** (per-provider expiry tracker OR conservative MAX-window floor).
-2. **Fix HIGH-2** (pause-time accumulator).
-3. **Fix MEDIUM-3, MED-4, MED-6, MED-7** (small cluster of setter / constructor / snapshot hardening).
-4. **Update docstrings** for MED-5 + INFO-1 through INFO-5.
-5. **Re-run agent-teams self-audit** against the post-fix tip to confirm no new HIGH/CRITICAL surfaces opened by the fixes (mirrors the L2 → today regression-check pattern).
-6. **Open 14-day public GitHub review window** per POL-2 §4.4 with this consolidated findings doc + remediation patches linked from the issue.
-7. **Define TVL caps** per POL-2 §4.3: EscrowPool/StakeBond initial cap = $10K each.
-8. **Verify Pausable wired** per POL-2 §4.2 + Foundation Safe holds PAUSER_ROLE.
-9. **Deploy** under POL-2 §4 framework.
+1. ~~**Fix HIGH-1**~~ — **DONE 2026-05-06.**
+2. ~~**Fix HIGH-2**~~ — **DONE 2026-05-06.**
+3. ~~**Fix MEDIUM-3, MED-4, MED-6, MED-7**~~ + ~~**LOW-3**~~ — **DONE 2026-05-06.**
+4. **Update docstrings** for MED-5 + INFO-1 through INFO-5. (Pending)
+5. **Re-run agent-teams self-audit** against the post-fix tip to confirm no new HIGH/CRITICAL surfaces opened by the fixes (mirrors the L2 → today regression-check pattern). (Pending)
+6. **Open 14-day public GitHub review window** per POL-2 §4.4 with this consolidated findings doc + remediation patches linked from the issue. (Pending)
+7. **Define TVL caps** per POL-2 §4.3: EscrowPool/StakeBond initial cap = $10K each. (Pending)
+8. **Verify Pausable wired** per POL-2 §4.2 + Foundation Safe holds PAUSER_ROLE. (Pending)
+9. **Deploy** under POL-2 §4 framework. (Pending)
 
 Estimated total engineering: 3-5 days for HIGH + cluster MEDIUM remediations + re-audit.
+
+**Post-remediation tip status (2026-05-06):** 524 hardhat tests passing (up from 512 pre-fix; 12 net new regression tests across HIGH-1, HIGH-2, MED-3, MED-6, MED-7, LOW-3 in `test/L4SelfAuditFixes.test.js`). Compile clean with only pre-existing warnings.
 
 ## 8. Sign-off
 

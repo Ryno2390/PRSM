@@ -175,6 +175,8 @@ contract StakeBond is Ownable2Step, ReentrancyGuard, Pausable {
     error NothingToClaim(address challenger);
     error FoundationReserveEmpty();
     error FoundationReserveWalletNotSet();
+    /// @dev L4 self-audit MED-4 (B-03) fix: foundation reserve wallet must be a contract (typically Foundation Safe).
+    error WalletNotContract(address provided);
 
     constructor(
         address initialOwner,
@@ -187,10 +189,15 @@ contract StakeBond is Ownable2Step, ReentrancyGuard, Pausable {
             initialUnbondDelay > MAX_UNBOND_DELAY_SECONDS) {
             revert InvalidUnbondDelay(initialUnbondDelay);
         }
-        // initialSlasher MAY be address(0) at deploy time only when
-        // running unit tests / local dev that don't exercise the slash
-        // path — production deploys MUST set this to the registry's
-        // address since there is no setter to fix it after-the-fact.
+        // L4 self-audit MED-6 (D-02) fix: reject address(0) for the
+        // immutable slasher. Same rationale as EscrowPool: post-HIGH-7
+        // the slasher is immutable, so a misconfigured deploy
+        // permanently bricks slash() with no setter recovery. Hard
+        // reject here so the misconfiguration is loud at deploy time.
+        // Tests that previously relied on address(0) deploys must now
+        // wire a stub slasher (any non-zero address; the slash gate
+        // ignores EOA slashers via slasher.code.length > 0 check).
+        if (initialSlasher == address(0)) revert ZeroAddress();
         ftns = IERC20(ftnsAddress);
         unbondDelaySeconds = initialUnbondDelay;
         slasher = initialSlasher;
@@ -390,8 +397,30 @@ contract StakeBond is Ownable2Step, ReentrancyGuard, Pausable {
     /**
      * @notice Set the destination wallet for drainFoundationReserve.
      *         Owner-only. Must be non-zero before drain can succeed.
+     *
+     * @dev L4 self-audit MED-4 (B-03) fix: reject address(0) explicitly
+     *      and require the destination to be a contract (typically the
+     *      Foundation Safe). Pre-fix, an operator typo or compromised
+     *      owner could route the entire reserve stream to an arbitrary
+     *      EOA on the next drain. Post-fix, only contract destinations
+     *      are accepted; combined with the deploy-script canonical-Safe
+     *      pin (out-of-contract concern), a misconfigured destination
+     *      can't silently absorb slashes. Pre-existing operators who
+     *      previously set the wallet to address(0) to "disable" drain
+     *      can still do so via the existing FoundationReserveWalletNotSet
+     *      revert path in drainFoundationReserve — this fix makes the
+     *      disable-by-zero path explicit rather than implicit.
+     *
+     * @dev L4 self-audit LOW-3 (D-04) fix: gated by `whenNotPaused`.
+     *      Pre-fix, a compromised owner could (during pause)
+     *      setFoundationReserveWallet(attacker) + drainFoundationReserve
+     *      to extract the reserve while users believed pause was
+     *      protecting state. Post-fix, drain-destination changes
+     *      respect the global pause invariant.
      */
-    function setFoundationReserveWallet(address newWallet) external onlyOwner {
+    function setFoundationReserveWallet(address newWallet) external onlyOwner whenNotPaused {
+        if (newWallet == address(0)) revert ZeroAddress();
+        if (newWallet.code.length == 0) revert WalletNotContract(newWallet);
         address old = foundationReserveWallet;
         foundationReserveWallet = newWallet;
         emit FoundationReserveWalletUpdated(old, newWallet);
@@ -515,7 +544,13 @@ contract StakeBond is Ownable2Step, ReentrancyGuard, Pausable {
      *         configured foundationReserveWallet. Owner-only. Reverts
      *         if the wallet is unset or the reserve is empty.
      */
-    function drainFoundationReserve() external onlyOwner nonReentrant {
+    function drainFoundationReserve() external onlyOwner nonReentrant whenNotPaused {
+        // L4 self-audit LOW-3 (D-04) fix: gated by `whenNotPaused`. Pre-fix,
+        // a compromised owner could drain the reserve while users
+        // believed pause was protecting state, violating Stated
+        // Invariant #3 ("when paused, no value can move in any
+        // direction"). To drain during a real incident, owner must
+        // unpause first — which itself creates an on-chain breadcrumb.
         if (foundationReserveWallet == address(0)) {
             revert FoundationReserveWalletNotSet();
         }

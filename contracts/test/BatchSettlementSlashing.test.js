@@ -77,7 +77,11 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
     );
     await stakeBond.waitForDeployment();
 
-    await stakeBond.connect(owner).setFoundationReserveWallet(foundation.address);
+    // L4 self-audit MED-4: foundation wallet must be a contract.
+    const FoundationStub = await ethers.getContractFactory("MockERC20");
+    const foundationStub = await FoundationStub.deploy();
+    await foundationStub.waitForDeployment();
+    await stakeBond.connect(owner).setFoundationReserveWallet(await foundationStub.getAddress());
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
 
     // Fund + approve the requester's escrow.
@@ -329,8 +333,12 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
   });
 
   describe("governance: setStakeBond", function () {
-    it("owner can update the stake bond address", async function () {
-      const newAddr = other.address;
+    it("owner can update the stake bond address (must be a contract)", async function () {
+      // L4 self-audit MED-7: setter rejects EOA targets.
+      const Stub = await ethers.getContractFactory("MockERC20");
+      const stub = await Stub.deploy();
+      await stub.waitForDeployment();
+      const newAddr = await stub.getAddress();
       await expect(registry.connect(owner).setStakeBond(newAddr))
         .to.emit(registry, "StakeBondUpdated")
         .withArgs(await stakeBond.getAddress(), newAddr);
@@ -341,6 +349,12 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
       await expect(
         registry.connect(provider).setStakeBond(other.address)
       ).to.be.reverted;
+    });
+
+    it("REGRESSION (L4 self-audit MED-7 / D-03): rejects EOA target", async function () {
+      await expect(
+        registry.connect(owner).setStakeBond(other.address)
+      ).to.be.revertedWithCustomError(registry, "SetterTargetNotContract");
     });
   });
 

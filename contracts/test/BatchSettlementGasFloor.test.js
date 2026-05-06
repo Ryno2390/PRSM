@@ -85,8 +85,12 @@ describe("BatchSettlementRegistry — §8.7 MIN_SLASH_GAS floor", function () {
       await registry.getAddress(),
     );
     await stakeBond.waitForDeployment();
+    // L4 self-audit MED-4: foundation wallet must be a contract.
+    const FoundationStub = await ethers.getContractFactory("MockERC20");
+    const foundationStub = await FoundationStub.deploy();
+    await foundationStub.waitForDeployment();
     await stakeBond.connect(owner).setFoundationReserveWallet(
-      foundation.address,
+      await foundationStub.getAddress(),
     );
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
 

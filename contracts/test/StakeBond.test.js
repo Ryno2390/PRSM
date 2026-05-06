@@ -75,13 +75,18 @@ describe("StakeBond — lifecycle", function () {
       ).to.be.revertedWithCustomError(bond, "InvalidUnbondDelay");
     });
 
-    it("REGRESSION (HIGH-7): permits zero-address slasher at construction (slashing disabled mode)", async function () {
+    it("REGRESSION (L4 self-audit MED-6 / D-02): rejects zero-address slasher — prevents permanent brick", async function () {
+      // Updated post L4 self-audit MED-6: previously HIGH-7 explicitly
+      // permitted zero-address as a "slashing disabled mode" because
+      // the immutable slasher could be set to 0 with no setter recovery.
+      // MED-6 found this was an attractive nuisance: production deploys
+      // that accidentally land on address(0) silently brick slash() with
+      // no signal until the first failed challenge. Hard-rejecting at
+      // construction surfaces the misconfiguration loudly.
       const Bond = await ethers.getContractFactory("StakeBond");
-      const b = await Bond.deploy(
-        owner.address, await token.getAddress(), DEFAULT_UNBOND_DELAY, ethers.ZeroAddress
-      );
-      await b.waitForDeployment();
-      expect(await b.slasher()).to.equal(ethers.ZeroAddress);
+      await expect(
+        Bond.deploy(owner.address, await token.getAddress(), DEFAULT_UNBOND_DELAY, ethers.ZeroAddress)
+      ).to.be.revertedWithCustomError(bond, "ZeroAddress");
     });
   });
 
@@ -674,27 +679,36 @@ describe("StakeBond — slash + bounty", function () {
     });
 
     it("transfers full reserve to the configured wallet", async function () {
-      await bond
-        .connect(owner)
-        .setFoundationReserveWallet(foundation.address);
+      // L4 self-audit MED-4: foundation wallet must be a contract
+      // (typically Foundation Safe). Use a freshly-deployed MockERC20
+      // as a stand-in contract that has code + can receive ERC-20
+      // transfers. (The contract is unrelated to the test FTNS token —
+      // it's just a contract address whose balance we can query.)
+      const WalletStub = await ethers.getContractFactory("MockERC20");
+      const walletStub = await WalletStub.deploy();
+      await walletStub.waitForDeployment();
+      const walletAddr = await walletStub.getAddress();
+
+      await bond.connect(owner).setFoundationReserveWallet(walletAddr);
 
       const expectedReserve = (PREMIUM_STAKE * 3000n) / 10000n;
-      const balBefore = await token.balanceOf(foundation.address);
+      const balBefore = await token.balanceOf(walletAddr);
 
       await expect(bond.connect(owner).drainFoundationReserve())
         .to.emit(bond, "FoundationReserveDrained")
-        .withArgs(foundation.address, expectedReserve);
+        .withArgs(walletAddr, expectedReserve);
 
-      expect(await token.balanceOf(foundation.address)).to.equal(
+      expect(await token.balanceOf(walletAddr)).to.equal(
         balBefore + expectedReserve
       );
       expect(await bond.foundationReserveBalance()).to.equal(0);
     });
 
     it("reverts on empty reserve (already drained)", async function () {
-      await bond
-        .connect(owner)
-        .setFoundationReserveWallet(foundation.address);
+      const WalletStub = await ethers.getContractFactory("MockERC20");
+      const walletStub = await WalletStub.deploy();
+      await walletStub.waitForDeployment();
+      await bond.connect(owner).setFoundationReserveWallet(await walletStub.getAddress());
       await bond.connect(owner).drainFoundationReserve();
       await expect(
         bond.connect(owner).drainFoundationReserve()
@@ -702,9 +716,10 @@ describe("StakeBond — slash + bounty", function () {
     });
 
     it("non-owner cannot drain", async function () {
-      await bond
-        .connect(owner)
-        .setFoundationReserveWallet(foundation.address);
+      const WalletStub = await ethers.getContractFactory("MockERC20");
+      const walletStub = await WalletStub.deploy();
+      await walletStub.waitForDeployment();
+      await bond.connect(owner).setFoundationReserveWallet(await walletStub.getAddress());
       await expect(
         bond.connect(provider).drainFoundationReserve()
       ).to.be.reverted;
@@ -712,21 +727,45 @@ describe("StakeBond — slash + bounty", function () {
   });
 
   describe("setFoundationReserveWallet", function () {
-    it("owner can set the wallet", async function () {
+    let walletStub;
+    beforeEach(async function () {
+      const WalletStub = await ethers.getContractFactory("MockERC20");
+      walletStub = await WalletStub.deploy();
+      await walletStub.waitForDeployment();
+    });
+
+    it("owner can set the wallet (must be a contract)", async function () {
+      const walletAddr = await walletStub.getAddress();
       await expect(
-        bond.connect(owner).setFoundationReserveWallet(foundation.address)
+        bond.connect(owner).setFoundationReserveWallet(walletAddr)
       )
         .to.emit(bond, "FoundationReserveWalletUpdated")
-        .withArgs(ethers.ZeroAddress, foundation.address);
-      expect(await bond.foundationReserveWallet()).to.equal(
-        foundation.address
-      );
+        .withArgs(ethers.ZeroAddress, walletAddr);
+      expect(await bond.foundationReserveWallet()).to.equal(walletAddr);
     });
 
     it("non-owner cannot set the wallet", async function () {
+      const walletAddr = await walletStub.getAddress();
       await expect(
-        bond.connect(provider).setFoundationReserveWallet(foundation.address)
+        bond.connect(provider).setFoundationReserveWallet(walletAddr)
       ).to.be.reverted;
+    });
+
+    it("REGRESSION (L4 self-audit MED-4 / B-03): rejects zero address", async function () {
+      await expect(
+        bond.connect(owner).setFoundationReserveWallet(ethers.ZeroAddress)
+      ).to.be.revertedWithCustomError(bond, "ZeroAddress");
+    });
+
+    it("REGRESSION (L4 self-audit MED-4 / B-03): rejects EOA — wallet must be a contract", async function () {
+      // Foundation reserve wallet is the destination for slash 30%
+      // routing. An EOA destination would let an operator typo or
+      // compromised owner irreversibly route the stream to an attacker
+      // EOA. Hard-rejecting EOAs ensures only a contract (typically
+      // the Foundation Safe) can receive the reserve flow.
+      await expect(
+        bond.connect(owner).setFoundationReserveWallet(foundation.address)
+      ).to.be.revertedWithCustomError(bond, "WalletNotContract");
     });
   });
 });

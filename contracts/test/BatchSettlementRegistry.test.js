@@ -381,8 +381,13 @@ describe("BatchSettlementRegistry", function () {
   });
 
   describe("governance: setEscrowPool", function () {
-    it("owner can update the pool address", async function () {
-      const newPool = other.address;
+    it("owner can update the pool address (must be a contract)", async function () {
+      // L4 self-audit MED-7: setter rejects EOA targets. Use a
+      // freshly-deployed contract as the new pool stand-in.
+      const Stub = await ethers.getContractFactory("MockERC20");
+      const stub = await Stub.deploy();
+      await stub.waitForDeployment();
+      const newPool = await stub.getAddress();
       await expect(registry.connect(owner).setEscrowPool(newPool))
         .to.emit(registry, "EscrowPoolUpdated")
         .withArgs(await escrowPool.getAddress(), newPool);
@@ -393,6 +398,18 @@ describe("BatchSettlementRegistry", function () {
       await expect(
         registry.connect(other).setEscrowPool(other.address)
       ).to.be.reverted;
+    });
+
+    it("REGRESSION (L4 self-audit MED-7 / D-03): rejects EOA target — setter requires contract", async function () {
+      await expect(
+        registry.connect(owner).setEscrowPool(other.address)
+      ).to.be.revertedWithCustomError(registry, "SetterTargetNotContract");
+    });
+
+    it("permits address(0) — documented disable mode (per-batch D-03 snapshot protects in-flight)", async function () {
+      await expect(registry.connect(owner).setEscrowPool(ethers.ZeroAddress))
+        .to.emit(registry, "EscrowPoolUpdated")
+        .withArgs(await escrowPool.getAddress(), ethers.ZeroAddress);
     });
   });
 

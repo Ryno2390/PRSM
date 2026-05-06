@@ -93,10 +93,17 @@ contract EscrowPool is Ownable2Step, ReentrancyGuard, Pausable {
         address initialRegistry
     ) Ownable(initialOwner) {
         if (ftnsAddress == address(0)) revert ZeroAddress();
-        // initialRegistry may be address(0) at deploy time only when
-        // running unit tests that don't exercise the settle path —
-        // production deploys MUST set this to the registry's address
-        // since there is no setter to fix it after-the-fact.
+        // L4 self-audit MED-6 (D-02) fix: reject address(0) for the
+        // immutable settlementRegistry. Pre-fix, a misconfigured deploy
+        // (operator typo, mis-edited Hardhat script, malicious CI) would
+        // produce a permanently-bricked contract: settleFromRequester
+        // reverts CallerNotRegistry(_, address(0)) for every call, and
+        // there is no setter to recover (HIGH-6 made registry immutable).
+        // Symptoms are indistinguishable from a legitimate deploy until
+        // the first failed settlement. Hard-rejecting here makes the
+        // misconfiguration loud at deploy time. Tests that previously
+        // relied on address(0) deploys must now wire a stub registry.
+        if (initialRegistry == address(0)) revert ZeroAddress();
         ftns = IERC20(ftnsAddress);
         settlementRegistry = initialRegistry;
     }

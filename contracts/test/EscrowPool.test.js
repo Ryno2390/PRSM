@@ -36,15 +36,15 @@ describe("EscrowPool", function () {
       expect(await pool.settlementRegistry()).to.equal(registry.address);
     });
 
-    it("allows zero initial registry (to be set later)", async function () {
+    it("REGRESSION (L4 self-audit MED-6 / D-02): rejects zero initial registry — prevents permanent brick", async function () {
+      // Pre-fix: a misconfigured deploy with address(0) was accepted,
+      // permanently bricking settleFromRequester (CallerNotRegistry(_, 0)
+      // for every call) with no setter to recover.
+      // Post-fix: deploy reverts so the misconfiguration is loud.
       const Pool = await ethers.getContractFactory("EscrowPool");
-      const p = await Pool.deploy(
-        owner.address,
-        await token.getAddress(),
-        ethers.ZeroAddress
-      );
-      await p.waitForDeployment();
-      expect(await p.settlementRegistry()).to.equal(ethers.ZeroAddress);
+      await expect(
+        Pool.deploy(owner.address, await token.getAddress(), ethers.ZeroAddress)
+      ).to.be.revertedWithCustomError(pool, "ZeroAddress");
     });
 
     it("reverts on zero FTNS address", async function () {

@@ -102,8 +102,13 @@ describe("BatchSettlementRegistry — Phase 7.1 CONSENSUS_MISMATCH", function ()
       await registry.getAddress(),
     );
     await stakeBond.waitForDeployment();
+    // L4 self-audit MED-4: foundation wallet must be a contract.
+    // Use a freshly-deployed MockERC20 as a contract stand-in.
+    const FoundationStub = await ethers.getContractFactory("MockERC20");
+    const foundationStub = await FoundationStub.deploy();
+    await foundationStub.waitForDeployment();
     await stakeBond.connect(owner).setFoundationReserveWallet(
-      foundation.address,
+      await foundationStub.getAddress(),
     );
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
 

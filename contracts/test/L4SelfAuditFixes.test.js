@@ -255,6 +255,173 @@ describe("L4 Self-Audit Fixes (2026-05-06)", function () {
     });
   });
 
+  describe("MED-3 (B-02) — lookbackWindowSecondsAtCommit per-batch snapshot", function () {
+    let registry, token;
+    let owner, provider, requester;
+
+    beforeEach(async function () {
+      [owner, provider, requester] = await ethers.getSigners();
+      const Token = await ethers.getContractFactory("MockERC20");
+      token = await Token.deploy();
+      await token.waitForDeployment();
+
+      const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
+      registry = await Registry.deploy(owner.address, DEFAULT_WINDOW);
+      await registry.waitForDeployment();
+    });
+
+    it("commitBatch snapshots the live lookback window onto the batch", async function () {
+      const lookback = await registry.settlementLookbackWindowSeconds();
+
+      await registry.connect(provider).commitBatch(
+        requester.address,
+        ethers.keccak256(ethers.toUtf8Bytes("med3-root")),
+        1, ONE_FTNS, PREMIUM_SLASH_BPS, ethers.ZeroHash, "ipfs://med3"
+      );
+      const filter = registry.filters.BatchCommitted(null, provider.address);
+      const events = await registry.queryFilter(filter);
+      const batchId = events[0].args.batchId;
+      const b = await registry.batches(batchId);
+      expect(b.lookbackWindowSecondsAtCommit).to.equal(lookback);
+    });
+
+    it("setSettlementLookbackWindow does NOT retroactively flip EXPIRED eligibility on PENDING batches", async function () {
+      // Commit a receipt that is "old" relative to the DEFAULT 30-day
+      // lookback (so EXPIRED would NOT succeed). Owner then SHRINKS the
+      // window to 1 day to attempt retroactive expiry. The per-batch
+      // snapshot must defeat that.
+      const now = (await ethers.provider.getBlock("latest")).timestamp;
+      const TWO_DAYS = 2 * 24 * 60 * 60;
+      const recentLeaf = {
+        jobIdHash: ethers.keccak256(ethers.toUtf8Bytes("job-med3")),
+        shardIndex: 0,
+        providerIdHash: ethers.keccak256(ethers.toUtf8Bytes("provider")),
+        providerPubkeyHash: ethers.keccak256(ethers.toUtf8Bytes("pubkey")),
+        outputHash: ethers.keccak256(ethers.toUtf8Bytes("output")),
+        executedAtUnix: now - TWO_DAYS,
+        valueFtns: ONE_FTNS,
+        signatureHash: ethers.keccak256(ethers.toUtf8Bytes("sig")),
+        signingMessageHash: ethers.keccak256(ethers.toUtf8Bytes("signing-msg")),
+      };
+      const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+        ["tuple(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)"],
+        [[
+          recentLeaf.jobIdHash, recentLeaf.shardIndex, recentLeaf.providerIdHash,
+          recentLeaf.providerPubkeyHash, recentLeaf.outputHash, recentLeaf.executedAtUnix,
+          recentLeaf.valueFtns, recentLeaf.signatureHash, recentLeaf.signingMessageHash,
+        ]],
+      );
+      const root = ethers.keccak256(encoded);
+      const tx = await registry.connect(provider).commitBatch(
+        requester.address, root, 1, recentLeaf.valueFtns,
+        PREMIUM_SLASH_BPS, ethers.ZeroHash, "med3-batch"
+      );
+      const batchId = (await tx.wait()).logs.find(
+        (l) => l.fragment && l.fragment.name === "BatchCommitted"
+      ).args[0];
+
+      // Owner shrinks lookback to 1 day. Pre-fix: EXPIRED challenge of a
+      // 2-day-old receipt would now succeed. Post-fix: the snapshot of
+      // 30 days at commit gates the check, so the challenge reverts.
+      await registry.connect(owner).setSettlementLookbackWindow(MIN_UNBOND_DELAY);
+
+      await expect(
+        registry.connect(requester).challengeReceipt(
+          batchId, recentLeaf, [], 3, "0x"  // 3 = EXPIRED
+        )
+      ).to.be.revertedWithCustomError(registry, "ReceiptNotExpired");
+    });
+  });
+
+  describe("MED-6 (D-02) — constructor zero-address rejection on cross-wires", function () {
+    it("EscrowPool constructor REVERTS on zero initialRegistry", async function () {
+      const [owner] = await ethers.getSigners();
+      const MockERC20 = await ethers.getContractFactory("MockERC20");
+      const ftns = await MockERC20.deploy();
+      const Pool = await ethers.getContractFactory("EscrowPool");
+      await expect(
+        Pool.deploy(owner.address, await ftns.getAddress(), ethers.ZeroAddress)
+      ).to.be.revertedWithCustomError(Pool, "ZeroAddress");
+    });
+
+    it("StakeBond constructor REVERTS on zero slasher", async function () {
+      const [owner] = await ethers.getSigners();
+      const MockERC20 = await ethers.getContractFactory("MockERC20");
+      const ftns = await MockERC20.deploy();
+      const Bond = await ethers.getContractFactory("StakeBond");
+      await expect(
+        Bond.deploy(owner.address, await ftns.getAddress(), 7 * 24 * 60 * 60, ethers.ZeroAddress)
+      ).to.be.revertedWithCustomError(Bond, "ZeroAddress");
+    });
+  });
+
+  describe("MED-7 (D-03) — setter contract-bytecode requirement", function () {
+    let registry, owner, attacker;
+
+    beforeEach(async function () {
+      [owner, attacker] = await ethers.getSigners();
+      const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
+      registry = await Registry.deploy(owner.address, DEFAULT_WINDOW);
+      await registry.waitForDeployment();
+    });
+
+    it("setEscrowPool REVERTS when target is an EOA", async function () {
+      await expect(
+        registry.connect(owner).setEscrowPool(attacker.address)
+      ).to.be.revertedWithCustomError(registry, "SetterTargetNotContract");
+    });
+
+    it("setStakeBond REVERTS when target is an EOA", async function () {
+      await expect(
+        registry.connect(owner).setStakeBond(attacker.address)
+      ).to.be.revertedWithCustomError(registry, "SetterTargetNotContract");
+    });
+
+    it("setSignatureVerifier REVERTS when target is an EOA", async function () {
+      await expect(
+        registry.connect(owner).setSignatureVerifier(attacker.address)
+      ).to.be.revertedWithCustomError(registry, "SetterTargetNotContract");
+    });
+
+    it("setEscrowPool / setStakeBond / setSignatureVerifier still ACCEPT address(0) (disable mode)", async function () {
+      await expect(registry.connect(owner).setEscrowPool(ethers.ZeroAddress)).to.not.be.reverted;
+      await expect(registry.connect(owner).setStakeBond(ethers.ZeroAddress)).to.not.be.reverted;
+      await expect(registry.connect(owner).setSignatureVerifier(ethers.ZeroAddress)).to.not.be.reverted;
+    });
+  });
+
+  describe("LOW-3 — drainFoundationReserve is gated by whenNotPaused", function () {
+    it("drainFoundationReserve REVERTS while StakeBond is paused", async function () {
+      const [owner, provider] = await ethers.getSigners();
+      const MockERC20 = await ethers.getContractFactory("MockERC20");
+      const ftns = await MockERC20.deploy();
+      // Use an arbitrary contract address as slasher (StakeBond.slasher
+      // is immutable post-HIGH-7; the slash path is not exercised here).
+      const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
+      const registry = await Registry.deploy(owner.address, DEFAULT_WINDOW);
+      const Bond = await ethers.getContractFactory("StakeBond");
+      const bond = await Bond.deploy(
+        owner.address, await ftns.getAddress(), MIN_UNBOND_DELAY, await registry.getAddress()
+      );
+
+      const FoundationStub = await ethers.getContractFactory("MockERC20");
+      const foundation = await FoundationStub.deploy();
+      await bond.connect(owner).setFoundationReserveWallet(await foundation.getAddress());
+
+      await bond.connect(owner).pause();
+      await expect(
+        bond.connect(owner).drainFoundationReserve()
+      ).to.be.revertedWithCustomError(bond, "EnforcedPause");
+
+      // After unpause, the call surface is reachable again (it reverts
+      // for a different reason — empty reserve — but no longer EnforcedPause).
+      await bond.connect(owner).unpause();
+      await expect(
+        bond.connect(owner).drainFoundationReserve()
+      ).to.not.be.revertedWithCustomError(bond, "EnforcedPause");
+    });
+  });
+
   // Helper: derive batchId from the provider's sequence-N commit.
   // Replicates the contract's keccak256(abi.encode(...)) layout.
   async function getProviderBatchId(registry, provider, sequence) {

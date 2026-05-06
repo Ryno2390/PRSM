@@ -128,6 +128,15 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
                                       // provider keys (not one provider + one requester) to trigger.
                                       // Zero means "not part of a consensus group" — DOUBLE_SPEND /
                                       // INVALID_SIGNATURE challenges still work unchanged.
+        uint64  lookbackWindowSecondsAtCommit;   // L4 self-audit MED-3 (B-02) fix: snapshot of
+                                      // `settlementLookbackWindowSeconds` at commit. Mirrors the
+                                      // D-05 pattern for the EXPIRED-challenge path: prevents owner
+                                      // from retroactively flipping receipt expiry eligibility on
+                                      // already-PENDING batches via setSettlementLookbackWindow.
+                                      // Pre-fix, owner could shorten the window to expire previously-
+                                      // valid receipts (lose payment) or lengthen it to protect stale
+                                      // receipts from EXPIRED challenges (overpay). Per-batch snapshot
+                                      // closes both directions.
         uint64  totalPausedAtBatchOrigin;        // L4 self-audit HIGH-2 (B-01) fix: snapshot of
                                       // `totalPausedSeconds` at commit. Subtracting this from the
                                       // current `totalPausedSeconds` gives the seconds of paused-time
@@ -354,6 +363,8 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
     error ReceiptNotExpired(uint64 executedAtUnix, uint256 lookbackSeconds);
     error ConflictingBatchNotCommitted(bytes32 conflictingBatchId);
     error InvalidSlashRateBps(uint16 provided);
+    /// @dev L4 self-audit MED-7 (D-03): setters reject EOA / non-contract pointers for non-zero addresses.
+    error SetterTargetNotContract(address provided);
     error InsufficientGasForSlash(uint256 available, uint256 required);
 
     constructor(address initialOwner, uint256 initialChallengeWindow) Ownable(initialOwner) {
@@ -430,6 +441,12 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         // subtracts pauses that occur AFTER this commit so they
         // don't consume the challenge window.
         b.totalPausedAtBatchOrigin = uint64(totalPausedSeconds);
+        // L4 self-audit MED-3 (B-02) fix: snapshot the lookback window
+        // at commit. _handleExpired consults the per-batch snapshot
+        // instead of the live mutable global so post-commit changes
+        // via setSettlementLookbackWindow cannot retroactively flip
+        // EXPIRED challenge eligibility on already-PENDING batches.
+        b.lookbackWindowSecondsAtCommit = uint64(settlementLookbackWindowSeconds);
         // L2 audit MEDIUM D-03 fix: snapshot cross-wire pointers.
         b.escrowPoolAtCommit = address(escrowPool);
         b.stakeBondAtCommit = address(stakeBond);
@@ -583,7 +600,7 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         } else if (reason == ReasonCode.NO_ESCROW) {
             proven = _handleNoEscrow(b);
         } else if (reason == ReasonCode.EXPIRED) {
-            proven = _handleExpired(leaf);
+            proven = _handleExpired(leaf, b.lookbackWindowSecondsAtCommit);
         } else if (reason == ReasonCode.CONSENSUS_MISMATCH) {
             proven = _handleConsensusMismatch(batchId, b, leaf, auxData);
         } else {
@@ -743,11 +760,21 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
     /**
      * @dev EXPIRED: receipt older than settlementLookbackWindowSeconds.
      *      Pure time check against leaf.executedAtUnix.
+     *
+     *      L4 self-audit MED-3 (B-02) fix: takes the per-batch
+     *      `lookbackWindowSecondsAtCommit` snapshot, NOT the live
+     *      mutable global. Owner cannot retroactively flip EXPIRED
+     *      eligibility on already-PENDING batches by mutating
+     *      `settlementLookbackWindowSeconds` mid-flight.
      */
-    function _handleExpired(ReceiptLeaf calldata leaf) internal view returns (bool) {
+    function _handleExpired(
+        ReceiptLeaf calldata leaf,
+        uint64 lookbackWindowAtCommit
+    ) internal view returns (bool) {
         uint256 age = block.timestamp - uint256(leaf.executedAtUnix);
-        if (age <= settlementLookbackWindowSeconds) {
-            revert ReceiptNotExpired(leaf.executedAtUnix, settlementLookbackWindowSeconds);
+        uint256 lookback = uint256(lookbackWindowAtCommit);
+        if (age <= lookback) {
+            revert ReceiptNotExpired(leaf.executedAtUnix, lookback);
         }
         return true;
     }
@@ -856,6 +883,14 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
      * @param newPool EscrowPool contract address
      */
     function setEscrowPool(address newPool) external onlyOwner {
+        // L4 self-audit MED-7 (D-03) fix: non-zero values must be
+        // contracts. Zero is permitted (documented "disable" mode).
+        // The D-03 per-batch snapshot protects in-flight batches from
+        // mid-flight rotation; this guard prevents new batches from
+        // being committed against an EOA / non-conforming target.
+        if (newPool != address(0) && newPool.code.length == 0) {
+            revert SetterTargetNotContract(newPool);
+        }
         address old = address(escrowPool);
         escrowPool = IEscrowPool(newPool);
         emit EscrowPoolUpdated(old, newPool);
@@ -868,6 +903,10 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
      *         works — Phase 3.1 behavior preserved).
      */
     function setStakeBond(address newBond) external onlyOwner {
+        // L4 self-audit MED-7 (D-03) fix: non-zero values must be contracts.
+        if (newBond != address(0) && newBond.code.length == 0) {
+            revert SetterTargetNotContract(newBond);
+        }
         address old = address(stakeBond);
         stakeBond = IStakeBond(newBond);
         emit StakeBondUpdated(old, newBond);
@@ -880,6 +919,10 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
      *         VerifierNotConfigured).
      */
     function setSignatureVerifier(address newVerifier) external onlyOwner {
+        // L4 self-audit MED-7 (D-03) fix: non-zero values must be contracts.
+        if (newVerifier != address(0) && newVerifier.code.length == 0) {
+            revert SetterTargetNotContract(newVerifier);
+        }
         address old = address(signatureVerifier);
         signatureVerifier = ISignatureVerifier(newVerifier);
         emit SignatureVerifierUpdated(old, newVerifier);

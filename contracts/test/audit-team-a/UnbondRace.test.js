@@ -89,7 +89,11 @@ describe("AUDIT-TEAM-A — A02 Unbond/Challenge race lets attacker dodge slash",
     stakeBond = await Bond.deploy(owner.address, await token.getAddress(), UNBOND_DELAY, await registry.getAddress());
     await stakeBond.waitForDeployment();
 
-    await stakeBond.connect(owner).setFoundationReserveWallet(foundation.address);
+    // L4 self-audit MED-4: foundation wallet must be a contract.
+    const FoundationStub = await ethers.getContractFactory("MockERC20");
+    const foundationStub = await FoundationStub.deploy();
+    await foundationStub.waitForDeployment();
+    await stakeBond.connect(owner).setFoundationReserveWallet(await foundationStub.getAddress());
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
 
     await token.mint(requester.address, ONE_FTNS * 1000n);

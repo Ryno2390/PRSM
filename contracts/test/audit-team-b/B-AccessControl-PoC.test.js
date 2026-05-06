@@ -178,8 +178,13 @@ describe("Team B — Access Control PoC", function () {
       const realFtns = await MockERC20.deploy();
       const fakeFtns = await MockERC20.deploy();
 
+      // L4 self-audit MED-6: initialRegistry must be non-zero. Deploy a
+      // throwaway registry; this test exercises FTNS token swap, not
+      // settlement plumbing — any real registry suffices.
+      const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
+      const registry = await Registry.deploy(owner.address, 86400);
       const Pool = await ethers.getContractFactory("EscrowPool");
-      const pool = await Pool.deploy(owner.address, await realFtns.getAddress(), ethers.ZeroAddress);
+      const pool = await Pool.deploy(owner.address, await realFtns.getAddress(), await registry.getAddress());
 
       // Requester deposits 100 real FTNS — totalEscrowedBalance now = 100.
       const HUNDRED = ethers.parseUnits("100", 18);
@@ -359,11 +364,13 @@ describe("Team B — Access Control PoC", function () {
       );
       expect(await bondWithEOA.slasher()).to.equal(eoa.address);
 
-      // Constructor accepts zero (slashing-disabled mode for tests).
-      const bondNoSlasher = await Bond.deploy(
-        owner.address, await ftns.getAddress(), 7 * 24 * 60 * 60, ethers.ZeroAddress
-      );
-      expect(await bondNoSlasher.slasher()).to.equal(ethers.ZeroAddress);
+      // L4 self-audit MED-6 (post-fix): constructor REJECTS address(0)
+      // for slasher. The "slashing-disabled mode" is no longer reachable
+      // via the bond constructor — operators must wire a real BSR
+      // address (which itself can have stakeBond=0 to disable slashing).
+      await expect(
+        Bond.deploy(owner.address, await ftns.getAddress(), 7 * 24 * 60 * 60, ethers.ZeroAddress)
+      ).to.be.revertedWithCustomError(Bond, "ZeroAddress");
 
       // Post-fix: high-level binding has no setter; low-level call to
       // the removed selector reverts.
