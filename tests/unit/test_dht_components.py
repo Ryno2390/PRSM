@@ -7,19 +7,33 @@ SyncDHTTransport → DHTListener → DHTRequestRouter → ManifestDHTServer
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import struct
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import pytest
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey, Ed25519PublicKey,
+)
+from cryptography.hazmat.primitives.serialization import (
+    Encoding, PublicFormat,
+)
 
 from prsm.compute.model_registry.models import (
     ManifestShardEntry, ModelManifest,
 )
 from prsm.compute.model_registry.signing import sign_manifest
 from prsm.network.dht_components import DHTNodeComponents
-from prsm.network.embedding_dht.local_index import LocalEmbeddingIndex
+from prsm.network.embedding_dht.local_index import (
+    LocalEmbeddingIndex, LocalEmbeddingRecord,
+)
+from prsm.network.embedding_dht.protocol import (
+    canonical_signing_payload,
+)
 from prsm.network.manifest_dht.local_index import LocalManifestIndex
 from prsm.network.manifest_dht.dht_client import (
     ManifestNotFoundError,
@@ -442,3 +456,243 @@ class TestTwoNodeManifestE2E:
                 node_b.manifest_client.get_manifest("m-unknown")
         finally:
             node_b.stop()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# T4 — 3-node ManifestDHT E2E + 2-node EmbeddingDHT E2E with real sigs
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _real_verify_signature(
+    pubkey_bytes: bytes, message: bytes, signature: bytes,
+) -> bool:
+    """Real Ed25519 verification — production EmbeddingDHTClient
+    expects a callable with this exact shape."""
+    try:
+        Ed25519PublicKey.from_public_bytes(pubkey_bytes).verify(
+            signature, message,
+        )
+    except InvalidSignature:
+        return False
+    return True
+
+
+def _make_signed_embedding_record(
+    *,
+    content_hash: str = "0xabc123",
+    model_id: str = "openai/text-embedding-ada-002",
+    dimension: int = 8,
+    creator_id: str = "creator-A",
+    created_at: float = 1715000000.0,
+) -> Tuple[LocalEmbeddingRecord, bytes]:
+    """Build a record signed by a freshly-generated Ed25519 key.
+    Mirrors the helper in tests/unit/test_embedding_dht_server_client.py
+    so the E2E round-trip exercises the same canonical signing
+    payload production code paths use."""
+    privkey = Ed25519PrivateKey.generate()
+    pubkey_bytes = privkey.public_key().public_bytes(
+        encoding=Encoding.Raw, format=PublicFormat.Raw,
+    )
+    raw_vec = struct.pack(
+        f"<{dimension}f", *[0.1 * (i + 1) for i in range(dimension)],
+    )
+    payload = canonical_signing_payload(
+        content_hash=content_hash,
+        model_id=model_id,
+        dimension=dimension,
+        dtype="float32",
+        vector_bytes=raw_vec,
+        created_at=created_at,
+    )
+    sig = privkey.sign(payload)
+    rec = LocalEmbeddingRecord(
+        content_hash=content_hash,
+        model_id=model_id,
+        dimension=dimension,
+        dtype="float32",
+        vector_b64=base64.b64encode(raw_vec).decode("ascii"),
+        creator_id=creator_id,
+        created_at=created_at,
+        signature_b64=base64.b64encode(sig).decode("ascii"),
+    )
+    return rec, pubkey_bytes
+
+
+class TestThreeNodeManifestE2E:
+    def test_b_fetches_via_three_node_topology(self, tmp_path):
+        """Three-node setup: A serves model "m1", C serves model "m1"
+        too, B has neither but knows both A and C as peers. B's
+        ``get_manifest("m1")`` must succeed by routing to one of the
+        providers via Kademlia find_closest_peers, fetching, anchor-
+        verifying. Confirms multi-provider DHT behavior end-to-end."""
+        # ── Node A — original publisher ──
+        a_identity = generate_node_identity("node-a")
+        manifest = _build_signed_manifest(a_identity, model_id="m1")
+
+        anchor = _FakeAnchor()
+        anchor.register(a_identity.node_id, a_identity.public_key_b64)
+
+        a_index = _make_manifest_index(tmp_path, "a_idx")
+        a_path = _persist_manifest_in_root(tmp_path / "a_idx", "m1", manifest)
+        a_index.register("m1", a_path)
+        node_a = DHTNodeComponents.build(
+            my_node_id=a_identity.node_id,
+            my_host="127.0.0.1",
+            dht_listen_port=0,
+            transport_adapter=DirectAdapter(),
+            listen_host="127.0.0.1",
+            local_manifest_index=a_index,
+            anchor=anchor,
+        )
+
+        # ── Node C — secondary provider with the SAME signed
+        # manifest. Anchor verification still passes against A's
+        # pubkey because the manifest A signed is the same bytes C
+        # serves; the publisher-binding lives in the signature, not
+        # in the source-of-fetch. ──
+        c_identity = generate_node_identity("node-c")
+        c_index = _make_manifest_index(tmp_path, "c_idx")
+        c_path = _persist_manifest_in_root(tmp_path / "c_idx", "m1", manifest)
+        c_index.register("m1", c_path)
+        node_c = DHTNodeComponents.build(
+            my_node_id=c_identity.node_id,
+            my_host="127.0.0.1",
+            dht_listen_port=0,
+            transport_adapter=DirectAdapter(),
+            listen_host="127.0.0.1",
+            local_manifest_index=c_index,
+            anchor=anchor,
+        )
+
+        # ── Node B — fetcher; has neither manifest ──
+        b_identity = generate_node_identity("node-b")
+        b_index = _make_manifest_index(tmp_path, "b_idx")
+        node_b = DHTNodeComponents.build(
+            my_node_id=b_identity.node_id,
+            my_host="127.0.0.1",
+            dht_listen_port=0,
+            transport_adapter=DirectAdapter(),
+            listen_host="127.0.0.1",
+            local_manifest_index=b_index,
+            anchor=anchor,
+        )
+
+        try:
+            port_a = node_a.start(anchor=anchor)
+            port_c = node_c.start(anchor=anchor)
+            node_b.start(anchor=anchor)
+
+            # Populate B's routing table with both A and C.
+            assert node_b.add_peer(
+                a_identity.node_id, "127.0.0.1", port_a,
+            )
+            assert node_b.add_peer(
+                c_identity.node_id, "127.0.0.1", port_c,
+            )
+
+            # Run get_manifest. It should iterate K closest peers
+            # (default 3) and return the first verified manifest
+            # — coming from whichever of A/C is closer in XOR
+            # distance to sha256("m1")[:32].
+            assert node_b.manifest_client is not None
+            fetched = node_b.manifest_client.get_manifest("m1")
+            assert fetched.model_id == "m1"
+            assert (
+                fetched.publisher_signature
+                == manifest.publisher_signature
+            )
+        finally:
+            node_b.stop()
+            node_c.stop()
+            node_a.stop()
+
+
+class TestTwoNodeEmbeddingE2E:
+    def test_b_fetches_embedding_from_a_with_real_signatures(
+        self, tmp_path,
+    ):
+        """Real Ed25519-signed embedding flows over the full DHT
+        stack: SyncDHTTransport → DHTListener → DHTRequestRouter →
+        EmbeddingDHTServer → wire → B parses + verifies signature."""
+        # Build a signed record + capture the pubkey for the
+        # anchor-equivalent creator_pubkey_for callable.
+        # KademliaDHT.find_closest_peers parses the target_id via
+        # bytes.fromhex(), which means content_hash must be plain
+        # hex (no "0x" prefix). Production content_hash values are
+        # already plain hex per ContentUploader's CID-derived sha256.
+        record, pubkey_bytes = _make_signed_embedding_record(
+            content_hash=hashlib.sha256(b"content-1").hexdigest(),
+            model_id="oai/text-embedding-3-small",
+            dimension=8,
+        )
+
+        # Node A: has the embedding.
+        a_identity = generate_node_identity("emb-node-a")
+        a_emb_index = _make_embedding_index(tmp_path, "a_emb_idx")
+        a_emb_index.register(record)
+
+        # Node B: has none; verifies signatures via the captured pubkey.
+        b_identity = generate_node_identity("emb-node-b")
+        b_emb_index = _make_embedding_index(tmp_path, "b_emb_idx")
+
+        # creator_pubkey_for: the production lookup queries
+        # PublisherKeyAnchor by content_hash → creator → pubkey. For
+        # the test we map directly: known content_hash → known pubkey.
+        def _creator_pubkey_for(content_hash: str) -> Optional[bytes]:
+            if content_hash == record.content_hash:
+                return pubkey_bytes
+            return None
+
+        node_a = DHTNodeComponents.build(
+            my_node_id=a_identity.node_id,
+            my_host="127.0.0.1",
+            dht_listen_port=0,
+            transport_adapter=DirectAdapter(),
+            listen_host="127.0.0.1",
+            local_embedding_index=a_emb_index,
+            creator_pubkey_for=_creator_pubkey_for,
+            verify_signature=_real_verify_signature,
+        )
+        node_b = DHTNodeComponents.build(
+            my_node_id=b_identity.node_id,
+            my_host="127.0.0.1",
+            dht_listen_port=0,
+            transport_adapter=DirectAdapter(),
+            listen_host="127.0.0.1",
+            local_embedding_index=b_emb_index,
+            creator_pubkey_for=_creator_pubkey_for,
+            verify_signature=_real_verify_signature,
+        )
+
+        try:
+            port_a = node_a.start(
+                creator_pubkey_for=_creator_pubkey_for,
+                verify_signature=_real_verify_signature,
+            )
+            node_b.start(
+                creator_pubkey_for=_creator_pubkey_for,
+                verify_signature=_real_verify_signature,
+            )
+            assert node_b.add_peer(
+                a_identity.node_id, "127.0.0.1", port_a,
+            )
+
+            assert node_b.embedding_client is not None
+            providers = node_b.embedding_client.find_providers(
+                content_hash=record.content_hash,
+                model_id=record.model_id,
+            )
+            assert len(providers) >= 1
+            # Now fetch the embedding from the first provider and
+            # confirm signature verification passes.
+            resp = node_b.embedding_client.fetch_embedding(
+                providers[0],
+                content_hash=record.content_hash,
+                model_id=record.model_id,
+            )
+            assert resp.content_hash == record.content_hash
+            assert resp.model_id == record.model_id
+            assert resp.signature_b64 == record.signature_b64
+        finally:
+            node_b.stop()
+            node_a.stop()
