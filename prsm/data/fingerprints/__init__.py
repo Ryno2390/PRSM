@@ -18,11 +18,27 @@ behind the ABC and are wired by ContentUploader at upload time.
 from prsm.data.fingerprints.base import (
     BinaryFingerprint,
     FingerprintKind,
+    FingerprintRecord,
     detect_content_kind,
 )
+
+
+def _import_image_fingerprint():
+    """Lazy importer so a host without imagehash/Pillow can still
+    construct the registry — the backend simply won't be available."""
+    try:
+        from prsm.data.fingerprints.image import ImageFingerprint
+        return ImageFingerprint
+    except ImportError:
+        return None
+
+
+ImageFingerprint = _import_image_fingerprint()
 
 __all__ = [
     "BinaryFingerprint",
     "FingerprintKind",
+    "FingerprintRecord",
     "detect_content_kind",
+    "ImageFingerprint",
 ]

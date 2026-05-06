@@ -114,3 +114,8 @@ python-socks[asyncio]>=2.4.0   # R9 Phase 6.2 pluggable-transport adapter (Tor /
 # Security & Sanitization
 bleach>=6.1.0
 sentence-transformers>=2.2.2
+
+# PRSM-PROV-1 Item 4 — binary content fingerprints (optional; absent
+# backends fall back to byte-hash dedup with a logged warning)
+imagehash>=4.3.2   # T4.2 image perceptual-hash (pHash via DCT)
+Pillow>=10.0.0     # T4.2 image decoding for ImageFingerprint
