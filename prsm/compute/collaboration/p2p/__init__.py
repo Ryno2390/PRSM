@@ -10,7 +10,6 @@ Key Components:
 - Shard Distribution: Intelligent placement of encrypted file shards
 - Bandwidth Optimization: Adaptive bandwidth management and QoS
 - Node Reputation: Trust-based peer selection and behavior tracking
-- Fallback Storage: IPFS integration for reliability and redundancy
 
 The P2P network layer ensures that no single node has access to complete
 files, while maintaining high availability and performance through
@@ -58,15 +57,6 @@ from .node_reputation import (
     ReputationTracker
 )
 
-from .fallback_storage import (
-    FallbackStorageManager,
-    IPFSClient,
-    IPFSNode,
-    StoredContent,
-    StorageStrategy,
-    StorageStatus
-)
-
 # Version information
 __version__ = "1.0.0"
 __author__ = "PRSM Development Team"
@@ -107,14 +97,6 @@ __all__ = [
     'NodeMetrics',
     'ReputationCalculator',
     'ReputationTracker',
-    
-    # Fallback Storage
-    'FallbackStorageManager',
-    'IPFSClient',
-    'IPFSNode',
-    'StoredContent',
-    'StorageStrategy',
-    'StorageStatus'
 ]
 
 # Module documentation
@@ -147,12 +129,6 @@ infrastructure for PRSM's secure collaboration platform. It provides:
    - Misbehavior detection and penalties
    - Trust-based peer selection
 
-5. **Resilient Fallback Storage**
-   - IPFS integration for data redundancy
-   - Hybrid storage strategies
-   - Automatic failover and recovery
-   - Content addressing and verification
-
 The "Coca Cola Recipe" Security Model ensures that file contents are
 cryptographically sharded and distributed such that no single node
 can access complete files without proper authorization.
@@ -180,11 +156,6 @@ DEFAULT_CONFIG = {
         'preferred_reputation': 0.7,
         'cache_ttl': 300
     },
-    'fallback_storage': {
-        'default_strategy': 'hybrid',
-        'auto_pin_threshold': 10 * 1024 * 1024,  # 10MB
-        'verification_interval': 3600
-    }
 }
 
 def get_default_config():
@@ -232,46 +203,32 @@ def create_p2p_network(config=None):
     components['bandwidth_optimizer'] = BandwidthOptimizer(
         full_config['bandwidth_optimization']
     )
-    
-    # Fallback Storage (if IPFS nodes configured)
-    if 'ipfs_nodes' in full_config:
-        ipfs_client = IPFSClient(full_config['ipfs_nodes'])
-        components['fallback_storage'] = FallbackStorageManager(
-            ipfs_client,
-            full_config['fallback_storage']
-        )
-    
+
     return components
 
 async def start_p2p_network(components):
     """Start all P2P network components"""
     start_tasks = []
-    
+
     if 'node_discovery' in components:
         start_tasks.append(components['node_discovery'].start())
-    
+
     if 'bandwidth_optimizer' in components:
         start_tasks.append(components['bandwidth_optimizer'].start())
-    
-    if 'fallback_storage' in components:
-        start_tasks.append(components['fallback_storage'].start())
-    
+
     if start_tasks:
         await asyncio.gather(*start_tasks, return_exceptions=True)
 
 async def stop_p2p_network(components):
     """Stop all P2P network components"""
     stop_tasks = []
-    
-    if 'fallback_storage' in components:
-        stop_tasks.append(components['fallback_storage'].stop())
-    
+
     if 'bandwidth_optimizer' in components:
         stop_tasks.append(components['bandwidth_optimizer'].stop())
-    
+
     if 'node_discovery' in components:
         stop_tasks.append(components['node_discovery'].stop())
-    
+
     if stop_tasks:
         await asyncio.gather(*stop_tasks, return_exceptions=True)
 
