@@ -106,9 +106,6 @@ class NodeConfig:
     # Storage paths
     data_dir: str = field(default_factory=lambda: str(Path.home() / ".prsm"))
 
-    # IPFS
-    ipfs_api_url: str = "http://127.0.0.1:5001"
-
     # FTNS
     welcome_grant: float = 100.0
 
@@ -231,7 +228,6 @@ class NodeConfig:
             "gossip_ttl": self.gossip_ttl,
             "heartbeat_interval": self.heartbeat_interval,
             "data_dir": self.data_dir,
-            "ipfs_api_url": self.ipfs_api_url,
             "welcome_grant": self.welcome_grant,
             "target_peers": self.target_peers,
             "announce_interval": self.announce_interval,

@@ -194,7 +194,7 @@ class NodeDashboard:
         return Panel(lines, title="Content & Economy", border_style="yellow")
 
     def _build_compute(self, status: Dict[str, Any]) -> Panel:
-        """Compute & storage panel: CPU, RAM, jobs, IPFS, storage."""
+        """Compute & storage panel: CPU, RAM, jobs, ContentStore, storage."""
         compute = status.get("compute") or {}
         storage = status.get("storage") or {}
 
@@ -218,14 +218,14 @@ class NodeDashboard:
             lines.append("  Compute: not enabled\n", style="dim")
 
         if storage:
-            ipfs_ok = storage.get("ipfs_available", False)
+            store_ok = storage.get("storage_available", False)
             pledged = storage.get("pledged_gb", 0)
             used = storage.get("used_gb", 0)
             pinned = storage.get("pinned_cids", 0)
 
-            lines.append("  IPFS: ", style="")
-            lines.append("connected\n" if ipfs_ok else "not available\n",
-                          style="green" if ipfs_ok else "dim")
+            lines.append("  Store: ", style="")
+            lines.append("connected\n" if store_ok else "not available\n",
+                          style="green" if store_ok else "dim")
             lines.append(f"  Storage: {used:.1f} / {pledged} GB\n")
             lines.append(f"  Pinned: {pinned} CIDs\n")
         else:

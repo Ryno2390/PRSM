@@ -91,7 +91,6 @@ def content_provider(mock_identity, mock_transport, mock_gossip, mock_content_in
         identity=mock_identity,
         transport=mock_transport,
         gossip=mock_gossip,
-        ipfs_api_url="http://127.0.0.1:5001",
         content_index=mock_content_index,
     )
     return provider
@@ -226,12 +225,12 @@ class TestContentResponseMessage:
     
     def test_create_response_error(self):
         """Test creating an error response."""
-        response = ContentResponseMessage.error_response("req123", "QmTestCID", "IPFS error")
+        response = ContentResponseMessage.error_response("req123", "QmTestCID", "Storage error")
         
         assert response.request_id == "req123"
         assert response.cid == "QmTestCID"
         assert response.status == ContentStatus.ERROR
-        assert response.error == "IPFS error"
+        assert response.error == "Storage error"
     
     def test_response_to_payload_inline(self):
         """Test serializing inline response to payload."""
@@ -266,13 +265,13 @@ class TestContentResponseMessage:
             status=ContentStatus.FOUND,
             size=5_000_000,  # Large file
             transfer_mode=TransferMode.GATEWAY,
-            gateway_url="http://127.0.0.1:8080/ipfs/QmTestCID",
+            gateway_url="prsm://content/QmTestCID",
         )
         
         payload = response.to_payload()
         
         assert payload["transfer_mode"] == "gateway"
-        assert payload["gateway_url"] == "http://127.0.0.1:8080/ipfs/QmTestCID"
+        assert payload["gateway_url"] == "prsm://content/QmTestCID"
         assert "data_b64" not in payload
     
     def test_response_from_payload_inline(self):
@@ -597,8 +596,8 @@ class TestContentProvider:
             filename="test.txt",
         )
         
-        # Mock IPFS cat
-        with patch.object(content_provider, '_ipfs_cat', new_callable=AsyncMock) as mock_cat:
+        # Mock content fetch
+        with patch.object(content_provider, '_fetch_local', new_callable=AsyncMock) as mock_cat:
             mock_cat.return_value = test_data
             
             # Create mock peer
@@ -642,8 +641,8 @@ class TestContentProvider:
             filename="large.bin",
         )
         
-        # Mock IPFS cat
-        with patch.object(content_provider, '_ipfs_cat', new_callable=AsyncMock) as mock_cat:
+        # Mock content fetch
+        with patch.object(content_provider, '_fetch_local', new_callable=AsyncMock) as mock_cat:
             mock_cat.return_value = b"x" * large_size
             
             # Create mock peer
@@ -683,7 +682,7 @@ class TestContentProvider:
             content_hash=hashlib.sha256(test_data).hexdigest(),
         )
         
-        with patch.object(content_provider, '_ipfs_cat', new_callable=AsyncMock) as mock_cat:
+        with patch.object(content_provider, '_fetch_local', new_callable=AsyncMock) as mock_cat:
             mock_cat.return_value = test_data
             
             result = await content_provider.request_content("QmLocalCID")
@@ -897,8 +896,8 @@ class TestCrossNodeContentIntegration:
         # Node B discovers content via gossip
         provider_b.content_discovery.announce_content("QmSharedCID", "node_alpha")
         
-        # Mock IPFS cat on node A
-        with patch.object(provider_a, '_ipfs_cat', new_callable=AsyncMock) as mock_cat:
+        # Mock content fetch on node A
+        with patch.object(provider_a, '_fetch_local', new_callable=AsyncMock) as mock_cat:
             mock_cat.return_value = test_data
             
             # Simulate request/response flow
@@ -941,8 +940,8 @@ class TestErrorHandling:
     """Tests for error handling in content retrieval."""
     
     @pytest.mark.asyncio
-    async def test_ipfs_failure(self, content_provider, mock_transport):
-        """Test handling IPFS failure."""
+    async def test_fetch_failure(self, content_provider, mock_transport):
+        """Test handling content fetch failure."""
         content_provider.start()
         
         content_provider.register_local_content(
@@ -951,9 +950,9 @@ class TestErrorHandling:
             content_hash="abc123",
         )
         
-        # Mock IPFS failure
-        with patch.object(content_provider, '_ipfs_cat', new_callable=AsyncMock) as mock_cat:
-            mock_cat.return_value = None  # IPFS failed
+        # Mock fetch failure
+        with patch.object(content_provider, '_fetch_local', new_callable=AsyncMock) as mock_cat:
+            mock_cat.return_value = None  # fetch failed
             
             peer = MagicMock()
             peer.peer_id = "requester"
@@ -994,11 +993,11 @@ class TestErrorHandling:
             status=ContentStatus.FOUND,
             size=5_000_000,
             transfer_mode=TransferMode.GATEWAY,
-            gateway_url="http://invalid:8080/ipfs/QmCID",
+            gateway_url="prsm://content/QmCID",
         )
         
         # Mock gateway fetch failure
-        with patch.object(content_provider, '_fetch_from_gateway', new_callable=AsyncMock) as mock_fetch:
+        with patch.object(content_provider, '_fetch_from_url', new_callable=AsyncMock) as mock_fetch:
             mock_fetch.return_value = None
             
             result = await content_provider._request_from_provider(

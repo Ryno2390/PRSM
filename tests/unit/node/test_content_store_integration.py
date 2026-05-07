@@ -7,7 +7,7 @@ sites in prsm/node/storage_provider.py and prsm/node/content_provider.py:
   * StorageProvider._get_content_size must read ContentStore, not return 0.
   * StorageProvider.pin_content must mark pinned content with the real size.
   * StorageProvider.verify_pin must match ContentStore state.
-  * ContentProvider._ipfs_cat must round-trip content through ContentStore.
+  * ContentProvider._fetch_local must round-trip content through ContentStore.
 
 These tests exercise the real ContentStore (no IPFS, no mocks).
 """
@@ -84,7 +84,7 @@ class TestStorageProviderContentStoreWiring:
         cid_hex = content_hash.hex()
 
         provider = StorageProvider.__new__(StorageProvider)
-        provider.ipfs_available = True
+        provider.storage_available = True
         provider.pinned_content = {}
 
         assert await provider.pin_content(cid_hex) is True
@@ -100,7 +100,7 @@ class TestStorageProviderContentStoreWiring:
         cid_hex = content_hash.hex()
 
         provider = StorageProvider.__new__(StorageProvider)
-        provider.ipfs_available = True
+        provider.storage_available = True
 
         assert await provider.verify_pin(cid_hex) is True
         # A valid-format hex digest that was never stored must not be found.
@@ -110,8 +110,8 @@ class TestStorageProviderContentStoreWiring:
 class TestContentProviderContentStoreWiring:
     """ContentProvider retrieves content through the real ContentStore."""
 
-    async def test_ipfs_cat_round_trips_through_contentstore(self, content_store):
-        """_ipfs_cat() retrieves bytes stored via ContentStore.store_local."""
+    async def test_fetch_local_round_trips_through_contentstore(self, content_store):
+        """_fetch_local() retrieves bytes stored via ContentStore.store_local."""
         from prsm.node.content_provider import ContentProvider
 
         payload = b"content-provider-roundtrip" * 8
@@ -120,23 +120,23 @@ class TestContentProviderContentStoreWiring:
 
         provider = ContentProvider.__new__(ContentProvider)
 
-        retrieved = await provider._ipfs_cat(cid_hex)
+        retrieved = await provider._fetch_local(cid_hex)
         assert retrieved == payload
 
-    async def test_ipfs_cat_returns_none_for_missing(self, content_store):
-        """_ipfs_cat() returns None when the content is absent."""
+    async def test_fetch_local_returns_none_for_missing(self, content_store):
+        """_fetch_local() returns None when the content is absent."""
         from prsm.node.content_provider import ContentProvider
 
         provider = ContentProvider.__new__(ContentProvider)
         # Valid-format hex (sha256 prefix 0x01) for content never stored.
-        retrieved = await provider._ipfs_cat("01" + "ab" * 32)
+        retrieved = await provider._fetch_local("01" + "ab" * 32)
         assert retrieved is None
 
-    async def test_ipfs_cat_returns_none_for_malformed_id(self, content_store):
-        """_ipfs_cat() returns None instead of raising for malformed hex."""
+    async def test_fetch_local_returns_none_for_malformed_id(self, content_store):
+        """_fetch_local() returns None instead of raising for malformed hex."""
         from prsm.node.content_provider import ContentProvider
 
         provider = ContentProvider.__new__(ContentProvider)
         # Unknown algorithm byte 0xff must not raise ValueError out of the method.
-        retrieved = await provider._ipfs_cat("ff" * 32)
+        retrieved = await provider._fetch_local("ff" * 32)
         assert retrieved is None

@@ -509,7 +509,7 @@ class PRSMNode:
     - Gossip protocol
     - Compute provider (accept jobs)
     - Compute requester (submit jobs)
-    - Storage provider (IPFS pins)
+    - Storage provider (ContentStore pins)
     - Content uploader (provenance + royalties)
     - Management API (FastAPI)
     """
@@ -558,7 +558,6 @@ class PRSMNode:
         self._started = False
         self._start_time: Optional[float] = None
         self._api_task: Optional[asyncio.Task] = None
-        self._ipfs_daemon_proc: Optional[Any] = None  # Track IPFS daemon process if we started it
 
     async def initialize(self) -> None:
         """Load or generate identity, initialize all subsystems."""
@@ -689,7 +688,6 @@ class PRSMNode:
                 identity=self.identity,
                 gossip=self.gossip,
                 ledger=self.ledger,
-                ipfs_api_url=self.config.ipfs_api_url,
                 pledged_gb=self.config.storage_gb,
                 config=self.config,
                 transport=self.transport,
@@ -804,7 +802,6 @@ class PRSMNode:
             identity=self.identity,
             transport=self.transport,
             gossip=self.gossip,
-            ipfs_api_url=self.config.ipfs_api_url,
             content_index=self.content_index,
             bandwidth_limiter=_bandwidth_limiter,
         )
@@ -842,8 +839,7 @@ class PRSMNode:
         # Native-storage migration PR 2c: content_publisher / content_retriever
         # are attached AFTER the BT layer is initialised below (~line 950).
         # The uploader's internal _publish_content / _fetch_content helpers
-        # log + return None until that attachment runs — which is the same
-        # behaviour the legacy IPFS path produced when the daemon was down.
+        # log + return None until that attachment runs.
         self.content_uploader = ContentUploader(
             identity=self.identity,
             gossip=self.gossip,
@@ -1639,17 +1635,6 @@ class PRSMNode:
 
         self._started = False
         logger.info("PRSM node stopped")
-
-    async def _ensure_ipfs_available(self) -> bool:
-        """
-        Deprecated: IPFS is replaced by native ContentStore.
-        Returns True if ContentStore is available.
-        """
-        try:
-            from prsm.storage import get_content_store
-            return get_content_store() is not None
-        except Exception:
-            return False
 
     async def _seed_welcome_grant(self) -> None:
         """Rebuild wallet_balances cache from dag_transactions on startup.

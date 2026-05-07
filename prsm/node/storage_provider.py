@@ -2,8 +2,8 @@
 Storage Provider
 ================
 
-IPFS pin space contribution for the PRSM network.
-Auto-detects local IPFS daemon, pledges configurable storage,
+Pin-space contribution to the PRSM proprietary content store.
+Auto-detects the local ContentStore, pledges configurable storage,
 accepts pin requests, and earns FTNS rewards for storage proofs.
 
 Includes challenge-response storage proof verification to ensure
@@ -86,11 +86,11 @@ class ChallengeConfig:
 
 
 class StorageProvider:
-    """Contributes IPFS pin space to the network and earns FTNS rewards.
+    """Contributes pin space to the network and earns FTNS rewards.
 
-    Requires a running IPFS daemon (Kubo) at the configured API URL.
-    Gracefully degrades if IPFS is not available — storage features
-    are disabled but the node continues to operate.
+    Requires a running PRSM ContentStore. Gracefully degrades if the
+    store is not available — storage features are disabled but the
+    node continues to operate.
 
     Includes challenge-response storage proof verification to ensure
     this provider (and remote providers) actually store the content
@@ -102,7 +102,6 @@ class StorageProvider:
         identity: NodeIdentity,
         gossip: GossipProtocol,
         ledger: LocalLedger,
-        ipfs_api_url: str = "",  # Deprecated: IPFS replaced by ContentStore
         pledged_gb: float = 10.0,
         reward_interval: float = 3600.0,  # 1 hour
         challenge_config: Optional[ChallengeConfig] = None,
@@ -117,7 +116,6 @@ class StorageProvider:
         self.ledger = ledger
         self.transport = transport
         self.discovery = discovery
-        self.ipfs_api_url = ipfs_api_url
         self.pledged_gb = pledged_gb
         self.reward_interval = reward_interval
         self.config = config  # NodeConfig for scheduling checks
@@ -142,18 +140,15 @@ class StorageProvider:
         # Challenge configuration
         self.challenge_config = challenge_config or ChallengeConfig()
 
-        self.ipfs_available = False
+        self.storage_available = False
         self.pinned_content: Dict[str, PinnedContent] = {}
         self._running = False
         self._tasks: List[asyncio.Task] = []
-        self._ipfs_session = None
         self.ledger_sync = None  # Set by node.py after construction
 
-        # Storage proof system - verifier for challenging other providers
-        # and prover for answering challenges to this provider.
-        # NOTE: the legacy ipfs_client kwarg was removed in the v1.5.0
-        # IPFS -> native-storage migration; StorageProofVerifier reads from
-        # the ContentStore when it needs shard bytes.
+        # Storage proof system: verifier challenges other providers; prover
+        # answers challenges to this provider. StorageProofVerifier reads
+        # shard bytes from the ContentStore.
         self._proof_verifier = StorageProofVerifier(
             challenge_timeout_minutes=self.challenge_config.challenge_timeout_minutes,
             max_pending_challenges=self.challenge_config.max_concurrent_challenges,
@@ -185,19 +180,13 @@ class StorageProvider:
         return max(0.0, self.pledged_gb - self.used_gb)
 
     async def start(self) -> None:
-        """Detect IPFS, register handlers, start reward and challenge loops."""
+        """Detect ContentStore, register handlers, start reward and challenge loops."""
         self._running = True
 
-        # Check IPFS availability
-        self.ipfs_available = await self._check_ipfs()
-        if self.ipfs_available:
+        self.storage_available = await self._check_content_store()
+        if self.storage_available:
             logger.info(f"ContentStore active, storage provider active ({self.pledged_gb}GB pledged)")
 
-            # Initialize the storage prover for answering challenges.
-            # NOTE: the legacy ipfs_client / ipfs_api_url kwargs were removed
-            # in the v1.5.0 IPFS -> ContentStore migration. StorageProver now
-            # takes an optional content_client; passing None keeps the prover
-            # relying on the caller to provide challenge bytes directly.
             self._storage_prover = StorageProver(
                 identity=self.identity,
             )
@@ -235,18 +224,13 @@ class StorageProvider:
         for task in self._tasks:
             task.cancel()
         self._tasks.clear()
-        
-        if self._ipfs_session:
-            await self._ipfs_session.close()
-            self._ipfs_session = None
-            
-        # Close the storage prover's IPFS session
+
         if self._storage_prover:
             await self._storage_prover.close()
             self._storage_prover = None
 
-    async def _check_ipfs(self) -> bool:
-        """Check if ContentStore is available (replaces IPFS daemon check).
+    async def _check_content_store(self) -> bool:
+        """Check if ContentStore is available.
 
         Initializes the global ContentStore singleton lazily if one is not
         already present. Returns True when the store is reachable.
@@ -260,10 +244,6 @@ class StorageProvider:
         except Exception:
             return False
 
-    async def _get_ipfs_session(self) -> Any:
-        """Deprecated: returns None (IPFS HTTP session no longer used)."""
-        return None
-
     async def pin_content(self, cid: str) -> bool:
         """Pin content in the local ContentStore.
 
@@ -271,7 +251,7 @@ class StorageProvider:
         method promotes it to "pinned" status (protected from GC) and
         records the authoritative size returned by ContentStore.
         """
-        if not self.ipfs_available:
+        if not self.storage_available:
             return False
         try:
             from prsm.storage import ContentHash, get_content_store
@@ -315,7 +295,7 @@ class StorageProvider:
 
     async def verify_pin(self, cid: str) -> bool:
         """Verify that content exists in the local ContentStore."""
-        if not self.ipfs_available:
+        if not self.storage_available:
             return False
         try:
             from prsm.storage import ContentHash, get_content_store
@@ -334,7 +314,7 @@ class StorageProvider:
 
     async def _on_storage_request(self, subtype: str, data: Dict[str, Any], origin: str) -> None:
         """Handle a storage request from the network."""
-        if not self._running or not self.ipfs_available:
+        if not self._running or not self.storage_available:
             return
 
         # Check if we're within active hours
@@ -438,7 +418,7 @@ class StorageProvider:
         logger.info("Storage provider registered for content serving")
 
     async def _on_direct_content_request(self, msg: P2PMessage, peer: PeerConnection) -> None:
-        """Serve pinned content via IPFS gateway URL.
+        """Serve pinned content via PRSM gateway URL.
 
         Phase 1.3 Task 3e: defer to ContentProvider when it has the CID
         in its _local_content — ContentProvider's serve path runs the
@@ -490,7 +470,7 @@ class StorageProvider:
             )
             return
 
-        gateway_url = f"http://127.0.0.1:8080/ipfs/{cid}"
+        gateway_url = f"prsm://content/{cid}"
         served = await self._content_provider.serve_on_behalf_of_replica(
             cid=cid,
             request_id=request_id,
@@ -673,7 +653,7 @@ class StorageProvider:
                         content.failed_challenges += 1
                         logger.warning(
                             f"Could not generate proof for {cid[:16]}... - "
-                            f"content may not be available in IPFS"
+                            f"content may not be available in ContentStore"
                         )
                         
                         # Verify if content is actually pinned
@@ -1056,7 +1036,7 @@ class StorageProvider:
         verifier_stats = self._proof_verifier.get_provider_stats(self.identity.node_id)
         
         return {
-            "ipfs_available": self.ipfs_available,
+            "storage_available": self.storage_available,
             "pledged_gb": self.pledged_gb,
             "used_gb": self.used_gb,
             "available_gb": self.available_gb,

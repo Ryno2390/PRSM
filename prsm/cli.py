@@ -1294,7 +1294,7 @@ def start(wizard: bool, background: bool, p2p_port: int, api_port: int, bootstra
                     table.add_row("GPU", res.get("gpu_name", "none") if res.get("gpu_available") else "none")
                 if status.get("storage"):
                     st = status["storage"]
-                    table.add_row("Storage", "connected" if st.get("storage_available", st.get("ipfs_available", False)) else "not available")
+                    table.add_row("Storage", "connected" if st.get("storage_available", False) else "not available")
                     table.add_row("Storage Pledged", f"{st['pledged_gb']} GB")
                 console.print(table)
                 console.print()

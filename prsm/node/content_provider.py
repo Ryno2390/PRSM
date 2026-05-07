@@ -52,7 +52,7 @@ class ContentStatus(str, Enum):
 class TransferMode(str, Enum):
     """How content is transferred."""
     INLINE = "inline"  # Base64 encoded in response
-    GATEWAY = "gateway"  # IPFS gateway URL provided
+    GATEWAY = "gateway"  # Gateway URL provided (peer-supplied, may be PRSM-native or HTTP)
 
 
 @dataclass
@@ -61,7 +61,7 @@ class ContentRequestMessage:
     
     Sent via direct P2P message to request content that a peer has advertised.
     """
-    cid: str  # IPFS content ID
+    cid: str  # PRSM content ID
     request_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
     priority: int = 0  # 0=normal, 1=high priority
     timeout: int = 30  # Request timeout in seconds
@@ -104,7 +104,7 @@ class ContentResponseMessage:
     size: int = 0  # Content size in bytes
     error: Optional[str] = None  # Error message if status is "error"
     transfer_mode: Optional[TransferMode] = None
-    gateway_url: Optional[str] = None  # IPFS gateway URL for large files
+    gateway_url: Optional[str] = None  # Gateway URL for large files (peer-supplied)
     content_hash: Optional[str] = None  # SHA-256 hash for verification
     filename: Optional[str] = None
     
@@ -333,24 +333,22 @@ class ContentProvider:
     
     This class is responsible for:
     1. Receiving and processing content requests from peers
-    2. Retrieving content from local IPFS node
+    2. Retrieving content from the local ContentStore
     3. Sending content responses (inline or gateway URL)
     4. Requesting content from other peers when acting as a client
     
     Integration Points:
     - Transport: Receives MSG_DIRECT messages with content_request subtype
-    - IPFS: Retrieves content via IPFS cat API
+    - ContentStore: Retrieves content via the PRSM proprietary content store
     - Gossip: Announces content availability
     - ContentIndex: Looks up providers for content
     """
-    
+
     def __init__(
         self,
         identity: NodeIdentity,
         transport: WebSocketTransport,
         gossip: GossipProtocol,
-        ipfs_api_url: str = "",  # Deprecated: IPFS replaced by ContentStore
-        ipfs_gateway_url: str = "",  # Deprecated: IPFS replaced by ContentStore
         content_index: Optional[Any] = None,
         content_discovery: Optional[ContentDiscovery] = None,
         default_timeout: float = DEFAULT_REQUEST_TIMEOUT,
@@ -360,8 +358,6 @@ class ContentProvider:
         self.identity = identity
         self.transport = transport
         self.gossip = gossip
-        self.ipfs_api_url = ipfs_api_url
-        self.ipfs_gateway_url = ipfs_gateway_url
         self.content_index = content_index
         self.content_discovery = content_discovery or ContentDiscovery()
         self.default_timeout = default_timeout
@@ -381,10 +377,10 @@ class ContentProvider:
         
         # Semaphore to limit concurrent requests
         self._request_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
-        
-        # HTTP session for IPFS operations
-        self._ipfs_session: Optional[Any] = None
-        
+
+        # HTTP session for cross-node gateway fetches
+        self._http_session: Optional[Any] = None
+
         # Telemetry
         self._telemetry: Dict[str, Any] = {
             "requests_received": 0,
@@ -408,10 +404,10 @@ class ContentProvider:
     
     async def stop(self) -> None:
         """Clean up resources."""
-        if self._ipfs_session:
-            await self._ipfs_session.close()
-            self._ipfs_session = None
-        
+        if self._http_session:
+            await self._http_session.close()
+            self._http_session = None
+
         # Cancel any pending requests
         for future in self._pending_requests.values():
             if not future.done():
@@ -431,7 +427,7 @@ class ContentProvider:
         """Register content that this node can serve.
         
         Args:
-            cid: IPFS content identifier
+            cid: PRSM content identifier
             size_bytes: Size of the content
             content_hash: SHA-256 hash of the content
             filename: Optional filename
@@ -495,7 +491,7 @@ class ContentProvider:
         
         This is the server-side handler that:
         1. Checks if we have the content
-        2. Retrieves it from IPFS
+        2. Retrieves it from the local ContentStore
         3. Sends the response
         """
         self._telemetry["requests_received"] += 1
@@ -516,11 +512,10 @@ class ContentProvider:
             return
         
         try:
-            # Retrieve from IPFS
-            content_bytes = await self._ipfs_cat(cid)
+            content_bytes = await self._fetch_local(cid)
             if content_bytes is None:
                 response = ContentResponseMessage.error_response(
-                    request_id, cid, "Failed to retrieve from IPFS"
+                    request_id, cid, "Failed to retrieve from ContentStore"
                 )
                 await self._send_response(peer.peer_id, response)
                 self._telemetry["requests_failed"] += 1
@@ -547,7 +542,7 @@ class ContentProvider:
                 )
             else:
                 # Provide gateway URL for large files
-                gateway_url = f"{self.ipfs_gateway_url}/ipfs/{cid}"
+                gateway_url = f"prsm://content/{cid}"
                 response = ContentResponseMessage(
                     request_id=request_id,
                     cid=cid,
@@ -659,7 +654,7 @@ class ContentProvider:
         
         # Check if we have it locally first
         if cid in self._local_content:
-            local_bytes = await self._ipfs_cat(cid)
+            local_bytes = await self._fetch_local(cid)
             if local_bytes is not None:
                 logger.debug(f"Retrieved {cid[:12]}... locally")
                 return local_bytes
@@ -787,7 +782,7 @@ class ContentProvider:
             content_bytes = response.data
         
         elif response.transfer_mode == TransferMode.GATEWAY and response.gateway_url:
-            content_bytes = await self._fetch_from_gateway(response.gateway_url)
+            content_bytes = await self._fetch_from_url(response.gateway_url)
         
         if content_bytes is None:
             return None
@@ -834,13 +829,16 @@ class ContentProvider:
             f"Discovered content {announcement.cid[:12]}... at {announcement.provider_id[:8]}"
         )
     
-    # ── IPFS Operations ─────────────────────────────────────────────────
-    
-    async def _get_ipfs_session(self) -> Any:
-        """Deprecated: returns None (IPFS HTTP session no longer used)."""
-        return None
+    # ── Content Store / Gateway Operations ─────────────────────────────
 
-    async def _ipfs_cat(self, content_id: str) -> Optional[bytes]:
+    async def _get_http_session(self) -> Any:
+        """Lazily create and return a shared aiohttp session for gateway fetches."""
+        if self._http_session is None:
+            import aiohttp
+            self._http_session = aiohttp.ClientSession()
+        return self._http_session
+
+    async def _fetch_local(self, content_id: str) -> Optional[bytes]:
         """Retrieve content from the local ContentStore by content hash.
 
         Returns None (never raises) for any of: ContentStore unavailable,
@@ -865,12 +863,21 @@ class ContentProvider:
         except (StorageError, OSError) as e:
             logger.error(f"ContentStore retrieve failed for {content_id[:12]}...: {e}")
         return None
-    
-    async def _fetch_from_gateway(self, gateway_url: str) -> Optional[bytes]:
-        """Fetch content from an IPFS gateway URL."""
+
+    async def _fetch_from_url(self, gateway_url: str) -> Optional[bytes]:
+        """Fetch content via HTTP from a peer-supplied gateway URL.
+
+        Used when a peer responds with TransferMode.GATEWAY instead of
+        inline bytes. The URL scheme is whatever the peer publishes (e.g.
+        ``prsm://`` for in-network gateways, ``http(s)://`` for HTTP-fronted
+        nodes); only ``http``/``https`` are actually fetchable here.
+        """
+        if not gateway_url.startswith(("http://", "https://")):
+            logger.debug(f"Skipping non-HTTP gateway URL: {gateway_url}")
+            return None
         try:
             import aiohttp
-            session = await self._get_ipfs_session()
+            session = await self._get_http_session()
             async with session.get(
                 gateway_url,
                 timeout=aiohttp.ClientTimeout(total=120),
