@@ -132,10 +132,10 @@ Step 7 inference settlement than Step 6 data-query settlement.
 | `prsm_analyze` | `/compute/forge` | ❌ BROKEN | 503 — `agent_forge=None` |
 | `prsm_create_agent` | (local; just builds JSON manifest) | ✅ REAL | Manifest is unconsumable downstream |
 | `prsm_dispatch_agent` | `/compute/forge` | ❌ BROKEN | 503 |
-| `prsm_agent_status` | TBD — depends on `/compute/forge` job_id | ⚠️ ORPHAN | No jobs to query |
-| `prsm_quote` | `/compute/forge/quote` | ⚠️ LIKELY BROKEN | Same agent_forge dep — needs verification |
-| `prsm_search_shards` | TBD | ⚠️ UNVERIFIED | Outside this pass |
-| `prsm_upload_dataset` | TBD | ⚠️ UNVERIFIED | Creator path; outside this pass |
+| `prsm_agent_status` | `/compute/status/{job_id}` | ❌ BROKEN | Backing endpoint does not exist on node API — call returns 404. Confirmed via grep on `prsm/node/api.py`. |
+| `prsm_quote` | local `PricingEngine` | ✅ REAL | Uses pricing module directly; does NOT call `/compute/forge/quote`. Earlier guess was wrong. |
+| `prsm_search_shards` | `/content/search` → `node.content_index.search()` | ✅ REAL | |
+| `prsm_upload_dataset` | `/content/upload/shard` | ⚠️ **STUB — CRITICAL** | Registers a `SemanticShardManifest` in `data_listing_manager` but **does NOT upload to IPFS**. Per `prsm/node/api.py:1392` the CIDs are placeholders (`cid=f"Qm{dataset_id}-{i:04d}"`) with comment `# Placeholder until IPFS upload`. **Creator-economy implication:** the canonical creator flow ("Creators publish data via `prsm_upload_dataset`; earn 6.4% royalty continuously as queries hit their content") cannot work — queries would have nothing to route against because nothing real is actually published. |
 | `prsm_node_status` | local node API | ✅ REAL | Status read |
 | `prsm_hardware_benchmark` | local | ✅ REAL | Benchmarking framework live |
 | `prsm_yield_estimate` | local | ✅ REAL | Calculator |
@@ -143,13 +143,14 @@ Step 7 inference settlement than Step 6 data-query settlement.
 | `prsm_revenue_split` | on-chain RoyaltyDistributor | ✅ REAL | Wired to live mainnet contract |
 | `prsm_settlement_stats` | local settler registry | ✅ REAL | |
 | `prsm_privacy_status` | local privacy budget | ✅ REAL | Phase 3.x.4 |
-| `prsm_training_status` | local NWTN training (Ring 9) | ⚠️ PARTIAL | Ring 9 kept; surface unverified |
+| `prsm_training_status` | `/rings/status` → DashboardMetrics + local TrainingEvaluator | ✅ REAL | Hits real Ring 9 surface; degrades gracefully when traces are scarce |
 | `prsm_billing_status` | local billing tracker | ✅ REAL | Phase 3.x.1 Task 7 |
-| `prsm_list_datasets` | local catalog | ⚠️ UNVERIFIED | Outside this pass |
+| `prsm_list_datasets` | `/content/search` → `node.content_index.search()` | ✅ REAL | Same backend as `prsm_search_shards` |
 
-**Verified-real tools: 9 of 18.** **Verified-broken tools: 3 of 18
-(prsm_analyze, prsm_dispatch_agent, plus prsm_agent_status as
-collateral damage).** Unverified or partial: 6.
+**Final tally after 2026-05-07 unverified-6 walk:**
+- **REAL: 13 of 18** — quote, list_datasets, search_shards, training_status promoted from unverified.
+- **BROKEN: 4 of 18** — analyze, dispatch_agent, agent_status (confirmed: `/compute/status/{job_id}` endpoint does not exist), and the implicit collateral on any tool that depends on `/compute/forge`.
+- **STUB: 1 of 18** — `prsm_upload_dataset` registers a manifest but does not upload to IPFS (CIDs are placeholders). **This is the second load-bearing finding.** The creator-economy pillar of PRSM (Vision: creators earn 6.4% royalty as queries hit their content) cannot work end-to-end without (a) IPFS upload completion AND (b) QueryOrchestrator reconstruction. Either one alone is insufficient.
 
 ## What "fully operational" needs
 
@@ -220,19 +221,27 @@ with the "⚠️ UNVERIFIED" rows promoted to ✅ or ❌.
 
 ## What this means for "fully operational"
 
-**Honest framing:** PRSM today is a **mainnet-live private inference
-network** (the canonical step-7 settlement is real, the
-`prsm_inference` path delivers TEE-attested model inference with
-verifiable receipts on mainnet). The **data-query path** that
-Tokenomics §5.1 routes 6.4% creator royalty + 72% compute provider
-splits through has been broken since v1.6.0 and the rebuild is the
-critical path to "fully operational" in the sense of the canonical
-8-step workflow.
+**Honest framing (post-2026-05-07 walk):** PRSM today is a
+**mainnet-live private inference network** (the canonical step-7
+settlement is real, the `prsm_inference` path delivers TEE-attested
+model inference with verifiable receipts on mainnet). The
+**data-query path** that Tokenomics §5.1 routes 6.4% creator royalty +
+72% compute provider splits through is broken at TWO layers:
+
+1. **Orchestration layer** — `/compute/forge` returns 503 because Agent
+   Forge was deleted in v1.6.0 (no QueryOrchestrator successor).
+2. **Content-distribution layer** — `prsm_upload_dataset` is a
+   registration stub; even with the orchestration layer rebuilt,
+   queries would have no real content to route against because
+   `/content/upload/shard` doesn't actually push to IPFS.
+
+**Both layers must be functional for the canonical creator-and-querier
+workflow to close the loop.** Fixing only one is insufficient.
 
 The Risk Register should reflect this — current investor-facing
 materials may overstate "fully operational" if they describe the
-data-query path as functional. (Out of scope for this gap-list to
-audit; flag for separate review.)
+data-query path or creator-economy as functional. (Out of scope for
+this gap-list to audit; flag for separate review.)
 
 ## Recommended next-step ordering
 
