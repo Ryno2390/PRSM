@@ -15,7 +15,7 @@
 | HIGH | 1 (A-06) | **REMEDIATED 2026-05-07** in this same sprint via the paired-tracker patch (BSR `lastPendingBatchPausedAtAccrual` + `ISlasherWithProviderExpiryAndPause` reader in StakeBond). |
 | MEDIUM | 1 (A-07) | Re-classification: MED-7 in 2026-05-06 disposition matrix moves from REMEDIATED → REMEDIATED-PARTIAL. The 7-day timelock the policy referenced was NOT shipped; only the `code.length > 0` check was. The per-batch D-03 snapshot still protects in-flight batches. |
 | LOW | 0 | n/a |
-| INFO | 2 (A-08, B-INFO-B7-1, B-INFO-B7-2) | A-08: RoyaltyDistributor donation strand mirrors LOW-1 (bundle when convenient). B-INFO-B7-1: `EscrowPool.setFtnsToken` lacks `code.length > 0` check (consistency, risk-bounded). B-INFO-B7-2: `lastPendingBatchExpiry` not cleared on finalize (conservative-by-design, non-exploitable). |
+| INFO | 3 (A-08, B-INFO-B7-1, B-INFO-B7-2) | **A-08: REMEDIATED 2026-05-07** — RoyaltyDistributor v2 source ships Ownable2Step + `recoverStranded(address to)` + `totalClaimable` accumulator. 9 regression tests (commit `877b380d`). Lands on mainnet via the planned v2 redeploy (HIGH-1 + HIGH-3 bundle). **B-INFO-B7-1: REMEDIATED** in earlier sprint — `EscrowPool.setFtnsToken` `code.length > 0` check shipped. B-INFO-B7-2: `lastPendingBatchExpiry` not cleared on finalize (conservative-by-design, non-exploitable; deferred). |
 
 ## 3. The HIGH (A-06) — fix shipped this sprint
 
@@ -52,9 +52,9 @@ Re-classify MED-7 in `audits/findings/L4-self-2026-05-06/consolidated.md` from `
 
 ## 5. The 3 INFOs — defensive cleanups
 
-- **A-08:** RoyaltyDistributor mirrors LOW-1 / A-04 donation strand. RoyaltyDistributor has no `Ownable*` so a `recoverStranded` surface would need an owner role added first. Bundle with the LOW-1 fix when convenient.
-- **B-INFO-B7-1:** `EscrowPool.setFtnsToken` lacks `code.length > 0` check (inconsistency with the BSR setters). Risk-bounded by B-CROSS-2's `totalEscrowedBalance == 0` precondition. Trivial to add.
-- **B-INFO-B7-2:** `lastPendingBatchExpiry` is never cleared when a batch finalizes; stale future values are dominated by the always-future `localFloor`, so no over-blocking; not exploitable. Conservative-by-design. Could be cleared in `finalizeBatch` for cleanliness.
+- **A-08: REMEDIATED 2026-05-07.** RoyaltyDistributor v2 source on disk now ships `Ownable2Step` + `recoverStranded(address to)` + the `totalClaimable` accumulator that backs it (invariant `balance(this) >= totalClaimable` enforced via lockstep updates with the `claimable[]` mapping). 9 regression tests in `test/RoyaltyDistributor.test.js`. ADR at `docs/governance/A-08-recoverStranded-design.md`. Patch is in commit `877b380d`. **Mainnet impact: NONE** — mainnet RoyaltyDistributor v1 (`0x3E82…D6c2`) is still the push-payment + 3-arg-constructor build; A-08 lands when the already-planned v2 redeploy ceremony fires (bundling HIGH-1 / A-01 push→pull migration + HIGH-3 / D-02 Pausable disposition).
+- **B-INFO-B7-1: REMEDIATED** in an earlier same-day sprint (commit `976ff807`) — `EscrowPool.setFtnsToken` now reverts `TokenNotContract(provided)` when `newToken.code.length == 0`. Mirrors the BSR setter's MED-7 pattern; risk-bounded by the existing B-CROSS-2 `totalEscrowedBalance == 0` precondition.
+- **B-INFO-B7-2:** `lastPendingBatchExpiry` is never cleared when a batch finalizes; stale future values are dominated by the always-future `localFloor`, so no over-blocking; not exploitable. Conservative-by-design — deferred. Could be cleared in `finalizeBatch` for cleanliness if a future sweep wants to bundle it.
 
 ## 6. Vectors evaluated and cleared (cross-team consensus)
 
