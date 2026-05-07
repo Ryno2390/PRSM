@@ -212,7 +212,7 @@ class SystemHealth(BaseModel):
                 "components": {
                     "database": {"status": "healthy", "response_time_ms": 15.2},
                     "redis": {"status": "healthy", "response_time_ms": 8.1},
-                    "ipfs": {"status": "healthy", "response_time_ms": 45.6},
+                    "content_store": {"status": "healthy", "response_time_ms": 45.6},
                     "vector_db": {"status": "healthy", "response_time_ms": 23.4}
                 },
                 "response_time_ms": 245.5

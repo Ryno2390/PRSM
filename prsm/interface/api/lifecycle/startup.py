@@ -38,7 +38,7 @@ async def startup_sequence(app: FastAPI) -> None:
     2. Initialize database connections
     3. Initialize Redis caching
     4. Initialize vector databases
-    5. Initialize IPFS
+    5. Initialize native content storage
     6. Initialize security systems
     7. Initialize authentication
     8. Initialize secure credentials
@@ -62,8 +62,8 @@ async def startup_sequence(app: FastAPI) -> None:
     # Step 4: Initialize vector databases
     await _init_vector_databases()
 
-    # Step 5: Initialize IPFS
-    await _init_ipfs()
+    # Step 5: Initialize native content storage
+    await _init_content_store()
 
     # Step 6: Initialize secure credentials
     await _init_secure_credentials()
@@ -138,8 +138,8 @@ async def _init_vector_databases() -> None:
         logger.warning("Vector database initialization failed", error=str(e))
 
 
-async def _init_ipfs() -> None:
-    """Initialize native content storage."""
+async def _init_content_store() -> None:
+    """Initialize the PRSM native content store."""
     try:
         from prsm.storage import init_content_store
         init_content_store()

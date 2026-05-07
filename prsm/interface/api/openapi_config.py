@@ -109,12 +109,8 @@ API_TAGS_METADATA = [
         "description": "Frontend user interface endpoints and web application integration.",
     },
     {
-        "name": "IPFS",
-        "description": "Distributed storage system integration and file management.",
-        "externalDocs": {
-            "description": "IPFS Integration Guide",
-            "url": "https://docs.prsm-network.com/ipfs"
-        }
+        "name": "Storage",
+        "description": "PRSM proprietary content store: distributed storage and file management.",
     },
     {
         "name": "WebSocket",

@@ -143,30 +143,29 @@ class HealthChecker:
                 last_check=datetime.utcnow()
             )
     
-    async def check_ipfs(self) -> ComponentHealth:
-        """Check IPFS node health"""
+    async def check_content_store(self) -> ComponentHealth:
+        """Check PRSM native content store health"""
         start_time = time.time()
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"http://{settings.IPFS_HOST}:{settings.IPFS_API_PORT}/api/v0/id")
-                response.raise_for_status()
-                
-                data = response.json()
-                response_time = (time.time() - start_time) * 1000
-                
-                details = {
-                    "node_id": data.get("ID"),
-                    "agent_version": data.get("AgentVersion"),
-                    "protocol_version": data.get("ProtocolVersion")
-                }
-                
+            from prsm.storage import get_content_store
+            store = get_content_store()
+            response_time = (time.time() - start_time) * 1000
+
+            if store is None:
                 return ComponentHealth(
-                    status="healthy",
+                    status="degraded",
                     response_time_ms=response_time,
-                    details=details,
-                    last_check=datetime.utcnow()
+                    error="ContentStore not initialized",
+                    last_check=datetime.utcnow(),
                 )
-                
+
+            return ComponentHealth(
+                status="healthy",
+                response_time_ms=response_time,
+                details={"backend": type(store).__name__},
+                last_check=datetime.utcnow(),
+            )
+
         except Exception as e:
             response_time = (time.time() - start_time) * 1000
             return ComponentHealth(
@@ -288,14 +287,14 @@ class HealthChecker:
     async def get_full_health_check(self) -> SystemHealth:
         """Perform comprehensive health check"""
         # Run all health checks concurrently
-        db_check, redis_check, ipfs_check, external_check = await asyncio.gather(
+        db_check, redis_check, content_check, external_check = await asyncio.gather(
             self.check_database(),
             self.check_redis(),
-            self.check_ipfs(),
+            self.check_content_store(),
             self.check_external_apis(),
             return_exceptions=True
         )
-        
+
         components = {
             "database": db_check if isinstance(db_check, ComponentHealth) else ComponentHealth(
                 status="unhealthy", error=str(db_check), last_check=datetime.utcnow()
@@ -303,8 +302,8 @@ class HealthChecker:
             "redis": redis_check if isinstance(redis_check, ComponentHealth) else ComponentHealth(
                 status="unhealthy", error=str(redis_check), last_check=datetime.utcnow()
             ),
-            "ipfs": ipfs_check if isinstance(ipfs_check, ComponentHealth) else ComponentHealth(
-                status="unhealthy", error=str(ipfs_check), last_check=datetime.utcnow()
+            "content_store": content_check if isinstance(content_check, ComponentHealth) else ComponentHealth(
+                status="unhealthy", error=str(content_check), last_check=datetime.utcnow()
             ),
             "external_apis": external_check if isinstance(external_check, ComponentHealth) else ComponentHealth(
                 status="unhealthy", error=str(external_check), last_check=datetime.utcnow()

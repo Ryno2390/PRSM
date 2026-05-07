@@ -206,7 +206,7 @@ def _register_health_endpoint(app: FastAPI) -> None:
                 health_status["components"]["redis"] = {"status": "unhealthy", "error": err}
                 has_configured_failure = True
 
-        # Content Store (replaces IPFS)
+        # Content Store (PRSM proprietary)
         try:
             store = get_content_store()
             if store is not None:

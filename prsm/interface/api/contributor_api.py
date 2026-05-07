@@ -461,7 +461,7 @@ async def get_validation_criteria(
         type_info = {
             ContributionType.STORAGE.value: {
                 "description": "Provide distributed storage for PRSM network data",
-                "required_fields": ["ipfs_hashes", "storage_duration_hours", "redundancy_factor"],
+                "required_fields": ["content_hashes", "storage_duration_hours", "redundancy_factor"],
                 "example_value_range": "0.01-10.0 FTNS per GB-hour"
             },
             ContributionType.COMPUTE.value: {

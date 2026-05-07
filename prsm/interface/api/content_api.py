@@ -2,10 +2,10 @@
 Content API
 ===========
 
-Authenticated endpoints for uploading content to IPFS with provenance
-registration. Distinct from ipfs_api.py (unauthenticated, raw IPFS
-passthrough) — this router requires user identity to record the creator
-and royalty configuration in the platform database.
+Authenticated endpoints for uploading content to the PRSM proprietary
+BitTorrent layer with provenance registration. Requires user identity
+to record the creator and royalty configuration in the platform
+database.
 
 Endpoints:
   POST /api/v1/content/upload                 Upload file with provenance
@@ -32,7 +32,7 @@ _DEFAULT_ROYALTY = 0.01
 
 @router.post("/upload")
 async def upload_content_with_provenance(
-    file: UploadFile = File(..., description="File to upload to IPFS"),
+    file: UploadFile = File(..., description="File to upload to the PRSM network"),
     description: str = Form("", description="Human-readable description"),
     royalty_rate: float = Form(
         _DEFAULT_ROYALTY,
@@ -46,13 +46,13 @@ async def upload_content_with_provenance(
     current_user: str = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """
-    Upload a file to IPFS and register a provenance record.
+    Upload a file to the PRSM network and register a provenance record.
 
     The authenticated user becomes the content's creator. When other users
     access this content, they will pay royalties at the configured rate to
     the creator's FTNS account.
 
-    For derivative works (content based on existing IPFS content), supply
+    For derivative works (content based on existing PRSM content), supply
     the source CIDs as parent_cids — the 70/25/5 royalty split will apply
     automatically.
 

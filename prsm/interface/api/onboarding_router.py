@@ -26,7 +26,6 @@ All POST endpoints accept both JSON (for API clients) and HTML form data
 from pathlib import Path
 from typing import Optional, Dict, Any
 import json
-import shutil
 import sys
 import importlib
 import socket
@@ -72,11 +71,6 @@ async def _run_prerequisite_checks() -> Dict[str, Any]:
             "ok": sys.version_info >= (3, 10),
             "value": sys.version.split()[0],
             "label": f"Python {sys.version.split()[0]}",
-        },
-        "ipfs_installed": {
-            "ok": bool(shutil.which("ipfs")),
-            "value": shutil.which("ipfs") or "not found",
-            "label": "IPFS CLI",
         },
         "anthropic_sdk": {
             "ok": importlib.util.find_spec("anthropic") is not None,
@@ -269,13 +263,9 @@ async def network_config_form(request: Request):
     """Step 4: Network configuration form."""
     global _pending_config
 
-    # Check IPFS status
-    ipfs_status = await _check_ipfs_status()
-
     if _wants_json(request):
         return JSONResponse({
             "step": 4,
-            "ipfs_status": ipfs_status,
             "current_config": {
                 "p2p_port": _pending_config.get("p2p_port", 8765),
                 "api_port": _pending_config.get("api_port", 8080),
@@ -286,36 +276,10 @@ async def network_config_form(request: Request):
     return templates.TemplateResponse(request, "onboarding/network.html", {
             "request": request,
             "step": 4,
-            "ipfs_status": ipfs_status,
             "p2p_port": _pending_config.get("p2p_port", 8765),
             "api_port": _pending_config.get("api_port", 8080),
             "bootstrap_nodes": ",".join(_pending_config.get("bootstrap_nodes", ["wss://bootstrap1.prsm-network.com:8765"]))
         })
-
-
-async def _check_ipfs_status() -> Dict[str, Any]:
-    """Check IPFS daemon status."""
-    # Check if installed
-    ipfs_path = shutil.which("ipfs")
-    if not ipfs_path:
-        return {"status": "not_installed", "message": "IPFS not found on PATH"}
-
-    # Check if running
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            resp = await client.post("http://127.0.0.1:5001/api/v0/id")
-            if resp.status_code == 200:
-                data = resp.json()
-                return {
-                    "status": "running",
-                    "message": f"IPFS node {data.get('ID', 'unknown')[:12]}...",
-                    "node_id": data.get("ID")
-                }
-    except Exception:
-        pass
-
-    return {"status": "installed_not_running", "message": "IPFS installed but not running"}
 
 
 @router.post("/network")
@@ -324,7 +288,6 @@ async def submit_network_config(
     p2p_port: int = Form(default=8765),
     api_port: int = Form(default=8080),
     bootstrap_nodes: str = Form(default="wss://bootstrap1.prsm-network.com:8765"),
-    ipfs_auto_start: str = Form(default="true"),
 ):
     """Save network configuration."""
     global _pending_config
@@ -340,7 +303,6 @@ async def submit_network_config(
     _pending_config["bootstrap_nodes"] = [
         n.strip() for n in bootstrap_nodes.split(",") if n.strip()
     ]
-    _pending_config["ipfs_auto_start"] = ipfs_auto_start.lower() == "true"
 
     if _wants_json(request):
         return JSONResponse({
@@ -349,7 +311,6 @@ async def submit_network_config(
                 "p2p_port": p2p_port,
                 "api_port": api_port,
                 "bootstrap_nodes": _pending_config["bootstrap_nodes"],
-                "ipfs_auto_start": _pending_config["ipfs_auto_start"]
             },
             "next": "/onboarding/identity"
         })
@@ -550,7 +511,6 @@ def _get_default_config() -> Dict[str, Any]:
         "p2p_port": 8765,
         "bootstrap_nodes": ["wss://bootstrap1.prsm-network.com:8765"],
         "node_identity_path": "config/node_identity.json",
-        "ipfs_auto_start": True,
         "api_port": 8080,
         "log_level": "INFO"
     }

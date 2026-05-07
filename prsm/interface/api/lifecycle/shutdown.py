@@ -19,7 +19,7 @@ async def shutdown_sequence(app: FastAPI) -> None:
     1. Close database connections
     2. Close Redis connections
     3. Close vector database connections
-    4. Close IPFS connections
+    4. Close native content store
     5. Shutdown security systems
 
     Args:
@@ -36,8 +36,8 @@ async def shutdown_sequence(app: FastAPI) -> None:
     # Step 3: Close vector databases
     await _close_vector_databases()
 
-    # Step 4: Close IPFS
-    await _close_ipfs()
+    # Step 4: Close native content store
+    await _close_content_store()
 
     # Step 5: Shutdown security systems
     await _shutdown_security_systems()
@@ -84,8 +84,8 @@ async def _close_vector_databases() -> None:
         logger.error("Error closing vector databases", error=str(e))
 
 
-async def _close_ipfs() -> None:
-    """Close content storage."""
+async def _close_content_store() -> None:
+    """Close the PRSM native content store."""
     try:
         from prsm.storage import close_content_store
         close_content_store()

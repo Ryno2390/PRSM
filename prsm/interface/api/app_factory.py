@@ -131,7 +131,7 @@ API for decentralized AI collaboration and knowledge synthesis.
 
 - **NWTN Orchestration**: Neuro-symbolic reasoning engine
 - **FTNS Token Economy**: Fungible tokens for computational resources
-- **Distributed Storage**: IPFS-based content addressing
+- **Distributed Storage**: PRSM proprietary content-addressed BitTorrent layer
 - **Governance**: Decentralized decision making
 - **Safety Systems**: Circuit breakers and monitoring
 

@@ -175,8 +175,9 @@ async def upload_file_ui(file_data: Dict[str, Any]) -> Dict[str, Any]:
     Handle file uploads from the UI
     
     📁 FILE UPLOAD:
-    Processes file uploads from the UI and stores them in IPFS
-    with automatic metadata generation and user file management
+    Processes file uploads from the UI and stores them in the PRSM
+    proprietary content store with automatic metadata generation and
+    user file management
     """
     try:
         import base64
@@ -247,7 +248,7 @@ async def upload_file_ui(file_data: Dict[str, Any]) -> Dict[str, Any]:
             "user_id":      user_id_val,
             "privacy":      file_data.get("privacy", "private"),
             "ai_access":    file_data.get("ai_access", "core_only"),
-            "ipfs_cid":     real_cid,
+            "content_cid":  real_cid,
         }
         
         logger.info("File uploaded via UI",
@@ -272,7 +273,7 @@ async def upload_file_ui(file_data: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/files")
 async def list_user_files(user_id: str = None) -> Dict[str, Any]:
-    """List files the user has uploaded to IPFS (from ContentProvenanceModel)."""
+    """List files the user has uploaded to the PRSM network (from ContentProvenanceModel)."""
     try:
         from prsm.core.database import get_async_session, ContentProvenanceModel
         from sqlalchemy import select, desc
@@ -604,10 +605,10 @@ async def get_information_space_data(
     
     🔬 INFORMATION SPACE:
     Returns real graph data for research opportunity visualization
-    based on IPFS content analysis and semantic relationships
-    
+    based on PRSM network content analysis and semantic relationships
+
     Enhanced with comprehensive Information Space functionality:
-    - Real content analysis from IPFS
+    - Real content analysis from the PRSM network
     - Semantic relationship mapping
     - Research opportunity identification
     - Interactive visualization data
