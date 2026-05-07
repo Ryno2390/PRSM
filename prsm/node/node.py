@@ -315,6 +315,7 @@ def _build_publisher_key_anchor_client_or_none():
 def _build_dht_components_or_none(
     *, identity, listen_host, dht_listen_port,
     manifest_index, embedding_index,
+    local_fingerprint_index=None,
 ):
     """PRSM-DHT-TRANSPORT T3b/T3c — opt-in construction of
     :class:`DHTNodeComponents`.
@@ -406,6 +407,7 @@ def _build_dht_components_or_none(
             listen_host=listen_host or "0.0.0.0",
             local_manifest_index=manifest_index,
             local_embedding_index=embedding_index,
+            local_fingerprint_index=local_fingerprint_index,
             anchor=anchor_for_manifest,
             creator_pubkey_for=creator_pubkey_for,
             verify_signature=(
@@ -754,6 +756,28 @@ class PRSMNode:
                 f"dedup-serve disabled: {_e}"
             )
 
+        # T4.9.next5: parallel server-side store for the binary
+        # fingerprint lane. Same lifecycle + failure-mode posture as
+        # _embedding_index above. Without this, peers can ASK us for
+        # fingerprints but we'd have nothing to serve.
+        _local_fingerprint_index = None
+        try:
+            from prsm.network.embedding_dht.local_fingerprint_index import (
+                LocalFingerprintIndex,
+            )
+            _local_fp_index_path = (
+                Path.home() / ".prsm" / "local_fingerprint_index"
+            )
+            _local_fp_index_path.mkdir(parents=True, exist_ok=True)
+            _local_fingerprint_index = LocalFingerprintIndex(
+                _local_fp_index_path,
+            )
+        except Exception as _e:  # noqa: BLE001
+            logger.debug(
+                f"FingerprintDHT local index unavailable, cross-node "
+                f"fingerprint-serve disabled: {_e}"
+            )
+
         # PRSM-DHT-TRANSPORT T3b — construct DHTNodeComponents if the
         # operator opted in. Off-by-default; enable via NodeConfig.dht_enabled
         # or PRSM_DHT_ENABLED=1. The components run their own asyncio loop
@@ -783,6 +807,7 @@ class PRSMNode:
                 dht_listen_port=self.config.dht_listen_port,
                 manifest_index=_manifest_index,
                 embedding_index=_embedding_index,
+                local_fingerprint_index=_local_fingerprint_index,
             )
             if self.dht_components is not None:
                 logger.info(
@@ -873,6 +898,11 @@ class PRSMNode:
             # client switch is flipped — at which point both lanes
             # engage simultaneously without further uploader changes.
             fingerprint_index_path=_fingerprint_index_path,
+            # T4.9.next5: serve-side fingerprint storage. Same instance
+            # is also passed to DHTNodeComponents above, so the
+            # uploader's _register_local_fingerprint and the
+            # EmbeddingDHTServer's fetch handler share a single store.
+            local_fingerprint_index=_local_fingerprint_index,
         )
 
         # ── Ledger Sync ──────────────────────────────────────────

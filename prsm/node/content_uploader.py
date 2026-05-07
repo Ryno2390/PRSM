@@ -470,6 +470,7 @@ class ContentUploader:
         content_publisher: Optional[Any] = None,
         content_retriever: Optional[Any] = None,
         fingerprint_index_path: Optional[Path] = None,
+        local_fingerprint_index: Optional[Any] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -527,6 +528,14 @@ class ContentUploader:
         # this side of the wire — the local _SemanticIndex still works,
         # but peers won't find embeddings on this node via the DHT.
         self._embedding_index = embedding_index
+        # T4.9.next5: server-side LocalFingerprintIndex — same shape as
+        # _embedding_index but for the binary lane. Populated by
+        # _register_local_fingerprint() on every successful upload that
+        # computed a binary fingerprint AND has an on-chain
+        # provenance_hash. None disables the serve side; clients on
+        # this node can still ASK peers for fingerprints, but no peer
+        # would find any here.
+        self._local_fingerprint_index = local_fingerprint_index
         peer_candidates_fn = (
             self._make_peer_candidates_fn(content_index)
             if (embedding_dht_client is not None and content_index is not None)
@@ -661,6 +670,90 @@ class ContentUploader:
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 f"local embedding registration failed (will not block "
+                f"upload): {type(exc).__name__}: {exc}"
+            )
+
+    def _register_local_fingerprint(
+        self,
+        record: Any,
+        provenance_hash_hex: Optional[str],
+    ) -> None:
+        """T4.9.next5: register a freshly-computed binary fingerprint
+        with the local LocalFingerprintIndex so peers fetching via the
+        EmbeddingDHTServer can verify and serve it.
+
+        Mirrors ``_register_local_embedding`` for the binary lane. The
+        signing payload uses ``fingerprint_signing_payload`` (distinct
+        domain tag from the embedding lane) so cross-lane signature
+        replay is impossible.
+
+        Skip conditions (returns silently — never breaks the upload):
+          - no local_fingerprint_index wired at construction
+          - no provenance_hash_hex (no on-chain anchor → no peer can
+            verify our signature → MUST NOT offer the fingerprint for
+            cross-node dedup)
+          - record is None or has empty payload
+          - any registration error (logged at warning, not raised)
+
+        Trust model: the signature here is by the *creator* of the
+        content, signing the (content_hash, kind, payload, created_at)
+        tuple. A peer fetching via the DHT verifies the signature
+        against the on-chain creator pubkey (PublisherKeyAnchor). A
+        relay node serving someone else's record relays the bytes
+        verbatim — it cannot forge the signature.
+        """
+        if self._local_fingerprint_index is None:
+            return
+        if not provenance_hash_hex:
+            return
+        if record is None:
+            return
+        try:
+            from prsm.network.embedding_dht.local_fingerprint_index import (
+                LocalFingerprintRecord,
+            )
+            from prsm.network.embedding_dht.protocol import (
+                fingerprint_signing_payload,
+            )
+        except ImportError as exc:
+            logger.debug(
+                f"embedding_dht not importable; skipping local "
+                f"fingerprint registration: {exc}"
+            )
+            return
+
+        try:
+            payload_bytes = getattr(record, "payload", None)
+            kind = getattr(record, "kind", None)
+            if not payload_bytes or kind is None:
+                return
+            kind_value = kind.value if hasattr(kind, "value") else str(kind)
+            created_at = time.time()
+
+            sig_message = fingerprint_signing_payload(
+                content_hash=provenance_hash_hex,
+                fingerprint_kind=kind_value,
+                payload_bytes=payload_bytes,
+                created_at=created_at,
+            )
+            signature_b64 = self.identity.sign(sig_message)
+
+            local_record = LocalFingerprintRecord(
+                content_hash=provenance_hash_hex,
+                fingerprint_kind=kind_value,
+                payload_b64=base64.b64encode(payload_bytes).decode("ascii"),
+                creator_id=self.identity.node_id,
+                created_at=created_at,
+                signature_b64=signature_b64,
+            )
+            self._local_fingerprint_index.register(local_record)
+            logger.debug(
+                f"FingerprintDHT: registered local fingerprint for "
+                f"content_hash={provenance_hash_hex[:18]} kind={kind_value}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"local fingerprint registration failed (will not block "
                 f"upload): {type(exc).__name__}: {exc}"
             )
 
@@ -1209,6 +1302,13 @@ class ContentUploader:
             self._fingerprint_index.store(
                 cid, binary_fingerprint_record, self.identity.node_id,
             )
+            # T4.9.next5: also register with the cross-node FingerprintDHT
+            # serve side so peers can fetch this fingerprint for their
+            # own dedup check. Mirrors _register_local_embedding for the
+            # binary lane.
+            self._register_local_fingerprint(
+                binary_fingerprint_record, provenance_hash_hex,
+            )
 
         # Gossip provenance registration
         await self.gossip.publish(GOSSIP_PROVENANCE_REGISTER, {
@@ -1380,6 +1480,11 @@ class ContentUploader:
                     manifest_cid,
                     binary_fingerprint_record,
                     self.identity.node_id,
+                )
+                # T4.9.next5: also register with the cross-node
+                # FingerprintDHT serve side (sharded-path parity).
+                self._register_local_fingerprint(
+                    binary_fingerprint_record, provenance_hash_hex,
                 )
 
             # Gossip provenance registration

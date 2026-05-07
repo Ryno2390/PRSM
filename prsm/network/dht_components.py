@@ -122,6 +122,7 @@ class DHTNodeComponents:
         listen_host: Optional[str] = None,
         local_manifest_index: Optional[LocalManifestIndex] = None,
         local_embedding_index: Optional[LocalEmbeddingIndex] = None,
+        local_fingerprint_index: Optional[Any] = None,
         # ManifestDHT verifier (required when local_manifest_index is set)
         anchor: Optional[Any] = None,
         # EmbeddingDHT verifier (required when local_embedding_index is set)
@@ -221,6 +222,7 @@ class DHTNodeComponents:
                 routing_table=kademlia,
                 my_node_id=my_node_id,
                 my_address=placeholder_address,
+                local_fingerprint_index=local_fingerprint_index,
             )
 
         router = DHTRequestRouter(
