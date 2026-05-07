@@ -190,3 +190,69 @@ class ContentRetriever:
 - PR 5: ~1 hr (verification + tag)
 
 **Total: ~2-2.5 working days** to complete the migration. PR 2 owns ~60% of the work; the rest is mechanical.
+
+---
+
+## Migration closure — 2026-05-07 (later that day)
+
+All five planned PRs landed plus the deferred PR 2b. The repo-wide
+`grep -rin "ipfs" prsm/` returns zero matches (only the historical
+alembic schema files retain the old column name, which is intentional —
+they describe schema state at their migration version, and the
+forward-rename lives in alembic 016).
+
+| PR | Commit | Net LoC | Notes |
+|----|--------|---------|-------|
+| PR 1 | `bef7ee16` | ~−205 | Deleted `fallback_storage.py` + `data_spine_proxy.py` + `public_source_porter.py` + spine module |
+| PR 2a | `c0a32fd8` | (created `content_publisher.py`, +159 / −140 in `content_uploader.py`) | ContentPublisher Tier A + content_uploader rewire |
+| PR 2c | `cad6cd96` | +44 / −1 | node.py BT layer composition + ContentPublisher attachment |
+| PR 3 | `616daedd` | +54 / −133 | API layer comments, identifier renames, `_init_ipfs` → `_init_content_store`, dropped IPFS-daemon prerequisite check from onboarding |
+| PR 4 | `2841cf2b` | +104 / −137 | `storage_provider` + `content_provider` rewires; `ipfs_available` → `storage_available`; `_ipfs_cat` → `_fetch_local`; `_fetch_from_gateway` → `_fetch_from_url` (now uses real aiohttp session); `prsm://` URL scheme; deleted dead `_ensure_ipfs_available` and `_ipfs_daemon_proc` |
+| PR 5 | `26e83b64` | +216 / −251 | 43-file repo-wide scrub via Agent assist; alembic migration `016_rename_ipfs_cid_to_content_cid.py`; SQLAlchemy column renames in `FTNSTransactionModel` / `TeacherModelModel` / `ModelRegistryModel`; `bittorrent_manifest.ipfs_cid` field deleted entirely; UI mockups + cli_modules + economy/tokenomics + core/integrations cleaned |
+| dead-code | `fb1314ba` | −895 | Deleted orphan `semantic_embedding_engine.py` (broken imports, zero callers) |
+| **PR 2b** | **`ac0ff969`** | **+619 / −85** | **Deferred ContentStore↔BitTorrent integration for Tier B (encrypted) + Tier C (encrypted + erasure). Multi-file torrent layout: `manifest.bin` + `keyshares.json` + `shard-NNNN.bin`. Added `StorageArtifacts` + `store_local_with_artifacts` / `retrieve_with_artifacts` to ContentStore. ContentPublisher / ContentRetriever auto-route by tier.** |
+
+### Architectural call that held up
+
+The 2026-05-07 architectural decision — *ContentStore and BitTorrent
+are complementary, not alternatives* — proved out cleanly. Tier A skips
+ContentStore entirely (raw bytes → BT). Tier B/C runs the bytes
+through ContentStore's encrypt-then-shard pipeline and packages every
+artefact (encrypted manifest, Shamir shares, shards) as a multi-file
+torrent. The retriever auto-detects layout and routes through
+`ContentStore.retrieve_with_artifacts` for the encrypted case.
+
+### What this unblocks (revised)
+
+1. **Closed:** the gap-list "STUB" finding for `prsm_upload_dataset`.
+   Both Tier A and Tier B/C content distribution now works end-to-end.
+2. **Closed:** zero-IPFS gate for the L4 external-auditor pass — no
+   misleading IPFS references left in `prsm/`.
+3. **Closed:** the half of the canonical 8-step workflow's content
+   layer that this migration owns. (The other half — the orchestration
+   `/compute/forge` 503 — is a separate workstream still open.)
+
+### Known limitations carried forward
+
+- **Shamir key-share colocation in Tier B/C torrents.** PR 2b ships
+  with all key shares bundled in `keyshares.json` alongside the
+  ciphertext. Distribution-of-shares is the `KeyDistribution.sol`
+  follow-on (Phase 7-storage Task 6, already mainnet-deployed) plus a
+  Python wiring task. Until that ships, treat Tier B/C as "encrypted at
+  rest in a torrent" but not "secret from a node operator who downloads
+  the torrent." Documented at the top of `prsm/node/content_publisher.py`.
+- **Alembic migration applies on first upgrade.** Operators with
+  existing populated DBs need `alembic upgrade head` to apply
+  `016_rename_ipfs_cid_to_content_cid`. New deploys are unaffected.
+
+### Final test posture
+
+- `tests/unit/test_content_publisher.py`: 13 tests (4 new for Tier
+  B/C). All green.
+- Smoke set across `test_content_publisher` +
+  `test_cross_node_content` + `test_content_store_integration` +
+  `test_content_uploader_onchain_register`: 78 / 78 green.
+- Smoke imports verified across `prsm.node.node`, `prsm.storage`,
+  `prsm.cli`, `prsm.economy.tokenomics.contributor_manager`,
+  `prsm.compute.performance.load_testing`, `prsm.core.bittorrent_manifest`,
+  `prsm.data.vector_store`.
