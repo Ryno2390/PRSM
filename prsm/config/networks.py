@@ -85,20 +85,32 @@ MAINNET = NetworkConfig(
     provenance_registry="0xdF470BFa9eF310B196801D5105468515d0069915",
     royalty_distributor="0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2",
     foundation_safe="0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791",
-    # Audit-bundle (gated on L4 firm pair-review; not yet deployed):
-    escrow_pool=None,
-    stake_bond=None,
-    settlement_registry=None,
-    signature_verifier=None,
-    emission_controller=None,
-    compensation_distributor=None,
-    storage_slashing=None,
-    key_distribution=None,
+    # Audit-bundle + Phase 8 + Phase 7-storage deployed 2026-05-07
+    # under PRSM-POL-2 §4.1 substituted-audit framework
+    # (agent-teams self-audit + Slither static pass + OZ Pausable +
+    # TVL caps off-chain). Deployer hot key: 0xF7d8...11c2.
+    # Total deploy spend: ~$0.25.
+    escrow_pool="0x526D40C08524670846ab811C95691845374122aF",
+    stake_bond="0xD4C6584BB69d1cc46B32502c57124Df12D8979Ed",
+    settlement_registry="0x48fFab641b9D638F312FFA776818756a326F995B",
+    signature_verifier="0xac6a73b270A49Fb62985AbA6bFD6a949577032E5",  # production Ed25519Verifier
+    emission_controller="0x13A0D76895c196B795b94fe843F76B6e145AeaAE",
+    compensation_distributor="0xa9551F5a3AeAB39cc8315AcD8caC2886Bd04f244",
+    storage_slashing="0x0e9cAfadCCCe0987C773B5FdFF295c2Aa6F03337",
+    key_distribution="0x51AF73Aa098E3b12Da78167c25c3d1D98059c8Ff",
     publisher_key_anchor=None,  # Phase 3.x.3 — not yet on mainnet
     notes=(
         "Mainnet uses the real 2-of-3 Foundation Safe (Ledger + Trezor + OneKey) at 0x91b0...5791.",
-        "Audit-bundle contracts (EscrowPool, StakeBond, etc.) deploy after L4 firm pair-review clears.",
-        "Until audit-bundle deploys, mainnet supports content registration + royalty payouts only.",
+        "Audit-bundle deployed 2026-05-07 with deployer-EOA ownership; Foundation Safe "
+        "ownership transfer is a separate hardware-multisig ceremony (post-deploy task).",
+        "Foundation reserve wallet on StakeBond + all 3 CompensationDistributor pool sinks "
+        "+ StorageSlashing.authorizedVerifier all point at the Foundation Safe — passes MED-4 "
+        "code.length check natively (Safes are smart contracts).",
+        "Provenance + RoyaltyDistributor (Phase 1.3) live since 2026-05-04; FTNS token live since "
+        "Phase 1.3 Task 8 with 100M minted to Foundation Safe via PRSM-CR-2026-05-06-3.",
+        "TVL caps for v1 are off-chain operational discipline + Forta alerts on Deposit/Bond "
+        "event sums (POL-2 §4.3 default $10K each on EscrowPool + StakeBond). On-chain caps "
+        "are a v2 enhancement.",
     ),
 )
 
