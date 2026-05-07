@@ -545,6 +545,12 @@ class PRSMNode:
         self.bt_provider: Optional[BitTorrentProvider] = None
         self.bt_requester: Optional[BitTorrentRequester] = None
 
+        # Native-storage migration PR 2c: ContentPublisher/Retriever
+        # composed from the BT layer above. Set in initialize() once
+        # the BT layer is live; None when libtorrent is unavailable.
+        self.content_publisher: Optional[Any] = None
+        self.content_retriever: Optional[Any] = None
+
         # PRSM-DHT-TRANSPORT T3b: opt-in DHT stack (Manifest + Embedding)
         # Constructed in initialize() iff dht_enabled or PRSM_DHT_ENABLED=1.
         self.dht_components: Optional[Any] = None
@@ -833,11 +839,15 @@ class PRSMNode:
         # piece is missing — the upload still succeeds locally.
         provenance_client = _build_provenance_client_or_none()
 
+        # Native-storage migration PR 2c: content_publisher / content_retriever
+        # are attached AFTER the BT layer is initialised below (~line 950).
+        # The uploader's internal _publish_content / _fetch_content helpers
+        # log + return None until that attachment runs — which is the same
+        # behaviour the legacy IPFS path produced when the daemon was down.
         self.content_uploader = ContentUploader(
             identity=self.identity,
             gossip=self.gossip,
             ledger=self.ledger,
-            ipfs_api_url=self.config.ipfs_api_url,
             transport=self.transport,
             content_index=self.content_index,
             embedding_fn=_embedding_fn,
@@ -948,8 +958,41 @@ class PRSMNode:
                 config=bt_requester_config,
             )
             logger.info("BitTorrent provider and requester initialized")
+
+            # Native-storage migration PR 2c (2026-05-07): wire
+            # ContentPublisher / ContentRetriever onto the already-
+            # constructed ContentUploader. The uploader was initialised
+            # earlier with content_publisher=None; production uploads
+            # logged "content_publisher is None — cannot publish" until
+            # this attachment runs. With these set, prsm_upload_dataset
+            # actually distributes content via the proprietary
+            # BitTorrent layer instead of returning a placeholder.
+            from prsm.node.content_publisher import (
+                ContentPublisher,
+                ContentRetriever,
+            )
+
+            staging_dir = self.config.data_dir / "content_publish_staging"
+            cache_dir = self.config.data_dir / "content_fetch_cache"
+
+            self.content_publisher = ContentPublisher(
+                bt_provider=self.bt_provider,
+                staging_dir=staging_dir,
+            )
+            self.content_retriever = ContentRetriever(
+                bt_requester=self.bt_requester,
+                cache_dir=cache_dir,
+            )
+            self.content_uploader.content_publisher = self.content_publisher
+            self.content_uploader.content_retriever = self.content_retriever
+            logger.info(
+                "ContentUploader wired through ContentPublisher (Tier A) — "
+                "uploads now distribute via the BitTorrent layer."
+            )
         else:
             logger.info("BitTorrent not available - libtorrent may not be installed")
+            self.content_publisher = None
+            self.content_retriever = None
 
         # ── Payment Escrow & Result Consensus ─────────────────────
         from prsm.node.payment_escrow import PaymentEscrow
