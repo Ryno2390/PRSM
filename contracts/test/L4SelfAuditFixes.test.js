@@ -255,6 +255,112 @@ describe("L4 Self-Audit Fixes (2026-05-06)", function () {
     });
   });
 
+  describe("A-06 (re-run HIGH) — pause-extended unbond floor composes HIGH-1 + HIGH-2", function () {
+    let registry, bond, token;
+    let owner, provider;
+
+    beforeEach(async function () {
+      [owner, provider] = await ethers.getSigners();
+
+      const Token = await ethers.getContractFactory("MockERC20");
+      token = await Token.deploy();
+      await token.waitForDeployment();
+
+      const Registry = await ethers.getContractFactory("BatchSettlementRegistry");
+      registry = await Registry.deploy(owner.address, MAX_WINDOW);
+      await registry.waitForDeployment();
+
+      const Bond = await ethers.getContractFactory("StakeBond");
+      bond = await Bond.deploy(
+        owner.address,
+        await token.getAddress(),
+        MIN_UNBOND_DELAY,
+        await registry.getAddress()
+      );
+      await bond.waitForDeployment();
+
+      await token.mint(provider.address, PREMIUM_STAKE);
+      await token.connect(provider).approve(await bond.getAddress(), PREMIUM_STAKE);
+    });
+
+    it("commitBatch snapshots totalPausedSeconds atomically with expiry", async function () {
+      // Pause + unpause to accumulate ~500s of paused time first.
+      await registry.connect(owner).pause();
+      await time.increase(500);
+      await registry.connect(owner).unpause();
+      const accruedBefore = await registry.totalPausedSeconds();
+      expect(accruedBefore).to.be.gte(498n);
+
+      await registry.connect(provider).commitBatch(
+        owner.address,
+        ethers.keccak256(ethers.toUtf8Bytes("a06-root")),
+        1, ONE_FTNS, PREMIUM_SLASH_BPS, ethers.ZeroHash, "ipfs://a06"
+      );
+      const pausedAtAccrual = await registry.lastPendingBatchPausedAtAccrual(provider.address);
+      expect(pausedAtAccrual).to.equal(accruedBefore);
+    });
+
+    it("A-06 vector: requestUnbond floor pause-extends after governance window-reduction + post-commit pause", async function () {
+      // 1. Commit at MAX_WINDOW (30 days). expiry = now + 30d, pausedAtAccrual = 0.
+      const commitTx = await registry.connect(provider).commitBatch(
+        owner.address,
+        ethers.keccak256(ethers.toUtf8Bytes("a06-vector-root")),
+        1, ONE_FTNS, PREMIUM_SLASH_BPS, ethers.ZeroHash, "ipfs://a06-vector"
+      );
+      const commitBlock = await ethers.provider.getBlock(
+        (await commitTx.wait()).blockNumber
+      );
+      const wallExpiry = BigInt(commitBlock.timestamp) + BigInt(MAX_WINDOW);
+
+      // 2. Provider bonds.
+      await bond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+
+      // 3. Pause for ~5 days during the batch's window. After unpause,
+      //    totalPausedSeconds is ~5 days; pausedAtAccrual stayed at 0.
+      const FIVE_DAYS = 5 * 24 * 60 * 60;
+      await time.increase(60 * 60); // 1 hour after commit
+      await registry.connect(owner).pause();
+      await time.increase(FIVE_DAYS);
+      await registry.connect(owner).unpause();
+      const totalPausedAfter = await registry.totalPausedSeconds();
+      expect(totalPausedAfter).to.be.gte(BigInt(FIVE_DAYS) - 5n);
+
+      // 4. Governance reduces live window to MIN_WINDOW. Provider's
+      //    batch retains its 30-day pinned window per D-05; but
+      //    pre-A-06-fix the unbond floor would be:
+      //      max(now + 1d, now + 1h, wallExpiry) = wallExpiry
+      //    which is ~5 days SHORTER than the actual effective challenge
+      //    expiry of `wallExpiry + 5 days`.
+      await registry.connect(owner).setChallengeWindowSeconds(MIN_WINDOW);
+
+      // 5. Provider requests unbond. Post-fix, the floor must be at
+      //    LEAST `wallExpiry + (totalPaused - pausedAtAccrual)` =
+      //    wallExpiry + ~5d.
+      await bond.connect(provider).requestUnbond();
+      const stake = await bond.stakeOf(provider.address);
+      const pauseAdjustedFloor = wallExpiry + BigInt(FIVE_DAYS) - 10n; // -10s slack for block-time
+      expect(BigInt(stake.unbond_eligible_at)).to.be.gte(pauseAdjustedFloor);
+    });
+
+    it("no-pause path: A-06 fix is a no-op for the common case", async function () {
+      // Commit + bond, no pause, no governance change.
+      const tx = await registry.connect(provider).commitBatch(
+        owner.address,
+        ethers.keccak256(ethers.toUtf8Bytes("a06-nopause")),
+        1, ONE_FTNS, PREMIUM_SLASH_BPS, ethers.ZeroHash, "ipfs://nopause"
+      );
+      const cb = await ethers.provider.getBlock((await tx.wait()).blockNumber);
+      const wallExpiry = BigInt(cb.timestamp) + BigInt(MAX_WINDOW);
+
+      await bond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+      await bond.connect(provider).requestUnbond();
+      const stake = await bond.stakeOf(provider.address);
+      // Floor should be at LEAST the wall-clock expiry; no pause-time
+      // added because totalPausedSeconds == pausedAtAccrual == 0.
+      expect(BigInt(stake.unbond_eligible_at)).to.be.gte(wallExpiry);
+    });
+  });
+
   describe("MED-3 (B-02) — lookbackWindowSecondsAtCommit per-batch snapshot", function () {
     let registry, token;
     let owner, provider, requester;

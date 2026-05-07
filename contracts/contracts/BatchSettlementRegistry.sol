@@ -281,6 +281,31 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
     /// race).
     mapping(address provider => uint64) public lastPendingBatchExpiry;
 
+    /// @dev L4 self-audit re-run A-06 fix: snapshot of `totalPausedSeconds`
+    ///      at the moment `lastPendingBatchExpiry[provider]` was last
+    ///      updated (i.e. for the SAME batch whose expiry currently
+    ///      dominates the per-provider tracker). Read by
+    ///      `StakeBond.requestUnbond` via the extended interface so the
+    ///      unbond floor can be pause-extended:
+    ///        pauseAdjustedExpiry =
+    ///            lastPendingBatchExpiry[p]
+    ///            + (totalPausedSeconds - lastPendingBatchPausedAtAccrual[p])
+    ///
+    ///      Without this, the wall-clock `lastPendingBatchExpiry` floor
+    ///      diverges from the pause-extended actual challenge expiry
+    ///      computed by `_effectiveElapsed` when ANY pause occurs during
+    ///      the batch's window. Provider could request unbond at the
+    ///      wall-clock boundary, withdraw `unbondDelaySeconds` later, and
+    ///      a successful challenge in the `pausedSinceCommit`-shaped tail
+    ///      of the effective challenge window would hit `WITHDRAWN` →
+    ///      `SlashSwallowed`, re-opening the A-01/D-01 slash-evasion race.
+    ///
+    /// Maintained ATOMICALLY with `lastPendingBatchExpiry`: only written
+    /// in `commitBatch` when the new expiry strictly dominates the old
+    /// tracker. The pair is therefore always consistent (snapshot belongs
+    /// to the same batch whose expiry is currently tracked).
+    mapping(address provider => uint64) public lastPendingBatchPausedAtAccrual;
+
     /// @dev L4 self-audit HIGH-2 (B-01) fix: cumulative seconds the
     ///      contract has been paused since deployment. Incremented only
     ///      by `_unpause()` (so it reflects COMPLETED pauses; the
@@ -496,9 +521,16 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         // StakeBond.requestUnbond can clamp against the LONGEST pinned
         // window of any PENDING batch (not the live mutable global).
         // Stale values are naturally ignored by callers via max-of-floors.
+        //
+        // L4 self-audit re-run A-06 fix: when expiry is updated, also
+        // snapshot `totalPausedSeconds` so the reader can pause-extend
+        // the floor in `_effectiveElapsed`-equivalent arithmetic. The
+        // pair is written atomically: snapshot belongs to the same batch
+        // whose expiry now dominates the tracker.
         uint64 newExpiry = uint64(block.timestamp + uint256(b.challengeWindowSecondsAtCommit));
         if (newExpiry > lastPendingBatchExpiry[msg.sender]) {
             lastPendingBatchExpiry[msg.sender] = newExpiry;
+            lastPendingBatchPausedAtAccrual[msg.sender] = uint64(totalPausedSeconds);
         }
 
         emit BatchCommitted(

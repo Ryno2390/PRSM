@@ -41,6 +41,31 @@ interface ISlasherWithProviderExpiry {
 }
 
 /**
+ * @dev L4 self-audit re-run A-06 fix interface: pause-extended unbond
+ *      floor. The HIGH-1 `lastPendingBatchExpiry` tracker is wall-clock
+ *      (`commitTimestamp + windowAtCommit`); the HIGH-2
+ *      `_effectiveElapsed` math makes the actual challenge expiry
+ *      pause-extended (wall-clock + pausedSinceCommit). Unbond floor
+ *      diverges from effective challenge expiry by `pausedSinceCommit`
+ *      under the canonical A-01 trigger condition (governance
+ *      `setChallengeWindowSeconds` reduction).
+ *
+ * Closes the gap by exposing both:
+ *   - `lastPendingBatchPausedAtAccrual(provider)` — `totalPausedSeconds`
+ *     value at the moment the per-provider expiry was last updated.
+ *   - `totalPausedSeconds()` — current cumulative paused time.
+ *
+ * The reader computes `pauseAdjustedExpiry =
+ *   lastPendingBatchExpiry(p) + (totalPausedSeconds() - lastPendingBatchPausedAtAccrual(p))`
+ * and uses it as the slasher floor in `requestUnbond`.
+ */
+interface ISlasherWithProviderExpiryAndPause {
+    function lastPendingBatchExpiry(address provider) external view returns (uint64);
+    function lastPendingBatchPausedAtAccrual(address provider) external view returns (uint64);
+    function totalPausedSeconds() external view returns (uint256);
+}
+
+/**
  * @title StakeBond
  * @notice Per-provider FTNS collateral for Phase 7 Tier-C verification.
  *
@@ -327,9 +352,42 @@ contract StakeBond is Ownable2Step, ReentrancyGuard, Pausable {
             // batches) are naturally dominated by `localFloor` (which
             // is always strictly in the future). No explicit
             // stale-check needed.
-            try ISlasherWithProviderExpiry(slasher).lastPendingBatchExpiry(msg.sender) returns (uint64 maxExpiry) {
-                if (uint256(maxExpiry) > effectiveEligibleAt) {
-                    effectiveEligibleAt = uint256(maxExpiry);
+            //
+            // L4 self-audit re-run A-06 fix: pause-extend the per-provider
+            // expiry. The wall-clock `lastPendingBatchExpiry` diverges
+            // from the pause-extended actual challenge expiry computed by
+            // BSR's `_effectiveElapsed` whenever ANY pause occurred
+            // during the batch's window. We mirror that arithmetic by
+            // adding `(totalPausedSeconds - lastPendingBatchPausedAtAccrual)`
+            // to the wall-clock expiry. Without this, a provider could
+            // unbond at the wall-clock boundary and withdraw `unbondDelay`
+            // later, while a successful challenge in the
+            // `pausedSinceCommit`-shaped tail of the effective challenge
+            // window would hit WITHDRAWN → SlashSwallowed.
+            try ISlasherWithProviderExpiryAndPause(slasher).lastPendingBatchExpiry(msg.sender) returns (uint64 maxExpiry) {
+                uint256 pauseAdjusted = uint256(maxExpiry);
+                try ISlasherWithProviderExpiryAndPause(slasher).lastPendingBatchPausedAtAccrual(msg.sender) returns (uint64 pausedAtAccrual) {
+                    try ISlasherWithProviderExpiryAndPause(slasher).totalPausedSeconds() returns (uint256 currentPaused) {
+                        if (currentPaused > uint256(pausedAtAccrual)) {
+                            pauseAdjusted += currentPaused - uint256(pausedAtAccrual);
+                        }
+                    } catch {
+                        // slasher exposes lastPendingBatchExpiry +
+                        // lastPendingBatchPausedAtAccrual but not
+                        // totalPausedSeconds — partial-fix BSR build.
+                        // Fall through with un-pause-adjusted expiry; the
+                        // wall-clock floor is still correct for the
+                        // no-pause case.
+                    }
+                } catch {
+                    // slasher exposes lastPendingBatchExpiry but not
+                    // lastPendingBatchPausedAtAccrual — pre-A-06-fix
+                    // BSR build. Fall through with un-pause-adjusted
+                    // expiry. The wall-clock floor remains correct for
+                    // the no-pause case (which is the common case).
+                }
+                if (pauseAdjusted > effectiveEligibleAt) {
+                    effectiveEligibleAt = pauseAdjusted;
                 }
             } catch {
                 // slasher contract doesn't expose lastPendingBatchExpiry() —
