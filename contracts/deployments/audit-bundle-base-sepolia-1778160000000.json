@@ -1,0 +1,32 @@
+{
+  "bundle": "audit-bundle",
+  "phases": ["3.1", "7", "7.1"],
+  "network": "base-sepolia",
+  "chainId": "84532",
+  "timestamp": "2026-05-07T16:00:00.000Z",
+  "deployer": "0xCCAc7b21695De068979b1ca47B0cfBD328654220",
+  "params": {
+    "challengeWindowSeconds": "86400",
+    "unbondDelaySeconds": "604800",
+    "verifierKind": "production-ed25519"
+  },
+  "contracts": {
+    "BatchSettlementRegistry": "0xF8BEEb4362222b50109b6034767322B31aA92449",
+    "EscrowPool": "0xaa28b5818242608e04C1773c3e34bF7bFfb96248",
+    "SignatureVerifier": "0x208dc98545Fe062d0B13Ac07b073633E6a62b5A9",
+    "StakeBond": "0xF93aCa6551F408fFfe24292288d5488864D5264c",
+    "FTNSToken": "0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a",
+    "FoundationReserveWallet": "0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a"
+  },
+  "crossWireTxHashes": {
+    "_note": "Cross-wires confirmed via on-chain getter calls 2026-05-07; tx hashes not captured because the deploy script's post-deploy invariant check race-conditioned on Base Sepolia RPC propagation delay and crashed before manifest write. All 4 setter calls succeeded — verified by reading `Registry.escrowPool/stakeBond/signatureVerifier` and `StakeBond.foundationReserveWallet` on-chain (deploy script bug to fix in a follow-on commit).",
+    "registry_setEscrowPool": "verified-on-chain",
+    "registry_setSignatureVerifier": "verified-on-chain",
+    "registry_setStakeBond": "verified-on-chain",
+    "stakeBond_setFoundationReserveWallet": "verified-on-chain"
+  },
+  "_testnet_notes": {
+    "foundation_reserve_stub": "FTNS token address used as foundation reserve wallet stub (passes MED-4 code.length>0 gate; on testnet the slash share accumulates passively at the FTNS contract — no drain function, no economic recovery, but slashing path is exercisable).",
+    "ratified_decisions": "docs/2026-05-05-public-testnet-deploy-plan.md §9 (decision 1: fresh FTNS, not Mock; decision 2: deployer EOA where possible)."
+  }
+}

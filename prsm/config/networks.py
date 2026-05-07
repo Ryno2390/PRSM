@@ -111,25 +111,34 @@ TESTNET = NetworkConfig(
     chain_id=84532,
     rpc_url_default="https://sepolia.base.org",
     explorer_url="https://sepolia.basescan.org",
-    # T1 deploy 2026-05-05 — all addresses are testnet-FTNS deployed via deployer EOA:
-    ftns_token="0xF8d0c1AE75441d3C3Dd2A2420C0789043916412a",
-    provenance_registry="0x2911f9a0a02896486CdF59d6d369764841DC0eA4",
-    royalty_distributor="0xB790045ff826C76fe02DBc54a6ef0021951Fd892",
-    foundation_safe="0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0",  # deployer EOA per §9 ratified decision
-    escrow_pool="0x4BDf07b2BB23176469bdEFca2B103AdB3DCb3dd2",
-    stake_bond="0xDea103f33503BC7e73Ea447d43b2Cd7E2710D20A",
-    settlement_registry="0x200B35fCB68678717a355176e22321Dc3e703315",
-    signature_verifier="0x1d7fCbC08792D649016703C4Be59635e619097EE",
-    emission_controller="0x134552dbe2d235DB60be5A881A2c06d9E42d2613",
-    compensation_distributor="0xFa3610e87027b548B86859B105B1b39B30d9955B",
-    storage_slashing="0x4FDd792fDcDcEe31861D23A1B0342058Ed32c766",
-    key_distribution="0xC33ceA03455DB9246716ccF04cE1446EB56B439b",
+    # T1 deploy 2026-05-07 (post-HIGH-1/2 + MED-cluster + A-06 fixes; deployer
+    # `PRSM Testnet Deployer` = 0xCCAc7b21695De068979b1ca47B0cfBD328654220):
+    ftns_token="0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a",
+    # Provenance + Royalty are Phase 1.3 surfaces deployed independently;
+    # not in scope of this T1 rehearsal. Testnet versions can be deployed
+    # later if/when content-registration flow needs validating on testnet.
+    provenance_registry=None,
+    royalty_distributor=None,
+    foundation_safe="0xCCAc7b21695De068979b1ca47B0cfBD328654220",  # deployer EOA per §9 ratified decision
+    escrow_pool="0xaa28b5818242608e04C1773c3e34bF7bFfb96248",
+    stake_bond="0xF93aCa6551F408fFfe24292288d5488864D5264c",
+    settlement_registry="0xF8BEEb4362222b50109b6034767322B31aA92449",
+    signature_verifier="0x208dc98545Fe062d0B13Ac07b073633E6a62b5A9",  # production Ed25519Verifier
+    emission_controller="0x30b6810F5653B99464AE6c2c2Ef37963bdbb0d99",
+    compensation_distributor="0x18c875743DD722fBDd7a694A1644b502BC433DBB",
+    storage_slashing="0x2ba1B361d2AD49f15F1131762fA3512d7824EB06",
+    key_distribution="0xdB41A471AAC86285cD855bEdC27D7FC810dc3318",
     publisher_key_anchor=None,  # not yet deployed on Base Sepolia; Phase 3.x.3 Sepolia deploy was on Ethereum Sepolia
     notes=(
         "TESTNET — testnet-FTNS has zero monetary value.",
         "Foundation 'Safe' on testnet is a single deployer EOA, NOT the real 2-of-3 mainnet multisig.",
+        "Foundation reserve wallet on StakeBond is set to the FTNS token address itself "
+        "(passes MED-4 code.length>0 gate; foundation-share slashes accumulate passively at "
+        "the FTNS contract — no economic-recovery path on testnet, but slashing flow IS exercisable).",
         "Halving curve uses mainnet's 4-year cadence (constant in EmissionController.sol). "
         "Accelerated-halving variant is a planned follow-up task (T10).",
+        "Provenance + Royalty contracts are NOT deployed on testnet — content-registration "
+        "flow remains mainnet-only for now.",
         "Faucet: ask in #testnet-faucet on Discord; founder airdrops within 24h.",
     ),
 )

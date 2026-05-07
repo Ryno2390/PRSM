@@ -1,0 +1,24 @@
+{
+  "bundle": "phase1-ftns",
+  "network": "base-sepolia",
+  "chainId": "84532",
+  "timestamp": "2026-05-07T13:12:34.502Z",
+  "deployer": "0xCCAc7b21695De068979b1ca47B0cfBD328654220",
+  "contracts": {
+    "FTNSTokenSimple": "0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a"
+  },
+  "proxy": {
+    "kind": "uups",
+    "implementation": "0x808A262d0369d266f3138d717391D825056FcE64"
+  },
+  "initialSupply": {
+    "to": "0xCCAc7b21695De068979b1ca47B0cfBD328654220",
+    "amount": "100000000000000000000000000"
+  },
+  "deployerRoles": [
+    "DEFAULT_ADMIN_ROLE",
+    "MINTER_ROLE",
+    "PAUSER_ROLE",
+    "BURNER_ROLE"
+  ]
+}

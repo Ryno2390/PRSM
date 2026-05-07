@@ -1,0 +1,28 @@
+{
+  "bundle": "phase8-emission-stack",
+  "phases": ["8"],
+  "network": "base-sepolia",
+  "chainId": "84532",
+  "timestamp": "2026-05-07T16:01:40.000Z",
+  "deployer": "0xCCAc7b21695De068979b1ca47B0cfBD328654220",
+  "params": {
+    "baselineRatePerSecond": "1000000000000000000",
+    "mintCap": "900000000000000000000000000",
+    "epochZeroStart": "1778159996",
+    "creatorBps": "5000",
+    "operatorBps": "3000",
+    "grantBps": "2000"
+  },
+  "contracts": {
+    "EmissionController": "0x30b6810F5653B99464AE6c2c2Ef37963bdbb0d99",
+    "CompensationDistributor": "0x18c875743DD722fBDd7a694A1644b502BC433DBB",
+    "FTNSToken": "0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a",
+    "creatorPool": "0xCCAc7b21695De068979b1ca47B0cfBD328654220",
+    "operatorPool": "0xCCAc7b21695De068979b1ca47B0cfBD328654220",
+    "grantPool": "0xCCAc7b21695De068979b1ca47B0cfBD328654220"
+  },
+  "crossWireTxHashes": {
+    "_note": "Cross-wires confirmed via on-chain getter calls 2026-05-07; deploy script crashed at post-deploy invariant check due to Base Sepolia RPC propagation delay. The setAuthorizedDistributor tx was submitted (hash 0x87aaf3d3...) and on-chain reads confirm Emission.authorizedDistributor=0x18c875... and Distributor.emissionController=0x30b681...",
+    "emission_setAuthorizedDistributor": "0x87aaf3d3..."
+  }
+}
