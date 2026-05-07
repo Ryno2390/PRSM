@@ -99,7 +99,7 @@ This is reported separately because the consolidated.md remediation row currentl
 
 ---
 
-### A-08 — RoyaltyDistributor donation strand mirrors LOW-1; aggregate fund-loss footgun across pull-payment contracts (Severity: INFO)
+### A-08 — RoyaltyDistributor donation strand mirrors LOW-1; aggregate fund-loss footgun across pull-payment contracts (Severity: INFO) — **REMEDIATED 2026-05-07**
 
 **Location:**
 - `contracts/contracts/RoyaltyDistributor.sol:51-168`
@@ -112,6 +112,8 @@ Same shape as A-04 — not exploitable, footgun. Magnitude is bounded by donatio
 
 **Recommended fix:**
 Either (a) add an Ownable surface and `recoverStranded(address to)` mirroring the proposed StakeBond fix, or (b) accept the documented limitation; the donation pattern is not a privilege-escalation primitive.
+
+**Remediation 2026-05-07 (commit `877b380d`):** Option (a) shipped. RoyaltyDistributor v2 source now inherits Ownable2Step (4-arg constructor: `ftns, registry, treasury, initialOwner`), maintains a `totalClaimable` accumulator updated atomically with every `claimable[]` write, and exposes `recoverStranded(address to) onlyOwner nonReentrant` that sweeps `balance(this) - totalClaimable` (strict excess only). 9 regression tests in `test/RoyaltyDistributor.test.js` (548 total passing). Design ADR: `docs/governance/A-08-recoverStranded-design.md`. **Mainnet impact:** none — mainnet RoyaltyDistributor v1 (`0x3E82…D6c2`) is unchanged; A-08 lands at the already-planned v2 redeploy ceremony bundling HIGH-1/A-01 push→pull migration + HIGH-3/D-02 Pausable disposition.
 
 ## Vectors evaluated and cleared
 
