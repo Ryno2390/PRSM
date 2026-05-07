@@ -49,13 +49,18 @@ from prsm.network.embedding_dht.protocol import (
     ErrorCode,
     ErrorResponse,
     FetchEmbeddingRequest,
+    FetchFingerprintRequest,
     FindEmbeddingRequest,
+    FindFingerprintRequest,
+    FingerprintProvidersResponse,
+    FingerprintResponse,
     IncompatibleProtocolVersionError,
     MalformedMessageError,
     ProviderInfo,
     UnknownMessageTypeError,
     canonical_signing_payload,
     encode_message,
+    fingerprint_signing_payload,
     parse_message,
 )
 from prsm.network.manifest_dht.dht_client import (
@@ -322,6 +327,202 @@ class EmbeddingDHTClient:
                 f"creator-signature verification FAILED for "
                 f"content_hash={resp.content_hash[:12]} under "
                 f"model_id={resp.model_id!r}"
+            )
+
+    # -- T4.9.next: fingerprint-lane public API --------------------------
+
+    def find_fingerprint_providers(
+        self, content_hash: str, fingerprint_kind: str,
+    ) -> List[ProviderInfo]:
+        """Ask up to k peers near ``content_hash`` for who has the
+        binary fingerprint under ``fingerprint_kind``. Returns the
+        union of all returned provider lists, deduplicated by node_id.
+
+        Mirrors :meth:`find_providers` for the binary fingerprint lane.
+        Pure routing — no signature verification at this step.
+        """
+        try:
+            peers = self._routing_table.find_closest_peers(
+                content_hash, count=self._k,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "routing-table find_closest_peers failed (fingerprint "
+                "lane): %s", exc,
+            )
+            return []
+
+        request = FindFingerprintRequest(
+            content_hash=content_hash,
+            fingerprint_kind=fingerprint_kind,
+            request_id=_new_request_id(),
+        )
+        wire = encode_message(request)
+
+        seen: dict[str, ProviderInfo] = {}
+        for peer in peers:
+            address = getattr(peer, "address", None)
+            if not isinstance(address, str) or ":" not in address:
+                continue
+            try:
+                resp_bytes = self._send_message(address, wire)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "find_fingerprint_providers send failed to %s: %s",
+                    address, exc,
+                )
+                continue
+            try:
+                resp = parse_message(resp_bytes)
+            except (
+                MalformedMessageError,
+                UnknownMessageTypeError,
+                IncompatibleProtocolVersionError,
+            ) as exc:
+                logger.debug(
+                    "find_fingerprint_providers parse failed from "
+                    "%s: %s", address, exc,
+                )
+                continue
+            if isinstance(resp, ErrorResponse):
+                continue
+            if not isinstance(resp, FingerprintProvidersResponse):
+                continue
+            for p in resp.providers:
+                if p.node_id and p.node_id not in seen:
+                    seen[p.node_id] = p
+
+        return list(seen.values())
+
+    def fetch_fingerprint(
+        self,
+        provider: ProviderInfo,
+        content_hash: str,
+        fingerprint_kind: str,
+    ) -> FingerprintResponse:
+        """Fetch a binary fingerprint from a specific provider and
+        verify the creator signature.
+
+        Raises ``EmbeddingNotFoundError`` if the provider doesn't
+        have it, ``TransportFailureError`` on send/parse failure,
+        ``SignatureVerificationError`` on signature failure.
+
+        Mirrors :meth:`fetch_embedding` for the binary fingerprint lane.
+        Cross-checks ``content_hash`` and ``fingerprint_kind`` on the
+        response before signature verification — same defense the
+        embedding lane uses against a peer that swaps in a different
+        (content_hash, kind) pair under the requester's expected key.
+        """
+        request = FetchFingerprintRequest(
+            content_hash=content_hash,
+            fingerprint_kind=fingerprint_kind,
+            request_id=_new_request_id(),
+        )
+        try:
+            resp_bytes = self._send_message(
+                provider.address, encode_message(request),
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise TransportFailureError(
+                f"send to {provider.address} failed: {exc}"
+            ) from exc
+        try:
+            resp = parse_message(resp_bytes)
+        except (
+            MalformedMessageError,
+            UnknownMessageTypeError,
+            IncompatibleProtocolVersionError,
+        ) as exc:
+            raise TransportFailureError(
+                f"parse failed from {provider.address}: {exc}"
+            ) from exc
+
+        if isinstance(resp, ErrorResponse):
+            if resp.code == ErrorCode.NOT_FOUND.value:
+                raise EmbeddingNotFoundError(
+                    f"{provider.node_id} has no fingerprint for "
+                    f"({content_hash[:12]}, {fingerprint_kind})"
+                )
+            raise TransportFailureError(
+                f"{provider.node_id} returned error code "
+                f"{resp.code}: {resp.message}"
+            )
+        if not isinstance(resp, FingerprintResponse):
+            raise TransportFailureError(
+                f"{provider.node_id} returned unexpected message "
+                f"type {type(resp).__name__}"
+            )
+
+        # Cross-check the response actually answers OUR request — same
+        # defense as the embedding lane.
+        if resp.content_hash != content_hash:
+            raise SignatureVerificationError(
+                f"response content_hash={resp.content_hash!r} != "
+                f"requested {content_hash!r}"
+            )
+        if resp.fingerprint_kind != fingerprint_kind:
+            raise SignatureVerificationError(
+                f"response fingerprint_kind={resp.fingerprint_kind!r} "
+                f"!= requested {fingerprint_kind!r}"
+            )
+
+        self._verify_fingerprint_signature(resp)
+        return resp
+
+    def _verify_fingerprint_signature(
+        self, resp: FingerprintResponse,
+    ) -> None:
+        """Verify ``resp.signature_b64`` against the creator's
+        on-chain anchored Ed25519 pubkey, using the
+        :func:`fingerprint_signing_payload` canonical bytes (distinct
+        domain tag from the embedding lane). Raises
+        ``SignatureVerificationError`` on any failure."""
+        pubkey = self._creator_pubkey_for(resp.content_hash)
+        if pubkey is None:
+            raise SignatureVerificationError(
+                f"no on-chain creator pubkey for content_hash="
+                f"{resp.content_hash[:12]}; refusing to trust "
+                f"unanchored fingerprint"
+            )
+        if not isinstance(pubkey, (bytes, bytearray)):
+            raise SignatureVerificationError(
+                f"creator_pubkey_for returned non-bytes "
+                f"({type(pubkey).__name__})"
+            )
+
+        try:
+            sig_bytes = base64.b64decode(resp.signature_b64, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise SignatureVerificationError(
+                f"signature_b64 not valid base64: {exc}"
+            ) from exc
+
+        try:
+            payload_bytes = base64.b64decode(resp.payload_b64, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise SignatureVerificationError(
+                f"payload_b64 not valid base64: {exc}"
+            ) from exc
+
+        message = fingerprint_signing_payload(
+            content_hash=resp.content_hash,
+            fingerprint_kind=resp.fingerprint_kind,
+            payload_bytes=payload_bytes,
+            created_at=resp.created_at,
+        )
+
+        try:
+            ok = self._verify_signature(bytes(pubkey), message, sig_bytes)
+        except Exception as exc:  # noqa: BLE001
+            raise SignatureVerificationError(
+                f"verify_signature raised: {exc}"
+            ) from exc
+
+        if not ok:
+            raise SignatureVerificationError(
+                f"creator-signature verification FAILED for "
+                f"content_hash={resp.content_hash[:12]} under "
+                f"fingerprint_kind={resp.fingerprint_kind!r}"
             )
 
 

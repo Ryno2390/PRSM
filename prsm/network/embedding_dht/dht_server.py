@@ -28,8 +28,11 @@ quiescent index don't need locks.
 from __future__ import annotations
 
 import logging
-from typing import Any, List
+from typing import Any, List, Optional
 
+from prsm.network.embedding_dht.local_fingerprint_index import (
+    LocalFingerprintIndex,
+)
 from prsm.network.embedding_dht.local_index import LocalEmbeddingIndex
 from prsm.network.embedding_dht.protocol import (
     EmbeddingProvidersResponse,
@@ -37,7 +40,11 @@ from prsm.network.embedding_dht.protocol import (
     ErrorCode,
     ErrorResponse,
     FetchEmbeddingRequest,
+    FetchFingerprintRequest,
     FindEmbeddingRequest,
+    FindFingerprintRequest,
+    FingerprintProvidersResponse,
+    FingerprintResponse,
     IncompatibleProtocolVersionError,
     MalformedMessageError,
     MessageType,
@@ -78,7 +85,14 @@ class EmbeddingDHTServer:
         my_node_id: str,
         my_address: str,
         k: int = DEFAULT_K,
+        local_fingerprint_index: Optional[LocalFingerprintIndex] = None,
     ) -> None:
+        """T4.9.next — the server now also services the binary
+        fingerprint lane when ``local_fingerprint_index`` is supplied.
+        Both lanes share the same routing table; if no fingerprint
+        index is wired the server still responds to fingerprint
+        find/fetch requests but always reports NOT_FOUND for fetch
+        and only routes peers via the routing table for find."""
         if not isinstance(my_node_id, str) or not my_node_id:
             raise ValueError("my_node_id must be a non-empty string")
         if not isinstance(my_address, str) or ":" not in my_address:
@@ -86,6 +100,7 @@ class EmbeddingDHTServer:
                 f"my_address must be 'host:port', got {my_address!r}"
             )
         self._local_index = local_index
+        self._local_fingerprint_index = local_fingerprint_index
         self._routing_table = routing_table
         self._my_node_id = my_node_id
         self._my_address = my_address
@@ -125,6 +140,10 @@ class EmbeddingDHTServer:
             return self._handle_find(message)
         if isinstance(message, FetchEmbeddingRequest):
             return self._handle_fetch(message)
+        if isinstance(message, FindFingerprintRequest):
+            return self._handle_find_fingerprint(message)
+        if isinstance(message, FetchFingerprintRequest):
+            return self._handle_fetch_fingerprint(message)
 
         # Response shapes arriving here are misuse: the server only
         # responds, it never receives responses. Match the
@@ -137,8 +156,11 @@ class EmbeddingDHTServer:
             code=ErrorCode.MALFORMED_REQUEST.value,
             message=(
                 f"server received {type(message).__name__} as a request; "
-                f"server only handles {MessageType.FIND_EMBEDDING.value} "
-                f"and {MessageType.FETCH_EMBEDDING.value}"
+                f"server only handles "
+                f"{MessageType.FIND_EMBEDDING.value} / "
+                f"{MessageType.FETCH_EMBEDDING.value} / "
+                f"{MessageType.FIND_FINGERPRINT.value} / "
+                f"{MessageType.FETCH_FINGERPRINT.value}"
             ),
         ))
 
@@ -239,6 +261,114 @@ class EmbeddingDHTServer:
             dimension=record.dimension,
             dtype=record.dtype,
             vector_b64=record.vector_b64,
+            creator_id=record.creator_id,
+            created_at=record.created_at,
+            signature_b64=record.signature_b64,
+        ))
+
+    # -- T4.9.next handlers (fingerprint lane) ---------------------------
+
+    def _handle_find_fingerprint(
+        self, request: FindFingerprintRequest,
+    ) -> bytes:
+        """Reply with up to k providers known to serve
+        (content_hash, fingerprint_kind).
+
+        Same find-by-content-hash routing as the embedding lane, but
+        returns a :class:`FingerprintProvidersResponse` and looks up
+        local presence in :attr:`_local_fingerprint_index`. If no
+        fingerprint index is wired, only routing-table peers are
+        returned (we don't claim local presence).
+        """
+        providers: List[ProviderInfo] = []
+
+        if (
+            self._local_fingerprint_index is not None
+            and self._local_fingerprint_index.has(
+                request.content_hash, request.fingerprint_kind,
+            )
+        ):
+            providers.append(ProviderInfo(
+                node_id=self._my_node_id,
+                address=self._my_address,
+            ))
+
+        try:
+            peers = self._routing_table.find_closest_peers(
+                request.content_hash, count=self._k
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "routing table lookup failed for content_hash=%s "
+                "(fingerprint lane): %s",
+                request.content_hash[:12], exc,
+            )
+            peers = []
+
+        seen_ids = {p.node_id for p in providers}
+        for peer in peers:
+            node_id = getattr(peer, "node_id", None)
+            address = getattr(peer, "address", None)
+            if (
+                not isinstance(node_id, str) or not node_id
+                or not isinstance(address, str) or ":" not in address
+            ):
+                continue
+            if node_id in seen_ids:
+                continue
+            try:
+                providers.append(ProviderInfo(
+                    node_id=node_id, address=address,
+                ))
+            except MalformedMessageError:
+                continue
+            seen_ids.add(node_id)
+            if len(providers) >= self._k + 1:
+                break
+
+        return encode_message(FingerprintProvidersResponse(
+            request_id=request.request_id,
+            providers=tuple(providers),
+        ))
+
+    def _handle_fetch_fingerprint(
+        self, request: FetchFingerprintRequest,
+    ) -> bytes:
+        """Reply with the locally-stored binary fingerprint for
+        (content_hash, fingerprint_kind), or NOT_FOUND.
+
+        If no fingerprint index is wired, always NOT_FOUND — the
+        server has no local fingerprint storage to consult.
+        """
+        if self._local_fingerprint_index is None:
+            return encode_message(ErrorResponse(
+                request_id=request.request_id,
+                code=ErrorCode.NOT_FOUND.value,
+                message=(
+                    "this server has no local fingerprint index; "
+                    "cannot serve fingerprint fetches"
+                ),
+            ))
+
+        record = self._local_fingerprint_index.lookup(
+            request.content_hash, request.fingerprint_kind,
+        )
+        if record is None:
+            return encode_message(ErrorResponse(
+                request_id=request.request_id,
+                code=ErrorCode.NOT_FOUND.value,
+                message=(
+                    f"no fingerprint for content_hash="
+                    f"{request.content_hash[:12]} under "
+                    f"fingerprint_kind={request.fingerprint_kind!r}"
+                ),
+            ))
+
+        return encode_message(FingerprintResponse(
+            request_id=request.request_id,
+            content_hash=record.content_hash,
+            fingerprint_kind=record.fingerprint_kind,
+            payload_b64=record.payload_b64,
             creator_id=record.creator_id,
             created_at=record.created_at,
             signature_b64=record.signature_b64,
