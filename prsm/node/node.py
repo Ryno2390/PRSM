@@ -1390,6 +1390,21 @@ class PRSMNode:
                 f"DHT listener bound on "
                 f"{self.config.listen_host}:{port}"
             )
+            # T4.9.next4: late-bind the EmbeddingDHTClient that
+            # DHTNodeComponents.start() just constructed into the
+            # ContentUploader so cross-node dedup engages on both
+            # lanes (text-vector + binary fingerprint). Skipped when
+            # the embedding lane wasn't enabled at build() time
+            # (manifest-only DHT setups).
+            embedding_client = getattr(
+                self.dht_components, "embedding_client", None,
+            )
+            if embedding_client is not None and self.content_uploader is not None:
+                self.content_uploader.set_embedding_dht_client(embedding_client)
+                logger.info(
+                    "EmbeddingDHTClient late-bound into ContentUploader — "
+                    "cross-node dedup is live (semantic + fingerprint lanes)"
+                )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 f"DHT components start failed: "

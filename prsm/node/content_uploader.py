@@ -664,6 +664,49 @@ class ContentUploader:
                 f"upload): {type(exc).__name__}: {exc}"
             )
 
+    def set_embedding_dht_client(self, client: Any) -> None:
+        """T4.9.next4: late-bind the EmbeddingDHTClient after node startup.
+
+        ``DHTNodeComponents`` only constructs the client at ``start()``
+        time, but ``ContentUploader`` is built earlier (so the upload
+        path is reachable before the network listener is up). This
+        method threads the running client back into both lanes so
+        cross-node dedup goes live the moment ``start()`` returns.
+
+        Idempotent: callers can pass ``None`` to disable, and re-passing
+        the same client is a no-op other than a fresh peer-candidates
+        rebuild.
+
+        Lockstep guarantee: same client + same ``peer_candidates_fn``
+        feed both ``_semantic_index`` (text-vector lane) AND
+        ``_fingerprint_index`` (binary lane). Either both lanes flip
+        on, or both stay off — no hemispheric DHT.
+
+        Trust model: the client itself enforces the verifier invariant
+        at its own constructor (refuses to build without a real
+        creator_pubkey_for + verify_signature). Anything reaching this
+        method is already trust-enabled.
+        """
+        self._embedding_dht_client = client
+
+        # Build the peer-candidates supplier lazily here. At ctor time
+        # this was skipped because ``embedding_dht_client`` was None;
+        # the supplier itself is still safe to build whenever a
+        # content_index is available, so make it now.
+        peer_candidates_fn = (
+            self._make_peer_candidates_fn(self.content_index)
+            if (client is not None and self.content_index is not None)
+            else None
+        )
+
+        # Update both lanes' DHT plumbing in lockstep. Reaching into
+        # the private fields is intentional — both indexes are owned
+        # by this uploader and the field names are stable test surface.
+        self._semantic_index._dht_client = client  # noqa: SLF001
+        self._semantic_index._peer_candidates_fn = peer_candidates_fn  # noqa: SLF001
+        self._fingerprint_index._dht_client = client  # noqa: SLF001
+        self._fingerprint_index._peer_candidates_fn = peer_candidates_fn  # noqa: SLF001
+
     @staticmethod
     def _build_fingerprint_index(
         persist_path: Optional[Path],
