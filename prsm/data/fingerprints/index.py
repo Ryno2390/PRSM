@@ -19,10 +19,11 @@ the way ``_SemanticIndex`` does for the text-vector lane.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 from prsm.data.fingerprints.base import (
     BinaryFingerprint,
@@ -91,6 +92,12 @@ class FingerprintIndex:
     weights, decoded codec tables, etc.) warm across calls.
     """
 
+    # Default upper bound on remote fingerprint pulls per find_nearest()
+    # call. Each pull is a network round-trip; this caps the worst-case
+    # blocking time on a sub-threshold local search. Mirrors
+    # ``_SemanticIndex.DEFAULT_MAX_REMOTE_PULLS_PER_QUERY``.
+    DEFAULT_MAX_REMOTE_PULLS_PER_QUERY: int = 32
+
     def __init__(
         self,
         backends: Optional[Dict[FingerprintKind, BinaryFingerprint]] = None,
@@ -98,7 +105,43 @@ class FingerprintIndex:
         persist_path: Optional[Path] = None,
         duplicate_thresholds: Optional[Dict[FingerprintKind, float]] = None,
         derivative_thresholds: Optional[Dict[FingerprintKind, float]] = None,
+        dht_client: Optional[Any] = None,
+        peer_candidates_fn: Optional[
+            Callable[[], Iterable[Tuple[str, str]]]
+        ] = None,
+        max_remote_pulls_per_query: Optional[int] = None,
     ) -> None:
+        """Construct a fingerprint index, optionally wired to the
+        EmbeddingDHT for cross-node escalation (PRSM-PROV-1 Item 4
+        T4.9.next2 — fingerprint-lane analogue of T3.5).
+
+        Args:
+            backends: Map ``FingerprintKind -> BinaryFingerprint``.
+            persist_path: Optional JSON path the index persists to.
+            duplicate_thresholds / derivative_thresholds: per-kind
+                similarity tiers; defaults from
+                ``dedup_thresholds.yaml::defaults``.
+            dht_client: An ``EmbeddingDHTClient`` (duck-typed: any
+                object exposing
+                ``find_fingerprint_providers(content_hash, kind) -> list``
+                and ``fetch_fingerprint(provider, content_hash, kind)
+                -> FingerprintResponse``). ``None`` disables escalation.
+            peer_candidates_fn: A callable returning an iterable of
+                ``(content_id, content_hash)`` pairs known via gossip
+                whose fingerprints could be pulled from the DHT.
+                ``None`` disables escalation.
+            max_remote_pulls_per_query: Cap on remote fingerprint pulls
+                per ``find_nearest()`` invocation per kind. Defaults to
+                ``DEFAULT_MAX_REMOTE_PULLS_PER_QUERY``.
+
+        Trust model: this code path inherits the
+        ``EmbeddingDHTClient`` invariant — it requires a verifier
+        (creator-pubkey lookup + Ed25519 verifier). Fetched
+        fingerprints that fail signature verification are dropped
+        silently with a debug log; we do NOT cache poisoned payloads.
+        Failures of any kind degrade to local-only behavior — they
+        never break the upload path.
+        """
         self._backends: Dict[FingerprintKind, BinaryFingerprint] = backends or {}
         self._persist_path = persist_path
         self._duplicate_thresholds = (
@@ -119,6 +162,14 @@ class FingerprintIndex:
 
         if persist_path and persist_path.exists():
             self._load()
+
+        self._dht_client = dht_client
+        self._peer_candidates_fn = peer_candidates_fn
+        self._max_remote_pulls_per_query = (
+            max_remote_pulls_per_query
+            if max_remote_pulls_per_query is not None
+            else self.DEFAULT_MAX_REMOTE_PULLS_PER_QUERY
+        )
 
     # ── observation ────────────────────────────────────────────────
 
@@ -141,6 +192,14 @@ class FingerprintIndex:
     def derivative_threshold(self, kind: FingerprintKind) -> float:
         """Effective derivative threshold for *kind*."""
         return self._derivative_thresholds.get(kind, 1.0)
+
+    @property
+    def dht_enabled(self) -> bool:
+        """True iff DHT escalation is fully wired (client + candidates)."""
+        return (
+            self._dht_client is not None
+            and self._peer_candidates_fn is not None
+        )
 
     # ── compute / store / find ─────────────────────────────────────
 
@@ -189,32 +248,170 @@ class FingerprintIndex:
         the first record that ties for the highest similarity if there
         are duplicates (deterministic but not load-bearing — callers
         treat the match as "a representative original").
+
+        T4.9.next2: If DHT escalation is wired and the local best
+        similarity is below the derivative threshold for this kind,
+        pull peer fingerprints into the local cache and re-scan.
+        Bounded by ``max_remote_pulls_per_query`` per call.
         """
         backend = self._backends.get(record.kind)
         if backend is None:
             return None
-        per_kind = self._index.get(record.kind, {})
+
+        local_best = self._scan_kind(record.kind, record.payload, backend)
+
+        # DHT escalation: only when the local result is weak (no match
+        # or sub-derivative for this kind). A strong local hit needs
+        # no remote pull.
+        if self.dht_enabled:
+            derivative = self.derivative_threshold(record.kind)
+            if local_best is None or local_best.similarity < derivative:
+                pulled = self._pull_remote_fingerprints(record.kind)
+                if pulled > 0:
+                    local_best = self._scan_kind(
+                        record.kind, record.payload, backend,
+                    )
+
+        return local_best
+
+    def _scan_kind(
+        self,
+        kind: FingerprintKind,
+        query_payload: bytes,
+        backend: BinaryFingerprint,
+    ) -> Optional[FingerprintMatch]:
+        """O(n) similarity scan across the records stored for *kind*."""
+        per_kind = self._index.get(kind, {})
         if not per_kind:
             return None
-
         best_content_id: Optional[str] = None
         best_creator: str = ""
         best_sim: float = -1.0
         for content_id, (payload, creator) in per_kind.items():
-            sim = backend.similarity(record.payload, payload)
+            sim = backend.similarity(query_payload, payload)
             if sim > best_sim:
                 best_sim = sim
                 best_content_id = content_id
                 best_creator = creator
-
         if best_content_id is None:
             return None
         return FingerprintMatch(
             content_id=best_content_id,
             similarity=best_sim,
             creator_id=best_creator,
-            kind=record.kind,
+            kind=kind,
         )
+
+    def _pull_remote_fingerprints(self, kind: FingerprintKind) -> int:
+        """Walk peer-candidates and pull missing fingerprints of *kind*
+        from the DHT into the local index.
+
+        Returns the count of fingerprints actually inserted. Bounded by
+        ``self._max_remote_pulls_per_query``. Idempotent — peers whose
+        fingerprint of this kind is already cached locally are skipped.
+
+        Failure modes (all logged at debug, all silently skipped — we
+        NEVER raise out of this path because find_nearest() runs on
+        the upload-critical path):
+            - peer_candidates_fn raises
+            - find_fingerprint_providers raises
+            - no providers available
+            - fetch_fingerprint raises (transport / parse / sig error)
+            - server returns NOT_FOUND under our (content_hash, kind)
+            - payload decode fails (malformed base64)
+        """
+        if not self.dht_enabled:
+            return 0
+        try:
+            candidates = list(self._peer_candidates_fn())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                f"peer_candidates_fn raised; skipping fingerprint DHT "
+                f"escalation: {exc}"
+            )
+            return 0
+
+        kind_value = kind.value
+        per_kind = self._index.setdefault(kind, {})
+        inserted = 0
+        for content_id, content_hash in candidates:
+            if inserted >= self._max_remote_pulls_per_query:
+                break
+            if not isinstance(content_id, str) or not content_id:
+                continue
+            if not isinstance(content_hash, str) or not content_hash:
+                continue
+            if content_id in per_kind:
+                continue
+
+            response = self._fetch_one_fingerprint(content_hash, kind_value)
+            if response is None:
+                continue
+
+            try:
+                payload_bytes = base64.b64decode(
+                    response.payload_b64, validate=True,
+                )
+                if not payload_bytes:
+                    raise ValueError("payload_b64 decoded to zero bytes")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    f"fingerprint payload decode failed for "
+                    f"content_hash={content_hash[:18]} kind={kind_value}: "
+                    f"{exc}"
+                )
+                continue
+
+            creator_id = getattr(response, "creator_id", "") or ""
+            per_kind[content_id] = (payload_bytes, creator_id)
+            inserted += 1
+
+        if inserted:
+            if self._persist_path:
+                self._save()
+            logger.info(
+                f"FingerprintDHT: pulled {inserted} peer "
+                f"fingerprints (kind={kind_value}) into local index"
+            )
+        return inserted
+
+    def _fetch_one_fingerprint(
+        self, content_hash: str, kind_value: str,
+    ) -> Optional[Any]:
+        """Find providers + try them in order until one returns a
+        signature-verified fingerprint for ``(content_hash, kind)``.
+
+        Returns the verified ``FingerprintResponse`` or None on any
+        failure path (no providers, all providers failed, NOT_FOUND,
+        signature verification failed for every candidate).
+        """
+        try:
+            providers = self._dht_client.find_fingerprint_providers(
+                content_hash, kind_value,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                f"find_fingerprint_providers raised for "
+                f"content_hash={content_hash[:18]} kind={kind_value}: {exc}"
+            )
+            return None
+
+        for provider in providers:
+            try:
+                return self._dht_client.fetch_fingerprint(
+                    provider, content_hash, kind_value,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # EmbeddingNotFoundError, TransportFailureError,
+                # SignatureVerificationError all land here. Try the
+                # next provider — a malicious peer cannot block
+                # fetching from honest peers.
+                logger.debug(
+                    f"fetch_fingerprint from "
+                    f"{getattr(provider, 'node_id', '?')} failed: {exc}"
+                )
+                continue
+        return None
 
     # ── persistence ────────────────────────────────────────────────
 
