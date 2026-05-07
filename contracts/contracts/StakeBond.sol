@@ -68,13 +68,37 @@ interface ISlasherWithProviderExpiry {
  *
  * Slasher authorization: L2 audit HIGH-7 (B-CROSS-3) fix — the slasher
  * address is now IMMUTABLE, set once at construction. In production it
- * is the BatchSettlementRegistry's address. Constructor address(0) is
- * permitted for tests/local dev where slashing is intentionally
- * disabled — production deploys MUST set this since rotation requires
- * re-deploying StakeBond. Closes the post-handoff drain vector where
- * a compromised owner could re-point slasher to an attacker EOA and
- * call slash() against arbitrary providers (50%-100% bond capture
+ * is the BatchSettlementRegistry's address. L4 self-audit MED-6 (D-02)
+ * additionally hard-rejects address(0) in the constructor: rotation is
+ * impossible after deploy, so the production setup must wire the BSR
+ * address at construction time. Closes the post-handoff drain vector
+ * where a compromised owner could re-point slasher to an attacker EOA
+ * and call slash() against arbitrary providers (50%-100% bond capture
  * + 70% bounty net to the attacker).
+ *
+ * L4 self-audit INFO-4 (D-05) — cross-contract pause coordination is
+ * IMPLICIT, not enforced. StakeBond and BatchSettlementRegistry each
+ * carry independent OpenZeppelin Pausable state; the operational
+ * invariant the protocol relies on is:
+ *
+ *   "Pause both contracts together, in either order, before triaging
+ *    an exploit. Unpause both contracts together once safe to resume."
+ *
+ * The contracts do NOT enforce this via cross-calls. The relevant
+ * interaction surfaces:
+ *   - BSR.challengeReceipt → StakeBond.slash (try/catch). If StakeBond
+ *     is paused but BSR is not, the slash silently reverts and BSR's
+ *     `SlashSwallowed` event fires. This is observable by Forta but is
+ *     a degraded state for the duration of the asymmetric pause.
+ *   - StakeBond.requestUnbond → BSR.lastPendingBatchExpiry (view).
+ *     Read-only, not affected by either pause.
+ *
+ * Operational defense: PRSM-EXPLOIT-PLAYBOOK §11 lists the contract-pair
+ * pause sequence; the multisig signing UI presents both pause txs as a
+ * batched bundle to reduce the asymmetric-pause window. Future work
+ * could move this guarantee on-chain via a shared `PauseCoordinator`,
+ * but the operational defense is currently sufficient given the small
+ * Foundation Safe + 14-day public review window.
  */
 contract StakeBond is Ownable2Step, ReentrancyGuard, Pausable {
     enum StakeStatus {

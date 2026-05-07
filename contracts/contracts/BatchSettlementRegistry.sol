@@ -67,6 +67,37 @@ struct ReceiptLeaf {
                                    // per build_receipt_signing_payload(). Bound here so the
                                    // INVALID_SIGNATURE challenge cannot be re-targeted to an
                                    // attacker-chosen message — see L2 audit C-INT-01.
+                                   //
+                                   // L4 self-audit MED-5 (C-01) + INFO-2 (C-03) caller note:
+                                   //   `signingMessageHash` is PROVIDER-supplied and not
+                                   //   cross-validated against the other leaf fields
+                                   //   on-chain (the off-chain
+                                   //   `build_receipt_signing_payload` formula above is
+                                   //   convention, not an on-chain invariant). A successful
+                                   //   INVALID_SIGNATURE challenge therefore proves only:
+                                   //     "the provider's pubkey did NOT sign the 32-byte
+                                   //      preimage `signingMessageHash`."
+                                   //   It does NOT prove that the receipt CONTENTS
+                                   //   (job_id, shard_index, output_hash, executed_at_unix,
+                                   //   value_ftns) faithfully reflect anything the provider
+                                   //   actually signed. Receipt-content forgery is caught
+                                   //   instead by:
+                                   //     - NO_ESCROW (requester attests no matching authorization)
+                                   //     - CONSENSUS_MISMATCH (k-of-n provider disagreement
+                                   //       on a redundant-execution dispatch)
+                                   //     - DOUBLE_SPEND (same receipt committed in two batches)
+                                   //   Full on-chain binding of message-hash to leaf fields
+                                   //   would require storing the variable-length `job_id`
+                                   //   string, which is gas-prohibitive at batch scale and
+                                   //   would also force an off-chain canonical-form rebuild;
+                                   //   the on-chain protocol therefore relies on the three
+                                   //   primitives above for content-forgery defense and
+                                   //   uses INVALID_SIGNATURE only for the narrow
+                                   //   "signature-doesn't-verify under declared pubkey" case.
+                                   //   `bytes32` accepts any 32-byte value (INFO-2); the
+                                   //   defense surface is not key-revocation-aware here —
+                                   //   that is enforced upstream at the publisher-key
+                                   //   anchor layer.
 }
 
 /**
@@ -428,7 +459,6 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         b.totalValueFTNS = totalValueFTNS;
         // invalidatedValueFTNS defaults to 0
         b.commitTimestamp = uint64(block.timestamp);
-        b.status = BatchStatus.PENDING;
         b.tier_slash_rate_bps = tierSlashRateBps;
         b.consensus_group_id = consensusGroupId;
         // L2 audit MEDIUM D-05 fix: snapshot the live window at commit
@@ -452,6 +482,14 @@ contract BatchSettlementRegistry is Ownable2Step, Pausable {
         b.stakeBondAtCommit = address(stakeBond);
         b.signatureVerifierAtCommit = address(signatureVerifier);
         b.metadataURI = metadataURI;
+        // L4 self-audit INFO-5 (D-06) fix: write `status = PENDING` LAST
+        // so any future addition that introduces an external call
+        // (currently none) cannot observe a half-initialised batch in
+        // the PENDING state. No present-day exploit — the function makes
+        // no external call between `b.status` and the snapshot writes —
+        // but the ordering is now defensively correct against future
+        // edits that might add one.
+        b.status = BatchStatus.PENDING;
 
         // L4 self-audit HIGH-1 (A-01 ≡ D-01) fix: maintain the
         // per-provider monotonic max-pending-expiry tracker so

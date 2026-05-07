@@ -151,10 +151,14 @@ Per the policy, the founder must decide for each HIGH: **remediate** OR **accept
 | MED-7 | Remediate | ~1 hr | Setter validation with `code.length > 0` + interface check. | **REMEDIATED 2026-05-06** (`setEscrowPool` / `setStakeBond` / `setSignatureVerifier` enforce `code.length > 0` for non-zero values; `address(0)` disable mode preserved). |
 | MED-1 | **Accept with rationale** for this deploy round | (would require new ConsensusGroupRegistry) | Preserve push for now; revisit if k=2 consensus is widely deployed. Stop-gap option (`challenger == requester`) is a reasonable middle path if appetite for engineering exists. | Accepted. |
 | MED-2 | **Accept with rationale** for this deploy round | (would require deposit-time auth-set commit) | Multi-receipt cherry-pick is an off-chain dispute concern; on-chain fix is invasive. Document as known limitation. | Accepted. |
-| MED-5 | **Documentation-only** | ~30 min | Update docstrings + threat model; full on-chain fix not justified. | Pending docstring update. |
+| MED-5 | **Documentation-only** | ~30 min | Update docstrings + threat model; full on-chain fix not justified. | **DOCUMENTED 2026-05-07** (ReceiptLeaf.signingMessageHash NatSpec extended in `BatchSettlementRegistry.sol`). |
 | LOW-1, LOW-2 | Remediate when convenient | ~1 hr each | Defensive cleanups, batchable. | Pending. |
 | LOW-3 | Remediate when convenient | ~1 hr | Defensive cleanups, batchable. | **REMEDIATED 2026-05-06** (`drainFoundationReserve` now `whenNotPaused`). |
-| INFO-1 to INFO-5 | Remediate when touching adjacent code | minutes | Code/doc quality. | Pending. |
+| INFO-1 (A-05) — `requestUnbond` slasher floor silent degradation | Remediate when touching adjacent code | minutes | Code/doc quality. | **REMEDIATED 2026-05-06** (subsumed by MED-6: StakeBond constructor now hard-rejects `address(0)` for slasher; production `address(0)` deploy is impossible). |
+| INFO-2 (C-03) — `signingMessageHash` 32-byte unconstrained | Remediate when touching adjacent code | minutes | Code/doc quality. | **DOCUMENTED 2026-05-07** (folded into the MED-5 NatSpec extension on `ReceiptLeaf.signingMessageHash`). |
+| INFO-3 (C-04) — Stale `signingMessageHash: ZeroHash` default in PoC test factory | Remediate when touching adjacent code | minutes | Code/doc quality. | **REMEDIATED 2026-05-07** (`makeLeaf` factory default in `C-INT-01-invalid-signature-forgery.test.js` now uses non-degenerate hashes; tests that probe the binding still override explicitly). |
+| INFO-4 (D-05) — Cross-contract pause coordination implicit | Remediate when touching adjacent code | minutes | Code/doc quality. | **DOCUMENTED 2026-05-07** (StakeBond contract-level NatSpec now spells out the operational invariant + degraded-state observability via `SlashSwallowed`). |
+| INFO-5 (D-06) — `commitBatch` storage-pointer assignment ordering | Remediate when touching adjacent code | minutes | Code/doc quality. | **REMEDIATED 2026-05-07** (`b.status = BatchStatus.PENDING` reordered to LAST write in `commitBatch`; defensive against future external-call additions). |
 
 ## 7. Recommended next workstream
 
@@ -163,8 +167,8 @@ Before audit-bundle mainnet deploy under POL-2 §4 framework:
 1. ~~**Fix HIGH-1**~~ — **DONE 2026-05-06.**
 2. ~~**Fix HIGH-2**~~ — **DONE 2026-05-06.**
 3. ~~**Fix MEDIUM-3, MED-4, MED-6, MED-7**~~ + ~~**LOW-3**~~ — **DONE 2026-05-06.**
-4. **Update docstrings** for MED-5 + INFO-1 through INFO-5. (Pending)
-5. **Re-run agent-teams self-audit** against the post-fix tip to confirm no new HIGH/CRITICAL surfaces opened by the fixes (mirrors the L2 → today regression-check pattern). (Pending)
+4. ~~**Update docstrings** for MED-5 + INFO-1 through INFO-5~~ — **DONE 2026-05-07.**
+5. **Re-run agent-teams self-audit** against the post-fix tip to confirm no new HIGH/CRITICAL surfaces opened by the fixes (mirrors the L2 → today regression-check pattern). (In progress 2026-05-07)
 6. **Open 14-day public GitHub review window** per POL-2 §4.4 with this consolidated findings doc + remediation patches linked from the issue. (Pending)
 7. **Define TVL caps** per POL-2 §4.3: EscrowPool/StakeBond initial cap = $10K each. (Pending)
 8. **Verify Pausable wired** per POL-2 §4.2 + Foundation Safe holds PAUSER_ROLE. (Pending)

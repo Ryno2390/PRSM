@@ -45,12 +45,18 @@ describe("Audit Team C — C-INT-01: INVALID_SIGNATURE adversarial slashing", fu
       jobIdHash: ethers.keccak256(ethers.toUtf8Bytes("job-real-1")),
       shardIndex: 0,
       providerIdHash: ethers.keccak256(ethers.toUtf8Bytes("provider-id-1")),
-      providerPubkeyHash: ethers.ZeroHash,
+      providerPubkeyHash: ethers.keccak256(ethers.toUtf8Bytes("provider-pubkey-default")),
       outputHash: ethers.keccak256(ethers.toUtf8Bytes("output-bytes")),
       executedAtUnix: Math.floor(Date.now() / 1000),
       valueFtns: ONE_FTNS,
-      signatureHash: ethers.ZeroHash,
-      signingMessageHash: ethers.ZeroHash, // post-fix: bound to actual signed message
+      signatureHash: ethers.keccak256(ethers.toUtf8Bytes("provider-sig-default")),
+      // L4 self-audit INFO-3 (C-04): non-degenerate default. Tests that
+      // care about the signingMessageHash binding override this; tests
+      // that don't were previously inheriting `ZeroHash`, which is a
+      // valid bytes32 but also the value an uninitialised storage slot
+      // would produce. Future test authors copying this factory shouldn't
+      // land on a degenerate input by default.
+      signingMessageHash: ethers.keccak256(ethers.toUtf8Bytes("default-signing-message")),
       ...overrides,
     };
     return leaf;
