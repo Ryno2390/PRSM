@@ -36,6 +36,7 @@ describe("FTNSToken ↔ EmissionController minter integration", function () {
       now,
       BASELINE_RATE,
       TEST_MINT_CAP,
+      EPOCH,
       owner.address
     );
 

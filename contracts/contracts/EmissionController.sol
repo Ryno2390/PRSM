@@ -59,9 +59,26 @@ contract EmissionController is Ownable2Step, ReentrancyGuard {
     /// lifetime. Typically 900M FTNS (total supply cap − genesis allocation).
     uint256 public immutable mintCap;
 
-    /// @notice Halving epoch length. 4 years in seconds, matching the
-    /// PRSM_Tokenomics.md §4 commitment.
-    uint256 public constant EPOCH_DURATION_SECONDS = 4 * 365 days;
+    /// @notice Halving epoch length. Mainnet bound to 4 years per
+    /// PRSM_Tokenomics.md §4 (constructor enforces the floor).
+    /// Testnet deploys can configure shorter epochs (>=1 hour) so
+    /// halving curves are observable at testnet timescales without
+    /// affecting the mainnet commitment. T10 (2026-05-07): refactored
+    /// from `constant` to `immutable` to enable this.
+    uint256 public immutable EPOCH_DURATION_SECONDS;
+
+    /// @notice Floor on configurable epoch duration. 1 hour gives
+    /// testnet operators meaningful halving observation while
+    /// preventing pathological zero-or-near-zero values that would
+    /// drain the mintCap in seconds.
+    uint256 public constant MIN_EPOCH_DURATION_SECONDS = 1 hours;
+
+    /// @notice Mainnet (chain 8453) is bound to the 4-year canonical
+    /// cadence per PRSM_Tokenomics.md §4. Constructor enforces this
+    /// floor on the Base L2 chainId; other chains accept anything
+    /// >= MIN_EPOCH_DURATION_SECONDS.
+    uint256 public constant MAINNET_EPOCH_DURATION_SECONDS = 4 * 365 days;
+    uint256 public constant BASE_MAINNET_CHAIN_ID = 8453;
 
     // -------------------------------------------------------------------------
     // Mutable state
@@ -114,6 +131,9 @@ contract EmissionController is Ownable2Step, ReentrancyGuard {
     error ExceedsMintCap(uint256 requested, uint256 remaining);
     error InvalidAddress();
     error ZeroAmount();
+    /// @dev T10: epoch duration below the absolute floor (1 hour) or
+    /// below the mainnet commitment (4 years on chain 8453).
+    error InvalidEpochDuration(uint256 provided, uint256 minimum);
 
     // -------------------------------------------------------------------------
     // Modifiers
@@ -138,16 +158,42 @@ contract EmissionController is Ownable2Step, ReentrancyGuard {
         uint64 _epochZeroStartTimestamp,
         uint256 _baselineRatePerSecond,
         uint256 _mintCap,
+        uint256 _epochDurationSeconds,
         address _initialOwner
     ) Ownable(_initialOwner) {
         if (_ftnsToken == address(0)) revert InvalidAddress();
         if (_baselineRatePerSecond == 0) revert ZeroAmount();
         if (_mintCap == 0) revert ZeroAmount();
 
+        // T10: Validate epoch duration. The floor is 1 hour for any
+        // chain (prevents pathological zero-near-zero values that
+        // would drain mintCap in seconds). Mainnet (Base, chain 8453)
+        // additionally enforces the canonical 4-year cadence per
+        // PRSM_Tokenomics.md §4 — non-4-year mainnet deploys revert
+        // at construction.
+        uint256 effectiveFloor = block.chainid == BASE_MAINNET_CHAIN_ID
+            ? MAINNET_EPOCH_DURATION_SECONDS
+            : MIN_EPOCH_DURATION_SECONDS;
+        if (_epochDurationSeconds < effectiveFloor) {
+            revert InvalidEpochDuration(_epochDurationSeconds, effectiveFloor);
+        }
+        // Mainnet requires EXACTLY the canonical value, not just >=,
+        // so a buggy higher value can't extend the canonical schedule.
+        if (
+            block.chainid == BASE_MAINNET_CHAIN_ID &&
+            _epochDurationSeconds != MAINNET_EPOCH_DURATION_SECONDS
+        ) {
+            revert InvalidEpochDuration(
+                _epochDurationSeconds,
+                MAINNET_EPOCH_DURATION_SECONDS
+            );
+        }
+
         ftnsToken = IFTNSMinter(_ftnsToken);
         epochZeroStartTimestamp = _epochZeroStartTimestamp;
         baselineRatePerSecond = _baselineRatePerSecond;
         mintCap = _mintCap;
+        EPOCH_DURATION_SECONDS = _epochDurationSeconds;
         lastMintTimestamp = _epochZeroStartTimestamp;
     }
 

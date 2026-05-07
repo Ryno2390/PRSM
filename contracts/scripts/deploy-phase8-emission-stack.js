@@ -159,6 +159,15 @@ async function main() {
   const epochZeroStart = requireBigInt("EPOCH_ZERO_START_TIMESTAMP");
   const baselineRate = requireBigInt("BASELINE_RATE_PER_SECOND");
   const mintCap = requireBigInt("MINT_CAP");
+  // T10 (2026-05-07): epoch duration is now constructor-set so testnet
+  // operators can observe halvings at testnet timescales while mainnet
+  // (chainid 8453) is constructor-bound to the canonical 4-year cadence.
+  // Default to 4 years; testnet operators override via env. Constructor
+  // enforces the chain-aware floor (1h non-mainnet, 4y mainnet exact).
+  const FOUR_YEARS_SECONDS = BigInt(4 * 365 * 24 * 60 * 60);
+  const epochDurationSeconds = process.env.EPOCH_DURATION_SECONDS
+    ? BigInt(process.env.EPOCH_DURATION_SECONDS)
+    : FOUR_YEARS_SECONDS;
   const emissionOwner = requireAddress("EMISSION_OWNER");
   const creatorPool = requireAddress("CREATOR_POOL_ADDRESS");
   const operatorPool = requireAddress("OPERATOR_POOL_ADDRESS");
@@ -204,6 +213,7 @@ async function main() {
   console.log(`Epoch zero start (unix): ${epochZeroStart}`);
   console.log(`Baseline rate (wei/s):   ${baselineRate}`);
   console.log(`Mint cap (wei):          ${mintCap}`);
+  console.log(`Epoch duration (s):      ${epochDurationSeconds}`);
   console.log(`Emission owner:          ${emissionOwner}`);
   console.log(`Creator pool:            ${creatorPool}  (${creatorBps} bps)`);
   console.log(`Operator pool:           ${operatorPool}  (${operatorBps} bps)`);
@@ -224,6 +234,7 @@ async function main() {
     epochZeroStart,
     baselineRate,
     mintCap,
+    epochDurationSeconds,
     emissionOwner
   );
   await emission.waitForDeployment();
@@ -315,6 +326,7 @@ async function main() {
         epochZeroStartTimestamp: epochZeroStart.toString(),
         baselineRatePerSecond: baselineRate.toString(),
         mintCap: mintCap.toString(),
+        epochDurationSeconds: epochDurationSeconds.toString(),
         initialOwner: emissionOwner,
       },
       CompensationDistributor: {
@@ -375,6 +387,7 @@ async function main() {
           epochZeroStart,
           baselineRate,
           mintCap,
+          epochDurationSeconds,
           emissionOwner,
         ],
       });

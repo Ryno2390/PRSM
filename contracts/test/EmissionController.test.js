@@ -35,6 +35,7 @@ describe("EmissionController — core mint + rate", function () {
       epochZero,
       BASELINE_RATE,
       mintCap,
+      EPOCH,
       owner.address
     );
 
@@ -308,6 +309,96 @@ describe("EmissionController — core mint + rate", function () {
       await expect(controller.connect(owner).resumeMinting())
         .to.emit(controller, "MintingResumed")
         .withArgs(owner.address);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T10 (2026-05-07) — epoch-duration constructor validation
+  // -------------------------------------------------------------------------
+  //
+  // Hardhat's default chainId is 31337, NOT BASE_MAINNET_CHAIN_ID (8453),
+  // so the mainnet-only branches (exact-4-year requirement, 4-year floor)
+  // can't be exercised here. Those are guarded by static-analysis review
+  // of the constructor and an explicit code-path read. The cases that
+  // CAN be exercised on hardhat are the non-mainnet floor (>= 1 hour)
+  // and the immutability of EPOCH_DURATION_SECONDS once set.
+
+  describe("T10 epoch-duration validation", function () {
+    const ONE_HOUR = 60 * 60;
+
+    async function deployWithEpoch(epochDurationSeconds) {
+      [owner, distributor, other] = await ethers.getSigners();
+      const Mock = await ethers.getContractFactory("MockFTNSMinter");
+      const tok = await Mock.deploy();
+      const now = await time.latest();
+      const Controller = await ethers.getContractFactory("EmissionController");
+      return await Controller.deploy(
+        await tok.getAddress(),
+        BigInt(now),
+        BASELINE_RATE,
+        TEST_MINT_CAP,
+        epochDurationSeconds,
+        owner.address
+      );
+    }
+
+    it("reverts when epoch duration is zero (below MIN_EPOCH_DURATION_SECONDS)", async function () {
+      const Controller = await ethers.getContractFactory("EmissionController");
+      await expect(deployWithEpoch(0)).to.be.revertedWithCustomError(
+        Controller,
+        "InvalidEpochDuration"
+      );
+    });
+
+    it("reverts when epoch duration is below 1 hour", async function () {
+      const Controller = await ethers.getContractFactory("EmissionController");
+      // 59 minutes — below the 1-hour floor.
+      await expect(deployWithEpoch(59 * 60)).to.be.revertedWithCustomError(
+        Controller,
+        "InvalidEpochDuration"
+      );
+    });
+
+    it("accepts 1 hour exactly (floor)", async function () {
+      const c = await deployWithEpoch(ONE_HOUR);
+      expect(await c.EPOCH_DURATION_SECONDS()).to.equal(ONE_HOUR);
+    });
+
+    it("accepts 1 day (typical testnet config)", async function () {
+      const ONE_DAY = 24 * 60 * 60;
+      const c = await deployWithEpoch(ONE_DAY);
+      expect(await c.EPOCH_DURATION_SECONDS()).to.equal(ONE_DAY);
+    });
+
+    it("accepts the canonical 4-year mainnet value on non-mainnet too", async function () {
+      const FOUR_YEARS = 4 * 365 * 24 * 60 * 60;
+      const c = await deployWithEpoch(FOUR_YEARS);
+      expect(await c.EPOCH_DURATION_SECONDS()).to.equal(FOUR_YEARS);
+    });
+
+    it("accelerated 1-hour epoch causes rate to halve after 1 hour", async function () {
+      const c = await deployWithEpoch(ONE_HOUR);
+      await c.connect(owner).setAuthorizedDistributor(distributor.address);
+      expect(await c.currentEpochRate()).to.equal(BASELINE_RATE);
+      await time.increase(ONE_HOUR);
+      expect(await c.currentEpochRate()).to.equal(BASELINE_RATE / 2n);
+      await time.increase(ONE_HOUR);
+      expect(await c.currentEpochRate()).to.equal(BASELINE_RATE / 4n);
+    });
+
+    it("MIN_EPOCH_DURATION_SECONDS surface equals 1 hour", async function () {
+      const c = await deployWithEpoch(ONE_HOUR);
+      expect(await c.MIN_EPOCH_DURATION_SECONDS()).to.equal(ONE_HOUR);
+    });
+
+    it("MAINNET_EPOCH_DURATION_SECONDS surface equals 4 years", async function () {
+      const c = await deployWithEpoch(ONE_HOUR);
+      expect(await c.MAINNET_EPOCH_DURATION_SECONDS()).to.equal(4 * 365 * 24 * 60 * 60);
+    });
+
+    it("BASE_MAINNET_CHAIN_ID surface equals 8453", async function () {
+      const c = await deployWithEpoch(ONE_HOUR);
+      expect(await c.BASE_MAINNET_CHAIN_ID()).to.equal(8453);
     });
   });
 });

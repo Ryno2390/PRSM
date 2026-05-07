@@ -139,8 +139,12 @@ TESTNET = NetworkConfig(
     stake_bond="0xF93aCa6551F408fFfe24292288d5488864D5264c",
     settlement_registry="0xF8BEEb4362222b50109b6034767322B31aA92449",
     signature_verifier="0x208dc98545Fe062d0B13Ac07b073633E6a62b5A9",  # production Ed25519Verifier
-    emission_controller="0x30b6810F5653B99464AE6c2c2Ef37963bdbb0d99",
-    compensation_distributor="0x18c875743DD722fBDd7a694A1644b502BC433DBB",
+    # T10 (2026-05-07) re-deploy: 1-hour epoch (vs mainnet 4 years) so
+    # halving curve is observable at testnet timescales. Old pair
+    # (EmissionController 0x30b6810F…, CompensationDistributor 0x18c87574…)
+    # is orphaned but retained on-chain — superseded by these.
+    emission_controller="0x1478F8f5F13a5BDeBc2a0b7C185D19BEE15f312e",
+    compensation_distributor="0xFd730f8E513eD184F255cb1a62791e711B2e81b9",
     storage_slashing="0x2ba1B361d2AD49f15F1131762fA3512d7824EB06",
     key_distribution="0xdB41A471AAC86285cD855bEdC27D7FC810dc3318",
     publisher_key_anchor=None,  # not yet deployed on Base Sepolia; Phase 3.x.3 Sepolia deploy was on Ethereum Sepolia
@@ -150,8 +154,9 @@ TESTNET = NetworkConfig(
         "Foundation reserve wallet on StakeBond is set to the FTNS token address itself "
         "(passes MED-4 code.length>0 gate; foundation-share slashes accumulate passively at "
         "the FTNS contract — no economic-recovery path on testnet, but slashing flow IS exercisable).",
-        "Halving curve uses mainnet's 4-year cadence (constant in EmissionController.sol). "
-        "Accelerated-halving variant is a planned follow-up task (T10).",
+        "Halving curve uses 1-hour epoch (vs mainnet 4 years) — T10 redeploy 2026-05-07. "
+        "EmissionController.EPOCH_DURATION_SECONDS is now constructor-set (immutable); "
+        "mainnet (chainId 8453) constructor enforces exactly 4 years.",
         "Provenance + Royalty contracts are NOT deployed on testnet — content-registration "
         "flow remains mainnet-only for now.",
         "Faucet: ask in #testnet-faucet on Discord; founder airdrops within 24h.",

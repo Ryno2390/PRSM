@@ -35,6 +35,7 @@ describe("CompensationDistributor — pull + weighted split", function () {
       now,
       BASELINE_RATE,
       TEST_MINT_CAP,
+      EPOCH,
       owner.address
     );
 

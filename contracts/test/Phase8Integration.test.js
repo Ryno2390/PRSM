@@ -50,6 +50,7 @@ describe("Phase 8 end-to-end integration", function () {
       now,
       BASELINE_RATE,
       TEST_MINT_CAP,
+      EPOCH,
       owner.address
     );
 

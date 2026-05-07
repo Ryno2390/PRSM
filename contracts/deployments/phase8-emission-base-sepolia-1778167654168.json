@@ -1,0 +1,33 @@
+{
+  "bundle": "phase8-emission",
+  "network": "base-sepolia",
+  "chainId": "84532",
+  "timestamp": "2026-05-07T15:27:34.165Z",
+  "deployer": "0xCCAc7b21695De068979b1ca47B0cfBD328654220",
+  "params": {
+    "baselineRatePerSecond": "1000000000000000000",
+    "mintCap": "900000000000000000000000000",
+    "epochZeroStartTimestamp": "1778167646",
+    "epochDurationSeconds": "3600",
+    "poolWeightsBps": {
+      "creator": 5000,
+      "operator": 3000,
+      "grant": 2000
+    }
+  },
+  "contracts": {
+    "EmissionController": "0x1478F8f5F13a5BDeBc2a0b7C185D19BEE15f312e",
+    "CompensationDistributor": "0xFd730f8E513eD184F255cb1a62791e711B2e81b9",
+    "FTNSToken": "0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a",
+    "CreatorPool": "0xCCAc7b21695De068979b1ca47B0cfBD328654220",
+    "OperatorPool": "0xCCAc7b21695De068979b1ca47B0cfBD328654220",
+    "GrantPool": "0xCCAc7b21695De068979b1ca47B0cfBD328654220"
+  },
+  "crossWireTxHashes": {
+    "emission_setAuthorizedDistributor": "0x6b881c2e126523e854bb9cbce12d272ab8beba1a3fa9a5d2337f00808367805f"
+  },
+  "postDeployNotes": [
+    "Grant FTNSToken MINTER_ROLE to EmissionController via Foundation multi-sig before any mint calls (not executed by this script).",
+    "If pool addresses need to change, use CompensationDistributor.setPoolAddresses (owner-only; irreversible once rolled)."
+  ]
+}

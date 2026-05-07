@@ -21,6 +21,13 @@
  *   BASELINE_RATE_PER_SECOND     - default 1_000_000_000_000_000_000 (1 FTNS/s)
  *   MINT_CAP_WEI                 - default 900_000_000 ether (900M FTNS)
  *   EPOCH_ZERO_START_TIMESTAMP   - default current block timestamp
+ *   EPOCH_DURATION_SECONDS       - T10 (2026-05-07): epoch length in seconds.
+ *                                  Default 4*365 days (canonical mainnet cadence).
+ *                                  Mainnet (chainid 8453) constructor enforces
+ *                                  EXACTLY 4 years; testnet accepts >= 1 hour.
+ *                                  Set to e.g. 3600 (1h) or 86400 (1d) on
+ *                                  testnet to observe halvings at testnet
+ *                                  timescales.
  *   CREATOR_BPS                  - default 5000 (50%)
  *   OPERATOR_BPS                 - default 3000 (30%)
  *   GRANT_BPS                    - default 2000 (20%)
@@ -52,6 +59,15 @@ async function main() {
   const mintCap = BigInt(
     process.env.MINT_CAP_WEI || hre.ethers.parseUnits("900000000", 18).toString()
   );
+  // T10 (2026-05-07): epoch duration is now a constructor arg.
+  // Default to canonical 4-year mainnet cadence; testnet operators
+  // override via EPOCH_DURATION_SECONDS to observe halvings faster.
+  // Constructor enforces chain-aware floor (1h non-mainnet, 4y mainnet).
+  const FOUR_YEARS_SECONDS = BigInt(4 * 365 * 24 * 60 * 60);
+  const epochDurationSeconds = BigInt(
+    process.env.EPOCH_DURATION_SECONDS || FOUR_YEARS_SECONDS.toString()
+  );
+
   const creatorBps = parseInt(process.env.CREATOR_BPS || "5000", 10);
   const operatorBps = parseInt(process.env.OPERATOR_BPS || "3000", 10);
   const grantBps = parseInt(process.env.GRANT_BPS || "2000", 10);
@@ -89,6 +105,7 @@ async function main() {
   console.log(`Baseline rate:     ${hre.ethers.formatUnits(baselineRatePerSecond, 18)} FTNS/s`);
   console.log(`Mint cap:          ${hre.ethers.formatUnits(mintCap, 18)} FTNS`);
   console.log(`Epoch zero start:  ${epochZeroStart}`);
+  console.log(`Epoch duration:    ${epochDurationSeconds} s (${Number(epochDurationSeconds) / 86400} days)`);
   console.log(`Pools (${creatorBps}/${operatorBps}/${grantBps} bps):`);
   console.log(`  creator:  ${creatorChecksum}`);
   console.log(`  operator: ${operatorChecksum}`);
@@ -107,6 +124,7 @@ async function main() {
     epochZeroStart,
     baselineRatePerSecond,
     mintCap,
+    epochDurationSeconds,
     deployer.address
   );
   await emission.waitForDeployment();
@@ -184,6 +202,7 @@ async function main() {
       baselineRatePerSecond: baselineRatePerSecond.toString(),
       mintCap: mintCap.toString(),
       epochZeroStartTimestamp: epochZeroStart.toString(),
+      epochDurationSeconds: epochDurationSeconds.toString(),
       poolWeightsBps: { creator: creatorBps, operator: operatorBps, grant: grantBps },
     },
     contracts: {
@@ -216,7 +235,7 @@ async function main() {
       {
         name: "EmissionController",
         address: deployments.EmissionController,
-        args: [ftnsChecksum, epochZeroStart, baselineRatePerSecond, mintCap, deployer.address],
+        args: [ftnsChecksum, epochZeroStart, baselineRatePerSecond, mintCap, epochDurationSeconds, deployer.address],
       },
       {
         name: "CompensationDistributor",

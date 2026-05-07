@@ -17,8 +17,8 @@ Basescan-verified as of 2026-05-07:
 | EscrowPool | `0xaa28b5818242608e04C1773c3e34bF7bFfb96248` | [↗](https://sepolia.basescan.org/address/0xaa28b5818242608e04C1773c3e34bF7bFfb96248) |
 | Ed25519Verifier | `0x208dc98545Fe062d0B13Ac07b073633E6a62b5A9` | [↗](https://sepolia.basescan.org/address/0x208dc98545Fe062d0B13Ac07b073633E6a62b5A9) |
 | StakeBond | `0xF93aCa6551F408fFfe24292288d5488864D5264c` | [↗](https://sepolia.basescan.org/address/0xF93aCa6551F408fFfe24292288d5488864D5264c) |
-| EmissionController | `0x30b6810F5653B99464AE6c2c2Ef37963bdbb0d99` | [↗](https://sepolia.basescan.org/address/0x30b6810F5653B99464AE6c2c2Ef37963bdbb0d99) |
-| CompensationDistributor | `0x18c875743DD722fBDd7a694A1644b502BC433DBB` | [↗](https://sepolia.basescan.org/address/0x18c875743DD722fBDd7a694A1644b502BC433DBB) |
+| EmissionController | `0x1478F8f5F13a5BDeBc2a0b7C185D19BEE15f312e` | [↗](https://sepolia.basescan.org/address/0x1478F8f5F13a5BDeBc2a0b7C185D19BEE15f312e) |
+| CompensationDistributor | `0xFd730f8E513eD184F255cb1a62791e711B2e81b9` | [↗](https://sepolia.basescan.org/address/0xFd730f8E513eD184F255cb1a62791e711B2e81b9) |
 | StorageSlashing | `0x2ba1B361d2AD49f15F1131762fA3512d7824EB06` | [↗](https://sepolia.basescan.org/address/0x2ba1B361d2AD49f15F1131762fA3512d7824EB06) |
 | KeyDistribution | `0xdB41A471AAC86285cD855bEdC27D7FC810dc3318` | [↗](https://sepolia.basescan.org/address/0xdB41A471AAC86285cD855bEdC27D7FC810dc3318) |
 
@@ -30,10 +30,14 @@ on mainnet, not testnet.
 
 - A real Foundation Safe — the "foundation" address on testnet is a
   single deployer EOA. Multisig governance lives on mainnet.
-- Accelerated halving — `EmissionController.EPOCH_DURATION_SECONDS` is
-  Solidity `constant` (4 years), so emission curves are effectively
-  invisible at testnet timescales. Refactor + accelerated-halving
-  variant tracked under task T10.
+- ~~Accelerated halving~~ — **DELIVERED 2026-05-07 (T10).** Testnet
+  `EmissionController` now uses a 1-hour epoch (vs mainnet 4 years).
+  `EPOCH_DURATION_SECONDS` was refactored from `constant` to
+  constructor-set `immutable`; mainnet (chainId 8453) constructor
+  enforces exactly 4 years. The first halving on testnet fires at
+  `epochZeroStart + 1h`; second at `+2h`, etc. — emission rate halves
+  from 1 FTNS/s to 0.5 FTNS/s after the first hour and so on, so the
+  full halving curve is observable in a single short session.
 - Drainable foundation reserve — the foundation reserve wallet on
   StakeBond is set to the FTNS token address itself (passes the
   `code.length > 0` gate; foundation-share slashes accumulate there
@@ -136,7 +140,7 @@ contract, total-supply matches the post-deploy invariant.
 | Bond stake (`prsm provider bond`) | testnet StakeBond accepts FTNS |
 | Submit inference job (escrow → settle) | full Phase 3.1 batch settlement |
 | Storage proof challenge (Phase 7-storage) | StorageSlashing live |
-| Emission claim (Phase 8) | curve is the mainnet 4-year halving; rewards visible but slow at testnet timescales |
+| Emission claim (Phase 8) | curve uses an accelerated 1-hour epoch — rate halves every hour so the full curve is visible in one session |
 | Content registration / royalty | not on testnet (mainnet-only) |
 
 ## Troubleshooting
