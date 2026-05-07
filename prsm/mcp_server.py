@@ -70,6 +70,28 @@ logger = logging.getLogger(__name__)
 
 # ── Tool Definitions ─────────────────────────────────────────────────────
 
+# 2026-05-07 (canonical-workflow gap-list delta): three tools are
+# currently broken end-to-end and MUST NOT be advertised to LLM
+# clients in production. The Tool definitions remain in TOOLS below
+# (so the call_tool dispatch table still works for explicit
+# invocations) but list_tools() filters them so client-side tool
+# discovery does not surface them. When QueryOrchestrator lands
+# (replacing the deleted Agent Forge), drop the entry from this set
+# to re-expose the relevant tool.
+#
+# - prsm_analyze: depends on /compute/forge → 503 (agent_forge=None)
+# - prsm_dispatch_agent: same backend
+# - prsm_agent_status: backing /compute/status/{job_id} endpoint
+#   does not exist on node API → 404
+#
+# Operators who want these visible (e.g. for testing reconstruction
+# work) can set PRSM_EXPOSE_BROKEN_TOOLS=1.
+BROKEN_TOOLS_HIDDEN = frozenset({
+    "prsm_analyze",
+    "prsm_dispatch_agent",
+    "prsm_agent_status",
+})
+
 TOOLS = [
     Tool(
         name="prsm_analyze",
@@ -1636,7 +1658,16 @@ def create_server() -> Server:
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
-        return TOOLS
+        # Hide currently-broken tools from client-side discovery.
+        # See BROKEN_TOOLS_HIDDEN above for rationale + lift-gate
+        # conditions. PRSM_EXPOSE_BROKEN_TOOLS=1 forces visibility for
+        # operators reconstructing the data-query path.
+        expose_broken = os.getenv(
+            "PRSM_EXPOSE_BROKEN_TOOLS", "",
+        ).lower() in ("1", "true", "yes")
+        if expose_broken:
+            return TOOLS
+        return [t for t in TOOLS if t.name not in BROKEN_TOOLS_HIDDEN]
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> Sequence[TextContent]:
