@@ -45,7 +45,7 @@ from prsm.storage.exceptions import (
     StorageError,
 )
 
-from prsm.storage.content_store import ContentStore
+from prsm.storage.content_store import ContentStore, StorageArtifacts
 
 _content_store: Optional[ContentStore] = None
 
@@ -80,6 +80,7 @@ __all__ = [
     "ShardManifest",
     # Facade
     "ContentStore",
+    "StorageArtifacts",
     # Singleton helpers
     "get_content_store",
     "init_content_store",

@@ -13,6 +13,7 @@ Usage::
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from prsm.storage.blob_store import BlobStore
@@ -20,6 +21,49 @@ from prsm.storage.exceptions import ContentNotFoundError
 from prsm.storage.key_manager import KeyManager
 from prsm.storage.models import ContentHash, KeyShare, ShardManifest
 from prsm.storage.shard_engine import ShardEngine
+
+
+# ---------------------------------------------------------------------------
+# StorageArtifacts (returned by store_local_with_artifacts / consumed by
+# retrieve_with_artifacts) — used by the publish/fetch layer to wire
+# encrypted Tier-B/C content through external transport (BitTorrent).
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class StorageArtifacts:
+    """All on-disk + in-memory artefacts produced by an encrypted store.
+
+    Used by external distribution layers (e.g. BitTorrent) that need to
+    package the full set of bytes required to later reassemble + decrypt
+    the content on a different node.
+
+    Attributes
+    ----------
+    content_hash:
+        Content-addressed identifier of the *original* (plaintext) bytes.
+    encrypted_manifest:
+        AES-256-GCM ciphertext of the serialised :class:`ShardManifest`.
+        Distributed alongside the shards so a recipient can recover the
+        manifest *without* querying the origin node.
+    key_shares:
+        Shamir secret-shared encryption-key shares. The recipient needs
+        ``threshold`` of these to reconstruct the AES key.
+    shard_paths:
+        Absolute filesystem paths of every shard blob written to the
+        local BlobStore. The publisher is responsible for staging /
+        copying these into a torrent directory (the ContentStore does not
+        own the BitTorrent staging area).
+    manifest:
+        The plaintext :class:`ShardManifest` — kept for the publisher's
+        bookkeeping (e.g. inspecting shard order). Should NOT be
+        distributed alongside the encrypted manifest, since doing so
+        would defeat the encryption.
+    """
+    content_hash: ContentHash
+    encrypted_manifest: bytes
+    key_shares: List[KeyShare]
+    shard_paths: List[str]
+    manifest: ShardManifest
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +259,128 @@ class ContentStore:
             return 0
         _ciphertext, _key_shares, manifest = entry
         return manifest.total_size
+
+    # ------------------------------------------------------------------
+    # Artifact-aware API (used by ContentPublisher / ContentRetriever for
+    # cross-node distribution via BitTorrent). The artifact-aware path
+    # exposes the same encrypt-then-shard pipeline as :meth:`store_local`
+    # but returns every byte the caller needs to reassemble + decrypt on
+    # a different node — bypassing :attr:`_manifest_cache` (which is
+    # in-memory only, single-node).
+    # ------------------------------------------------------------------
+
+    async def store_local_with_artifacts(
+        self,
+        data: bytes,
+        replication_factor: int = 3,
+    ) -> StorageArtifacts:
+        """Store *data* and return every artefact a remote node would need.
+
+        Same encrypt-then-shard pipeline as :meth:`store_local`, but
+        returns the encrypted manifest, key shares, and shard paths
+        instead of caching them in :attr:`_manifest_cache`.
+
+        Used by :class:`prsm.node.content_publisher.ContentPublisher` for
+        Tier-B/C publishing, where the artefacts are staged into a
+        BitTorrent directory and seeded to the network.
+
+        The shards are also written to the local BlobStore as a
+        side-effect so the publisher's own node can serve fetch requests
+        without re-downloading via BitTorrent.
+        """
+        content_hash, manifest, ciphertext, key_shares = await self._store_and_encrypt(
+            data,
+            owner_node_id=self.node_id,
+            replication_factor=replication_factor,
+        )
+        # Cache the manifest so subsequent local retrievals on this node
+        # skip the BlobStore round-trip — keeps store_local + this method
+        # observationally interchangeable from the local-fetch side.
+        self._manifest_cache[content_hash.hex()] = (ciphertext, key_shares, manifest)
+
+        shard_paths = [
+            self.blob_store._path_for(shard_hash)
+            for shard_hash in manifest.shard_hashes
+        ]
+
+        return StorageArtifacts(
+            content_hash=content_hash,
+            encrypted_manifest=ciphertext,
+            key_shares=key_shares,
+            shard_paths=shard_paths,
+            manifest=manifest,
+        )
+
+    async def retrieve_with_artifacts(
+        self,
+        encrypted_manifest: bytes,
+        key_shares: List[KeyShare],
+        shard_blobs: List[bytes],
+    ) -> bytes:
+        """Reassemble + decrypt content from a remotely-supplied artefact set.
+
+        Inverse of :meth:`store_local_with_artifacts`. Used by
+        :class:`prsm.node.content_publisher.ContentRetriever` after a
+        BitTorrent fetch has materialised the artefact files locally.
+
+        Parameters
+        ----------
+        encrypted_manifest:
+            AES-256-GCM ciphertext from
+            :attr:`StorageArtifacts.encrypted_manifest`.
+        key_shares:
+            Shamir key shares — at least :attr:`KeyShare.threshold` of them.
+        shard_blobs:
+            Raw shard bytes in the same order as the manifest's
+            ``shard_hashes``. The caller is responsible for fetching the
+            shards (e.g. by reading every shard-{N}.bin in the torrent
+            directory) and supplying them in deterministic order.
+
+        Returns
+        -------
+        bytes
+            The original plaintext content.
+
+        Raises
+        ------
+        KeyReconstructionError
+            If fewer than ``threshold`` key shares are supplied or any
+            share is corrupt.
+        ManifestError
+            If decrypting the manifest yields invalid JSON.
+        ShardIntegrityError
+            If any shard's recomputed hash does not match the manifest.
+        """
+        # Decrypt the manifest first — it tells us shard order, count,
+        # and erasure parameters.
+        manifest = self._decode_manifest(encrypted_manifest, key_shares)
+
+        # Stage the shards back into the local BlobStore. ShardEngine
+        # reads via `BlobStore.retrieve(shard_hash)`, so we need the
+        # bytes addressable by their content hash on this node before
+        # calling reassemble.
+        if len(shard_blobs) != len(manifest.shard_hashes):
+            from prsm.storage.exceptions import ShardIntegrityError
+            raise ShardIntegrityError(
+                f"Shard count mismatch: manifest expects "
+                f"{len(manifest.shard_hashes)}, got {len(shard_blobs)}"
+            )
+
+        # BlobStore.store() is content-addressed: re-storing bytes whose
+        # hash matches an existing blob is a no-op. We rely on that to
+        # both (a) verify each shard's integrity (the stored hash must
+        # match the manifest's expected hash) and (b) populate the
+        # local blob store so reassemble() can read them back.
+        for shard_blob, expected_hash in zip(shard_blobs, manifest.shard_hashes):
+            stored_hash = await self.blob_store.store(shard_blob)
+            if stored_hash != expected_hash:
+                from prsm.storage.exceptions import ShardIntegrityError
+                raise ShardIntegrityError(
+                    f"Shard hash mismatch: expected {expected_hash.hex()}, "
+                    f"got {stored_hash.hex()}"
+                )
+
+        return await self.shard_engine.reassemble(manifest)
 
     async def delete_local(self, content_hash: ContentHash) -> None:
         """Delete all shards and the manifest cache entry for *content_hash*.
