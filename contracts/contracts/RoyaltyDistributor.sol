@@ -3,6 +3,7 @@ pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 interface IProvenanceRegistry {
     /// @dev Slim getter — returns only what the distributor needs. The
@@ -48,7 +49,7 @@ interface IProvenanceRegistry {
  *      (Pausable). networkTreasury is immutable so a v2 deploy is
  *      required regardless of which fix lands first.
  */
-contract RoyaltyDistributor is ReentrancyGuard {
+contract RoyaltyDistributor is Ownable2Step, ReentrancyGuard {
     IERC20 public immutable ftns;
     IProvenanceRegistry public immutable registry;
     address public immutable networkTreasury;
@@ -60,6 +61,13 @@ contract RoyaltyDistributor is ReentrancyGuard {
     /// distributeRoyalty calls. Zeroed on claim().
     mapping(address recipient => uint256) public claimable;
 
+    /// @dev L4 self-audit A-08: sum of every entry in `claimable`. Maintained
+    /// in lockstep with `claimable` so `recoverStranded` can compute the
+    /// excess (donations + push-payments stuck in the contract) without
+    /// iterating the mapping. Invariant: `ftns.balanceOf(address(this)) >=
+    /// totalClaimable` at all times.
+    uint256 public totalClaimable;
+
     event RoyaltyPaid(
         bytes32 indexed contentHash,
         address indexed payer,
@@ -70,8 +78,20 @@ contract RoyaltyDistributor is ReentrancyGuard {
         uint256 servingNodeAmount
     );
     event RoyaltyClaimed(address indexed recipient, uint256 amount);
+    /// @dev L4 self-audit A-08
+    event StrandedRecovered(address indexed to, uint256 amount);
 
-    constructor(address _ftns, address _registry, address _networkTreasury) {
+    /// @dev L4 self-audit A-08 errors
+    error ZeroAddress();
+    error NothingToRecover();
+    error TransferFailed();
+
+    constructor(
+        address _ftns,
+        address _registry,
+        address _networkTreasury,
+        address _initialOwner
+    ) Ownable(_initialOwner) {
         require(_ftns != address(0), "Zero ftns");
         require(_registry != address(0), "Zero registry");
         require(_networkTreasury != address(0), "Zero treasury");
@@ -117,6 +137,11 @@ contract RoyaltyDistributor is ReentrancyGuard {
         if (nodeAmt > 0) {
             claimable[servingNode] += nodeAmt;
         }
+        // L4 self-audit A-08: maintain totalClaimable in lockstep. The
+        // sum equals exactly `gross` because creatorAmt+networkAmt+nodeAmt
+        // = gross by construction (line 105 above), so balance and
+        // totalClaimable both increase by the same amount.
+        totalClaimable += gross;
 
         emit RoyaltyPaid(
             contentHash,
@@ -138,8 +163,33 @@ contract RoyaltyDistributor is ReentrancyGuard {
         require(amount > 0, "Nothing to claim");
         // Effects before interaction.
         claimable[msg.sender] = 0;
+        // L4 self-audit A-08: balance and totalClaimable drop equally.
+        totalClaimable -= amount;
         require(ftns.transfer(msg.sender, amount), "Claim transfer failed");
         emit RoyaltyClaimed(msg.sender, amount);
+    }
+
+    /**
+     * @notice Recover FTNS that has accumulated in this contract beyond the
+     *         sum of all claimable balances — i.e. donations sent via direct
+     *         `ftns.transfer(distributor, X)` that bypass `distributeRoyalty`
+     *         and therefore cannot be claimed by anyone.
+     *
+     *         L4 self-audit A-08 fix. See docs/governance/A-08-recoverStranded-design.md.
+     *
+     *         Owner-only (Foundation Safe in production). Only sweeps the
+     *         strict excess `balance(this) - totalClaimable`; recipients'
+     *         claimable entitlements are untouched.
+     *
+     * @param to address to receive the recovered FTNS
+     */
+    function recoverStranded(address to) external onlyOwner nonReentrant {
+        if (to == address(0)) revert ZeroAddress();
+        uint256 bal = ftns.balanceOf(address(this));
+        if (bal <= totalClaimable) revert NothingToRecover();
+        uint256 excess = bal - totalClaimable;
+        if (!ftns.transfer(to, excess)) revert TransferFailed();
+        emit StrandedRecovered(to, excess);
     }
 
     /**

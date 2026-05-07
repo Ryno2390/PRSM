@@ -48,7 +48,8 @@ describe("[Team D] D5 — Royalty push-payment architectural risk", function () 
     distributor = await RD.deploy(
       await token.getAddress(),
       await provReg.getAddress(),
-      treasury.address
+      treasury.address,
+      owner.address
     );
     await distributor.waitForDeployment();
   });

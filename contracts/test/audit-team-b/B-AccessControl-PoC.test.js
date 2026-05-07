@@ -389,14 +389,16 @@ describe("Team B — Access Control PoC", function () {
       const Distributor = await ethers.getContractFactory("RoyaltyDistributor");
       const dummy = "0x000000000000000000000000000000000000bEEF";
 
+      // L4 self-audit A-08: constructor now takes a 4th arg `_initialOwner`.
+      const owner = (await ethers.getSigners())[0].address;
       await expect(
-        Distributor.deploy(ethers.ZeroAddress, dummy, dummy),
+        Distributor.deploy(ethers.ZeroAddress, dummy, dummy, owner),
       ).to.be.revertedWith("Zero ftns");
       await expect(
-        Distributor.deploy(dummy, ethers.ZeroAddress, dummy),
+        Distributor.deploy(dummy, ethers.ZeroAddress, dummy, owner),
       ).to.be.revertedWith("Zero registry");
       await expect(
-        Distributor.deploy(dummy, dummy, ethers.ZeroAddress),
+        Distributor.deploy(dummy, dummy, ethers.ZeroAddress, owner),
       ).to.be.revertedWith("Zero treasury");
     });
 
@@ -420,6 +422,7 @@ describe("Team B — Access Control PoC", function () {
         await ftns.getAddress(),
         await registry.getAddress(),
         await wrongTreasury.getAddress(),
+        deployer.address,
       );
 
       // networkTreasury is immutable — no way to fix.

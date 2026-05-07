@@ -50,6 +50,7 @@ describe("[Team D] D-02 regression: pause surface present on audit-bundle contra
     royaltyDistributor = await RD.deploy(
       await token.getAddress(),
       await provReg.getAddress(),
+      owner.address,
       owner.address
     );
     await royaltyDistributor.waitForDeployment();

@@ -5,6 +5,15 @@
  *   FTNS_TOKEN_ADDRESS    - existing FTNS ERC20 on the target network
  *   NETWORK_TREASURY      - address that receives the 2% network fee
  *
+ * Optional env vars:
+ *   ROYALTY_DISTRIBUTOR_OWNER - initial owner of RoyaltyDistributor.
+ *                                Defaults to the deployer EOA. On mainnet,
+ *                                set this to the Foundation Safe to skip
+ *                                the post-deploy transferOwnership step
+ *                                (otherwise hand-off via Ownable2Step is
+ *                                required before the Safe can call
+ *                                recoverStranded — A-08 fix).
+ *
  * Usage:
  *   npx hardhat run scripts/deploy-provenance.js --network base-sepolia
  *   npx hardhat run scripts/deploy-provenance.js --network base
@@ -207,9 +216,23 @@ async function main() {
   console.log(`  ProvenanceRegistry: ${registryAddress}`);
 
   // 2. Distributor (using checksummed addresses from preflight)
+  // L4 self-audit A-08: 4-arg constructor — initial owner defaults to
+  // deployer; operator can transferOwnership to Foundation Safe via
+  // Ownable2Step after deploy, OR pre-set ROYALTY_DISTRIBUTOR_OWNER to
+  // the Safe to skip the hand-off (Safe must already be deployed).
+  const ownerOverride = process.env.ROYALTY_DISTRIBUTOR_OWNER;
+  const initialOwner = ownerOverride
+    ? hre.ethers.getAddress(ownerOverride)
+    : deployer.address;
+  console.log(`  Initial owner:     ${initialOwner}${ownerOverride ? " (override)" : " (deployer)"}`);
   console.log("\nDeploying RoyaltyDistributor…");
   const Distributor = await hre.ethers.getContractFactory("RoyaltyDistributor");
-  const distributor = await Distributor.deploy(ftnsChecksum, registryAddress, treasuryChecksum);
+  const distributor = await Distributor.deploy(
+    ftnsChecksum,
+    registryAddress,
+    treasuryChecksum,
+    initialOwner,
+  );
   await distributor.waitForDeployment();
   const distributorAddress = await distributor.getAddress();
   console.log(`  RoyaltyDistributor: ${distributorAddress}`);
@@ -244,7 +267,7 @@ async function main() {
       {
         name: "RoyaltyDistributor",
         address: distributorAddress,
-        args: [ftnsChecksum, registryAddress, treasuryChecksum],
+        args: [ftnsChecksum, registryAddress, treasuryChecksum, initialOwner],
       },
     ];
     for (const t of verifyTargets) {

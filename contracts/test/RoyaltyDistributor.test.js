@@ -21,7 +21,8 @@ describe("RoyaltyDistributor", function () {
     distributor = await Distributor.deploy(
       await token.getAddress(),
       await registry.getAddress(),
-      treasury.address
+      treasury.address,
+      admin.address
     );
     await distributor.waitForDeployment();
 
@@ -227,6 +228,161 @@ describe("RoyaltyDistributor", function () {
       // slim getter, the diff must be near zero (allow tiny variance).
       const diff = Number(rcBig.gasUsed - rcSmall.gasUsed);
       expect(Math.abs(diff)).to.be.lessThan(1000);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // L4 self-audit A-08 — recoverStranded
+  // -------------------------------------------------------------------------
+  //
+  // Donations sent via direct ftns.transfer(distributor, X) bypass
+  // distributeRoyalty and are not credited to any claimable[] slot.
+  // Pre-fix they sat forever; post-fix the owner can sweep the strict
+  // excess `balance(this) - totalClaimable` without disturbing real
+  // claimable balances.
+
+  describe("A-08 recoverStranded", function () {
+    const contentHash = ethers.keccak256(ethers.toUtf8Bytes("a-08-content"));
+
+    async function registerCreator(rateBps) {
+      await registry.connect(creator).registerContent(
+        contentHash,
+        rateBps,
+        "ipfs://a-08",
+      );
+    }
+
+    it("totalClaimable starts at zero", async function () {
+      expect(await distributor.totalClaimable()).to.equal(0);
+    });
+
+    it("totalClaimable tracks distributeRoyalty credits in lockstep", async function () {
+      await registerCreator(5000); // 50% creator
+      const gross = ONE * 100n;
+      await distributor.connect(payer).distributeRoyalty(
+        contentHash,
+        servingNode.address,
+        gross,
+      );
+      // creator: 50, network: 2, node: 48 — total 100 = gross
+      expect(await distributor.totalClaimable()).to.equal(gross);
+      expect(await token.balanceOf(await distributor.getAddress())).to.equal(gross);
+    });
+
+    it("totalClaimable decrements on claim() in lockstep with balance", async function () {
+      await registerCreator(5000);
+      const gross = ONE * 100n;
+      await distributor.connect(payer).distributeRoyalty(
+        contentHash, servingNode.address, gross,
+      );
+      const creatorAmt = await distributor.claimable(creator.address);
+      await distributor.connect(creator).claim();
+      expect(await distributor.claimable(creator.address)).to.equal(0);
+      expect(await distributor.totalClaimable()).to.equal(gross - creatorAmt);
+      expect(await token.balanceOf(await distributor.getAddress())).to.equal(gross - creatorAmt);
+    });
+
+    it("recoverStranded recovers a direct donation when no claimable balance exists", async function () {
+      const donation = ONE * 7n;
+      await token.mint(payer.address, donation);
+      await token.connect(payer).transfer(await distributor.getAddress(), donation);
+      // Pre-recover: totalClaimable=0, balance=donation
+      expect(await distributor.totalClaimable()).to.equal(0);
+      expect(await token.balanceOf(await distributor.getAddress())).to.equal(donation);
+
+      const beforeBal = await token.balanceOf(admin.address);
+      await expect(distributor.connect(admin).recoverStranded(admin.address))
+        .to.emit(distributor, "StrandedRecovered")
+        .withArgs(admin.address, donation);
+      expect(await token.balanceOf(admin.address)).to.equal(beforeBal + donation);
+      expect(await token.balanceOf(await distributor.getAddress())).to.equal(0);
+    });
+
+    it("recoverStranded recovers ONLY the excess when claimable balances exist", async function () {
+      await registerCreator(5000);
+      const gross = ONE * 100n;
+      await distributor.connect(payer).distributeRoyalty(
+        contentHash, servingNode.address, gross,
+      );
+      // Now donate on top.
+      const donation = ONE * 13n;
+      await token.mint(payer.address, donation);
+      await token.connect(payer).transfer(await distributor.getAddress(), donation);
+
+      const totalClaimableBefore = await distributor.totalClaimable();
+      const balBefore = await token.balanceOf(await distributor.getAddress());
+      expect(balBefore - totalClaimableBefore).to.equal(donation);
+
+      const recipient = ethers.Wallet.createRandom().address;
+      await expect(distributor.connect(admin).recoverStranded(recipient))
+        .to.emit(distributor, "StrandedRecovered")
+        .withArgs(recipient, donation);
+
+      // claimable balances UNTOUCHED, totalClaimable UNTOUCHED
+      expect(await distributor.totalClaimable()).to.equal(totalClaimableBefore);
+      expect(await token.balanceOf(await distributor.getAddress()))
+        .to.equal(totalClaimableBefore);
+      expect(await token.balanceOf(recipient)).to.equal(donation);
+
+      // All claims still work post-recovery
+      await distributor.connect(creator).claim();
+      await distributor.connect(servingNode).claim();
+      await distributor.connect(treasury).claim();
+      expect(await token.balanceOf(await distributor.getAddress())).to.equal(0);
+      expect(await distributor.totalClaimable()).to.equal(0);
+    });
+
+    it("recoverStranded reverts NothingToRecover when balance == totalClaimable", async function () {
+      await registerCreator(5000);
+      await distributor.connect(payer).distributeRoyalty(
+        contentHash, servingNode.address, ONE * 100n,
+      );
+      // No donation; balance exactly equals totalClaimable.
+      await expect(distributor.connect(admin).recoverStranded(admin.address))
+        .to.be.revertedWithCustomError(distributor, "NothingToRecover");
+    });
+
+    it("recoverStranded reverts NothingToRecover on a fresh empty contract", async function () {
+      await expect(distributor.connect(admin).recoverStranded(admin.address))
+        .to.be.revertedWithCustomError(distributor, "NothingToRecover");
+    });
+
+    it("recoverStranded reverts ZeroAddress on to == 0", async function () {
+      await token.mint(payer.address, ONE);
+      await token.connect(payer).transfer(await distributor.getAddress(), ONE);
+      await expect(distributor.connect(admin).recoverStranded(ethers.ZeroAddress))
+        .to.be.revertedWithCustomError(distributor, "ZeroAddress");
+    });
+
+    it("recoverStranded is onlyOwner", async function () {
+      await token.mint(payer.address, ONE);
+      await token.connect(payer).transfer(await distributor.getAddress(), ONE);
+      await expect(distributor.connect(payer).recoverStranded(payer.address))
+        .to.be.revertedWithCustomError(distributor, "OwnableUnauthorizedAccount")
+        .withArgs(payer.address);
+    });
+
+    it("ownership transfers via Ownable2Step pendingOwner -> acceptOwnership", async function () {
+      // Initial owner is `admin` per beforeEach.
+      expect(await distributor.owner()).to.equal(admin.address);
+      // Transfer to creator (pending until accepted).
+      await distributor.connect(admin).transferOwnership(creator.address);
+      expect(await distributor.owner()).to.equal(admin.address);
+      expect(await distributor.pendingOwner()).to.equal(creator.address);
+      // Old owner can still call until acceptance.
+      await token.mint(payer.address, ONE);
+      await token.connect(payer).transfer(await distributor.getAddress(), ONE);
+      await distributor.connect(admin).recoverStranded(admin.address);
+      // Accept; creator is now owner.
+      await distributor.connect(creator).acceptOwnership();
+      expect(await distributor.owner()).to.equal(creator.address);
+      // Old owner now reverts.
+      await token.mint(payer.address, ONE);
+      await token.connect(payer).transfer(await distributor.getAddress(), ONE);
+      await expect(distributor.connect(admin).recoverStranded(admin.address))
+        .to.be.revertedWithCustomError(distributor, "OwnableUnauthorizedAccount");
+      // New owner can.
+      await distributor.connect(creator).recoverStranded(creator.address);
     });
   });
 });

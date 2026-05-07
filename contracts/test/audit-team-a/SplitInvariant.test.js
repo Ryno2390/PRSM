@@ -59,7 +59,7 @@ describe("AUDIT-TEAM-A — A01 RoyaltyDistributor split breaks PRSM-TOK-1 §8.1"
 
     const Distributor = await ethers.getContractFactory("RoyaltyDistributor");
     distributor = await Distributor.deploy(
-      await token.getAddress(), await registry.getAddress(), treasury.address
+      await token.getAddress(), await registry.getAddress(), treasury.address, admin.address
     );
     await distributor.waitForDeployment();
 
