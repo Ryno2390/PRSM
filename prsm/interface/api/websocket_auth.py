@@ -438,7 +438,7 @@ class WebSocketAuthManager:
         """Check if user has admin privileges for conversation access"""
         try:
             # Import auth manager to check admin permissions
-            from prsm.core.auth.enhanced_authorization import get_enhanced_auth_manager
+            from prsm.core.security.enhanced_authorization import get_enhanced_auth_manager
             from prsm.core.auth.models import UserRole
             
             auth_manager = get_enhanced_auth_manager()
