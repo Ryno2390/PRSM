@@ -1,292 +1,196 @@
-# PRSM Testnet Quickstart
+# PRSM Public Testnet — Quickstart
 
-**Network:** Base Sepolia (chainId 84532)
-**Status:** Live as of 2026-05-05
+The PRSM public testnet runs on **Base Sepolia** (chain id 84532). It's
+a no-stakes environment for trying out the protocol: testnet-FTNS has
+**zero monetary value**, and contracts can be redeployed at any time.
+Use mainnet for anything that needs to be durable.
 
-This guide gets you from zero to a running PRSM node earning real on-chain
-testnet-FTNS in under 30 minutes.
+## What's deployed
 
-> ⚠️ **Testnet only.** All FTNS on this network has zero monetary value.
-> Do not use a real wallet's private key. Do not connect mainnet wallets.
-> The "Foundation" on testnet is a single deployer EOA, not the real
-> 2-of-3 hardware multisig used on mainnet.
+All 9 audit-bundle + Phase 8 + Phase 7-storage contracts are live and
+Basescan-verified as of 2026-05-07:
 
----
-
-## TL;DR
-
-```bash
-pip install prsm                     # 1. install
-prsm join-testnet                    # 2. generate burner wallet
-# (fund the printed address with Base Sepolia ETH)
-source ~/.prsm/testnet-deployer.env  # 3. activate
-prsm wallet info --network testnet   # 4. confirm balance
-prsm storage upload <file>           # 5. upload + earn royalties
-prsm wallet claim --network testnet  # 6. withdraw earnings
-```
-
----
-
-## What's deployed on Base Sepolia
-
-| Contract | Address | Role |
+| Contract | Address | Basescan |
 |---|---|---|
-| FTNSTokenSimple | `0xF8d0c1AE75441d3C3Dd2A2420C0789043916412a` | ERC-20 token (1B cap, 100M genesis) |
-| ProvenanceRegistry | `0x2911f9a0a02896486CdF59d6d369764841DC0eA4` | Content registration + creator binding |
-| RoyaltyDistributor | `0xB790045ff826C76fe02DBc54a6ef0021951Fd892` | Pull-payment royalty splits |
-| BatchSettlementRegistry | `0x200B35fCB68678717a355176e22321Dc3e703315` | Batch settlement + challenge windows |
-| EscrowPool | `0x4BDf07b2BB23176469bdEFca2B103AdB3DCb3dd2` | Per-requester escrow |
-| Ed25519Verifier | `0x1d7fCbC08792D649016703C4Be59635e619097EE` | On-chain signature verification |
-| StakeBond | `0xDea103f33503BC7e73Ea447d43b2Cd7E2710D20A` | Provider stake bonds |
-| EmissionController | `0x134552dbe2d235DB60be5A881A2c06d9E42d2613` | Halving emission curve |
-| CompensationDistributor | `0xFa3610e87027b548B86859B105B1b39B30d9955B` | Pull-based provider rewards |
-| StorageSlashing | `0x4FDd792fDcDcEe31861D23A1B0342058Ed32c766` | Storage-proof challenges |
-| KeyDistribution | `0xC33ceA03455DB9246716ccF04cE1446EB56B439b` | Threshold key distribution |
+| FTNS (UUPS proxy) | `0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a` | [↗](https://sepolia.basescan.org/address/0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a) |
+| BatchSettlementRegistry | `0xF8BEEb4362222b50109b6034767322B31aA92449` | [↗](https://sepolia.basescan.org/address/0xF8BEEb4362222b50109b6034767322B31aA92449) |
+| EscrowPool | `0xaa28b5818242608e04C1773c3e34bF7bFfb96248` | [↗](https://sepolia.basescan.org/address/0xaa28b5818242608e04C1773c3e34bF7bFfb96248) |
+| Ed25519Verifier | `0x208dc98545Fe062d0B13Ac07b073633E6a62b5A9` | [↗](https://sepolia.basescan.org/address/0x208dc98545Fe062d0B13Ac07b073633E6a62b5A9) |
+| StakeBond | `0xF93aCa6551F408fFfe24292288d5488864D5264c` | [↗](https://sepolia.basescan.org/address/0xF93aCa6551F408fFfe24292288d5488864D5264c) |
+| EmissionController | `0x30b6810F5653B99464AE6c2c2Ef37963bdbb0d99` | [↗](https://sepolia.basescan.org/address/0x30b6810F5653B99464AE6c2c2Ef37963bdbb0d99) |
+| CompensationDistributor | `0x18c875743DD722fBDd7a694A1644b502BC433DBB` | [↗](https://sepolia.basescan.org/address/0x18c875743DD722fBDd7a694A1644b502BC433DBB) |
+| StorageSlashing | `0x2ba1B361d2AD49f15F1131762fA3512d7824EB06` | [↗](https://sepolia.basescan.org/address/0x2ba1B361d2AD49f15F1131762fA3512d7824EB06) |
+| KeyDistribution | `0xdB41A471AAC86285cD855bEdC27D7FC810dc3318` | [↗](https://sepolia.basescan.org/address/0xdB41A471AAC86285cD855bEdC27D7FC810dc3318) |
 
-All addresses are also pinned in `prsm/config/networks.py`.
+**Out of testnet scope:** `ProvenanceRegistry` and `RoyaltyDistributor`
+are mainnet-only. The content-registration / royalty path is exercised
+on mainnet, not testnet.
 
----
+## What testnet does NOT have
 
-## Step 1 — Install PRSM
+- A real Foundation Safe — the "foundation" address on testnet is a
+  single deployer EOA. Multisig governance lives on mainnet.
+- Accelerated halving — `EmissionController.EPOCH_DURATION_SECONDS` is
+  Solidity `constant` (4 years), so emission curves are effectively
+  invisible at testnet timescales. Refactor + accelerated-halving
+  variant tracked under task T10.
+- Drainable foundation reserve — the foundation reserve wallet on
+  StakeBond is set to the FTNS token address itself (passes the
+  `code.length > 0` gate; foundation-share slashes accumulate there
+  passively). On testnet there's no recovery path; the slashing
+  flow is exercisable but the economic recovery is mainnet-only.
 
-```bash
-pip install prsm
-```
+## Onboarding
 
-Or from source:
-
-```bash
-git clone https://github.com/Ryno2390/PRSM
-cd PRSM
-pip install -e .
-```
-
-Verify:
-
-```bash
-prsm --version
-```
-
----
-
-## Step 2 — Generate a testnet burner wallet
+### 1. Generate a fresh testnet burner wallet
 
 ```bash
 prsm join-testnet
 ```
 
-This creates a fresh keypair and writes `~/.prsm/testnet-deployer.env`
-(mode 600) containing:
+Creates `~/.prsm/testnet-deployer.env` with a freshly-generated private
+key plus all the env vars below. The wallet starts with zero balance.
 
-- `PRIVATE_KEY` (the burner's signing key)
-- `BASE_SEPOLIA_RPC_URL` (default `https://sepolia.base.org`)
-- All testnet contract addresses
-- `PRSM_ONCHAIN_PROVENANCE=1` (so uploads register on-chain)
+> **Warning:** the burner is only for testnet. Never send mainnet funds
+> to this address. The key is stored in plaintext at
+> `~/.prsm/testnet-deployer.env`.
 
-The command prints your wallet address and a Basescan link. **Copy
-the address — you'll need it to fund the wallet.**
+The env file sets:
 
-> The burner key is in the env file in plaintext. That's fine — testnet
-> tokens have zero value. **Never reuse this key for mainnet, and never
-> commit the env file.**
+```bash
+PRIVATE_KEY=0x<64-hex>             # the burner key (also as FTNS_WALLET_PRIVATE_KEY)
+BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
+PRSM_NETWORK=testnet
+PRSM_ONCHAIN_PROVENANCE=1
+FTNS_TOKEN_ADDRESS=0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a
+```
 
----
+### 2. Fund the burner with Base Sepolia ETH
 
-## Step 3 — Fund the wallet with Base Sepolia ETH
+You need ~0.001 ETH (a few cents at mainnet prices, but free on testnet)
+for transaction fees. Use any of these faucets — pick whichever is up:
 
-The burner needs some Base Sepolia ETH to pay gas (gas is cheap on
-Base Sepolia, but not free). Recommended faucets:
+- https://www.coinbase.com/faucets/base-sepolia
+- https://www.alchemy.com/faucets/base-sepolia
+- https://docs.base.org/tools/network-faucets/
 
-| Faucet | Notes | URL |
-|---|---|---|
-| **Coinbase Developer Platform** | No mainnet gate; ~0.0001 ETH/click, 0.1 ETH/day | https://portal.cdp.coinbase.com/faucet |
-| **Alchemy** | Requires ≥ 0.001 ETH on Ethereum mainnet at the wallet | https://www.alchemy.com/faucets/base-sepolia |
-| **pk910 PoW** (Sepolia → bridge to Base Sepolia) | Browser-based mining; bypasses mainnet gates but blocks hosting/VPN IPs | https://sepolia-faucet.pk910.de |
+The address to fund is printed at the top of `~/.prsm/testnet-deployer.env`
+(also visible via `cat ~/.prsm/testnet-deployer.env | head -3`).
 
-A few hundred clicks of the Coinbase faucet (~0.02 ETH) is enough for
-many node operations. If you want a single big drop, the Alchemy faucet
-requires a small mainnet-ETH stake at your wallet (~$5 once, satisfies
-their Sybil gate).
+### 3. Request testnet-FTNS
 
-**Verify your wallet is funded** at the Basescan link from Step 2 (or
-plug the address into `https://sepolia.basescan.org`).
+For the first ~20 testnet users, ask in the PRSM project's
+`#testnet-faucet` channel. Founder will airdrop within 24h. The airdrop
+script is `contracts/scripts/airdrop-testnet-ftns.js`:
 
----
+```bash
+PRIVATE_KEY=0x<faucet-key> \
+FTNS_TOKEN_ADDRESS=0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a \
+RECIPIENT=0x<your-burner-address> \
+AMOUNT_FTNS=1000 \
+    npx hardhat run scripts/airdrop-testnet-ftns.js --network base-sepolia
+```
 
-## Step 4 — Request testnet-FTNS
+(For the founder running this: `PRIVATE_KEY` is the deployer's key
+which holds 100M testnet-FTNS at deploy time.)
 
-Faucet for testnet-FTNS itself is currently manual (per ratified
-testnet-decision-policy):
-
-- Drop your wallet address in the project's `#testnet-faucet` Discord
-  channel (or email `security@prsm.network` if you don't have Discord
-  access).
-- The Foundation operator runs `airdrop-testnet-ftns.js` to send
-  ~1000 testnet-FTNS within 24 hours.
-
-You can use PRSM with 0 FTNS — uploading + earning still works. You
-only need FTNS to *spend* (pay other users for content access).
-
----
-
-## Step 5 — Activate + verify state
+### 4. Activate the env + start a node
 
 ```bash
 source ~/.prsm/testnet-deployer.env
-prsm wallet info --network testnet
+prsm wallet info             # sanity-check: should show your burner address
+prsm node start --network testnet
 ```
 
-You should see something like:
+Behind the scenes, `PRSM_NETWORK=testnet` flows through to every
+on-chain client (`OnChainFTNSLedger`, batch-settlement client,
+emission watcher, etc.) via `prsm.config.networks.resolve_endpoints()`.
+The client picks up:
 
-```
-Wallet on testnet (chainId 84532)
-Address:        0x...
-FTNS balance:   0.000000 FTNS
-Claimable:      0.000000 FTNS
-```
+- RPC endpoint: `BASE_SEPOLIA_RPC_URL` (defaults to
+  `https://sepolia.base.org`); pin a paid Alchemy / QuickNode endpoint
+  via `BASE_SEPOLIA_RPC_URL=https://...` for higher throughput.
+- All testnet contract addresses from `prsm/config/networks.py`'s
+  `TESTNET` config — no need to set them individually.
 
----
+### 5. Verify the wiring
 
-## Step 6 — Upload content + earn royalties
-
-Pre-requisite: you need a local IPFS node running (or another IPFS
-endpoint accessible at `http://127.0.0.1:5001`). Quickstart:
+A live E2E smoke test confirms the full path is correct:
 
 ```bash
-# install + run IPFS (one-time)
-brew install ipfs    # or: apt install ipfs
-ipfs init
-ipfs daemon &
+PRSM_TESTNET_E2E=1 \
+PRSM_NETWORK=testnet \
+FTNS_WALLET_PRIVATE_KEY=$PRIVATE_KEY \
+  pytest tests/e2e/test_testnet_smoke.py -v
 ```
 
-Then upload:
+3 tests, ~10 seconds. Locks in: testnet config resolves correctly,
+`OnChainFTNSLedger` connects to Sepolia (chain 84532) on the right
+contract, total-supply matches the post-deploy invariant.
 
-```bash
-prsm storage upload my_dataset.csv \
-  --description "My dataset" \
-  --royalty-rate 0.05
-```
+## What you can actually do
 
-This:
-
-1. Uploads the file to local IPFS
-2. Computes the canonical creator-bound provenance hash
-3. **Registers the content on-chain** at ProvenanceRegistry (visible at
-   https://sepolia.basescan.org/address/0x2911f9a0a02896486CdF59d6d369764841DC0eA4)
-4. Stores the on-chain tx hash in the local upload record
-5. Gossips the registration to other PRSM nodes on the network
-
-The on-chain registration is what makes royalty distribution possible:
-when someone else later pays to access your content, the
-RoyaltyDistributor uses the on-chain creator binding to credit the
-royalty share to your address.
-
----
-
-## Step 7 — Withdraw earnings
-
-When other users access your content, the RoyaltyDistributor
-accumulates your share in `claimable[your-address]` (visible via
-`prsm wallet info`). To withdraw:
-
-```bash
-prsm wallet claim --network testnet
-```
-
-The command:
-- Pre-flight checks `claimable > 0` (clean error if nothing to claim)
-- Prompts for confirmation
-- Submits `RoyaltyDistributor.claim()`
-- Prints tx hash + Basescan link
-
-After confirmation, the FTNS lands in your wallet's regular balance —
-verify with `prsm wallet info`.
-
----
-
-## What testnet does NOT do (yet)
-
-These are documented limitations vs. mainnet — see
-`docs/2026-05-05-public-testnet-deploy-plan.md` for the full follow-up
-list:
-
-- **No accelerated halving.** EmissionController uses mainnet's 4-year
-  halving constant, so you won't observe a halving event in a typical
-  test window. (Tracked as task T10.)
-- **No 2-of-3 multisig.** Testnet "Foundation" is a single deployer
-  EOA. Operations like pause / parameter updates / emergency
-  disbursement do NOT exercise the real 2-of-3 governance flow.
-- **No external audit.** The contracts are L2-team-cleared internally
-  (1 CRIT + 7 HIGH + 7 MEDIUM remediated) but external audit (L4 firm
-  pair-review) hasn't started. Mainnet-equivalent security guarantees
-  are not yet established.
-- **Bootstrap discovery hardcoded for mainnet.** Currently the
-  bootstrap node returns mainnet contract addresses by default; testnet
-  users have to set env vars manually (handled by `prsm join-testnet`).
-  Network-tagged bootstrap responses is task T4.
-
----
+| Operation | Status on testnet |
+|---|---|
+| `wallet info` (FTNS balance, address) | reads testnet contract |
+| Bond stake (`prsm provider bond`) | testnet StakeBond accepts FTNS |
+| Submit inference job (escrow → settle) | full Phase 3.1 batch settlement |
+| Storage proof challenge (Phase 7-storage) | StorageSlashing live |
+| Emission claim (Phase 8) | curve is the mainnet 4-year halving; rewards visible but slow at testnet timescales |
+| Content registration / royalty | not on testnet (mainnet-only) |
 
 ## Troubleshooting
 
-### `prsm wallet info` shows balance: 0
+### `OnChainFTNSLedger` connects to mainnet despite `PRSM_NETWORK=testnet`
 
-Either the burner has no FTNS yet (request airdrop in Step 4), or the
-RPC isn't reaching Base Sepolia. Verify:
+Make sure you ran `source ~/.prsm/testnet-deployer.env` in the SAME
+shell where you started the node. The env-var resolution happens at
+Python module-load time. If you set `PRSM_NETWORK=testnet` AFTER the
+process started, it has no effect.
 
-```bash
-echo $BASE_SEPOLIA_RPC_URL
-curl -X POST -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
-  $BASE_SEPOLIA_RPC_URL
-# Expected: {"jsonrpc":"2.0","id":1,"result":"0x14a34"}  (chainId 84532)
-```
+### `transaction execution reverted` on bond / settle
 
-### `prsm storage upload` fails with "creator_address: None"
+Check that the burner address has both:
+1. Sepolia ETH for gas (faucet, see step 2)
+2. Testnet-FTNS approved to the contract (StakeBond / EscrowPool —
+   the SDK does this automatically; if running against the contracts
+   manually, call `FTNS.approve(contract, amount)` first)
 
-Make sure you sourced the env file:
+### Faucet exhausted / 24h-rate-limited
 
-```bash
-source ~/.prsm/testnet-deployer.env
-echo $PRIVATE_KEY  # should be 66 chars (0x + 64 hex)
-```
+The Coinbase + Alchemy faucets enforce per-IP rate limits. Try a
+different one from the list, or wait 24h. Testnet-FTNS shortages can
+also happen — ping in `#testnet-faucet` and the founder will top up
+from the deployer wallet.
 
-If the env vars are set but the upload still fails, the on-chain
-provenance call may have errored — check logs. The upload should
-still succeed locally even if the on-chain registration fails;
-`provenance_tx_hash` will be None in the local record.
-
-### Need to start over
+### `prsm join-testnet` already wrote a config; how do I rotate burners?
 
 ```bash
-rm ~/.prsm/testnet-deployer.env
-prsm join-testnet
+prsm join-testnet --force
 ```
 
-The new wallet has a different address, so any FTNS / earnings
-attached to the old burner stay with that address.
+Overwrites `~/.prsm/testnet-deployer.env` with a fresh burner. Old
+balance is stranded at the old address (testnet — no economic loss).
 
----
+## Resources
 
-## Architecture reference
+- **Bundle deploy manifests:** `contracts/deployments/`
+  (`audit-bundle-base-sepolia-*.json`,
+  `phase8-emission-stack-base-sepolia-*.json`,
+  `phase7-storage-base-sepolia-*.json`,
+  `phase1-ftns-base-sepolia-*.json`).
+- **Original deploy plan:** `docs/2026-05-05-public-testnet-deploy-plan.md`.
+- **Source-of-truth network config:** `prsm/config/networks.py`
+  (`TESTNET` dataclass).
+- **Live RPC explorer:** https://sepolia.basescan.org/
 
-For a deeper protocol walkthrough:
+## Reporting issues
 
-- **Two-entity structure** (Foundation + Prismatica): `docs/2026-04-21-prsm-gov-1-foundation-governance-charter.md`
-- **Tokenomics** (FTNS, halving, emission cap): `docs/2026-04-21-prsm-tok-1-ftns-tokenomics.md`
-- **Audit pipeline** (L0-L11): `audits/AUDIT_PLAN.md`
-- **Risk register**: `docs/2026-04-22-risk-register-track-2.md`
+Testnet failures are interesting — that's the whole point of running
+one. File issues at https://github.com/prsm-network/PRSM/issues with:
 
----
-
-## Get help
-
-- Discord: (project-specific channel — TBD)
-- GitHub issues: https://github.com/Ryno2390/PRSM/issues
-- Security: `security@prsm.network` (PGP key in `SECURITY.md`)
-
----
-
-*This quickstart is part of the public testnet rollout
-(`docs/2026-05-05-public-testnet-deploy-plan.md`). Last updated:
-2026-05-05.*
+- The PRSM commit SHA (`git rev-parse HEAD`)
+- The contents of `~/.prsm/testnet-deployer.env` *minus* the
+  `PRIVATE_KEY` line (DO NOT paste the private key)
+- The exact command + the exact error
+- The Basescan link to any failed tx (if applicable)

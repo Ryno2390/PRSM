@@ -45,6 +45,7 @@ from prsm.node.ledger_sync import LedgerSync
 from prsm.node.agent_registry import AgentRegistry
 from prsm.node.agent_collaboration import AgentCollaboration, BidStrategy
 from prsm.economy.tokenomics.staking_manager import StakingManager, StakingConfig
+from prsm.config.networks import resolve_endpoints as _resolve_endpoints
 from prsm.economy.ftns_onchain import OnChainFTNSLedger
 from prsm.node.content_economy import ContentEconomy, RoyaltyModel
 
@@ -168,7 +169,7 @@ def _build_provenance_client_or_none():
         return None
     try:
         from prsm.economy.web3.provenance_registry import ProvenanceRegistryClient
-        rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+        rpc_url = _resolve_endpoints().rpc_url
         client = ProvenanceRegistryClient(
             rpc_url=rpc_url,
             contract_address=addr,

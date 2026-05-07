@@ -118,17 +118,19 @@ _ERC20_ABI = [
     },
 ]
 
-# ── Base mainnet config ───────────────────────────────────────────────────
-# Your FTNS contract address
-FTNS_CONTRACT_ADDRESS = os.getenv(
-    "FTNS_CONTRACT_ADDRESS",
-    "0x5276a3756C85f2E9e46f6D34386167a209aa16e5",  # Your deployed FTNS on Base
-)
-BASE_RPC_URL = os.getenv(
-    "BASE_RPC_URL",
-    "https://mainnet.base.org",
-)
-BASE_CHAIN_ID = 8453
+# ── Network config (resolved at module load via PRSM_NETWORK) ─────────────
+# T6 (post-2026-05-07): historically these were hardcoded mainnet
+# defaults, which meant `prsm join-testnet`'s env-var bundle silently
+# bypassed the constructor defaults (testnet env sets
+# BASE_SEPOLIA_RPC_URL + FTNS_TOKEN_ADDRESS, not BASE_RPC_URL +
+# FTNS_CONTRACT_ADDRESS). Now resolved through `prsm.config.networks`
+# which honors PRSM_NETWORK + per-field overrides.
+from prsm.config.networks import resolve_endpoints
+
+_resolved = resolve_endpoints()
+FTNS_CONTRACT_ADDRESS = _resolved.ftns_token or "0x5276a3756C85f2E9e46f6D34386167a209aa16e5"
+BASE_RPC_URL = _resolved.rpc_url
+BASE_CHAIN_ID = _resolved.chain_id
 
 
 @dataclass

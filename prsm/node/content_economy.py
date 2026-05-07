@@ -63,9 +63,18 @@ LEGACY_NETWORK_SHARE = 0.05
 ONCHAIN_PROVENANCE_ENABLED = os.getenv(
     "PRSM_ONCHAIN_PROVENANCE", ""
 ).lower() in ("1", "true", "yes")
-PROVENANCE_REGISTRY_ADDRESS = os.getenv("PRSM_PROVENANCE_REGISTRY_ADDRESS", "")
-ROYALTY_DISTRIBUTOR_ADDRESS = os.getenv("PRSM_ROYALTY_DISTRIBUTOR_ADDRESS", "")
-DEFAULT_FTNS_TOKEN_ADDRESS = "0x5276a3756C85f2E9e46f6D34386167a209aa16e5"
+# T6 (post-2026-05-07): addresses + RPC resolution moves to
+# `prsm.config.networks.resolve_endpoints()` so PRSM_NETWORK=testnet
+# correctly retargets these clients at Base Sepolia (matching what
+# `prsm join-testnet` writes into the env file). The constants below
+# remain as legacy fallbacks for the env-var-only operator path.
+from prsm.config.networks import resolve_endpoints as _resolve_endpoints
+_endpoints = _resolve_endpoints()
+PROVENANCE_REGISTRY_ADDRESS = _endpoints.provenance_registry or ""
+ROYALTY_DISTRIBUTOR_ADDRESS = _endpoints.royalty_distributor or ""
+DEFAULT_FTNS_TOKEN_ADDRESS = (
+    _endpoints.ftns_token or "0x5276a3756C85f2E9e46f6D34386167a209aa16e5"
+)
 
 
 class RoyaltyModel(str, Enum):
@@ -378,7 +387,7 @@ class ContentEconomy:
                 from prsm.economy.web3.provenance_registry import (
                     ProvenanceRegistryClient,
                 )
-                rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+                rpc_url = _endpoints.rpc_url
                 pk = os.getenv("FTNS_WALLET_PRIVATE_KEY")
                 self._provenance_client = ProvenanceRegistryClient(
                     rpc_url=rpc_url,
@@ -404,7 +413,7 @@ class ContentEconomy:
                 from prsm.economy.web3.royalty_distributor import (
                     RoyaltyDistributorClient,
                 )
-                rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+                rpc_url = _endpoints.rpc_url
                 pk = os.getenv("FTNS_WALLET_PRIVATE_KEY")
                 ftns_addr = os.getenv("FTNS_TOKEN_ADDRESS", DEFAULT_FTNS_TOKEN_ADDRESS)
                 self._royalty_client = RoyaltyDistributorClient(

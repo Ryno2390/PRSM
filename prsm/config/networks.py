@@ -166,3 +166,152 @@ def get_network_config(name: Optional[str] = None) -> NetworkConfig:
             f"unknown network {name!r}; known networks: {known}"
         )
     return NETWORK_CONFIGS[key]
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Env-var resolution for runtime consumers
+# ────────────────────────────────────────────────────────────────────────
+#
+# Several runtime modules — `prsm.economy.ftns_onchain.OnChainFTNSLedger`,
+# `prsm.node.content_economy._build_provenance_client_or_none`,
+# `prsm.node.node._build_provenance_client_or_none` — historically read
+# their RPC URL + contract addresses from independent env vars and
+# defaulted to mainnet. That meant `prsm join-testnet`'s env-var bundle
+# (which uses `BASE_SEPOLIA_RPC_URL` + `FTNS_TOKEN_ADDRESS` +
+# `PRSM_NETWORK=testnet`) didn't actually flow through; on-chain calls
+# would silently target Base mainnet despite the testnet onboarding.
+#
+# `resolve_endpoints()` centralises the resolution so all three consumers
+# pick up the same network selection. Resolution order per field:
+#   1. Explicit `network` kwarg (if passed by the caller).
+#   2. `PRSM_NETWORK` env var (testnet | mainnet).
+#   3. Default network (mainnet).
+# Per-field overrides (`FTNS_TOKEN_ADDRESS`, `PRSM_BASE_RPC_URL`,
+# `BASE_RPC_URL`, `BASE_SEPOLIA_RPC_URL`,
+# `PRSM_PROVENANCE_REGISTRY_ADDRESS`, …) take precedence over the
+# resolved network defaults — operators can still pin a specific address
+# when they want to.
+import os as _os  # local alias to avoid leaking `os` into the public symbol surface
+
+
+@dataclass(frozen=True)
+class ResolvedEndpoints:
+    """Materialised view of the network config + env-var overrides.
+
+    Caller-visible field surface stays stable: each field is the value
+    that on-chain clients should actually use. None means "no
+    deployment available for this field on the resolved network", which
+    callers are expected to handle (typically by skipping on-chain
+    routing for that surface).
+    """
+
+    network_name: str
+    chain_id: int
+    rpc_url: str
+    explorer_url: str
+    ftns_token: Optional[str]
+    provenance_registry: Optional[str]
+    royalty_distributor: Optional[str]
+    foundation_safe: Optional[str]
+    publisher_key_anchor: Optional[str]
+    settlement_registry: Optional[str]
+    escrow_pool: Optional[str]
+    stake_bond: Optional[str]
+    emission_controller: Optional[str]
+    compensation_distributor: Optional[str]
+    storage_slashing: Optional[str]
+    key_distribution: Optional[str]
+
+
+def _resolve_network_name(network: Optional[str] = None) -> str:
+    """Pick the network name from explicit arg → PRSM_NETWORK → default.
+
+    Empty string from `os.getenv` is treated as unset.
+    """
+    if network:
+        return network.lower()
+    env = (_os.getenv("PRSM_NETWORK") or "").strip().lower()
+    if env:
+        return env
+    return DEFAULT_NETWORK
+
+
+def _resolve_rpc_url(cfg: NetworkConfig) -> str:
+    """Pick the RPC URL respecting per-network env-var aliases.
+
+    Resolution order:
+      mainnet: BASE_RPC_URL → PRSM_BASE_RPC_URL → cfg.rpc_url_default
+      testnet: BASE_SEPOLIA_RPC_URL → PRSM_BASE_RPC_URL → cfg.rpc_url_default
+    `PRSM_BASE_RPC_URL` is a network-agnostic operator override that wins
+    over the per-network env var so a single env file can target either.
+    """
+    explicit = (_os.getenv("PRSM_BASE_RPC_URL") or "").strip()
+    if explicit:
+        return explicit
+    if cfg.chain_id == 84532:  # Base Sepolia
+        sepolia = (_os.getenv("BASE_SEPOLIA_RPC_URL") or "").strip()
+        if sepolia:
+            return sepolia
+    else:  # Base mainnet (and any future networks default to BASE_RPC_URL)
+        mainnet = (_os.getenv("BASE_RPC_URL") or "").strip()
+        if mainnet:
+            return mainnet
+    return cfg.rpc_url_default
+
+
+def resolve_endpoints(network: Optional[str] = None) -> ResolvedEndpoints:
+    """Resolve the runtime on-chain endpoint set.
+
+    Reads PRSM_NETWORK + per-field env-var overrides. Returns a
+    materialised dataclass that on-chain clients can plumb directly.
+    """
+    name = _resolve_network_name(network)
+    cfg = get_network_config(name)
+
+    def _override(env_name: str, fallback: Optional[str]) -> Optional[str]:
+        v = (_os.getenv(env_name) or "").strip()
+        return v if v else fallback
+
+    return ResolvedEndpoints(
+        network_name=name,
+        chain_id=cfg.chain_id,
+        rpc_url=_resolve_rpc_url(cfg),
+        explorer_url=cfg.explorer_url,
+        # Phase 1.3 contracts — operators can pin individual addresses.
+        # `FTNS_CONTRACT_ADDRESS` is the legacy alias kept for backwards
+        # compatibility with existing `OnChainFTNSLedger` operators.
+        ftns_token=_override(
+            "FTNS_TOKEN_ADDRESS",
+            _override("FTNS_CONTRACT_ADDRESS", cfg.ftns_token),
+        ),
+        provenance_registry=_override(
+            "PRSM_PROVENANCE_REGISTRY_ADDRESS", cfg.provenance_registry
+        ),
+        royalty_distributor=_override(
+            "PRSM_ROYALTY_DISTRIBUTOR_ADDRESS", cfg.royalty_distributor
+        ),
+        foundation_safe=_override("PRSM_FOUNDATION_SAFE", cfg.foundation_safe),
+        publisher_key_anchor=_override(
+            "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", cfg.publisher_key_anchor
+        ),
+        # Audit-bundle + Phase 8 + Phase 7-storage — pinning individual
+        # addresses is rarer in practice but we still expose the override
+        # surface for completeness.
+        settlement_registry=_override(
+            "PRSM_SETTLEMENT_REGISTRY_ADDRESS", cfg.settlement_registry
+        ),
+        escrow_pool=_override("PRSM_ESCROW_POOL_ADDRESS", cfg.escrow_pool),
+        stake_bond=_override("PRSM_STAKE_BOND_ADDRESS", cfg.stake_bond),
+        emission_controller=_override(
+            "PRSM_EMISSION_CONTROLLER_ADDRESS", cfg.emission_controller
+        ),
+        compensation_distributor=_override(
+            "PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS", cfg.compensation_distributor
+        ),
+        storage_slashing=_override(
+            "PRSM_STORAGE_SLASHING_ADDRESS", cfg.storage_slashing
+        ),
+        key_distribution=_override(
+            "PRSM_KEY_DISTRIBUTION_ADDRESS", cfg.key_distribution
+        ),
+    )
