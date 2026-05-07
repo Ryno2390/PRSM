@@ -12,7 +12,7 @@ from fastapi import Depends, Request, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from prsm.core.auth.models import User, Permission
+from prsm.core.auth.models import User, UserRole, Permission
 from prsm.core.database import get_db
 from prsm.core.redis_client import get_redis_client
 from .exceptions import (
@@ -97,9 +97,11 @@ async def get_current_user() -> User:
     """Current user — PRSM is a decentralized P2P network, no auth needed.
 
     Returns a local 'node' identity so API endpoints function without
-    requiring a JWT token or account.
+    requiring a JWT token or account. Uses the canonical SQLAlchemy
+    ``User`` model from ``prsm.core.auth.models`` — instances are
+    constructed in-memory only (no session.add) so the not-null
+    ``email`` / ``hashed_password`` columns are tolerated.
     """
-    from prsm.user_content_manager import User, UserRole
     return User(
         id=uuid4(),
         username="anonymous-node",
@@ -226,14 +228,20 @@ async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db)
 ) -> Optional[User]:
-    """Get current user if authenticated, None otherwise"""
-    
+    """Get current user if authenticated, None otherwise.
+
+    In anonymous-node mode (PRSM has no real user table), credentials
+    are validated for shape via ``verify_api_key`` and — on success —
+    the same anonymous-node sentinel returned by ``get_current_user``
+    is returned. Absent or bad credentials yield ``None`` so callers
+    can branch on authentication state.
+    """
     if not credentials or not credentials.credentials:
         return None
-    
+
     try:
-        user_id = await verify_api_key(credentials, db)
-        return await get_current_user(user_id, db)
+        await verify_api_key(credentials, db)
+        return await get_current_user()
     except Exception:
         return None
 
