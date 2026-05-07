@@ -190,25 +190,35 @@ async function main() {
   console.log(`   StakeBond.setFoundationReserveWallet → foundation (${tx.hash.slice(0, 10)}…)`);
 
   // ── Post-deploy invariant checks ───────────────────────────────────
+  // Each getter is wrapped in `waitForAddressEquals` to absorb the
+  // Base RPC propagation race observed in the 2026-05-07 mainnet
+  // sprint: `tx.wait()` returns once the tx is mined, but the state
+  // indexer can lag the receipt indexer by 1-3 seconds, returning
+  // 0x0 / pre-tx values on an immediate-next read. The cross-wires
+  // above (`registry.setEscrowPool`, etc.) all confirmed via
+  // `tx.wait()`; re-reading the getter with retries is the right
+  // way to confirm state without falsely failing a correct ceremony.
   console.log("\nPost-deploy invariant checks…");
-  const escrowRegistry = await escrow.settlementRegistry();
-  const registryEscrow = await registry.escrowPool();
-  const registryVerifier = await registry.signatureVerifier();
-  const registryBond = await registry.stakeBond();
-  const bondSlasher = await stakeBond.slasher();
-  const bondFoundation = await stakeBond.foundationReserveWallet();
+  const { waitForAddressEquals } = require("./_lib/eventual-state");
 
-  const check = (label, got, expected) => {
-    const ok = got.toLowerCase() === expected.toLowerCase();
-    console.log(`   ${ok ? "✅" : "❌"} ${label}: ${got}`);
-    if (!ok) throw new Error(`${label} mismatch: got ${got}, expected ${expected}`);
+  const checkAddr = async (label, read, expected) => {
+    try {
+      const got = await waitForAddressEquals(read, expected, {
+        errorPrefix: `${label} mismatch (expected ${expected})`,
+      });
+      console.log(`   ✅ ${label}: ${got}`);
+    } catch (err) {
+      console.log(`   ❌ ${label}: ${err.message}`);
+      throw err;
+    }
   };
-  check("escrow.settlementRegistry", escrowRegistry, deployments.BatchSettlementRegistry);
-  check("registry.escrowPool", registryEscrow, deployments.EscrowPool);
-  check("registry.signatureVerifier", registryVerifier, verifierAddress);
-  check("registry.stakeBond", registryBond, deployments.StakeBond);
-  check("stakeBond.slasher", bondSlasher, deployments.BatchSettlementRegistry);
-  check("stakeBond.foundationReserveWallet", bondFoundation, foundationChecksum);
+
+  await checkAddr("escrow.settlementRegistry", () => escrow.settlementRegistry(), deployments.BatchSettlementRegistry);
+  await checkAddr("registry.escrowPool", () => registry.escrowPool(), deployments.EscrowPool);
+  await checkAddr("registry.signatureVerifier", () => registry.signatureVerifier(), verifierAddress);
+  await checkAddr("registry.stakeBond", () => registry.stakeBond(), deployments.StakeBond);
+  await checkAddr("stakeBond.slasher", () => stakeBond.slasher(), deployments.BatchSettlementRegistry);
+  await checkAddr("stakeBond.foundationReserveWallet", () => stakeBond.foundationReserveWallet(), foundationChecksum);
 
   // ── Manifest ────────────────────────────────────────────────────────
   const manifest = {

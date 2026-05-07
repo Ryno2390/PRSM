@@ -135,20 +135,34 @@ async function transferOne(contractName, address, multisig, deployer) {
   const rcpt = await tx.wait();
   // Verify post-transfer: owner should still be deployer; pendingOwner
   // should now be the multisig.
-  const newOwner = await ownable.owner();
-  const pending = await ownable.pendingOwner();
-  if (newOwner.toLowerCase() !== deployer.address.toLowerCase()) {
-    throw new Error(
-      `${contractName} at ${checksum}: post-transfer owner is ${newOwner}, ` +
-      `expected deployer ${deployer.address} (Ownable2Step semantics)`,
-    );
-  }
-  if (pending.toLowerCase() !== multisig.toLowerCase()) {
-    throw new Error(
-      `${contractName} at ${checksum}: post-transfer pendingOwner is ${pending}, ` +
-      `expected ${multisig}`,
-    );
-  }
+  //
+  // The state reads use the eventual-consistency wrapper to absorb
+  // the Base RPC propagation race that bit every deploy + ownership
+  // ceremony in the 2026-05-07 sprint: tx.wait() returns once the tx
+  // is mined, but a follow-on getter sometimes returns the PRE-tx
+  // value because the state indexer hasn't caught up. The receipt is
+  // canonical (the tx is on-chain regardless of indexer state), so
+  // re-reading the getter for ~6 seconds total handles the lag
+  // without reverting genuinely-correct ceremonies.
+  const { waitForAddressEquals } = require("./_lib/eventual-state");
+  const newOwner = await waitForAddressEquals(
+    () => ownable.owner(),
+    deployer.address,
+    {
+      errorPrefix:
+        `${contractName} at ${checksum}: post-transfer owner mismatch ` +
+        `(expected deployer ${deployer.address}, Ownable2Step semantics)`,
+    },
+  );
+  const pending = await waitForAddressEquals(
+    () => ownable.pendingOwner(),
+    multisig,
+    {
+      errorPrefix:
+        `${contractName} at ${checksum}: post-transfer pendingOwner ` +
+        `mismatch (expected ${multisig})`,
+    },
+  );
   console.log(`     ✅  tx ${tx.hash} (block ${rcpt.blockNumber})`);
   console.log(
     `     ⏳  Foundation Safe must call acceptOwnership() to complete handoff`,

@@ -86,6 +86,8 @@ contract EscrowPool is Ownable2Step, ReentrancyGuard, Pausable {
     /// @dev L2 audit MEDIUM B-CROSS-2: setFtnsToken refuses while there
     ///      are pending requester balances backed by the current token.
     error PendingBalancesNonZero(uint256 totalEscrowed);
+    /// @dev L4 self-audit re-run B-INFO-B7-1: setFtnsToken rejects EOA targets.
+    error TokenNotContract(address provided);
 
     constructor(
         address initialOwner,
@@ -215,6 +217,15 @@ contract EscrowPool is Ownable2Step, ReentrancyGuard, Pausable {
      */
     function setFtnsToken(address newToken) external onlyOwner {
         if (newToken == address(0)) revert ZeroAddress();
+        // L4 self-audit re-run B-INFO-B7-1 fix: require the new token
+        // to be a contract. Mirrors MED-7's `code.length > 0` check
+        // on the BSR setters. Setting `ftns` to an EOA would make
+        // every subsequent `ftns.transfer(...)` revert with empty
+        // returndata; deposits + settlements would soft-brick.
+        // Risk-bounded today by the B-CROSS-2 `totalEscrowedBalance == 0`
+        // precondition (any non-zero pending balance blocks the swap),
+        // but cheap defensive consistency with the rest of the bundle.
+        if (newToken.code.length == 0) revert TokenNotContract(newToken);
         if (totalEscrowedBalance != 0) {
             revert PendingBalancesNonZero(totalEscrowedBalance);
         }

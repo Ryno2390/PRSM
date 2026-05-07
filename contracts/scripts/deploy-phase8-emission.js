@@ -137,7 +137,26 @@ async function main() {
   console.log(`   EmissionController.setAuthorizedDistributor → distributor (${tx.hash.slice(0, 10)}…)`);
 
   // ── Invariant checks ──────────────────────────────────────────────
+  // The cross-wire above (`setAuthorizedDistributor`) confirmed via
+  // `tx.wait()`, but the immediate-next `authorizedDistributor()` read
+  // can return 0x0 on Base if the state indexer hasn't propagated
+  // the receipt yet (2026-05-07 mainnet sprint observation). Wrap
+  // the cross-wire read in `waitForAddressEquals` to absorb the lag;
+  // the rest of the immutables are constructor-set so they're safe
+  // to read directly.
   console.log("\nPost-deploy invariant checks…");
+  const { waitForAddressEquals } = require("./_lib/eventual-state");
+
+  await waitForAddressEquals(
+    () => emission.authorizedDistributor(),
+    deployments.CompensationDistributor,
+    {
+      errorPrefix:
+        `emission.authorizedDistributor mismatch ` +
+        `(expected ${deployments.CompensationDistributor})`,
+    },
+  );
+
   const immutables = {
     "emission.baselineRatePerSecond": (await emission.baselineRatePerSecond()).toString(),
     "emission.mintCap":              (await emission.mintCap()).toString(),
@@ -152,10 +171,6 @@ async function main() {
   };
   for (const [k, v] of Object.entries(immutables)) {
     console.log(`   ${k}: ${v}`);
-  }
-  if (immutables["emission.authorizedDistributor"].toLowerCase() !==
-      deployments.CompensationDistributor.toLowerCase()) {
-    throw new Error("authorizedDistributor wiring mismatch");
   }
 
   // ── Manifest ────────────────────────────────────────────────────────
