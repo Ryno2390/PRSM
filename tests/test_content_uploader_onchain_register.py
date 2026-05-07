@@ -106,7 +106,7 @@ def test_happy_path_returns_tx_hash():
     call_kwargs = client.register_content.call_args.kwargs
     assert len(call_kwargs["content_hash"]) == 32  # bytes, not hex string
     assert call_kwargs["royalty_rate_bps"] == 500  # 0.05 * 10000
-    assert call_kwargs["metadata_uri"] == "ipfs://QmTest"
+    assert call_kwargs["metadata_uri"] == "prsm-bt://QmTest"
 
 
 def test_exception_returns_none_without_propagating():

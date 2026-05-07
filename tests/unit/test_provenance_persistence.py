@@ -64,7 +64,7 @@ class TestProvenancePersistence:
             mock_upsert.return_value = True
             
             # Mock the IPFS add operation directly
-            with patch.object(content_uploader, '_ipfs_add', new_callable=AsyncMock) as mock_add:
+            with patch.object(content_uploader, '_publish_content', new_callable=AsyncMock) as mock_add:
                 mock_add.return_value = "QmTestCID123456789"
                 
                 # Create a test file
@@ -95,7 +95,7 @@ class TestProvenancePersistence:
             mock_upsert.side_effect = Exception("Database connection failed")
             
             # Mock the IPFS add operation directly
-            with patch.object(content_uploader, '_ipfs_add', new_callable=AsyncMock) as mock_add:
+            with patch.object(content_uploader, '_publish_content', new_callable=AsyncMock) as mock_add:
                 mock_add.return_value = "QmTestCID123456789"
                 
                 # Create a test file

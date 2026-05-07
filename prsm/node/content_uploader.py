@@ -2,15 +2,15 @@
 Content Uploader & Retrieval
 ============================
 
-Upload content to IPFS with provenance tracking for royalties,
-and retrieve content from the network by CID.
+Upload content to the PRSM proprietary BitTorrent layer with
+provenance tracking for royalties, and retrieve content from the
+network by torrent infohash.
 
 Creates a verifiable provenance chain so the original creator
 earns FTNS when other nodes access or use their content.
 
 Sprint 4 Phase 4: Added request_content() for cross-node downloads
-with provider discovery via ContentIndex, content hash verification,
-and support for both inline (base64) and IPFS gateway transfer modes.
+with provider discovery via ContentIndex and content hash verification.
 Phase 1.3 Task 3b: the client-side request_content/server-side
 handler pair has been retired here; ContentProvider is the canonical
 serve path and ContentProvider.request_content is the client path.
@@ -438,10 +438,11 @@ class UploadedContent:
 
 
 class ContentUploader:
-    """Upload content to IPFS with provenance registration for royalties.
+    """Upload content to the PRSM network with provenance registration for royalties.
 
     Flow:
-    1. Upload content to local IPFS node
+    1. Publish content via the proprietary BitTorrent layer
+       (``ContentPublisher.publish``)
     2. Create provenance record (hash, creator, timestamp, signature)
     3. Gossip provenance registration to network
     4. Request storage replication from network peers
@@ -460,13 +461,15 @@ class ContentUploader:
         sharding_threshold: int = DEFAULT_SHARDING_THRESHOLD,
         embedding_fn: Optional[Callable] = None,
         semantic_index_path: Optional[Path] = None,
-        ipfs_api_url: str = "http://127.0.0.1:5001",
+        ipfs_api_url: Optional[str] = None,  # Deprecated — accepted-and-ignored; see content_publisher
         creator_address: Optional[str] = None,
         content_provider: Optional["ContentProvider"] = None,
         provenance_client: Optional[Any] = None,
         embedding_model_id: Optional[str] = None,
         embedding_dht_client: Optional[Any] = None,
         embedding_index: Optional[Any] = None,
+        content_publisher: Optional[Any] = None,
+        content_retriever: Optional[Any] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -475,10 +478,22 @@ class ContentUploader:
         self.content_index = content_index  # For looking up parent content creators
         self.ledger_sync = ledger_sync      # For broadcasting transactions
         self.content_economy = content_economy  # For replication tracking (Phase 4)
-        # Legacy IPFS HTTP endpoint for _ipfs_add / _ipfs_cat helpers. Kept
-        # for back-compat with call sites that still use the HTTP IPFS
-        # daemon; new code should go through ContentStore.
-        self.ipfs_api_url = ipfs_api_url
+
+        # Native-storage migration PR 2a (2026-05-07): publish/fetch the
+        # PRSM proprietary BitTorrent layer. The legacy ipfs_api_url
+        # kwarg is accepted for backwards-compat with existing call sites
+        # but no longer used — IPFS was removed in favour of the native
+        # BitTorrent + signed-manifest layer per founder direction.
+        # See docs/plans/native-storage-migration-status-2026-05-07.md.
+        self.content_publisher = content_publisher
+        self.content_retriever = content_retriever
+        if ipfs_api_url is not None:
+            logger.debug(
+                "ContentUploader: ignoring deprecated ipfs_api_url=%r "
+                "(IPFS replaced by ContentPublisher; pass content_publisher "
+                "instead)",
+                ipfs_api_url,
+            )
 
         # Phase 1.2: 0x address used to compute the canonical provenance_hash
         # for the on-chain registry. None disables on-chain provenance — the
@@ -756,7 +771,7 @@ class ContentUploader:
             # Convert float royalty_rate (e.g. 0.05 = 5%) to bps (500).
             # ProvenanceRegistry caps at MAX_ROYALTY_RATE_BPS = 9800.
             royalty_rate_bps = round(max(0.0, min(0.98, royalty_rate)) * 10000)
-            metadata_uri = f"ipfs://{cid}"
+            metadata_uri = f"prsm-bt://{cid}"
 
             tx_hash, status = self._provenance_client.register_content(
                 content_hash=content_hash_bytes,
@@ -938,10 +953,11 @@ class ContentUploader:
                 provenance_hash_hex=provenance_hash_hex,
             )
 
-        # Standard monolithic upload for small files
-        cid = await self._ipfs_add(content, filename)
+        # Standard monolithic upload for small files. The cid is now the
+        # BitTorrent infohash returned by ContentPublisher (Tier A).
+        cid = await self._publish_content(content, filename, provenance_hash_hex)
         if not cid:
-            logger.error(f"Failed to upload {filename} to IPFS")
+            logger.error(f"Failed to publish {filename}")
             return None
 
         embedding_id = f"emb:{cid}" if embedding is not None else None
@@ -1225,11 +1241,13 @@ class ContentUploader:
             # DuplicateShardError, CorruptShardError, PayloadChecksumError)
             # trigger the monolithic fallback.
             logger.error(f"Sharding failed for {filename}: {e}")
-            # Fall back to monolithic upload
+            # Fall back to monolithic upload via ContentPublisher.
             logger.info(f"Falling back to monolithic upload for {filename}")
-            cid = await self._ipfs_add(content, filename)
+            cid = await self._publish_content(
+                content, filename, provenance_hash_hex
+            )
             if not cid:
-                logger.error(f"Failed to upload {filename} to IPFS (fallback)")
+                logger.error(f"Failed to publish {filename} (fallback)")
                 return None
 
             size_bytes = len(content)
@@ -1510,22 +1528,56 @@ class ContentUploader:
     # moved the server side to ContentProvider. The real client path
     # is ContentProvider.request_content.
 
-    async def _fetch_from_gateway(self, gateway_url: str) -> Optional[bytes]:
-        """Fetch content bytes from an IPFS gateway URL."""
+    async def _publish_content(
+        self,
+        content: bytes,
+        filename: str,
+        provenance_hash_hex: Optional[str],
+    ) -> Optional[str]:
+        """Publish *content* via the proprietary BitTorrent layer.
+
+        Returns the torrent infohash on success or None on failure
+        (mirrors the failure semantics of the legacy ``_ipfs_add``
+        helper this method replaces). The returned infohash is used as
+        the content identifier (``cid`` in provenance records,
+        ``contentHash`` in on-chain RoyaltyDistributor calls).
+        """
+        if self.content_publisher is None:
+            logger.error(
+                "ContentUploader.content_publisher is None — cannot publish "
+                "%s. Wire content_publisher in the constructor.",
+                filename,
+            )
+            return None
         try:
-            import aiohttp
-            session = await self._get_ipfs_session()
-            async with session.get(
-                gateway_url,
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.read()
-                else:
-                    logger.debug(f"Gateway returned status {resp.status} for {gateway_url}")
+            result = await self.content_publisher.publish(
+                content,
+                provenance_id=provenance_hash_hex or "",
+                name=filename,
+            )
+            return result.torrent_infohash
         except Exception as e:
-            logger.error(f"Gateway fetch failed for {gateway_url}: {e}")
-        return None
+            logger.error(f"Content publish failed for {filename}: {e}")
+            return None
+
+    async def _fetch_content(self, cid: str) -> Optional[bytes]:
+        """Fetch content bytes by torrent infohash via the BitTorrent layer.
+
+        Returns the content bytes on success or None on failure (mirrors
+        the legacy ``_ipfs_cat`` shape).
+        """
+        if self.content_retriever is None:
+            logger.error(
+                "ContentUploader.content_retriever is None — cannot fetch "
+                "%s. Wire content_retriever in the constructor.",
+                cid,
+            )
+            return None
+        try:
+            return await self.content_retriever.fetch(cid)
+        except Exception as e:
+            logger.error(f"Content fetch failed for {cid}: {e}")
+            return None
 
     async def _on_content_access(self, subtype: str, data: Dict[str, Any], origin: str) -> None:
         """Credit royalty when we are the original creator or a source creator.
@@ -1594,42 +1646,6 @@ class ContentUploader:
             except Exception as e:
                 logger.debug(f"Transaction broadcast failed: {e}")
 
-    # ── IPFS operations ──────────────────────────────────────────
-
-    async def _ipfs_add(self, content: bytes, filename: str) -> Optional[str]:
-        """Add content to IPFS, return CID or None."""
-        try:
-            import aiohttp
-            session = await self._get_ipfs_session()
-            data = aiohttp.FormData()
-            data.add_field("file", content, filename=filename)
-            async with session.post(
-                f"{self.ipfs_api_url}/api/v0/add",
-                data=data,
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                if resp.status == 200:
-                    result = await resp.json()
-                    return result.get("Hash", "")
-        except Exception as e:
-            logger.error(f"IPFS add failed: {e}")
-        return None
-
-    async def _ipfs_cat(self, cid: str) -> Optional[bytes]:
-        """Fetch content bytes from IPFS."""
-        try:
-            import aiohttp
-            session = await self._get_ipfs_session()
-            async with session.post(
-                f"{self.ipfs_api_url}/api/v0/cat",
-                params={"arg": cid},
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.read()
-        except Exception as e:
-            logger.error(f"IPFS cat failed for {cid}: {e}")
-        return None
 
     async def _persist_provenance(self, uploaded: "UploadedContent") -> None:
         """
@@ -1859,8 +1875,8 @@ class ContentUploader:
             manifest = self.shard_manifests.get(manifest_cid)
 
             if not manifest:
-                # Try to fetch the manifest from IPFS
-                manifest_json = await self._ipfs_cat(manifest_cid)
+                # Try to fetch the manifest via the BitTorrent layer.
+                manifest_json = await self._fetch_content(manifest_cid)
                 if manifest_json:
                     manifest = ShardManifest.from_json(manifest_json.decode())
                     self.shard_manifests[manifest_cid] = manifest
@@ -1895,70 +1911,11 @@ class ContentUploader:
         return self.shard_manifests.get(manifest_cid)
 
 
-class _IPFSClientWrapper:
-    """Wrapper to make ContentUploader compatible with ContentSharder's IPFS client interface.
-
-    ContentSharder expects an IPFS client with upload_content() and download_content()
-    methods that return objects with specific attributes. This wrapper adapts
-    ContentUploader's methods to that interface.
-    """
-
-    def __init__(self, uploader: ContentUploader):
-        self._uploader = uploader
-
-    async def upload_content(
-        self,
-        content: bytes,
-        filename: str = "content.bin",
-        pin: bool = True,
-    ) -> "_UploadResult":
-        """Upload content to IPFS.
-
-        Args:
-            content: Raw bytes to upload
-            filename: Name for the content
-            pin: Whether to pin the content (ignored, always pinned)
-
-        Returns:
-            _UploadResult with success status and CID
-        """
-        cid = await self._uploader._ipfs_add(content, filename)
-        if cid:
-            return _UploadResult(success=True, cid=cid, error=None)
-        else:
-            return _UploadResult(success=False, cid=None, error="IPFS add failed")
-
-    async def download_content(self, cid: str) -> "_DownloadResult":
-        """Download content from IPFS.
-
-        Args:
-            cid: Content identifier to download
-
-        Returns:
-            _DownloadResult with success status and content
-        """
-        content = await self._uploader._ipfs_cat(cid)
-        if content is not None:
-            return _DownloadResult(
-                success=True,
-                metadata={"content": content},
-                error=None,
-            )
-        else:
-            return _DownloadResult(success=False, metadata=None, error="IPFS cat failed")
-
-
-@dataclass
-class _UploadResult:
-    """Result object for IPFS uploads, compatible with ContentSharder interface."""
-    success: bool
-    cid: Optional[str]
-    error: Optional[str]
-
-
-@dataclass
-class _DownloadResult:
-    """Result object for IPFS downloads, compatible with ContentSharder interface."""
-    success: bool
-    metadata: Optional[Dict[str, Any]]
-    error: Optional[str]
+# _IPFSClientWrapper / _UploadResult / _DownloadResult removed in
+# native-storage migration PR 2a (2026-05-07). The wrapper adapted
+# the legacy `_ipfs_add` / `_ipfs_cat` helpers to a ContentSharder-
+# friendly interface. Both helpers and the wrapper are gone now;
+# uploads route through `ContentPublisher.publish` (Tier A) at
+# `_publish_content` and downloads through `ContentRetriever.fetch`
+# at `_fetch_content`. The ContentSharder integration for
+# encrypted-and-sharded content (Tier B/C) is deferred to PR 2b.
