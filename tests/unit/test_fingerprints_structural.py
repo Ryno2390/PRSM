@@ -8,14 +8,17 @@ from __future__ import annotations
 
 from io import BytesIO
 
-import h5py
-import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 
-from prsm.data.fingerprints.base import FingerprintKind
-from prsm.data.fingerprints.structural import (
+# Skip the entire module if h5py / pyarrow aren't available — keeps CI
+# green on hosts without the optional StructuralFingerprint deps.
+h5py = pytest.importorskip("h5py")
+np = pytest.importorskip("numpy")
+pa = pytest.importorskip("pyarrow")
+pq = pytest.importorskip("pyarrow.parquet")
+
+from prsm.data.fingerprints.base import FingerprintKind  # noqa: E402
+from prsm.data.fingerprints.structural import (  # noqa: E402
     StructuralFingerprint,
     _detect_format,
 )

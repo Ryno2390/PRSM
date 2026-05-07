@@ -33,7 +33,39 @@ def _import_image_fingerprint():
         return None
 
 
+def _import_audio_fingerprint():
+    """Lazy importer for AudioFingerprint. Backend reports its own
+    missing-dep diagnostics at compute() time; the module always
+    imports cleanly because its heavy deps are inside compute()."""
+    try:
+        from prsm.data.fingerprints.audio import AudioFingerprint
+        return AudioFingerprint
+    except ImportError:
+        return None
+
+
+def _import_video_fingerprint():
+    """Lazy importer for VideoFingerprint (PyAV + numpy)."""
+    try:
+        from prsm.data.fingerprints.video import VideoFingerprint
+        return VideoFingerprint
+    except ImportError:
+        return None
+
+
+def _import_structural_fingerprint():
+    """Lazy importer for StructuralFingerprint (h5py + pyarrow)."""
+    try:
+        from prsm.data.fingerprints.structural import StructuralFingerprint
+        return StructuralFingerprint
+    except ImportError:
+        return None
+
+
 ImageFingerprint = _import_image_fingerprint()
+AudioFingerprint = _import_audio_fingerprint()
+VideoFingerprint = _import_video_fingerprint()
+StructuralFingerprint = _import_structural_fingerprint()
 
 __all__ = [
     "BinaryFingerprint",
@@ -41,4 +73,7 @@ __all__ = [
     "FingerprintRecord",
     "detect_content_kind",
     "ImageFingerprint",
+    "AudioFingerprint",
+    "VideoFingerprint",
+    "StructuralFingerprint",
 ]
