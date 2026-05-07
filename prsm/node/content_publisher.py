@@ -2,10 +2,10 @@
 ContentPublisher / ContentRetriever — unified publish/fetch surface for the
 PRSM proprietary content-distribution layer.
 
-Replaces the legacy IPFS HTTP daemon path (``_ipfs_add`` / ``_ipfs_cat``) in
-``content_uploader.py`` with calls to the BitTorrent provider/requester
-layer that is the canonical PRSM data-distribution mechanism (see
-canonical scope memory and ``prsm/core/bittorrent_*.py``).
+Routes upload/download calls in ``content_uploader.py`` through the
+BitTorrent provider/requester layer that is the canonical PRSM
+data-distribution mechanism (see canonical scope memory and
+``prsm/core/bittorrent_*.py``).
 
 PR 2a scope — **Tier A only.**
     Tier A (public) content is the launch tier. Bytes are written to a

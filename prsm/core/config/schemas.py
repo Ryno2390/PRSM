@@ -521,18 +521,6 @@ class PRSMConfig(BaseConfigSchema):
         return None
 
     @property
-    def ipfs_timeout(self):
-        return 60
-
-    @property
-    def ipfs_host(self):
-        return "127.0.0.1"
-
-    @property
-    def ipfs_port(self):
-        return 5001
-
-    @property
     def database_echo(self):
         """Return database echo setting for compatibility."""
         return self.logging.level == "DEBUG" if self.logging else False

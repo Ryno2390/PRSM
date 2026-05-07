@@ -73,7 +73,7 @@ class ProvenanceEngine:
         and other components that expect an async initialize() method.
         """
         # ProvenanceEngine is currently stateless at initialization
-        # Future enhancement: Could initialize IPFS connection, database connections, etc.
+        # Future enhancement: Could initialize ContentStore connection, database connections, etc.
         print("📝 Provenance Engine async initialization completed")
         return True
     
@@ -195,8 +195,8 @@ class ProvenanceEngine:
                 "derived_works": 0
             }
             
-            # Create IPFS record for immutable provenance
-            await self._store_provenance_ipfs(provenance)
+            # Create ContentStore record for immutable provenance
+            await self._store_provenance_contentstore(provenance)
             
             print(f"📝 Created provenance record for {content_id}")
             print(f"   - Creator: {original_creator}")
@@ -563,7 +563,7 @@ class ProvenanceEngine:
         except Exception as e:
             print(f"❌ Failed to calculate usage rewards for {content_id}: {e}")
     
-    async def _store_provenance_ipfs(self, provenance: ProvenanceMetadata) -> Optional[str]:
+    async def _store_provenance_contentstore(self, provenance: ProvenanceMetadata) -> Optional[str]:
         """Store provenance record in ContentStore for immutability"""
         import json as _json
         from prsm.storage.exceptions import StorageError

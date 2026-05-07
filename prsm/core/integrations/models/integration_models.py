@@ -189,7 +189,6 @@ class ImportResult(TimestampMixin):
     request_id: UUID
     status: ImportStatus
     imported_content_id: Optional[str] = None
-    ipfs_cid: Optional[str] = None
     local_path: Optional[str] = Field(default=None, description="Local file path to imported content")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Content metadata from source platform")
     security_scan: Optional[SecurityScanResult] = None

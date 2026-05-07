@@ -324,13 +324,13 @@ async def index_content(
 ):
     """Index content into vector store for semantic search.
     
-    Fetches content from IPFS and generates embedding for indexing.
+    Fetches content from ContentStore and generates embedding for indexing.
     """
     if not economy.vector_store:
         raise HTTPException(status_code=503, detail="Vector store not configured")
-    
+
     try:
-        # Would need to fetch content from IPFS
+        # Would need to fetch content from ContentStore
         # For now, return success if vector store is available
         return {"status": "queued", "cid": cid}
         

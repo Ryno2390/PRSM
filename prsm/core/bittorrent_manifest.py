@@ -3,11 +3,9 @@ BitTorrent Manifest System
 ===========================
 
 Provides a metadata layer for tracking torrents in PRSM.
-Mirrors the structure of ipfs_sharding.py for consistency.
 
 The manifest system allows PRSM to:
 - Track torrent metadata independently of the BitTorrent protocol
-- Optionally pin .torrent files to IPFS for durability
 - Link torrents to the PRSM provenance system
 """
 
@@ -95,7 +93,6 @@ class TorrentManifest:
     files: List[FileEntry] = field(default_factory=list)
     magnet_uri: str = ""
     torrent_bytes: bytes = b""  # Raw .torrent file
-    ipfs_cid: Optional[str] = None  # Optional: .torrent pinned to IPFS
     created_at: float = field(default_factory=time.time)
     created_by_node_id: str = ""
     provenance_id: Optional[str] = None  # Links to PRSM provenance system
@@ -120,7 +117,6 @@ class TorrentManifest:
             "files": [f.to_dict() for f in self.files],
             "magnet_uri": self.magnet_uri,
             "torrent_bytes": self.torrent_bytes.hex() if self.torrent_bytes else "",
-            "ipfs_cid": self.ipfs_cid,
             "created_at": self.created_at,
             "created_by_node_id": self.created_by_node_id,
             "provenance_id": self.provenance_id,
@@ -148,7 +144,6 @@ class TorrentManifest:
             files=[FileEntry.from_dict(f) for f in data.get("files", [])],
             magnet_uri=data.get("magnet_uri", ""),
             torrent_bytes=torrent_bytes,
-            ipfs_cid=data.get("ipfs_cid"),
             created_at=data.get("created_at", time.time()),
             created_by_node_id=data.get("created_by_node_id", ""),
             provenance_id=data.get("provenance_id"),
@@ -360,7 +355,6 @@ class TorrentManifestStore:
                 piece_length = Column(BigInteger, nullable=False)
                 magnet_uri = Column(Text, nullable=False)
                 torrent_bytes = Column(LargeBinary, nullable=True)
-                ipfs_cid = Column(String(64), nullable=True)
                 created_at = Column(Float, nullable=False)
                 created_by = Column(String(64), nullable=False)
                 provenance_id = Column(String(36), nullable=True)
@@ -414,7 +408,6 @@ class TorrentManifestStore:
                     existing.piece_length = manifest.piece_length
                     existing.magnet_uri = manifest.magnet_uri
                     existing.torrent_bytes = manifest.torrent_bytes
-                    existing.ipfs_cid = manifest.ipfs_cid
                     existing.created_at = manifest.created_at
                     existing.created_by = manifest.created_by_node_id
                     existing.provenance_id = manifest.provenance_id
@@ -431,7 +424,6 @@ class TorrentManifestStore:
                         piece_length=manifest.piece_length,
                         magnet_uri=manifest.magnet_uri,
                         torrent_bytes=manifest.torrent_bytes,
-                        ipfs_cid=manifest.ipfs_cid,
                         created_at=manifest.created_at,
                         created_by=manifest.created_by_node_id,
                         provenance_id=manifest.provenance_id,
@@ -473,7 +465,6 @@ class TorrentManifestStore:
                     piece_length=record.piece_length,
                     magnet_uri=record.magnet_uri,
                     torrent_bytes=record.torrent_bytes or b"",
-                    ipfs_cid=record.ipfs_cid,
                     created_at=record.created_at,
                     created_by_node_id=record.created_by,
                     provenance_id=record.provenance_id,
@@ -510,7 +501,6 @@ class TorrentManifestStore:
                         piece_length=record.piece_length,
                         magnet_uri=record.magnet_uri,
                         torrent_bytes=record.torrent_bytes or b"",
-                        ipfs_cid=record.ipfs_cid,
                         created_at=record.created_at,
                         created_by_node_id=record.created_by,
                         provenance_id=record.provenance_id,
@@ -571,7 +561,6 @@ class TorrentManifestStore:
                         piece_length=record.piece_length,
                         magnet_uri=record.magnet_uri,
                         torrent_bytes=record.torrent_bytes or b"",
-                        ipfs_cid=record.ipfs_cid,
                         created_at=record.created_at,
                         created_by_node_id=record.created_by,
                         provenance_id=record.provenance_id,

@@ -1643,7 +1643,7 @@ class SecurityAuditChecklist:
         """Check file upload security"""
         try:
             # Check for file upload validation
-            # This would typically be in IPFS or storage module
+            # This would typically be in the storage module
             return CheckResult(
                 check_id="app_file_upload",
                 status=CheckStatus.WARNING,

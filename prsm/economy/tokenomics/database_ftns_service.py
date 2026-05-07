@@ -482,7 +482,7 @@ class DatabaseFTNSService:
         Args:
             user_id: User to reward
             data_size_mb: Size of contributed data in MB
-            content_cid: IPFS CID of content
+            content_cid: PRSM content identifier
             quality_multiplier: Quality-based bonus
             
         Returns:
@@ -525,7 +525,7 @@ class DatabaseFTNSService:
         
         Args:
             user_id: User to reward
-            model_cid: IPFS CID of model
+            model_cid: PRSM content identifier of model
             performance_score: Model performance score (0-1)
             specialization: Model specialization area
             
@@ -570,7 +570,7 @@ class DatabaseFTNSService:
         
         Args:
             user_id: User to reward
-            paper_cid: IPFS CID of research paper
+            paper_cid: PRSM content identifier of research paper
             impact_factor: Journal/venue impact factor
             citation_count: Number of citations
             

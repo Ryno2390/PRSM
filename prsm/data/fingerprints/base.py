@@ -253,7 +253,7 @@ def detect_content_kind(
 
     Resolution priority (most authoritative first):
       1. Explicit ``mime_hint`` (caller knows the type, e.g. from an
-         IPFS pin's content-type header).
+         HTTP content-type header).
       2. ``python-magic`` content sniff (if installed).
       3. Stdlib ``mimetypes.guess_type(filename)`` fallback.
       4. Filename suffix lookup table.

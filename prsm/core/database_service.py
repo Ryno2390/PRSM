@@ -683,7 +683,7 @@ class DatabaseService:
                     transaction_type='royalty_distribution',
                     description=f"Royalty distribution for listing {listing_id}",
                     status='completed',
-                    ipfs_cid=str(listing_id),
+                    content_cid=str(listing_id),
                 )
                 db.add(tx)
                 await db.commit()
@@ -727,7 +727,7 @@ class DatabaseService:
                         'transaction_type': row.transaction_type,
                         'description': row.description,
                         'created_at': row.created_at,
-                        'ipfs_cid': row.ipfs_cid,
+                        'content_cid': row.content_cid,
                     }
                     for row in rows
                 ]
@@ -755,7 +755,7 @@ class DatabaseService:
                     transaction_type='content_ingestion_reward',
                     description=f"Content ingestion reward ({quality_level}) for {content_id}",
                     status='completed',
-                    ipfs_cid=content_id,
+                    content_cid=content_id,
                 )
                 db.add(tx)
                 await db.commit()

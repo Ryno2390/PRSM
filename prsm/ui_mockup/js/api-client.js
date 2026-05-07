@@ -676,14 +676,14 @@ class PRSMAPIClient {
             // Update earnings display
             const earningsElements = {
                 total: document.querySelector('[data-tokenomics="earnings-total"]'),
-                ipfs: document.querySelector('[data-tokenomics="earnings-ipfs"]'),
+                content: document.querySelector('[data-tokenomics="earnings-content"]'),
                 model: document.querySelector('[data-tokenomics="earnings-model"]'),
                 compute: document.querySelector('[data-tokenomics="earnings-compute"]')
             };
             
             if (earningsElements.total) earningsElements.total.textContent = `${earnings.total_earned} FTNS`;
             if (earnings.sources) {
-                if (earningsElements.ipfs) earningsElements.ipfs.textContent = `${earnings.sources.ipfs_hosting} FTNS`;
+                if (earningsElements.content) earningsElements.content.textContent = `${earnings.sources.content_hosting} FTNS`;
                 if (earningsElements.model) earningsElements.model.textContent = `${earnings.sources.model_hosting} FTNS`;
                 if (earningsElements.compute) earningsElements.compute.textContent = `${earnings.sources.compute_contribution} FTNS`;
             }
@@ -1224,7 +1224,7 @@ class PRSMAPIClient {
                     earnings: {
                         total_earned: 156.8,
                         sources: {
-                            ipfs_hosting: 89.2,
+                            content_hosting: 89.2,
                             model_hosting: 45.6,
                             compute_contribution: 22.0
                         },

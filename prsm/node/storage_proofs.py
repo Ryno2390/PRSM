@@ -873,7 +873,7 @@ class StorageProver:
         
         Args:
             challenge: Challenge to answer
-            content: Content bytes (retrieved from IPFS if not provided)
+            content: Content bytes (retrieved from ContentStore if not provided)
             
         Returns:
             StorageProof if successful, None if failed

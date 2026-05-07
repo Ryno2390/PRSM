@@ -89,7 +89,6 @@ class SecretsManager:
         "PAYPAL_CLIENT_SECRET": "Required for PayPal API authentication",
 
         # Infrastructure
-        "IPFS_GATEWAY_URL": "Custom IPFS gateway URL (defaults to public gateway)",
         "REDIS_URL": "Redis connection URL for caching and rate limiting",
 
         # Security

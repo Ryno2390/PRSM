@@ -80,7 +80,7 @@ class BandwidthMetrics:
 
 class ContentItem(BaseModel):
     """Content item in the PRSM CDN"""
-    content_hash: str  # IPFS hash
+    content_hash: str  # PRSM content hash
     content_type: str  # "model", "dataset", "paper", "embedding"
     size_bytes: int
     priority: ContentPriority

@@ -12,7 +12,7 @@ Supports multiple vector database backends:
 Key Features:
 - Seamless migration between vector database backends
 - Automatic provenance tracking for creator royalties
-- IPFS content addressing integration
+- PRSM content addressing integration
 - Multi-modal embedding support (text, image, audio)
 - Performance monitoring and optimization
 """

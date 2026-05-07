@@ -65,7 +65,7 @@ def provenance() -> None:
     "--metadata-uri",
     type=str,
     default="",
-    help="Off-chain metadata URI (ipfs://, https://, etc.). Keep this short — every payment reads the registry struct.",
+    help="Off-chain metadata URI (https:// or other URI scheme). Keep this short — every payment reads the registry struct.",
 )
 def register(file: Path, royalty_bps: int, metadata_uri: str) -> None:
     """Register FILE in the on-chain provenance registry."""

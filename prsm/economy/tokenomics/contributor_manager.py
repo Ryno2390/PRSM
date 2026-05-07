@@ -10,13 +10,13 @@ Core Features:
 - Cryptographic proof verification for multiple contribution types
 - Dynamic contributor status tracking (None, Basic, Active, Power User)
 - Peer validation and quality scoring systems
-- Integration with IPFS for storage proofs
+- Integration with the PRSM ContentStore for storage proofs
 - Governance participation tracking
 - Grace period management for temporary disconnections
 
 Integration Points:
 - FTNSService: For reward distribution based on contributor status
-- IPFS Client: For storage contribution verification
+- Storage Verifier: For storage contribution verification (e.g. StorageProvider)
 - Governance System: For voting participation tracking
 - Database: For persistent storage of proofs and status
 """
@@ -70,9 +70,9 @@ class ContributorManager:
     5. Providing earning eligibility determinations
     """
     
-    def __init__(self, db_session: AsyncSession, ipfs_client=None, governance_service=None):
+    def __init__(self, db_session: AsyncSession, storage_verifier=None, governance_service=None):
         self.db = db_session
-        self.ipfs = ipfs_client
+        self.storage_verifier = storage_verifier
         self.governance = governance_service
         self.verification_cache = {}
         
@@ -165,51 +165,48 @@ class ContributorManager:
         return proof
     
     async def _verify_storage_proof(self, user_id: str, proof_data: Dict) -> VerificationResult:
-        """Verify storage contribution using IPFS pinning proofs"""
-        
-        required_fields = ["ipfs_hashes", "storage_duration_hours", "redundancy_factor"]
+        """Verify storage contribution using ContentStore pinning proofs."""
+
+        required_fields = ["content_hashes", "storage_duration_hours", "redundancy_factor"]
         if not all(field in proof_data for field in required_fields):
             raise ValueError("Missing required storage proof fields")
-        
-        if not self.ipfs:
-            raise ValueError("IPFS client not available for storage verification")
-        
-        # Verify IPFS pinning
+
+        if not self.storage_verifier:
+            raise ValueError("Storage verifier not available for storage verification")
+
         verified_storage = 0
         verified_hashes = []
-        
-        for ipfs_hash in proof_data["ipfs_hashes"]:
+
+        for content_hash in proof_data["content_hashes"]:
             try:
-                # Check if hash is actually pinned by this user
-                pin_status = await self.ipfs.verify_pin_status(ipfs_hash, user_id)
+                pin_status = await self.storage_verifier.verify_pin_status(content_hash, user_id)
                 if pin_status:
-                    file_size = await self.ipfs.get_file_size(ipfs_hash)
+                    file_size = await self.storage_verifier.get_file_size(content_hash)
                     verified_storage += file_size
-                    verified_hashes.append(ipfs_hash)
-                    
+                    verified_hashes.append(content_hash)
+
             except Exception as e:
-                logger.warning(f"Failed to verify IPFS hash {ipfs_hash}: {e}")
+                logger.warning(f"Failed to verify content hash {content_hash}: {e}")
                 continue
-        
+
         if not verified_hashes:
-            raise ValueError("No valid IPFS hashes could be verified")
-        
-        # Calculate contribution value
-        storage_gb = verified_storage / (1024**3)  # Convert to GB
+            raise ValueError("No valid content hashes could be verified")
+
+        storage_gb = verified_storage / (1024**3)
         duration_hours = proof_data["storage_duration_hours"]
         redundancy = proof_data["redundancy_factor"]
-        
+
         # Value calculation: 0.01 FTNS per GB-hour with redundancy bonus
         base_value = Decimal(str(storage_gb)) * Decimal(str(duration_hours)) * Decimal("0.01")
         redundancy_bonus = min(redundancy, 3.0) / 3.0  # Cap redundancy bonus at 3x
         value = base_value * Decimal(str(1.0 + redundancy_bonus * 0.5))
-        
+
         # Quality score based on storage amount and duration
         quality = min(1.0, (storage_gb / 100) * 0.7 + (duration_hours / (24 * 30)) * 0.3)
-        
+
         # Confidence based on verification success rate
-        confidence = len(verified_hashes) / len(proof_data["ipfs_hashes"])
-        
+        confidence = len(verified_hashes) / len(proof_data["content_hashes"])
+
         # Generate proof hash
         proof_content = {
             "user_id": user_id,

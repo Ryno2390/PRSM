@@ -36,7 +36,7 @@ class RequestLimitsConfig(BaseModel):
         
         # File upload endpoints (if they exist)
         '/api/v1/upload': 100 * 1024 * 1024,  # 100MB for file uploads
-        '/api/v1/ipfs/upload': 50 * 1024 * 1024,  # 50MB for IPFS uploads
+        '/api/v1/content/upload': 50 * 1024 * 1024,  # 50MB for content uploads
     })
     
     # WebSocket message limits
@@ -54,7 +54,7 @@ class RequestLimitsConfig(BaseModel):
     # Expensive endpoints requiring stricter limits
     expensive_endpoints: Set[str] = Field(default_factory=lambda: {
         '/api/v1/nwtn/execute',
-        '/api/v1/ipfs/upload',
+        '/api/v1/content/upload',
         '/api/v1/web3/transfer',
         '/sessions',
         '/conversations/*/messages'

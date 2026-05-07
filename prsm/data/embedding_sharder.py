@@ -375,7 +375,7 @@ class EmbeddingSharder:
             shard = SemanticShard(
                 shard_id=f"{dataset_id}-shard-{i:04d}",
                 parent_dataset=dataset_id,
-                cid=f"Qm{dataset_id}-{i:04d}",  # Placeholder until IPFS upload
+                cid=f"Qm{dataset_id}-{i:04d}",  # Placeholder until content upload
                 centroid=centroids[i].tolist(),
                 record_count=len(cluster_records),
                 size_bytes=len(shard_data),

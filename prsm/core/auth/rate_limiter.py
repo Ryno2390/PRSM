@@ -78,7 +78,7 @@ class RateLimiter:
             
             # Endpoint-specific limits
             RateLimitRule("endpoint_expensive", RateLimitType.PER_ENDPOINT, 50, 3600, "/models/train/*"),
-            RateLimitRule("endpoint_upload", RateLimitType.PER_ENDPOINT, 20, 3600, "/ipfs/upload"),
+            RateLimitRule("endpoint_upload", RateLimitType.PER_ENDPOINT, 20, 3600, "/content/upload"),
         ]
         
         # IP reputation tracking

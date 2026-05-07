@@ -23,7 +23,7 @@ Configuration Categories:
 
 4. External Service Integration:
    - Redis for caching and session management
-   - IPFS for distributed storage
+   - PRSM ContentStore for distributed storage
    - Vector databases (Pinecone, Weaviate)
    - AI model APIs (OpenAI, Anthropic)
 

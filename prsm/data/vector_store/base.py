@@ -54,14 +54,14 @@ class VectorStoreConfig:
     vector_dimension: int = 1536  # OpenAI ada-002 default
     similarity_metric: str = "cosine"
     
-    # IPFS integration
-    ipfs_gateway: str = "https://ipfs.prsm.ai"
-    enable_ipfs_verification: bool = True
+    # ContentStore integration
+    content_gateway: str = "https://content.prsm.ai"
+    enable_content_verification: bool = True
 
 
 class ContentMatch(BaseModel):
     """Result from vector similarity search"""
-    content_cid: str = Field(..., description="IPFS content identifier")
+    content_cid: str = Field(..., description="PRSM content identifier")
     similarity_score: float = Field(..., ge=0.0, le=1.0)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     
@@ -96,7 +96,7 @@ class PRSMVectorStore(ABC):
     Abstract base class for all PRSM vector database implementations
     
     Provides unified interface for vector operations with built-in:
-    - IPFS content addressing integration
+    - PRSM content addressing integration
     - Provenance tracking for creator royalties
     - Multi-modal content support
     - Performance monitoring
@@ -137,10 +137,10 @@ class PRSMVectorStore(ABC):
                                           embeddings: np.ndarray,
                                           metadata: Dict[str, Any]) -> str:
         """
-        Store content embeddings with IPFS provenance tracking
-        
+        Store content embeddings with PRSM provenance tracking
+
         Args:
-            content_cid: IPFS content identifier
+            content_cid: PRSM content identifier
             embeddings: Vector embeddings for the content
             metadata: Content metadata including creator info and royalty rates
             

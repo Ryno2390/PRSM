@@ -11,7 +11,7 @@ during high-load or fault conditions.
 🔧 INTEGRATION POINTS:
 - NWTN Agent Pipeline: Protect against agent failures
 - FTNS Service: Prevent token calculation overload
-- IPFS Client: Handle storage service disruptions
+- ContentStore Client: Handle storage service disruptions
 - External APIs: Manage third-party service failures
 - Database Connections: Protect against DB overload
 
@@ -658,15 +658,6 @@ FTNS_CIRCUIT_CONFIG = CircuitBreakerConfig(
     success_threshold=3,
     timeout_seconds=10.0,
     failure_rate_threshold=0.4
-)
-
-# IPFS client circuit breaker
-IPFS_CIRCUIT_CONFIG = CircuitBreakerConfig(
-    failure_threshold=4,
-    recovery_timeout=45.0,
-    success_threshold=2,
-    timeout_seconds=20.0,
-    failure_rate_threshold=0.5
 )
 
 # Database circuit breaker

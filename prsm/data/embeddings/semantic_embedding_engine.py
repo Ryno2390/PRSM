@@ -4,7 +4,7 @@ PRSM Semantic Embedding Engine
 High-dimensional embedding spaces for content and knowledge representation
 
 This module implements sophisticated embedding systems that enable:
-1. Semantic similarity search across IPFS content
+1. Semantic similarity search across PRSM content
 2. Cross-domain knowledge mapping
 3. Efficient content retrieval and clustering
 4. Multi-modal embedding support
@@ -15,7 +15,7 @@ Key Features:
 - Hierarchical embedding spaces for different granularities
 - Efficient vector similarity search with approximate nearest neighbors
 - Embedding persistence and caching for performance
-- Integration with IPFS content addressing and NWTN reasoning
+- Integration with PRSM content addressing and NWTN reasoning
 """
 
 import asyncio
@@ -54,7 +54,7 @@ try:
 except ImportError:
     HAS_UMAP = False
 
-from ..ipfs.content_addressing import AddressedContent
+from ..content_addressing import AddressedContent
 from ..nwtn.hybrid_architecture import SOC
 
 logger = structlog.get_logger(__name__)
@@ -330,7 +330,7 @@ class SemanticEmbeddingEngine:
         try:
             # Get content text if not provided
             if not content_text:
-                # Would retrieve from IPFS in real implementation
+                # Would retrieve from ContentStore in real implementation
                 content_text = f"{content.title}\n\n{content.description}"
             
             # Check cache first

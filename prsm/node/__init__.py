@@ -3,7 +3,7 @@ PRSM Node - Working P2P node implementation.
 
 Provides the full stack for running a PRSM network node:
 identity management, local FTNS ledger, WebSocket P2P transport,
-compute marketplace, and IPFS storage contribution.
+compute marketplace, and ContentStore storage contribution.
 """
 
 from prsm.node.config import NodeConfig, NodeRole

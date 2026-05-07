@@ -137,15 +137,6 @@ def _check_prerequisites(sys_info: dict) -> list:
     else:
         checks.append(("Disk ≥ 5 GB free", None, "Could not detect"))
 
-    # IPFS
-    try:
-        import subprocess
-        result = subprocess.run(["ipfs", "version"], capture_output=True, text=True, timeout=5)
-        ipfs_ok = result.returncode == 0
-        checks.append(("IPFS", ipfs_ok, result.stdout.strip() if ipfs_ok else "Not installed (optional)"))
-    except Exception:
-        checks.append(("IPFS", None, "Not found (optional)"))
-
     return checks
 
 

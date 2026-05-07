@@ -2,8 +2,8 @@
 PRSM Native Storage Module
 
 Provides content-addressed blob storage, erasure-coded sharding, threshold
-key management, and network-aware shard distribution — replacing IPFS as the
-underlying storage substrate.
+key management, and network-aware shard distribution — the proprietary
+PRSM storage substrate.
 
 Public surface
 --------------

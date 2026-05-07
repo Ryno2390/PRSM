@@ -903,7 +903,7 @@ contract FTNSMarketplace is AccessControl, ReentrancyGuard {
         AssetType assetType;
         string title;
         string description;
-        string metadataURI; // IPFS hash or URL
+        string metadataURI; // ContentStore hash or URL
         uint256 price; // Price in FTNS tokens
         uint256 quantity; // Available quantity
         uint256 sold; // Amount sold

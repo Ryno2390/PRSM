@@ -130,7 +130,7 @@ class ChronosEngine:
             settlement = await self._execute_atomic_swap(transaction)
             transaction.settlement = settlement
             
-            # Stage 4: Record settlement on IPFS
+            # Stage 4: Record settlement in ContentStore
             settlement_hash = await self._record_settlement(settlement)
             settlement.settlement_hash = settlement_hash
             
@@ -242,7 +242,7 @@ class ChronosEngine:
             fees=fees,
             total_fees=total_fees,
             net_amount=net_amount,
-            settlement_hash=""  # Will be set after IPFS recording
+            settlement_hash=""  # Will be set after settlement recording
         )
         
         return settlement
@@ -295,7 +295,7 @@ class ChronosEngine:
             pool.last_updated = datetime.utcnow()
     
     async def _record_settlement(self, settlement: Settlement) -> str:
-        """Record settlement on IPFS for provenance."""
+        """Record settlement in ContentStore for provenance."""
         settlement_data = {
             "settlement_id": settlement.id,
             "swap_request_id": settlement.swap_request_id,
@@ -314,7 +314,7 @@ class ChronosEngine:
         data_json = json.dumps(settlement_data, sort_keys=True)
         settlement_hash = hashlib.sha256(data_json.encode()).hexdigest()
         
-        # In real implementation, this would use actual IPFS
+        # In real implementation, this would persist via ContentStore
         logger.info(f"Settlement recorded with hash: {settlement_hash}")
         
         return settlement_hash

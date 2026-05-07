@@ -4,8 +4,6 @@ BitTorrent Client
 
 Core libtorrent wrapper for PRSM's BitTorrent integration.
 Provides async interface for creating, seeding, and downloading torrents.
-
-Mirrors the structure of ipfs_client.py for consistency.
 """
 
 import asyncio

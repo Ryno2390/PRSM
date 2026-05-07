@@ -1321,7 +1321,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     @app.post("/content/upload")
     async def upload_content(req: ContentUploadRequest) -> Dict[str, Any]:
-        """Upload text content to IPFS with provenance tracking."""
+        """Upload text content to ContentStore with provenance tracking."""
         if not node.content_uploader:
             raise HTTPException(status_code=503, detail="Content uploader not initialized")
 
@@ -1334,7 +1334,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         )
 
         if not result:
-            raise HTTPException(status_code=502, detail="Upload failed — is IPFS running?")
+            raise HTTPException(status_code=502, detail="Upload failed — content store unavailable?")
 
         return {
             "cid": result.cid,
@@ -1389,7 +1389,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             shard = SemanticShard(
                 shard_id=f"{dataset_id}-shard-{i:04d}",
                 parent_dataset=dataset_id,
-                cid=f"Qm{dataset_id}-{i:04d}",  # Placeholder until IPFS upload
+                cid=f"Qm{dataset_id}-{i:04d}",  # Placeholder until content upload
                 centroid=[float(i) / max(shard_count, 1)],
                 record_count=len(chunk),
                 size_bytes=len(chunk),
@@ -1513,7 +1513,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         4. Verify content hash if verification is enabled
         
         Args:
-            cid: IPFS content identifier
+            cid: PRSM content identifier
             timeout: Seconds to wait for response (default: 30.0)
             verify_hash: Whether to verify SHA-256 hash (default: True)
         

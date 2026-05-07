@@ -461,7 +461,6 @@ class ContentUploader:
         sharding_threshold: int = DEFAULT_SHARDING_THRESHOLD,
         embedding_fn: Optional[Callable] = None,
         semantic_index_path: Optional[Path] = None,
-        ipfs_api_url: Optional[str] = None,  # Deprecated — accepted-and-ignored; see content_publisher
         creator_address: Optional[str] = None,
         content_provider: Optional["ContentProvider"] = None,
         provenance_client: Optional[Any] = None,
@@ -479,21 +478,9 @@ class ContentUploader:
         self.ledger_sync = ledger_sync      # For broadcasting transactions
         self.content_economy = content_economy  # For replication tracking (Phase 4)
 
-        # Native-storage migration PR 2a (2026-05-07): publish/fetch the
-        # PRSM proprietary BitTorrent layer. The legacy ipfs_api_url
-        # kwarg is accepted for backwards-compat with existing call sites
-        # but no longer used — IPFS was removed in favour of the native
-        # BitTorrent + signed-manifest layer per founder direction.
-        # See docs/plans/native-storage-migration-status-2026-05-07.md.
+        # Publish/fetch via the PRSM proprietary BitTorrent layer.
         self.content_publisher = content_publisher
         self.content_retriever = content_retriever
-        if ipfs_api_url is not None:
-            logger.debug(
-                "ContentUploader: ignoring deprecated ipfs_api_url=%r "
-                "(IPFS replaced by ContentPublisher; pass content_publisher "
-                "instead)",
-                ipfs_api_url,
-            )
 
         # Phase 1.2: 0x address used to compute the canonical provenance_hash
         # for the on-chain registry. None disables on-chain provenance — the
@@ -741,9 +728,9 @@ class ContentUploader:
           - any other exception during the call
 
         On-chain registration is best-effort: the upload itself does NOT
-        fail if the on-chain call fails. The local provenance record + IPFS
-        copy still exist; on-chain registration can be retried later via a
-        backfill script.
+        fail if the on-chain call fails. The local provenance record + the
+        ContentStore copy still exist; on-chain registration can be retried
+        later via a backfill script.
         """
         if self._provenance_client is None:
             return None
@@ -901,7 +888,7 @@ class ContentUploader:
 
         # ── Semantic deduplication ────────────────────────────────────────────
         # Generate an embedding and check for near-duplicates *before* committing
-        # to IPFS so we can auto-register derivative relationships early.
+        # to the content store so we can auto-register derivative relationships early.
         embedding = await self._get_embedding(content)
         near_dup_cid: Optional[str] = None
         near_dup_sim: Optional[float] = None
@@ -1536,11 +1523,10 @@ class ContentUploader:
     ) -> Optional[str]:
         """Publish *content* via the proprietary BitTorrent layer.
 
-        Returns the torrent infohash on success or None on failure
-        (mirrors the failure semantics of the legacy ``_ipfs_add``
-        helper this method replaces). The returned infohash is used as
-        the content identifier (``cid`` in provenance records,
-        ``contentHash`` in on-chain RoyaltyDistributor calls).
+        Returns the torrent infohash on success or None on failure.
+        The returned infohash is used as the content identifier
+        (``cid`` in provenance records, ``contentHash`` in on-chain
+        RoyaltyDistributor calls).
         """
         if self.content_publisher is None:
             logger.error(
@@ -1563,8 +1549,7 @@ class ContentUploader:
     async def _fetch_content(self, cid: str) -> Optional[bytes]:
         """Fetch content bytes by torrent infohash via the BitTorrent layer.
 
-        Returns the content bytes on success or None on failure (mirrors
-        the legacy ``_ipfs_cat`` shape).
+        Returns the content bytes on success or None on failure.
         """
         if self.content_retriever is None:
             logger.error(
@@ -1909,13 +1894,3 @@ class ContentUploader:
             ShardManifest if found, None otherwise
         """
         return self.shard_manifests.get(manifest_cid)
-
-
-# _IPFSClientWrapper / _UploadResult / _DownloadResult removed in
-# native-storage migration PR 2a (2026-05-07). The wrapper adapted
-# the legacy `_ipfs_add` / `_ipfs_cat` helpers to a ContentSharder-
-# friendly interface. Both helpers and the wrapper are gone now;
-# uploads route through `ContentPublisher.publish` (Tier A) at
-# `_publish_content` and downloads through `ContentRetriever.fetch`
-# at `_fetch_content`. The ContentSharder integration for
-# encrypted-and-sharded content (Tier B/C) is deferred to PR 2b.

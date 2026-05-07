@@ -66,7 +66,7 @@ class PgVectorStore(PRSMVectorStore):
     - Async operations using asyncpg
     - JSON metadata storage with GIN indexing
     - Cosine similarity search with HNSW indexing
-    - IPFS content addressing integration
+    - PRSM content addressing integration
     - Automatic provenance tracking for royalties
     - Built-in performance monitoring
     """

@@ -285,7 +285,9 @@ class FTNSTransactionModel(Base):
     status = Column(String(20), default="completed", nullable=False)
     idempotency_key = Column(String(255), unique=True, nullable=True, index=True)
     context_units = Column(Integer)
-    ipfs_cid = Column(String(255))
+    # Renamed from a legacy column; existing DBs require an ALTER TABLE
+    # ftns_transactions RENAME COLUMN to content_cid (see release notes).
+    content_cid = Column(String(255))
     block_hash = Column(String(255))
     balance_before_sender = Column(Float)
     balance_after_sender = Column(Float)
@@ -357,12 +359,13 @@ class TeacherModelModel(Base):
     curriculum_ids = Column(JSON, default=list)
     student_models = Column(JSON, default=list)
     rlvr_score = Column(Float)
-    ipfs_cid = Column(String(255), index=True)
+    # Renamed from a legacy column; see ContentProvenance migration note.
+    content_cid = Column(String(255), index=True)
     version = Column(String(50), default="1.0.0")
     active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     __table_args__ = (
         Index('idx_teacher_specialization_active', 'specialization', 'active'),
         Index('idx_teacher_performance', 'performance_score'),
@@ -422,7 +425,7 @@ class PeerNodeModel(Base):
 
 class ContentProvenanceModel(Base):
     """
-    Database model for IPFS content provenance records.
+    Database model for content provenance records.
 
     Persists ContentUploader.uploaded_content across node restarts so
     royalty collection continues after a node is restarted. Also enables
@@ -434,7 +437,7 @@ class ContentProvenanceModel(Base):
     """
     __tablename__ = "content_provenance"
 
-    # Primary identifier — IPFS CID (or manifest CID for sharded content)
+    # Primary identifier — content CID (or manifest CID for sharded content)
     cid = Column(String(255), primary_key=True)
 
     filename = Column(String(500), nullable=False)
@@ -536,7 +539,8 @@ class ModelRegistryModel(Base):
     model_type = Column(String(50), nullable=False, index=True)
     specialization = Column(String(255), index=True)
     owner_id = Column(String(255), nullable=False, index=True)
-    ipfs_cid = Column(String(255), index=True)
+    # Renamed from a legacy column; see ContentProvenance migration note.
+    content_cid = Column(String(255), index=True)
     version = Column(String(50), default="1.0.0")
     performance_metrics = Column(JSON, default=dict)
     resource_requirements = Column(JSON, default=dict)

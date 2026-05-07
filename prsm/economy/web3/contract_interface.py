@@ -39,7 +39,7 @@ class TokenBalance:
 class MarketplaceListing:
     id: int
     owner: str
-    ipfs_hash: str
+    content_hash: str
     title: str
     description: str
     price_per_hour: Decimal
@@ -56,7 +56,7 @@ class GovernanceProposal:
     title: str
     description: str
     category: int
-    ipfs_hash: str
+    content_hash: str
     is_emergency: bool
     creation_time: int
     voting_start: int

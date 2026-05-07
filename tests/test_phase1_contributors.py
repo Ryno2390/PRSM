@@ -137,17 +137,17 @@ def sample_user_id():
 
 
 @pytest.fixture
-def mock_ipfs_client():
+def mock_storage_verifier():
     """Mock IPFS client for testing storage proofs"""
     
     class MockIPFSClient:
-        async def verify_pin_status(self, ipfs_hash, user_id):
+        async def verify_pin_status(self, content_hash, user_id):
             # Simulate successful verification for test hashes
-            return ipfs_hash.startswith("Qm")
+            return content_hash.startswith("Qm")
         
-        async def get_file_size(self, ipfs_hash):
+        async def get_file_size(self, content_hash):
             # Simulate file size based on hash length (for testing)
-            return len(ipfs_hash) * 1024 * 1024  # MB based on hash length
+            return len(content_hash) * 1024 * 1024  # MB based on hash length
     
     return MockIPFSClient()
 
@@ -210,13 +210,13 @@ class TestContributorManager:
     """Test ContributorManager service logic"""
     
     @pytest.mark.asyncio
-    async def test_storage_proof_verification(self, db_session, sample_user_id, mock_ipfs_client):
+    async def test_storage_proof_verification(self, db_session, sample_user_id, mock_storage_verifier):
         """Test storage contribution proof verification"""
         
-        manager = ContributorManager(db_session, mock_ipfs_client)
+        manager = ContributorManager(db_session, mock_storage_verifier)
         
         proof_data = {
-            "ipfs_hashes": ["QmTest1234567890", "QmTest0987654321"],
+            "content_hashes": ["QmTest1234567890", "QmTest0987654321"],
             "storage_duration_hours": 720,  # 30 days
             "redundancy_factor": 2.0
         }
@@ -293,10 +293,10 @@ class TestContributorManager:
         assert proof.quality_score > 0.8  # Should be high given good quality metrics
     
     @pytest.mark.asyncio
-    async def test_contributor_status_calculation(self, db_session, sample_user_id, mock_ipfs_client):
+    async def test_contributor_status_calculation(self, db_session, sample_user_id, mock_storage_verifier):
         """Test contributor status tier calculation"""
         
-        manager = ContributorManager(db_session, mock_ipfs_client)
+        manager = ContributorManager(db_session, mock_storage_verifier)
         
         # Submit multiple proofs to reach different tiers
         proof_requests = [
@@ -304,7 +304,7 @@ class TestContributorManager:
             ContributionProofRequest(
                 contribution_type=ContributionType.STORAGE.value,
                 proof_data={
-                    "ipfs_hashes": ["QmTest1234567890"],
+                    "content_hashes": ["QmTest1234567890"],
                     "storage_duration_hours": 720,
                     "redundancy_factor": 1.0
                 }
@@ -357,7 +357,7 @@ class TestContributorManager:
         
         # Test missing required fields
         invalid_proof_data = {
-            "ipfs_hashes": ["QmTest1234567890"],
+            "content_hashes": ["QmTest1234567890"],
             # Missing storage_duration_hours and redundancy_factor
         }
         
@@ -382,10 +382,10 @@ class TestContributorIntegration:
     """Integration tests for contributor system"""
     
     @pytest.mark.asyncio
-    async def test_contributor_status_lifecycle(self, db_session, sample_user_id, mock_ipfs_client):
+    async def test_contributor_status_lifecycle(self, db_session, sample_user_id, mock_storage_verifier):
         """Test complete contributor lifecycle from new user to power user"""
         
-        manager = ContributorManager(db_session, mock_ipfs_client)
+        manager = ContributorManager(db_session, mock_storage_verifier)
         # Adjust thresholds for testing to be more reasonable
         manager.tier_thresholds[ContributorTier.BASIC] = 0.2      # 0.2 points minimum
         manager.tier_thresholds[ContributorTier.ACTIVE] = 2.0     # 2 points for active
@@ -402,7 +402,7 @@ class TestContributorIntegration:
         first_proof = ContributionProofRequest(
             contribution_type=ContributionType.STORAGE.value,
             proof_data={
-                "ipfs_hashes": ["QmTest1234567890"] * 5,  # Moderate storage contribution
+                "content_hashes": ["QmTest1234567890"] * 5,  # Moderate storage contribution
                 "storage_duration_hours": 720,
                 "redundancy_factor": 2.0
             }

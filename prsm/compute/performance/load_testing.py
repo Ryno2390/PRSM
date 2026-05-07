@@ -7,7 +7,7 @@ Comprehensive performance testing and benchmarking
 - API endpoint stress testing
 - WebSocket connection scaling tests
 - Database performance benchmarking  
-- IPFS storage load testing
+- ContentStore load testing
 - ML pipeline performance evaluation
 """
 
@@ -126,7 +126,7 @@ class LoadTestSuite:
     - API endpoint stress testing with realistic workloads
     - WebSocket connection scaling and message throughput
     - Database performance under concurrent load
-    - IPFS storage upload/download benchmarking
+    - ContentStore upload/download benchmarking
     - ML pipeline training and inference performance
     - End-to-end user journey simulation
     """
@@ -233,8 +233,8 @@ class LoadTestSuite:
             return await self._test_websocket_scaling(config)
         elif scenario == "database_performance":
             return await self._test_database_performance(config)
-        elif scenario == "ipfs_storage":
-            return await self._test_ipfs_storage(config)
+        elif scenario == "content_store":
+            return await self._test_content_store(config)
         elif scenario == "ml_pipeline":
             return await self._test_ml_pipeline(config)
         elif scenario == "user_journey":
@@ -547,77 +547,58 @@ class LoadTestSuite:
                 "success_rate": 0.0
             }
     
-    async def _test_ipfs_storage(self, config: LoadTestConfig) -> Dict[str, Any]:
-        """Test IPFS storage performance"""
-        logger.info("Testing IPFS storage performance")
+    async def _test_content_store(self, config: LoadTestConfig) -> Dict[str, Any]:
+        """Test PRSM ContentStore performance."""
+        logger.info("Testing ContentStore performance")
 
         try:
-            from prsm.compute.spine.ipfs_client import IPFSClient
+            from prsm.storage import ContentHash, get_content_store, init_content_store
             import os
 
-            # Create IPFS client
-            ipfs_client = IPFSClient()
+            store = get_content_store()
+            if store is None:
+                store = init_content_store()
+            if store is None:
+                return {
+                    "scenario": "content_store",
+                    "available": False,
+                    "reason": "content_store_unavailable",
+                    "concurrent_operations": config.concurrent_users,
+                    "success_rate": 0.0,
+                }
 
-            # Create test payload (1 KB of random data)
             test_payload = os.urandom(1024)
-            cid = None
 
-            # Time upload
             upload_start = time.perf_counter()
-            try:
-                cid = await ipfs_client.add(test_payload)
-            except AttributeError:
-                # Method might be sync
-                cid = ipfs_client.add(test_payload)
+            content_hash: ContentHash = await store.store_local(test_payload)
             upload_time = (time.perf_counter() - upload_start) * 1000  # ms
 
-            # Time download
             download_start = time.perf_counter()
-            try:
-                retrieved = await ipfs_client.cat(cid)
-            except AttributeError:
-                retrieved = ipfs_client.cat(cid)
+            retrieved = await store.retrieve_local(content_hash)
             download_time = (time.perf_counter() - download_start) * 1000  # ms
 
-            # Verify content matches
             verified = retrieved == test_payload
 
-            # Clean up - unpin the test content
-            try:
-                if hasattr(ipfs_client, 'unpin'):
-                    await ipfs_client.unpin(cid)
-            except Exception:
-                pass
-
             return {
-                "scenario": "ipfs_storage",
+                "scenario": "content_store",
                 "upload_time_ms": upload_time,
                 "download_time_ms": download_time,
                 "verified": verified,
                 "test_payload_bytes": len(test_payload),
-                "cid": cid,
+                "content_hash": content_hash.hex(),
                 "concurrent_operations": config.concurrent_users,
                 "success_rate": 1.0 if verified else 0.5,
-                "available": True
+                "available": True,
             }
 
-        except ImportError:
-            logger.warning("IPFS client not available")
-            return {
-                "scenario": "ipfs_storage",
-                "available": False,
-                "reason": "ipfs_client_not_installed",
-                "concurrent_operations": config.concurrent_users,
-                "success_rate": 0.0
-            }
         except Exception as e:
-            logger.error("IPFS storage test failed", error=str(e))
+            logger.error("ContentStore test failed", error=str(e))
             return {
-                "scenario": "ipfs_storage",
+                "scenario": "content_store",
                 "available": False,
                 "error": str(e),
                 "concurrent_operations": config.concurrent_users,
-                "success_rate": 0.0
+                "success_rate": 0.0,
             }
     
     async def _test_ml_pipeline(self, config: LoadTestConfig) -> Dict[str, Any]:
