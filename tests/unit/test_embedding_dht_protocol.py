@@ -453,11 +453,15 @@ def test_error_response_allows_empty_message():
 
 
 def test_error_codes_documented():
+    # T4.9 — UNSUPPORTED_FINGERPRINT_KIND added alongside the
+    # fingerprint-lane wire format extension. Previously: 5 codes;
+    # post-T4.9: 6 codes.
     expected = {
         "NOT_FOUND",
         "MALFORMED_REQUEST",
         "UNSUPPORTED_VERSION",
         "UNSUPPORTED_MODEL",
+        "UNSUPPORTED_FINGERPRINT_KIND",
         "INTERNAL_ERROR",
     }
     assert {e.value for e in ErrorCode} == expected

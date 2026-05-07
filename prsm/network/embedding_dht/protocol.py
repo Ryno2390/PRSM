@@ -94,6 +94,33 @@ MAX_VECTOR_DIMENSION = 8192
 # for variable-length fields.
 SIGNING_DOMAIN_TAG = b"PRSM-PROV-1/EmbeddingResponse/v1"
 
+# T4.9 — distinct domain tag for binary fingerprint payloads. A
+# creator's Ed25519 key signs both embeddings (text-vector) and
+# fingerprints (image-pHash / audio-Chromaprint / video-multihash /
+# structural). Distinct tags prevent a peer from extracting a
+# fingerprint signature and replaying it as an embedding signature
+# (or vice versa) on bytes that happen to round-trip both ways.
+FINGERPRINT_SIGNING_DOMAIN_TAG = b"PRSM-PROV-1/Fingerprint/v1"
+
+# Hard cap on a single fingerprint payload's raw bytes. Concrete
+# backends today produce: image-pHash 8 B, video-multihash 64 B,
+# structural 32 B, audio-Chromaprint up to ~300 B/min (a 1-hour clip
+# ≈ 72 KB). 128 KB gives ~30× headroom for the largest expected case
+# while staying well inside MAX_MESSAGE_BYTES even after base64
+# overhead (~33%).
+MAX_FINGERPRINT_PAYLOAD_BYTES = 128 * 1024
+
+# Allowed fingerprint kind strings. Mirrors the keys in
+# ``prsm/data/fingerprints/base.py::FingerprintKind`` minus
+# ``text-vector`` (which uses the existing embedding lane) and
+# ``byte-hash`` (which has no backend / no DHT participation).
+ALLOWED_FINGERPRINT_KINDS = frozenset({
+    "image-phash",
+    "audio-chromaprint",
+    "video-multihash",
+    "structural",
+})
+
 # Allowed embedding dtype strings. Restrict to float32 for now —
 # float16 / bfloat16 add cross-platform-determinism risk that isn't
 # justified by the bandwidth savings at the dimensions we care about.
@@ -111,6 +138,12 @@ class MessageType(str, Enum):
     EMBEDDING_PROVIDERS = "embedding_providers"
     EMBEDDING_RESPONSE = "embedding_response"
     ERROR = "error"
+    # T4.9 — binary fingerprint lane. Keys on
+    # (content_hash, fingerprint_kind) instead of (content_hash, model_id).
+    FIND_FINGERPRINT = "find_fingerprint"
+    FETCH_FINGERPRINT = "fetch_fingerprint"
+    FINGERPRINT_PROVIDERS = "fingerprint_providers"
+    FINGERPRINT_RESPONSE = "fingerprint_response"
 
 
 # Coded error reasons returned by the server. Strings (not ints) so
@@ -120,6 +153,7 @@ class ErrorCode(str, Enum):
     MALFORMED_REQUEST = "MALFORMED_REQUEST"
     UNSUPPORTED_VERSION = "UNSUPPORTED_VERSION"
     UNSUPPORTED_MODEL = "UNSUPPORTED_MODEL"
+    UNSUPPORTED_FINGERPRINT_KIND = "UNSUPPORTED_FINGERPRINT_KIND"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -549,6 +583,316 @@ def canonical_signing_payload(
 
 
 # --------------------------------------------------------------------------
+# T4.9 — Fingerprint message dataclasses (binary fingerprint lane)
+# --------------------------------------------------------------------------
+
+
+def _validate_fingerprint_kind(kind: Any) -> None:
+    """Reject unknown / non-string fingerprint kinds at parse time."""
+    if not isinstance(kind, str):
+        raise MalformedMessageError(
+            f"fingerprint_kind must be a string, got {type(kind).__name__}"
+        )
+    if kind not in ALLOWED_FINGERPRINT_KINDS:
+        raise MalformedMessageError(
+            f"fingerprint_kind must be one of "
+            f"{sorted(ALLOWED_FINGERPRINT_KINDS)}, got {kind!r}"
+        )
+
+
+@dataclass(frozen=True)
+class FindFingerprintRequest:
+    """Client → server: "Who can serve the binary fingerprint for
+    (content_hash, fingerprint_kind)?"
+
+    Fingerprint-lane analogue of :class:`FindEmbeddingRequest`. The
+    keyspace is partitioned by ``fingerprint_kind`` for the same
+    reason embeddings partition by ``model_id`` — payloads from
+    different kinds (image-pHash vs audio-Chromaprint) share no
+    similarity metric and must never be cross-compared.
+    """
+
+    content_hash: str
+    fingerprint_kind: str
+    request_id: str
+    protocol_version: int = EMBEDDING_DHT_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = MessageType.FIND_FINGERPRINT.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("content_hash", self.content_hash)
+        _validate_fingerprint_kind(self.fingerprint_kind)
+        _validate_str_field("request_id", self.request_id)
+        _validate_version(self.protocol_version)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "content_hash": self.content_hash,
+            "fingerprint_kind": self.fingerprint_kind,
+            "request_id": self.request_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FindFingerprintRequest":
+        _expect_type(data, MessageType.FIND_FINGERPRINT)
+        return cls(
+            content_hash=_required_str(data, "content_hash"),
+            fingerprint_kind=_required_str(data, "fingerprint_kind"),
+            request_id=_required_str(data, "request_id"),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+@dataclass(frozen=True)
+class FetchFingerprintRequest:
+    """Client → server: "Send me the binary fingerprint for
+    (content_hash, fingerprint_kind)."
+
+    Server returns ``FingerprintResponse`` if it has the fingerprint
+    locally, ``ErrorResponse(NOT_FOUND)`` otherwise. Server does NOT
+    chase the DHT on behalf of the client — find_fingerprint is the
+    iteration primitive, same convention as the embedding lane.
+    """
+
+    content_hash: str
+    fingerprint_kind: str
+    request_id: str
+    protocol_version: int = EMBEDDING_DHT_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = MessageType.FETCH_FINGERPRINT.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("content_hash", self.content_hash)
+        _validate_fingerprint_kind(self.fingerprint_kind)
+        _validate_str_field("request_id", self.request_id)
+        _validate_version(self.protocol_version)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "content_hash": self.content_hash,
+            "fingerprint_kind": self.fingerprint_kind,
+            "request_id": self.request_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FetchFingerprintRequest":
+        _expect_type(data, MessageType.FETCH_FINGERPRINT)
+        return cls(
+            content_hash=_required_str(data, "content_hash"),
+            fingerprint_kind=_required_str(data, "fingerprint_kind"),
+            request_id=_required_str(data, "request_id"),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+@dataclass(frozen=True)
+class FingerprintProvidersResponse:
+    """Server → client: list of providers for the requested
+    (content_hash, fingerprint_kind).
+
+    Structurally mirrors :class:`EmbeddingProvidersResponse` — same
+    ``ProviderInfo`` shape, same MAX_PROVIDERS_PER_RESPONSE cap. Kept
+    distinct so logs / metrics can tell which lane a query came from
+    without inspecting the originating request.
+    """
+
+    request_id: str
+    providers: Tuple[ProviderInfo, ...]
+    protocol_version: int = EMBEDDING_DHT_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = MessageType.FINGERPRINT_PROVIDERS.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        _validate_version(self.protocol_version)
+        if not isinstance(self.providers, tuple):
+            object.__setattr__(self, "providers", tuple(self.providers))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+            "providers": [p.to_dict() for p in self.providers],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FingerprintProvidersResponse":
+        _expect_type(data, MessageType.FINGERPRINT_PROVIDERS)
+        providers_raw = data.get("providers")
+        if not isinstance(providers_raw, list):
+            raise MalformedMessageError(
+                f"providers must be a list, got "
+                f"{type(providers_raw).__name__}"
+            )
+        if len(providers_raw) > MAX_PROVIDERS_PER_RESPONSE:
+            raise MalformedMessageError(
+                f"providers list exceeds MAX_PROVIDERS_PER_RESPONSE "
+                f"({len(providers_raw)} > {MAX_PROVIDERS_PER_RESPONSE})"
+            )
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            providers=tuple(
+                ProviderInfo.from_dict(p) for p in providers_raw
+            ),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+@dataclass(frozen=True)
+class FingerprintResponse:
+    """Server → client: a single binary fingerprint payload with
+    metadata and creator signature.
+
+    Fingerprint-lane analogue of :class:`EmbeddingResponse`. Differs
+    in two ways:
+
+      1. The payload is opaque bytes (base64-encoded) rather than a
+         typed float32 vector. Each backend's payload format is
+         self-describing per ``fingerprint_kind`` — image-pHash is
+         8 bytes, video-multihash is 64 bytes, audio-Chromaprint is a
+         packed uint32 sequence, structural is a 32-byte SHA-256
+         digest of the canonical structural-signature JSON.
+      2. The signature uses :data:`FINGERPRINT_SIGNING_DOMAIN_TAG`
+         (distinct from the embedding lane), so a creator key can't
+         be tricked into producing a signature that's valid for a
+         different protocol message type.
+
+    The signature binds (content_hash, fingerprint_kind, payload_bytes,
+    created_at) under the creator's Ed25519 key, anchored on-chain via
+    :class:`PublisherKeyAnchor`. Verifiers reject responses whose
+    signature does not match the on-chain creator pubkey for
+    ``content_hash`` — same defense as the embedding lane.
+    """
+
+    request_id: str
+    content_hash: str
+    fingerprint_kind: str
+    payload_b64: str
+    creator_id: str
+    created_at: float
+    signature_b64: str
+    protocol_version: int = EMBEDDING_DHT_PROTOCOL_VERSION
+
+    MESSAGE_TYPE: str = MessageType.FINGERPRINT_RESPONSE.value
+
+    def __post_init__(self) -> None:
+        _validate_str_field("request_id", self.request_id)
+        _validate_str_field("content_hash", self.content_hash)
+        _validate_fingerprint_kind(self.fingerprint_kind)
+        _validate_str_field("payload_b64", self.payload_b64)
+        _validate_str_field("creator_id", self.creator_id)
+        _validate_str_field("signature_b64", self.signature_b64)
+        _validate_version(self.protocol_version)
+
+        if not isinstance(self.created_at, (int, float)):
+            raise MalformedMessageError(
+                f"created_at must be numeric, got "
+                f"{type(self.created_at).__name__}"
+            )
+
+        # Sanity-bound the encoded payload — base64 encoding is ~33%
+        # overhead, so the encoded length cap is 4/3 of the raw cap.
+        # Reject obviously oversized bodies before decoding.
+        max_b64_len = (MAX_FINGERPRINT_PAYLOAD_BYTES * 4 + 2) // 3
+        if len(self.payload_b64) > max_b64_len:
+            raise MalformedMessageError(
+                f"payload_b64 length {len(self.payload_b64)} exceeds "
+                f"max base64 length {max_b64_len} (raw cap = "
+                f"{MAX_FINGERPRINT_PAYLOAD_BYTES})"
+            )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.MESSAGE_TYPE,
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id,
+            "content_hash": self.content_hash,
+            "fingerprint_kind": self.fingerprint_kind,
+            "payload_b64": self.payload_b64,
+            "creator_id": self.creator_id,
+            "created_at": self.created_at,
+            "signature_b64": self.signature_b64,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FingerprintResponse":
+        _expect_type(data, MessageType.FINGERPRINT_RESPONSE)
+        created_at = data.get("created_at")
+        if not isinstance(created_at, (int, float)):
+            raise MalformedMessageError(
+                f"created_at must be numeric, got "
+                f"{type(created_at).__name__}"
+            )
+        return cls(
+            request_id=_required_str(data, "request_id"),
+            content_hash=_required_str(data, "content_hash"),
+            fingerprint_kind=_required_str(data, "fingerprint_kind"),
+            payload_b64=_required_str(data, "payload_b64"),
+            creator_id=_required_str(data, "creator_id"),
+            created_at=float(created_at),
+            signature_b64=_required_str(data, "signature_b64"),
+            protocol_version=_required_int(data, "protocol_version"),
+        )
+
+
+def fingerprint_signing_payload(
+    content_hash: str,
+    fingerprint_kind: str,
+    payload_bytes: bytes,
+    created_at: float,
+) -> bytes:
+    """Canonical bytes that a :class:`FingerprintResponse` signature
+    must cover.
+
+    Layout:
+      FINGERPRINT_SIGNING_DOMAIN_TAG (32 bytes, zero-padded)
+      || len(content_hash)     as uint32 BE || content_hash    (utf-8)
+      || len(fingerprint_kind) as uint32 BE || fingerprint_kind (utf-8)
+      || len(payload_bytes)    as uint32 BE || payload_bytes
+      || created_at_ms         as uint64 BE  (milliseconds since epoch)
+
+    Same length-prefix-every-variable-field discipline as
+    :func:`canonical_signing_payload` — prevents domain-tag confusion
+    attacks where the boundaries between fields could be moved while
+    leaving the concatenated bytes the same.
+    """
+    if not isinstance(content_hash, str) or not content_hash:
+        raise MalformedMessageError("content_hash must be non-empty string")
+    _validate_fingerprint_kind(fingerprint_kind)
+    if not isinstance(payload_bytes, (bytes, bytearray)):
+        raise MalformedMessageError("payload_bytes must be bytes")
+    if len(payload_bytes) > MAX_FINGERPRINT_PAYLOAD_BYTES:
+        raise MalformedMessageError(
+            f"payload_bytes length {len(payload_bytes)} exceeds "
+            f"MAX_FINGERPRINT_PAYLOAD_BYTES "
+            f"({MAX_FINGERPRINT_PAYLOAD_BYTES})"
+        )
+    if not isinstance(created_at, (int, float)):
+        raise MalformedMessageError("created_at must be numeric")
+
+    content_hash_b = content_hash.encode("utf-8")
+    kind_b = fingerprint_kind.encode("utf-8")
+    created_at_ms = int(created_at * 1000)
+
+    parts: list[bytes] = [
+        FINGERPRINT_SIGNING_DOMAIN_TAG.ljust(32, b"\x00"),
+        len(content_hash_b).to_bytes(4, "big"),
+        content_hash_b,
+        len(kind_b).to_bytes(4, "big"),
+        kind_b,
+        len(payload_bytes).to_bytes(4, "big"),
+        bytes(payload_bytes),
+        created_at_ms.to_bytes(8, "big", signed=False),
+    ]
+    return b"".join(parts)
+
+
+# --------------------------------------------------------------------------
 # Top-level dispatcher
 # --------------------------------------------------------------------------
 
@@ -561,6 +905,12 @@ MESSAGE_TYPE_REGISTRY = {
         EmbeddingProvidersResponse.from_dict,
     MessageType.EMBEDDING_RESPONSE.value: EmbeddingResponse.from_dict,
     MessageType.ERROR.value: ErrorResponse.from_dict,
+    # T4.9 — fingerprint lane
+    MessageType.FIND_FINGERPRINT.value: FindFingerprintRequest.from_dict,
+    MessageType.FETCH_FINGERPRINT.value: FetchFingerprintRequest.from_dict,
+    MessageType.FINGERPRINT_PROVIDERS.value:
+        FingerprintProvidersResponse.from_dict,
+    MessageType.FINGERPRINT_RESPONSE.value: FingerprintResponse.from_dict,
 }
 
 
