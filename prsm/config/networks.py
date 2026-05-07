@@ -101,8 +101,11 @@ MAINNET = NetworkConfig(
     publisher_key_anchor=None,  # Phase 3.x.3 — not yet on mainnet
     notes=(
         "Mainnet uses the real 2-of-3 Foundation Safe (Ledger + Trezor + OneKey) at 0x91b0...5791.",
-        "Audit-bundle deployed 2026-05-07 with deployer-EOA ownership; Foundation Safe "
-        "ownership transfer is a separate hardware-multisig ceremony (post-deploy task).",
+        "Audit-bundle ownership-transfer ceremony complete 2026-05-07: all 7 Ownable2Step "
+        "contracts (EscrowPool, BSR, StakeBond, EmissionController, CompensationDistributor, "
+        "StorageSlashing, KeyDistribution) now owned by Foundation Safe via 2-of-3 hardware "
+        "multisig acceptOwnership batch. Deployer hot key 0xF7d8…11c2 retains zero authority "
+        "on these contracts.",
         "Foundation reserve wallet on StakeBond + all 3 CompensationDistributor pool sinks "
         "+ StorageSlashing.authorizedVerifier all point at the Foundation Safe — passes MED-4 "
         "code.length check natively (Safes are smart contracts).",
