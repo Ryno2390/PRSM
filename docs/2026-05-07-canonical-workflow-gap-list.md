@@ -221,22 +221,51 @@ with the "⚠️ UNVERIFIED" rows promoted to ✅ or ❌.
 
 ## What this means for "fully operational"
 
-**Honest framing (post-2026-05-07 walk):** PRSM today is a
-**mainnet-live private inference network** (the canonical step-7
-settlement is real, the `prsm_inference` path delivers TEE-attested
-model inference with verifiable receipts on mainnet). The
-**data-query path** that Tokenomics §5.1 routes 6.4% creator royalty +
-72% compute provider splits through is broken at TWO layers:
+**Honest framing (post-2026-05-07 walk + 2026-05-07 founder
+correction):** PRSM today is a **mainnet-live private inference
+network** (the canonical step-7 settlement is real, the
+`prsm_inference` path delivers TEE-attested model inference with
+verifiable receipts on mainnet). The **data-query path** that
+Tokenomics §5.1 routes 6.4% creator royalty + 72% compute provider
+splits through is broken at **THREE** layers:
 
-1. **Orchestration layer** — `/compute/forge` returns 503 because Agent
-   Forge was deleted in v1.6.0 (no QueryOrchestrator successor).
-2. **Content-distribution layer** — `prsm_upload_dataset` is a
-   registration stub; even with the orchestration layer rebuilt,
-   queries would have no real content to route against because
-   `/content/upload/shard` doesn't actually push to IPFS.
+1. **Orchestration layer** — `/compute/forge` returns 503 because
+   Agent Forge was deleted in v1.6.0 (no QueryOrchestrator successor).
+2. **Content-distribution registration** — `prsm_upload_dataset` is a
+   registration-only stub at `/content/upload/shard`; the
+   `SemanticShardManifest` is built and registered with
+   `data_listing_manager`, but the CIDs are placeholders.
+3. **Content-distribution plumbing — IPFS removal incomplete.** Per
+   founder direction (2026-05-07), PRSM has architecturally removed
+   IPFS in favor of its proprietary BitTorrent + signed-manifest
+   layer (`prsm/core/bittorrent_client.py`,
+   `prsm/core/bittorrent_manifest.py`, `prsm/node/bittorrent_*.py`,
+   `prsm/interface/api/routers/bittorrent_router.py`). However, the
+   codebase still contains **513 stale IPFS references** in
+   non-legacy source. Notably:
+   - `prsm/node/content_uploader.py` (41 refs) actively talks to an
+     external IPFS daemon at `http://127.0.0.1:5001` and uses
+     `_ipfs_add` as the real upload path at lines 942 + 1230.
+   - 10 `import` statements pull from `prsm.compute.spine.ipfs_client`,
+     `prsm.data.ipfs.content_addressing`,
+     `prsm.data.ipfs.content_verification` — **modules that no longer
+     exist on disk**. These imports would `ImportError` if executed
+     (silent dead-code paths today, time-bombs if any caller is
+     reactivated).
+   - `prsm/compute/collaboration/p2p/fallback_storage.py` (121 refs),
+     `prsm/compute/spine/data_spine_proxy.py` (84 refs),
+     `prsm/node/storage_provider.py` (32 refs),
+     `prsm/node/content_provider.py` (27 refs).
 
-**Both layers must be functional for the canonical creator-and-querier
-workflow to close the loop.** Fixing only one is insufficient.
+**All three layers must be functional for the canonical
+creator-and-querier workflow to close the loop.** Fixing only one or
+two is insufficient.
+
+The IPFS-removal sweep is independent from the QueryOrchestrator
+rebuild — they can land in parallel, but neither alone closes the
+loop. The sweep is also a prerequisite for accurate code-review by
+external auditors: an IPFS-importing path that an auditor traces will
+mislead them about the actual content-distribution architecture.
 
 The Risk Register should reflect this — current investor-facing
 materials may overstate "fully operational" if they describe the
