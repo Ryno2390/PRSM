@@ -49,14 +49,105 @@ Each PR is small, ships independently, and can land in any order with two except
 - Pre-delete check: `grep -rn "from prsm.compute.collaboration.p2p.fallback_storage\|import fallback_storage\|from prsm.compute.spine.data_spine_proxy\|import data_spine_proxy" prsm/` — if any caller, redirect or delete the caller too.
 - Drops 205 refs in one PR. **Largest leverage per LoC of any task.**
 
-### PR 2: Node-layer surgical rewrites (the load-bearing one)
+### PR 2: Node-layer surgical rewrites — ContentPublisher + Tier-aware routing (the load-bearing one)
 
-- Rewire `content_uploader.py` `_ipfs_add` / `_ipfs_cat` → `BitTorrentProvider.seed_content` / `BitTorrentRequester.request_content`. Drop `_IPFSClientWrapper`.
-- Rewire `storage_provider.py` IPFS-pin → BitTorrent-seed model.
-- Rewire `content_provider.py` content-serve to BitTorrent-source.
-- Update `node.py` init path: `init_content_store(...)` instead of IPFS client.
-- This is the load-bearing PR: it's where `prsm_upload_dataset` actually starts distributing content (closing the gap-list "STUB" finding from `docs/2026-05-07-canonical-workflow-gap-list.md`).
-- **Land before PR 3 (API layer)** because the API layer's HTTP endpoints call into these node-layer modules.
+**Architectural decision (2026-05-07):** `ContentStore` and `BitTorrentProvider` are **complementary, not alternatives.** The canonical 3-tier scope memory says "Three content tiers: A public, B encrypted-before-sharding, C erasure-coded + Shamir-split keys" — they map cleanly:
+
+| Tier | ContentStore role | BitTorrent role |
+|------|-------------------|-----------------|
+| **A (public)** | Skip — public bytes need no encryption/sharding | Seed raw bytes directly via `BitTorrentProvider.seed_content(path)` |
+| **B (encrypted)** | Encrypt + shard via `ContentStore.store_local(data)` | Seed the resulting encrypted blob directory |
+| **C (erasure + Shamir)** | Full pipeline via `ContentStore.store_local(data)` | Seed the resulting shard directory |
+
+**Concrete surface — new module `prsm/node/content_publisher.py`:**
+
+```python
+@dataclass
+class PublishedContent:
+    content_hash: Optional[ContentHash]   # from ContentStore (None for Tier A)
+    torrent_infohash: str                 # from BitTorrentProvider
+    manifest: TorrentManifest             # for discovery/network announce
+
+class ContentPublisher:
+    """
+    Unified upload entry point. Replaces the ~6 _ipfs_add callsites in
+    content_uploader.py with one well-typed call.
+    """
+    def __init__(
+        self,
+        content_store: ContentStore,
+        bt_provider: BitTorrentProvider,
+        staging_dir: Path,
+    ): ...
+
+    async def publish(
+        self,
+        data: bytes,
+        *,
+        tier: ContentTier,        # A | B | C
+        provenance_id: str,
+    ) -> PublishedContent:
+        if tier == ContentTier.A:
+            staged = await self._stage_raw(data, provenance_id)
+            manifest = await self.bt_provider.seed_content(
+                staged, provenance_id=provenance_id
+            )
+            return PublishedContent(
+                content_hash=None,
+                torrent_infohash=manifest.infohash,
+                manifest=manifest,
+            )
+        else:
+            content_hash = await self.content_store.store_local(data)
+            blob_dir = self.content_store.blob_store.directory_for(content_hash)
+            manifest = await self.bt_provider.seed_content(
+                blob_dir, provenance_id=provenance_id
+            )
+            return PublishedContent(
+                content_hash=content_hash,
+                torrent_infohash=manifest.infohash,
+                manifest=manifest,
+            )
+```
+
+**Companion fetch surface (used by `content_provider.py` rewrite):**
+
+```python
+class ContentRetriever:
+    """Mirror of ContentPublisher for the read path."""
+    async def fetch(
+        self,
+        *,
+        torrent_infohash: str,
+        content_hash: Optional[ContentHash] = None,  # required for Tier B/C
+        key_shares: Optional[List[KeyShare]] = None, # required for Tier B/C
+    ) -> bytes:
+        # 1. BT request_content → blob bytes
+        # 2. If content_hash given: ContentStore.retrieve_local(content_hash)
+        #    using the supplied key_shares to decrypt
+        ...
+```
+
+**Tasks under this PR:**
+
+1. **Add `BlobStore.directory_for(content_hash) -> Path`** (~10 LoC + test). Currently `BlobStore` is internal; this small public method lets `ContentPublisher` resolve a content_hash to its shard directory so BitTorrent can seed it.
+2. **Build `ContentPublisher` + `ContentRetriever`** in `prsm/node/content_publisher.py` (~150 source LoC + ~200 test LoC). Unit tests with mocked ContentStore + BitTorrentProvider for each tier.
+3. **Rewire `content_uploader.py`:** delete `_ipfs_add` (line 1599), `_ipfs_cat` (line 1618), and `_IPFSClientWrapper` (line 1898). Replace ~6 `_ipfs_add` callsites with `ContentPublisher.publish(data, tier=..., provenance_id=...)`. Drop `ipfs_api_url` constructor param.
+4. **Rewire `content_provider.py`:** route reads through `ContentRetriever.fetch`. Likely ~5 callsites.
+5. **Rewire `storage_provider.py`:** the existing "IPFS-pin contribution" model collapses naturally onto `BitTorrentProvider.seed_content` (in BT, "seeding" *is* "pinning"). Drop `ipfs_api_url`. Storage providers register a path → seed. Storage proofs (challenge-response) already work against the `BitTorrentProvider.bt_client` surface.
+6. **Update `node.py` init:** add `init_content_store(...)` + `init_bt_provider(...)` (likely already exists), wire both into `self.content_publisher = ContentPublisher(...)`. Drop IPFS client init.
+7. **Tier defaulting in `prsm_upload_dataset`:** the MCP tool currently doesn't take a tier param. Add it (default `ContentTier.A`); plumb through `/content/upload/shard` → `ContentPublisher.publish`.
+
+**This closes the gap-list "STUB" finding** from `docs/2026-05-07-canonical-workflow-gap-list.md` — once PR 2 lands, `/content/upload/shard` actually distributes content (the placeholder CIDs at `prsm/node/api.py:1392` go away, replaced with real torrent infohashes plus optional content_hashes).
+
+**Why this is the right shape (not just "rewire `_ipfs_add` to BT"):**
+1. **Matches the canonical 3-tier architecture** without forcing the wrong abstraction onto either layer.
+2. **Single call site** for upload — one well-typed entry point replaces ~6 scattered IPFS HTTP calls.
+3. **`replication_factor` semantics become real** — Tier A relies on BT's swarm dynamics; Tier B/C `replication_factor` becomes the BT seed count target.
+4. **Preserves the on-chain provenance flow** — both `content_hash` (Tier B/C) and `infohash` (all tiers) map cleanly to `RoyaltyDistributor.distributeRoyalty(contentHash, ...)`. The mainnet contract speaks `bytes32` abstractly; either ID type fits.
+5. **Future-proofs the read path** — a separate `ContentRetriever` mirror lets Tier B/C decryption stay symmetric with the publish path; no asymmetric "read uses ContentStore directly, write uses BT" smell.
+
+**Land before PR 3 (API layer)** because the API layer's HTTP endpoints call into these node-layer modules.
 
 ### PR 3: API-layer mechanical replacements
 
@@ -93,9 +184,9 @@ Each PR is small, ships independently, and can land in any order with two except
 ## Estimated cost
 
 - PR 1: ~30 min (verify no callers, delete, run tests)
-- PR 2: ~6-8 hr (the load-bearing rewrite — design the BitTorrent adapter first)
+- PR 2: **~10-12 hr** (revised up from 6-8 hr after the 2026-05-07 architectural call — `ContentPublisher` + `ContentRetriever` + `BlobStore.directory_for` + 4 file rewrites + tier param plumbing through `prsm_upload_dataset`)
 - PR 3: ~3-4 hr (mechanical bulk find-replace + verify)
 - PR 4: ~2 hr (residuals + test cleanup)
 - PR 5: ~1 hr (verification + tag)
 
-**Total: ~1.5-2 working days** to complete the migration. (Original plan estimated longer because it was sized when Tasks 1+2+6 hadn't yet shipped.)
+**Total: ~2-2.5 working days** to complete the migration. PR 2 owns ~60% of the work; the rest is mechanical.
