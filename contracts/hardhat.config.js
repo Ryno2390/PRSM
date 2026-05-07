@@ -12,8 +12,19 @@ require("dotenv").config();
 // 0x-prefixed 64-hex-char (32-byte) format.
 const PK_RE = /^0x[0-9a-fA-F]{64}$/;
 let _malformedPkWarned = false;  // dedup across N network configs
-function pkAccounts() {
-  const pk = process.env.PRIVATE_KEY;
+// 2026-05-07: support a network-specific override so the mainnet
+// ceremony hot key (MAINNET_PRIVATE_KEY) stays separate from the
+// testnet burner (PRIVATE_KEY). When `which="mainnet"` we prefer
+// MAINNET_PRIVATE_KEY and fall back to PRIVATE_KEY only if absent;
+// this lets the same operator keep both keys loaded without risking
+// cross-contamination. Default behavior (no arg) is unchanged.
+function pkAccounts(which) {
+  let pk;
+  if (which === "mainnet") {
+    pk = process.env.MAINNET_PRIVATE_KEY || process.env.PRIVATE_KEY;
+  } else {
+    pk = process.env.PRIVATE_KEY;
+  }
   if (!pk) return [];
   if (!PK_RE.test(pk)) {
     // 2026-05-04 ceremony lesson L1: silently returning [] when PRIVATE_KEY
@@ -101,7 +112,7 @@ module.exports = {
     // Base Mainnet
     "base": {
       url: process.env.BASE_RPC_URL || "https://mainnet.base.org",
-      accounts: pkAccounts(),
+      accounts: pkAccounts("mainnet"),
       chainId: 8453,
       gas: "auto",
       gasPrice: "auto",
