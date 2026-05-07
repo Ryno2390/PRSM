@@ -1350,6 +1350,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     async def upload_shard_dataset(body: Dict[str, Any] = {}) -> Dict[str, Any]:
         """Upload a dataset with semantic sharding.
 
+        Each shard is published through the proprietary BitTorrent
+        layer via ``ContentUploader.upload()`` — the same path the
+        regular ``/content/upload`` endpoint uses — so the resulting
+        ``cid`` for each shard is a real network-discoverable CID
+        (no placeholders).
+
         POST body: {
             "dataset_id": "nada-nc-2025",
             "title": "NADA NC Vehicle Registrations 2025",
@@ -1371,31 +1377,77 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         if not dataset_id:
             raise HTTPException(status_code=400, detail="Missing dataset_id")
+        if shard_count < 1:
+            raise HTTPException(
+                status_code=400, detail="shard_count must be >= 1",
+            )
 
-        # Decode content
+        # Decode content. Empty payload is rejected — the previous
+        # placeholder-CID behavior produced non-discoverable manifests
+        # that broke `prsm_search_shards` → fetch → royalty-distribution
+        # downstream. Per gap-list delta 2026-05-07.
         try:
             content = base64.b64decode(content_b64) if content_b64 else b""
         except Exception:
-            content = b""
+            raise HTTPException(
+                status_code=400, detail="content_b64 is not valid base64",
+            )
+        if not content:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "content_b64 is empty or missing — refusing to "
+                    "create a manifest with no payload"
+                ),
+            )
 
-        # Create semantic shards
+        # ContentPublisher path requires a wired ContentUploader,
+        # mirroring the regular /content/upload endpoint above.
+        if not node.content_uploader:
+            raise HTTPException(
+                status_code=503, detail="Content uploader not initialized",
+            )
+
+        # Slice content into shards + publish each through the real
+        # BitTorrent layer. Each upload() call returns an UploadedContent
+        # with a network-discoverable CID + provenance record.
         chunk_size = max(len(content) // max(shard_count, 1), 1024)
         shards = []
         for i in range(shard_count):
             start = i * chunk_size
             end = min(start + chunk_size, len(content))
-            chunk = content[start:end] if content else b""
+            chunk = content[start:end]
+            if not chunk:
+                # When shard_count > content size / 1024 the trailing
+                # shards would be empty. Skip — we can't publish 0
+                # bytes through the BT layer. The manifest reports the
+                # actual shard count produced.
+                continue
 
-            shard = SemanticShard(
-                shard_id=f"{dataset_id}-shard-{i:04d}",
+            shard_filename = f"{dataset_id}-shard-{i:04d}"
+            uploaded = await node.content_uploader.upload(
+                content=chunk,
+                filename=shard_filename,
+                royalty_rate=royalty_rate,
+            )
+            if uploaded is None:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        f"Shard {i} upload failed — content publisher "
+                        f"unavailable or rejected the payload"
+                    ),
+                )
+
+            shards.append(SemanticShard(
+                shard_id=shard_filename,
                 parent_dataset=dataset_id,
-                cid=f"Qm{dataset_id}-{i:04d}",  # Placeholder until content upload
+                cid=uploaded.cid,
                 centroid=[float(i) / max(shard_count, 1)],
                 record_count=len(chunk),
                 size_bytes=len(chunk),
                 keywords=[title, f"shard-{i}"],
-            )
-            shards.append(shard)
+            ))
 
         manifest = SemanticShardManifest(
             dataset_id=dataset_id,
