@@ -21,6 +21,7 @@ from prsm.data.fingerprints.base import (
     FingerprintRecord,
     detect_content_kind,
 )
+from prsm.data.fingerprints.index import FingerprintIndex, FingerprintMatch
 
 
 def _import_image_fingerprint():
@@ -76,4 +77,6 @@ __all__ = [
     "AudioFingerprint",
     "VideoFingerprint",
     "StructuralFingerprint",
+    "FingerprintIndex",
+    "FingerprintMatch",
 ]

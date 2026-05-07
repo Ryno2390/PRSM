@@ -469,6 +469,7 @@ class ContentUploader:
         embedding_index: Optional[Any] = None,
         content_publisher: Optional[Any] = None,
         content_retriever: Optional[Any] = None,
+        fingerprint_index_path: Optional[Path] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -536,6 +537,19 @@ class ContentUploader:
             model_id=embedding_model_id,
             dht_client=embedding_dht_client,
             peer_candidates_fn=peer_candidates_fn,
+        )
+
+        # PRSM-PROV-1 Item 4 T4.6 — per-kind binary fingerprint index.
+        # Owns the four non-text-vector lanes (image-pHash,
+        # audio-Chromaprint, video-multihash, structural). The
+        # text-vector lane stays in ``_semantic_index`` above.
+        # Backends are loaded lazily from prsm.data.fingerprints — any
+        # missing optional dep yields a ``None`` backend slot which the
+        # FingerprintIndex transparently treats as "no backend for this
+        # kind", so a host without imagehash/pyacoustid/PyAV/h5py still
+        # constructs a valid (text-vector-only) uploader.
+        self._fingerprint_index = self._build_fingerprint_index(
+            fingerprint_index_path,
         )
 
         self.uploaded_content: Dict[str, UploadedContent] = {}
@@ -640,6 +654,38 @@ class ContentUploader:
                 f"local embedding registration failed (will not block "
                 f"upload): {type(exc).__name__}: {exc}"
             )
+
+    @staticmethod
+    def _build_fingerprint_index(
+        persist_path: Optional[Path],
+    ) -> Any:
+        """Construct a FingerprintIndex from whichever optional backend
+        deps are installed.
+
+        Each backend is imported lazily; missing deps simply omit that
+        kind from the index. A node without any binary-fingerprint deps
+        ends up with an empty FingerprintIndex (zero backends) — the
+        text-vector path keeps working unchanged and binary uploads
+        fall through to BYTE_HASH.
+        """
+        from prsm.data.fingerprints import (
+            FingerprintIndex,
+            FingerprintKind,
+            ImageFingerprint,
+            AudioFingerprint,
+            VideoFingerprint,
+            StructuralFingerprint,
+        )
+        backends: Dict[Any, Any] = {}
+        if ImageFingerprint is not None:
+            backends[FingerprintKind.IMAGE_PHASH] = ImageFingerprint()
+        if AudioFingerprint is not None:
+            backends[FingerprintKind.AUDIO_CHROMAPRINT] = AudioFingerprint()
+        if VideoFingerprint is not None:
+            backends[FingerprintKind.VIDEO_MULTIHASH] = VideoFingerprint()
+        if StructuralFingerprint is not None:
+            backends[FingerprintKind.STRUCTURAL] = StructuralFingerprint()
+        return FingerprintIndex(backends=backends, persist_path=persist_path)
 
     @staticmethod
     def _make_peer_candidates_fn(
@@ -841,6 +887,43 @@ class ContentUploader:
             logger.debug(f"Embedding generation skipped: {exc}")
             return None
 
+    def _maybe_compute_binary_fingerprint(
+        self,
+        content: bytes,
+        filename: str,
+    ) -> Any:
+        """Detect the content kind and run the matching binary backend.
+
+        Returns a ``FingerprintRecord`` on success, or ``None`` when:
+          - content type is text (caller already handled via embedding)
+          - content type falls through to BYTE_HASH (no backend)
+          - the kind has no registered backend (optional dep missing)
+          - the backend can't fingerprint this specific input (truncated
+            file, wrong codec, etc.)
+
+        Lives outside ``_get_embedding`` so the dispatch logic stays
+        observable in ``upload()`` without crossing into the embedding
+        path's chunked/text-specific handling.
+        """
+        try:
+            from prsm.data.fingerprints import (
+                FingerprintKind,
+                detect_content_kind,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                f"binary fingerprint dispatch skipped for {filename}: {exc}"
+            )
+            return None
+
+        kind = detect_content_kind(content, filename=filename)
+        # Text content is the embedding lane's job; BYTE_HASH has no
+        # backend by definition. Both are no-ops for binary dedup.
+        if kind in (FingerprintKind.TEXT_VECTOR, FingerprintKind.BYTE_HASH):
+            return None
+
+        return self._fingerprint_index.compute(content, kind, filename=filename)
+
     async def upload(
         self,
         content: bytes,
@@ -917,6 +1000,50 @@ class ContentUploader:
                         parents = [match_cid] + parents
         # ─────────────────────────────────────────────────────────────────────
 
+        # ── Binary-fingerprint deduplication (PRSM-PROV-1 Item 4 T4.7) ──
+        # When the embedding path returned None — i.e. the content isn't
+        # text — try the binary fingerprint backends. Image/audio/video/
+        # structural are the lanes; for unrecognised content types
+        # ``detect_content_kind`` falls through to BYTE_HASH which has no
+        # backend, and dedup is skipped (caller still gets a fresh
+        # provenance record at the original-creator rate).
+        binary_fingerprint_record = None
+        if embedding is None and near_dup_cid is None:
+            binary_fingerprint_record = self._maybe_compute_binary_fingerprint(
+                content, filename,
+            )
+            if binary_fingerprint_record is not None:
+                bin_match = self._fingerprint_index.find_nearest(
+                    binary_fingerprint_record,
+                )
+                if bin_match is not None:
+                    dup_threshold = self._fingerprint_index.duplicate_threshold(
+                        bin_match.kind,
+                    )
+                    deriv_threshold = self._fingerprint_index.derivative_threshold(
+                        bin_match.kind,
+                    )
+                    if bin_match.similarity >= deriv_threshold:
+                        if bin_match.similarity >= dup_threshold:
+                            logger.warning(
+                                f"Binary near-duplicate (kind={bin_match.kind.value}) "
+                                f"for '{filename}': CID {bin_match.content_id[:16]}... "
+                                f"(similarity={bin_match.similarity:.4f}). "
+                                f"Registering as derivative work."
+                            )
+                        else:
+                            logger.info(
+                                f"Binary near-duplicate (kind={bin_match.kind.value}) "
+                                f"for '{filename}': CID {bin_match.content_id[:16]}... "
+                                f"(similarity={bin_match.similarity:.4f}). "
+                                f"Registering as derivative work."
+                            )
+                        near_dup_cid = bin_match.content_id
+                        near_dup_sim = bin_match.similarity
+                        if bin_match.content_id not in parents:
+                            parents = [bin_match.content_id] + parents
+        # ─────────────────────────────────────────────────────────────────────
+
         # Check if content should be sharded
         should_shard = force_shard or size_bytes > self.sharding_threshold
 
@@ -938,6 +1065,7 @@ class ContentUploader:
                 near_dup_cid=near_dup_cid,
                 near_dup_sim=near_dup_sim,
                 provenance_hash_hex=provenance_hash_hex,
+                binary_fingerprint_record=binary_fingerprint_record,
             )
 
         # Standard monolithic upload for small files. The cid is now the
@@ -1008,6 +1136,13 @@ class ContentUploader:
             # peers can fetch this embedding for their own dedup check.
             self._register_local_embedding(embedding, provenance_hash_hex)
 
+        # T4.7: Register the binary fingerprint (if any) so future
+        # uploads of similar binary content land on this CID.
+        if binary_fingerprint_record is not None:
+            self._fingerprint_index.store(
+                cid, binary_fingerprint_record, self.identity.node_id,
+            )
+
         # Gossip provenance registration
         await self.gossip.publish(GOSSIP_PROVENANCE_REGISTER, {
             **provenance_data,
@@ -1067,6 +1202,7 @@ class ContentUploader:
         near_dup_cid: Optional[str] = None,
         near_dup_sim: Optional[float] = None,
         provenance_hash_hex: Optional[str] = None,
+        binary_fingerprint_record: Optional[Any] = None,
     ) -> Optional[UploadedContent]:
         """Upload large content using sharding.
 
@@ -1168,6 +1304,16 @@ class ContentUploader:
                 self._semantic_index.store(manifest_cid, embedding, self.identity.node_id)
                 # T3.6: also register with the cross-node EmbeddingDHT.
                 self._register_local_embedding(embedding, provenance_hash_hex)
+
+            # T4.7: Register the binary fingerprint (if any) for the
+            # sharded path too, so a re-upload of the same image/audio/
+            # video/structural blob lands on this manifest_cid.
+            if binary_fingerprint_record is not None:
+                self._fingerprint_index.store(
+                    manifest_cid,
+                    binary_fingerprint_record,
+                    self.identity.node_id,
+                )
 
             # Gossip provenance registration
             await self.gossip.publish(GOSSIP_PROVENANCE_REGISTER, {
