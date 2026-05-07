@@ -728,6 +728,10 @@ class PRSMNode:
                 logger.debug(f"Embedding API unavailable, semantic dedup disabled: {_e}")
 
         _semantic_index_path = Path.home() / ".prsm" / "semantic_index.json"
+        # T4.9.next3: persist the per-kind binary fingerprint index next
+        # to the semantic index. Same lifecycle: persists across node
+        # restarts so warm-cache dedup survives a process bounce.
+        _fingerprint_index_path = Path.home() / ".prsm" / "fingerprint_index.json"
 
         # T3.6 (PRSM-PROV-1): LocalEmbeddingIndex backs the
         # EmbeddingDHT — every successful upload + embedding gets a
@@ -862,6 +866,13 @@ class PRSMNode:
             embedding_model_id=_embedding_model_id,
             embedding_dht_client=None,
             embedding_index=_embedding_index,
+            # T4.9.next3: persist FingerprintIndex to disk + share the
+            # embedding-lane DHT wiring. ``embedding_dht_client`` above
+            # is still None (Phase 6 P2P transport hasn't lit it yet),
+            # so fingerprint escalation is also dormant until the same
+            # client switch is flipped — at which point both lanes
+            # engage simultaneously without further uploader changes.
+            fingerprint_index_path=_fingerprint_index_path,
         )
 
         # ── Ledger Sync ──────────────────────────────────────────

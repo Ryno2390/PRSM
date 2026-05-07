@@ -548,8 +548,17 @@ class ContentUploader:
         # FingerprintIndex transparently treats as "no backend for this
         # kind", so a host without imagehash/pyacoustid/PyAV/h5py still
         # constructs a valid (text-vector-only) uploader.
+        #
+        # T4.9.next3: the same EmbeddingDHTClient + peer_candidates_fn
+        # that drive ``_semantic_index`` escalation also drive fingerprint
+        # escalation — the wire protocol partitions by message type, so
+        # one client services both lanes. Reuse the ``peer_candidates_fn``
+        # built above; it yields ``(cid, content_hash)`` tuples that are
+        # equally valid keys for the fingerprint DHT.
         self._fingerprint_index = self._build_fingerprint_index(
             fingerprint_index_path,
+            dht_client=embedding_dht_client,
+            peer_candidates_fn=peer_candidates_fn,
         )
 
         self.uploaded_content: Dict[str, UploadedContent] = {}
@@ -658,6 +667,9 @@ class ContentUploader:
     @staticmethod
     def _build_fingerprint_index(
         persist_path: Optional[Path],
+        *,
+        dht_client: Optional[Any] = None,
+        peer_candidates_fn: Optional[Callable] = None,
     ) -> Any:
         """Construct a FingerprintIndex from whichever optional backend
         deps are installed.
@@ -667,6 +679,13 @@ class ContentUploader:
         ends up with an empty FingerprintIndex (zero backends) — the
         text-vector path keeps working unchanged and binary uploads
         fall through to BYTE_HASH.
+
+        T4.9.next3: ``dht_client`` + ``peer_candidates_fn`` enable DHT
+        escalation in ``FingerprintIndex.find_nearest`` — both must be
+        wired or escalation stays disabled and behavior is unchanged.
+        The same ``EmbeddingDHTClient`` instance services both the
+        embedding (text-vector) and fingerprint (binary) lanes; the
+        wire protocol partitions by message type.
         """
         from prsm.data.fingerprints import (
             FingerprintIndex,
@@ -685,7 +704,12 @@ class ContentUploader:
             backends[FingerprintKind.VIDEO_MULTIHASH] = VideoFingerprint()
         if StructuralFingerprint is not None:
             backends[FingerprintKind.STRUCTURAL] = StructuralFingerprint()
-        return FingerprintIndex(backends=backends, persist_path=persist_path)
+        return FingerprintIndex(
+            backends=backends,
+            persist_path=persist_path,
+            dht_client=dht_client,
+            peer_candidates_fn=peer_candidates_fn,
+        )
 
     @staticmethod
     def _make_peer_candidates_fn(
