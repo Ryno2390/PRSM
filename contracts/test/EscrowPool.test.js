@@ -286,6 +286,40 @@ describe("EscrowPool", function () {
         pool.connect(owner).setFtnsToken(ethers.ZeroAddress)
       ).to.be.revertedWithCustomError(pool, "ZeroAddress");
     });
+
+    // L4 self-audit re-run B-INFO-B7-1 regression: setFtnsToken must reject
+    // an EOA target. Pre-fix, setting `ftns` to an EOA would make every
+    // subsequent `ftns.transfer(...)` revert with empty returndata —
+    // soft-bricking deposits + settlements. Risk is bounded today by
+    // B-CROSS-2's totalEscrowedBalance==0 precondition (any pending
+    // balance blocks the swap), but the explicit `code.length > 0` gate
+    // mirrors MED-7's check on the BSR setters and fails loud at deploy
+    // time instead of at the next user transfer.
+    it("REGRESSION (B-INFO-B7-1): setFtnsToken rejects EOA target with TokenNotContract", async function () {
+      // `requester` is a real signer with no contract code at its address.
+      const eoa = requester.address;
+      expect(await ethers.provider.getCode(eoa)).to.equal("0x");
+      await expect(
+        pool.connect(owner).setFtnsToken(eoa)
+      )
+        .to.be.revertedWithCustomError(pool, "TokenNotContract")
+        .withArgs(eoa);
+      // ftns reference unchanged.
+      expect(await pool.ftns()).to.equal(await token.getAddress());
+    });
+
+    it("REGRESSION (B-INFO-B7-1): setFtnsToken accepts a contract target", async function () {
+      // Sanity-pair to the EOA-rejection test above: the contract path
+      // still works after the gate is added.
+      const Token2 = await ethers.getContractFactory("MockERC20");
+      const newToken = await Token2.deploy();
+      await newToken.waitForDeployment();
+      const newAddr = await newToken.getAddress();
+      expect((await ethers.provider.getCode(newAddr)).length).to.be.greaterThan(2);
+      await expect(pool.connect(owner).setFtnsToken(newAddr))
+        .to.emit(pool, "FtnsTokenUpdated");
+      expect(await pool.ftns()).to.equal(newAddr);
+    });
   });
 
   describe("reentrancy + misc", function () {
