@@ -1141,6 +1141,23 @@ class PRSMNode:
             ledger=self.ledger,
             node_id=self.identity.node_id,
         )
+        # B8 async-dispatch follow-on: JobHistoryStore for
+        # /compute/forge → /compute/status traceability. In-memory
+        # LRU-bounded; filesystem persistence deferred to when
+        # actual async dispatch lands. Best-effort wiring — failure
+        # to construct degrades to escrow-only /compute/status
+        # (legacy behavior).
+        try:
+            from prsm.node.job_history import JobHistoryStore
+            self._job_history = JobHistoryStore()
+            logger.info("JobHistoryStore wired (in-memory, LRU 1024)")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "JobHistoryStore construction failed: %s — "
+                "/compute/status will fall back to escrow-only.",
+                exc,
+            )
+            self._job_history = None
         self._result_consensus = ResultConsensus(
             epsilon=0.01,
             timeout_seconds=300.0,

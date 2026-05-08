@@ -13,6 +13,7 @@ Security Features (Phase 4.2):
 """
 
 import logging
+import time as _time_for_history
 import uuid as _uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
@@ -733,6 +734,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 requester_id=node.identity.node_id,
             )
 
+        # B8 async-dispatch follow-on: record IN_PROGRESS to
+        # JobHistoryStore so /compute/status/{job_id} can surface
+        # richer state than the escrow lifecycle alone. Best-effort —
+        # store may be None on operators that haven't wired it.
+        _job_started_at = _time_for_history.time()
+        if hasattr(node, "_job_history") and node._job_history is not None:
+            try:
+                from prsm.node.job_history import (
+                    JobHistoryRecord as _JobRec,
+                    JobStatus as _JobStat,
+                )
+                node._job_history.put(_JobRec(
+                    job_id=job_id,
+                    query=query,
+                    status=_JobStat.IN_PROGRESS,
+                    started_at=_job_started_at,
+                ))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "JobHistoryStore put (IN_PROGRESS) failed for "
+                    "job_id=%s: %s",
+                    job_id, exc,
+                )
+
         try:
             # Dispatch on agent_forge type. The QueryOrchestrator
             # (Ring 5 replacement, wired via PRSM_QUERY_ORCHESTRATOR_ENABLED)
@@ -870,6 +895,41 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             else:
                 response_text = str(result)
 
+            traces_count = len(getattr(node.agent_forge, "traces", []))
+
+            # B8 async-dispatch follow-on: record COMPLETED to
+            # JobHistoryStore so /compute/status surfaces the full
+            # result. Best-effort.
+            if hasattr(node, "_job_history") and node._job_history is not None:
+                try:
+                    from prsm.node.job_history import (
+                        JobHistoryRecord as _JobRec,
+                        JobStatus as _JobStat,
+                    )
+                    node._job_history.put(_JobRec(
+                        job_id=job_id,
+                        query=query,
+                        status=_JobStat.COMPLETED,
+                        started_at=_job_started_at,
+                        completed_at=_time_for_history.time(),
+                        route=route,
+                        response=response_text,
+                        aggregator_node_id=result.get("aggregator_node_id"),
+                        contributing_shards=tuple(
+                            result.get("contributing_shards") or ()
+                        ),
+                        participants=tuple(
+                            result.get("participants") or ()
+                        ),
+                        traces_collected=traces_count,
+                    ))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "JobHistoryStore put (COMPLETED) failed for "
+                        "job_id=%s: %s",
+                        job_id, exc,
+                    )
+
             return {
                 "job_id": job_id,
                 "query": query,
@@ -877,11 +937,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "response": response_text,
                 "result": result,
                 "budget_ftns": budget_ftns,
-                # QueryOrchestrator has no .traces attribute (a legacy
-                # AgentForge concept); default to 0 when absent.
-                "traces_collected": (
-                    len(getattr(node.agent_forge, "traces", []))
-                ),
+                "traces_collected": traces_count,
             }
 
         except HTTPException:
@@ -893,6 +949,27 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     await node._payment_escrow.refund_escrow(job_id, str(e))
                 except Exception:
                     pass
+            # B8 async-dispatch follow-on: record FAILED.
+            if hasattr(node, "_job_history") and node._job_history is not None:
+                try:
+                    from prsm.node.job_history import (
+                        JobHistoryRecord as _JobRec,
+                        JobStatus as _JobStat,
+                    )
+                    node._job_history.put(_JobRec(
+                        job_id=job_id,
+                        query=query,
+                        status=_JobStat.FAILED,
+                        started_at=_job_started_at,
+                        completed_at=_time_for_history.time(),
+                        error=str(e),
+                    ))
+                except Exception as hist_exc:  # noqa: BLE001
+                    logger.warning(
+                        "JobHistoryStore put (FAILED) failed for "
+                        "job_id=%s: %s",
+                        job_id, hist_exc,
+                    )
             logger.error(f"Forge pipeline error: {e}")
             raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
@@ -900,50 +977,77 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     async def compute_status(job_id: str) -> Dict[str, Any]:
         """Look up the status of a /compute/forge job by its job_id.
 
-        Backs the ``prsm_agent_status`` MCP tool. Reads from the
-        node's ``PaymentEscrow`` (the only per-job persistent state
-        in the synchronous-from-caller-view forge pipeline) and
-        returns the escrow's lifecycle: pending / released /
-        refunded / disputed plus amount + timing + provider winner.
+        Backs the ``prsm_agent_status`` MCP tool. Two-tier lookup:
 
-        Coverage limitation (honest scope): only jobs that locked an
-        escrow are tracked. Jobs that completed with budget=0 (test
-        fixtures, free-tier dev mode) are not retrievable here. A
-        future async-dispatch sprint can add a richer JobHistory
-        record covering the result + route + traces; v1 covers the
-        load-bearing case (paid jobs that need billing reconciliation).
+        1. **JobHistoryStore** (richer): pipeline state — route,
+           response, aggregator, participants, traces, error if
+           failed. Always preferred when present.
+        2. **PaymentEscrow** (fallback): payment-leg lifecycle
+           (pending / released / refunded / disputed + amount +
+           timing + provider winner). Used when history doesn't
+           know about the job (e.g. node-restart eviction, or
+           budget=0 test fixtures that touched the escrow but
+           weren't recorded in history).
 
-        Returns 404 if the job_id is not in the escrow ledger.
+        The two surfaces compose: a `compute` block (from history)
+        and an `escrow` block (from payment_escrow) appear together
+        when both are populated. At least one must be available or
+        the endpoint returns 404.
         """
-        if not getattr(node, "_payment_escrow", None):
+        history = getattr(node, "_job_history", None)
+        escrow_svc = getattr(node, "_payment_escrow", None)
+
+        if history is None and escrow_svc is None:
             raise HTTPException(
                 status_code=503,
-                detail="Payment escrow not initialized on this node.",
+                detail=(
+                    "Neither JobHistoryStore nor PaymentEscrow "
+                    "is initialized on this node."
+                ),
             )
-        escrow = node._payment_escrow.get_escrow(job_id)
-        if escrow is None:
+
+        history_record = None
+        if history is not None:
+            try:
+                history_record = history.get(job_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "JobHistoryStore.get raised for job_id=%s: %s",
+                    job_id, exc,
+                )
+
+        escrow = None
+        if escrow_svc is not None:
+            escrow = escrow_svc.get_escrow(job_id)
+
+        if history_record is None and escrow is None:
             raise HTTPException(
                 status_code=404,
                 detail=(
-                    f"No escrow record for job_id={job_id!r}. Either the "
-                    f"job never ran on this node, or it ran without a "
-                    f"locked escrow (budget=0). Status retrieval is "
-                    f"only supported for paid jobs."
+                    f"No history or escrow record for job_id={job_id!r}. "
+                    f"Either the job never ran on this node, or its "
+                    f"history was evicted (LRU-bounded) and it ran "
+                    f"without a locked escrow."
                 ),
             )
-        return {
-            "job_id": escrow.job_id,
-            "escrow_id": escrow.escrow_id,
-            "requester_id": escrow.requester_id,
-            "amount_ftns": escrow.amount,
-            "status": escrow.status.value,
-            "provider_winner": escrow.provider_winner,
-            "tx_lock": escrow.tx_lock,
-            "tx_release": escrow.tx_release,
-            "created_at": escrow.created_at,
-            "completed_at": escrow.completed_at,
-            "metadata": dict(escrow.metadata or {}),
-        }
+
+        body: Dict[str, Any] = {"job_id": job_id}
+        if history_record is not None:
+            body["compute"] = history_record.to_dict()
+        if escrow is not None:
+            body["escrow"] = {
+                "escrow_id": escrow.escrow_id,
+                "requester_id": escrow.requester_id,
+                "amount_ftns": escrow.amount,
+                "status": escrow.status.value,
+                "provider_winner": escrow.provider_winner,
+                "tx_lock": escrow.tx_lock,
+                "tx_release": escrow.tx_release,
+                "created_at": escrow.created_at,
+                "completed_at": escrow.completed_at,
+                "metadata": dict(escrow.metadata or {}),
+            }
+        return body
 
     @app.post("/compute/inference")
     async def compute_inference(body: Dict[str, Any] = {}) -> Dict[str, Any]:
