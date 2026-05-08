@@ -425,6 +425,40 @@ Errors are typed: `KeyAlreadyDepositedError` / `KeyNotFoundError` / `PaymentNotV
 
 ---
 
+## Phase 7-storage + Phase 8 Daemons
+
+As of 2026-05-08, two async daemons ship for periodic on-chain invocation. Both are optional and opt-in.
+
+### HeartbeatScheduler (storage providers)
+
+Storage providers MUST heartbeat regularly to avoid permissionless slashing via `slash_for_missing_heartbeat`. The daemon calls `StorageSlashingClient.record_heartbeat()` on a configurable cadence.
+
+| Variable | Default | Description |
+|---|---|---|
+| `PRSM_STORAGE_SLASHING_ADDRESS` | *unset* | StorageSlashing.sol address. Required to construct the client. |
+| `FTNS_WALLET_PRIVATE_KEY` | *unset* | Provider's signing key. Required for the heartbeat tx. |
+| `PRSM_HEARTBEAT_SCHEDULER_ENABLED` | `0` | Set to `1` to launch the daemon at node startup. |
+| `PRSM_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `900` | Cadence (15 min default; choose substantially shorter than the contract's heartbeat-grace window). |
+
+The daemon swallows all transient errors and stays alive across them. `success_count` and `failure_count` are exposed for operator telemetry.
+
+### PullAndDistributeScheduler (Phase 8)
+
+Permissionless on-chain — anyone can run this. Calls `CompensationDistributorClient.pull_and_distribute()` to drain accrued emission across the three pools. The contract's source flags monitoring alerts on call-gap > 7 days; the daemon's constructor REJECTS interval > 7 days as a hard fail-fast.
+
+| Variable | Default | Description |
+|---|---|---|
+| `PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS` | *unset* | CompensationDistributor.sol address. Required to construct the client. |
+| `FTNS_WALLET_PRIVATE_KEY` | *unset* | Caller's signing key (any address — this is a permissionless call). |
+| `PRSM_COMPENSATION_SCHEDULER_ENABLED` | `0` | Set to `1` to launch the daemon at node startup. |
+| `PRSM_COMPENSATION_SCHEDULER_INTERVAL_SECONDS` | `86400` | Cadence (24h default; values > 7 days fall back to default). |
+
+### Operator-side disable
+
+To disable either daemon mid-incident: unset the matching `*_ENABLED` env var and restart, OR unset the address env var (which also disables the underlying client). See `docs/security/EXPLOIT_RESPONSE_PLAYBOOK_ANNEX_2026_05.md` for the full operator-pause runbook.
+
+---
+
 ## Monitoring
 
 ### Health Endpoints
@@ -745,6 +779,18 @@ PRSM_AGGREGATOR_SHARE_BPS=500   # 5% — operator-tunable
 
 # Item 6 governance proposal sink (off by default)
 # PRSM_ARBITRATION_PROPOSER_ID=foundation-proposer-1
+
+# Phase 7-storage daemon: heartbeats provider liveness on cadence.
+# Required for storage providers to avoid permissionless slashing.
+# PRSM_STORAGE_SLASHING_ADDRESS=0x...
+# PRSM_HEARTBEAT_SCHEDULER_ENABLED=1
+# PRSM_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS=900   # default 15 min
+
+# Phase 8 daemon: pulls + distributes FTNS emission on cadence.
+# Permissionless on-chain — anyone can run this; cadence < 7 days.
+# PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS=0x...
+# PRSM_COMPENSATION_SCHEDULER_ENABLED=1
+# PRSM_COMPENSATION_SCHEDULER_INTERVAL_SECONDS=86400   # default 24h
 ```
 
 ### High-Performance Compute Node

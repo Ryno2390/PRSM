@@ -401,6 +401,192 @@ def _build_publisher_key_anchor_client_or_none():
         return None
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Phase 7-storage + Phase 8 client + scheduler builders.
+#
+# All four return None on any failure / missing env var. Operators
+# opt in explicitly via address env var (constructs client) AND
+# scheduler-enable env var (launches daemon). Either component
+# missing → no-op; node still serves its other functions.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _build_compensation_distributor_client_or_none():
+    """Construct a CompensationDistributorClient if env-driven config
+    is complete. Closes the §6.2 first-deferred item from the 2026-05
+    exploit-response annex.
+
+    Required env vars:
+      PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS=<0x...>
+      FTNS_WALLET_PRIVATE_KEY=<0x...>
+      PRSM_BASE_RPC_URL=<https://...>  (optional; defaults to Base mainnet)
+
+    Returns None on any miss or construction failure — the caller
+    treats None as "no compensation distributor client wired."
+    """
+    addr = os.getenv("PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS", "").strip()
+    pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip()
+    if not addr or not pk:
+        return None
+    try:
+        from prsm.economy.web3.compensation_distributor import (
+            CompensationDistributorClient,
+        )
+        rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+        client = CompensationDistributorClient(
+            rpc_url=rpc_url,
+            contract_address=addr,
+            private_key=pk,
+        )
+        logger.info(
+            f"CompensationDistributorClient wired: {addr} via {rpc_url}"
+        )
+        return client
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"CompensationDistributorClient construction failed: "
+            f"{type(exc).__name__}: {exc} — pull-and-distribute "
+            f"surface unavailable."
+        )
+        return None
+
+
+def _build_storage_slashing_client_or_none():
+    """Construct a StorageSlashingClient if env-driven config is
+    complete.
+
+    Required env vars:
+      PRSM_STORAGE_SLASHING_ADDRESS=<0x...>
+      FTNS_WALLET_PRIVATE_KEY=<0x...>
+      PRSM_BASE_RPC_URL=<https://...>  (optional; defaults to Base mainnet)
+
+    Returns None on any miss or construction failure. Without a
+    StorageSlashingClient the node cannot heartbeat — providers will
+    eventually become slashable via permissionless
+    slash_for_missing_heartbeat. Operators running storage providers
+    SHOULD set this; non-storage operator nodes can omit it safely.
+    """
+    addr = os.getenv("PRSM_STORAGE_SLASHING_ADDRESS", "").strip()
+    pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip()
+    if not addr or not pk:
+        return None
+    try:
+        from prsm.economy.web3.storage_slashing import (
+            StorageSlashingClient,
+        )
+        rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+        client = StorageSlashingClient(
+            rpc_url=rpc_url,
+            contract_address=addr,
+            private_key=pk,
+        )
+        logger.info(
+            f"StorageSlashingClient wired: {addr} via {rpc_url}"
+        )
+        return client
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"StorageSlashingClient construction failed: "
+            f"{type(exc).__name__}: {exc} — heartbeat surface unavailable."
+        )
+        return None
+
+
+def _build_heartbeat_scheduler_or_none(*, client):
+    """Construct a HeartbeatScheduler if the operator opted in AND
+    the underlying StorageSlashingClient is non-None.
+
+    Activation env vars:
+      PRSM_HEARTBEAT_SCHEDULER_ENABLED=1     (required to enable)
+      PRSM_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS=900   (optional; default 900)
+
+    Invalid interval (non-numeric / zero / negative) silently falls
+    back to default 900s rather than failing — the operator clearly
+    wants the scheduler to run.
+    """
+    if client is None:
+        return None
+    if os.getenv("PRSM_HEARTBEAT_SCHEDULER_ENABLED", "").lower() not in (
+        "1", "true", "yes",
+    ):
+        return None
+    interval = 900.0
+    raw = os.getenv("PRSM_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS", "").strip()
+    if raw:
+        try:
+            parsed = float(raw)
+            if parsed > 0:
+                interval = parsed
+        except ValueError:
+            pass  # keep default
+    try:
+        from prsm.economy.web3.heartbeat_scheduler import HeartbeatScheduler
+        scheduler = HeartbeatScheduler(
+            client=client, interval_seconds=interval,
+        )
+        logger.info(
+            f"HeartbeatScheduler wired (interval={interval}s)"
+        )
+        return scheduler
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"HeartbeatScheduler construction failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
+
+def _build_compensation_scheduler_or_none(*, client):
+    """Construct a PullAndDistributeScheduler if the operator opted
+    in AND the underlying CompensationDistributorClient is non-None.
+
+    Activation env vars:
+      PRSM_COMPENSATION_SCHEDULER_ENABLED=1                 (required)
+      PRSM_COMPENSATION_SCHEDULER_INTERVAL_SECONDS=86400    (optional; default 86400 = 24h)
+
+    Invalid interval (non-numeric / zero / negative / above the
+    contract's 7-day monitoring threshold) silently falls back to
+    default 86400s. The 7-day cap matches PullAndDistributeScheduler's
+    own constructor invariant — falling back rather than raising
+    keeps the scheduler running on operator misconfiguration.
+    """
+    if client is None:
+        return None
+    if os.getenv("PRSM_COMPENSATION_SCHEDULER_ENABLED", "").lower() not in (
+        "1", "true", "yes",
+    ):
+        return None
+    interval = 86400.0
+    raw = os.getenv(
+        "PRSM_COMPENSATION_SCHEDULER_INTERVAL_SECONDS", "",
+    ).strip()
+    if raw:
+        try:
+            parsed = float(raw)
+            # Must satisfy PullAndDistributeScheduler's [0, 7days] band.
+            if 0 < parsed <= 7 * 24 * 60 * 60:
+                interval = parsed
+        except ValueError:
+            pass  # keep default
+    try:
+        from prsm.economy.web3.pull_and_distribute_scheduler import (
+            PullAndDistributeScheduler,
+        )
+        scheduler = PullAndDistributeScheduler(
+            client=client, interval_seconds=interval,
+        )
+        logger.info(
+            f"PullAndDistributeScheduler wired (interval={interval}s)"
+        )
+        return scheduler
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"PullAndDistributeScheduler construction failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
+
 def _build_dht_components_or_none(
     *, identity, listen_host, dht_listen_port,
     manifest_index, embedding_index,
@@ -830,6 +1016,24 @@ class PRSMNode:
         _threshold_resolver = _build_threshold_resolver_or_none()
         _arbitration_queue = _build_arbitration_queue_or_none()
         _arbitration_proposal_sink = _build_arbitration_proposal_sink_or_none()
+
+        # Phase 7-storage + Phase 8 client/scheduler wiring (2026-05-08).
+        # All four optional; node functions without them, just without
+        # the corresponding contract-call surface. Schedulers depend on
+        # their underlying clients so are constructed in pairs.
+        self._compensation_distributor_client = (
+            _build_compensation_distributor_client_or_none()
+        )
+        self._storage_slashing_client = _build_storage_slashing_client_or_none()
+        self._compensation_scheduler = _build_compensation_scheduler_or_none(
+            client=self._compensation_distributor_client,
+        )
+        self._heartbeat_scheduler = _build_heartbeat_scheduler_or_none(
+            client=self._storage_slashing_client,
+        )
+        # Tasks created on start() — None until then.
+        self._compensation_scheduler_task = None
+        self._heartbeat_scheduler_task = None
 
         # T3.6 (PRSM-PROV-1): LocalEmbeddingIndex backs the
         # EmbeddingDHT — every successful upload + embedding gets a
@@ -1691,6 +1895,21 @@ class PRSMNode:
         if self.bt_requester:
             await self.bt_requester.start()
 
+        # Phase 7-storage + Phase 8 daemons (2026-05-08). Launched only
+        # if the operator opted into both the client AND the scheduler
+        # via env vars (see _build_*_scheduler_or_none). Each survives
+        # any one tick failure; restart-resilience is in the daemon.
+        if self._heartbeat_scheduler is not None:
+            self._heartbeat_scheduler_task = asyncio.create_task(
+                self._heartbeat_scheduler.run_forever(),
+            )
+            logger.info("HeartbeatScheduler launched")
+        if self._compensation_scheduler is not None:
+            self._compensation_scheduler_task = asyncio.create_task(
+                self._compensation_scheduler.run_forever(),
+            )
+            logger.info("PullAndDistributeScheduler launched")
+
         # Start management API in background
         self._api_task = asyncio.create_task(self._run_api())
 
@@ -1908,6 +2127,23 @@ class PRSMNode:
         if self._api_task:
             self._api_task.cancel()
             self._api_task = None
+
+        # Phase 7-storage + Phase 8 daemons — graceful stop signals
+        # the loop to exit at next iteration; await the task to ensure
+        # any in-flight tick completes before we tear down further.
+        if self._heartbeat_scheduler is not None:
+            await self._heartbeat_scheduler.stop()
+        if self._compensation_scheduler is not None:
+            await self._compensation_scheduler.stop()
+        for task_attr in (
+            "_heartbeat_scheduler_task",
+            "_compensation_scheduler_task",
+        ):
+            task = getattr(self, task_attr, None)
+            if task is not None:
+                with suppress(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=5.0)
+                setattr(self, task_attr, None)
 
         if self.agent_collaboration:
             await self.agent_collaboration.stop()
