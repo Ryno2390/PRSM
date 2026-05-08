@@ -284,14 +284,29 @@ class AggregateServer:
         # (B3.1a established this as the binding receipt input).
         commit_signature = self.aggregator_privkey.sign(commit.signing_payload())
 
-        # Step 13: encrypted_plaintext. v1 limitation — actual X25519+
-        # ChaCha20-Poly1305 encryption ships in a separate follow-on.
-        # Until then, we ship plaintext directly + a 24-byte zero
-        # nonce so the response shape is correct. The
-        # AggregatorClientAdapter (B5) treats this as plaintext when
-        # decrypting (matching docstring TODO on both sides).
-        encrypted_plaintext = plaintext
-        nonce = b"\x00" * 24
+        # Step 13: encrypt the combined plaintext via X25519 ECDH +
+        # XChaCha20-Poly1305 (see partial_result_cipher.py). The
+        # aggregator's Ed25519 signing key + the prompter's pubkey
+        # (already on the wire) derive a per-request AEAD key.
+        # AAD binds the AggregationCommit's signing payload so any
+        # commit-tampering invalidates the ciphertext.
+        from prsm.compute.query_orchestrator.partial_result_cipher import (
+            PartialResultCipherError,
+            encrypt_aggregate_response,
+        )
+        try:
+            encrypted_plaintext, nonce = encrypt_aggregate_response(
+                aggregator_ed25519_privkey=self.aggregator_privkey.private_bytes_raw(),
+                prompter_ed25519_pubkey=request.prompter_pubkey,
+                plaintext=plaintext,
+                request_id=request.request_id,
+                commit_aad=commit.signing_payload(),
+            )
+        except PartialResultCipherError as exc:
+            raise AggregateServerError(
+                f"partial-result encryption failed: {exc}",
+                code=StageErrorCode.MALFORMED_REQUEST.value,
+            ) from exc
 
         # Step 14: assemble the response.
         return AggregateResponse(

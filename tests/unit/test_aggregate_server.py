@@ -253,7 +253,22 @@ class TestCombinePartialsUnsupported:
 # ──────────────────────────────────────────────────────────────────────
 
 
-def _make_request(partials: list[SignedPartial]) -> AggregateRequest:
+def _make_request(
+    partials: list[SignedPartial],
+    prompter_pubkey: bytes | None = None,
+) -> AggregateRequest:
+    """Build a synthetic AggregateRequest for server tests.
+
+    ``prompter_pubkey`` defaults to a fresh real Ed25519 pubkey so
+    the server's X25519 derivation in ``encrypt_aggregate_response``
+    succeeds. Tests that need a deterministic key pass it in.
+    """
+    if prompter_pubkey is None:
+        prompter_pubkey = (
+            ed25519.Ed25519PrivateKey.generate()
+            .public_key()
+            .public_bytes_raw()
+        )
     manifest = InstructionManifest(
         query="count records",
         instructions=[AgentInstruction(op=AgentOp.COUNT)],
@@ -263,7 +278,7 @@ def _make_request(partials: list[SignedPartial]) -> AggregateRequest:
         query_id=b"\x20" * 32,
         manifest_json=manifest.to_json(),
         partials=tuple(partials),
-        prompter_pubkey=b"\xc0" * 32,
+        prompter_pubkey=prompter_pubkey,
         prompter_node_id="prompter-test",
         beacon_used=b"\xd0" * 32,
         aggregator_pubkey_hash=hashlib.sha256(b"aggregator").digest(),
@@ -277,15 +292,23 @@ class TestAggregateServerHandle:
     def test_full_round_trip(self):
         # Build the server with a deterministic Ed25519 keypair so
         # the response signature is reproducible.
+        from prsm.compute.query_orchestrator.partial_result_cipher import (
+            decrypt_aggregate_response,
+        )
+
         privkey = ed25519.Ed25519PrivateKey.generate()
         server = AggregateServer(
             aggregator_privkey=privkey,
             privacy_budget_ceiling=1.0,
         )
 
+        # Need a real prompter keypair so we can decrypt the response.
+        prompter_priv = ed25519.Ed25519PrivateKey.generate()
+        prompter_pub = prompter_priv.public_key().public_bytes_raw()
+
         a, _ = _make_signed_partial(payload=b"3", privacy_budget_consumed=0.1)
         b, _ = _make_signed_partial(payload=b"4", privacy_budget_consumed=0.1)
-        request = _make_request([a, b])
+        request = _make_request([a, b], prompter_pubkey=prompter_pub)
 
         response = server.handle(request)
 
@@ -293,8 +316,16 @@ class TestAggregateServerHandle:
         assert isinstance(response, AggregateResponse)
         assert response.request_id == request.request_id
         assert response.query_id == request.query_id
-        # Plaintext is canonical {"count": 7}.
-        plaintext = response.encrypted_plaintext  # v1: not actually encrypted
+        # Decrypt: ECDH against aggregator's pubkey + AAD = commit
+        # signing payload (binds tampering).
+        plaintext = decrypt_aggregate_response(
+            prompter_ed25519_privkey=prompter_priv.private_bytes_raw(),
+            aggregator_ed25519_pubkey=response.aggregator_pubkey,
+            ciphertext=response.encrypted_plaintext,
+            nonce=response.nonce,
+            request_id=request.request_id,
+            commit_aad=response.commit.signing_payload(),
+        )
         assert json.loads(plaintext.decode("utf-8")) == {"count": 7}
         # Commit binds the digest.
         assert response.commit.result_digest == hashlib.sha256(plaintext).digest()

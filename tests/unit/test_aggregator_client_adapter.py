@@ -574,3 +574,146 @@ def test_negative_default_ftns_budget_rejected():
             transport=transport,
             default_ftns_budget=-1,
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# X25519 + XChaCha20-Poly1305 decrypt path (closes §2 follow-on)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_prompter_privkey_path_decrypts_real_ciphertext():
+    """When ``prompter_privkey`` is configured, the adapter must
+    decrypt a genuinely-encrypted response (not the legacy
+    plaintext-passthrough path)."""
+    from prsm.compute.query_orchestrator.partial_result_cipher import (
+        encrypt_aggregate_response,
+    )
+
+    agg_priv, agg_pub, agg_pkh = _aggregator_keypair()
+    pp_priv, pp_pub = _prompter_keypair()
+    plaintext = b"real encrypted combined-result"
+
+    def factory(request: AggregateRequest) -> AggregateResponse:
+        # Build a normal commit, then encrypt the plaintext bound to
+        # the commit's signing payload (matches AggregateServer.handle).
+        digest = hashlib.sha256(plaintext).digest()
+        commit = AggregationCommit(
+            query_id=request.query_id,
+            aggregator_pubkey_hash=agg_pkh,
+            result_digest=digest,
+        )
+        sig = agg_priv.sign(commit.signing_payload())
+        ct, nonce = encrypt_aggregate_response(
+            aggregator_ed25519_privkey=agg_priv.private_bytes_raw(),
+            prompter_ed25519_pubkey=pp_pub,
+            plaintext=plaintext,
+            request_id=request.request_id,
+            commit_aad=commit.signing_payload(),
+        )
+        return AggregateResponse(
+            request_id=request.request_id,
+            query_id=request.query_id,
+            commit=commit,
+            commit_signature=sig,
+            encrypted_plaintext=ct,
+            nonce=nonce,
+            aggregator_pubkey=agg_pub,
+            privacy_budget_consumed=0.5,
+            contributing_creators=("creator-1",),
+            completed_unix=int(time.time()),
+        )
+
+    transport = _StubTransport(response_factory=factory)
+    adapter = AggregatorClientAdapter(
+        prompter_pubkey=pp_pub,
+        prompter_node_id="p",
+        prompter_signer=pp_priv.sign,
+        prompter_privkey=pp_priv.private_bytes_raw(),
+        beacon_provider=lambda: b"\xa1" * 32,
+        transport=transport,
+    )
+
+    recovered, commit = asyncio.run(adapter.aggregate(
+        aggregator=_staked_node(agg_pkh),
+        manifest=_manifest(),
+        partials=[_partial(shard_cid="s-0")],
+        query_id=b"q" * 32,
+    ))
+    assert recovered == plaintext
+    # Digest still binds.
+    assert commit.result_digest == hashlib.sha256(plaintext).digest()
+
+
+def test_prompter_privkey_path_rejects_corrupted_ciphertext():
+    """A bit-flipped ciphertext must surface as
+    AggregationCommitMismatchError so the retry-loop routes it to
+    slash uniformly (matches the wire-verification error class)."""
+    from prsm.compute.query_orchestrator.partial_result_cipher import (
+        encrypt_aggregate_response,
+    )
+
+    agg_priv, agg_pub, agg_pkh = _aggregator_keypair()
+    pp_priv, pp_pub = _prompter_keypair()
+    plaintext = b"data"
+
+    def factory(request: AggregateRequest) -> AggregateResponse:
+        digest = hashlib.sha256(plaintext).digest()
+        commit = AggregationCommit(
+            query_id=request.query_id,
+            aggregator_pubkey_hash=agg_pkh,
+            result_digest=digest,
+        )
+        sig = agg_priv.sign(commit.signing_payload())
+        ct, nonce = encrypt_aggregate_response(
+            aggregator_ed25519_privkey=agg_priv.private_bytes_raw(),
+            prompter_ed25519_pubkey=pp_pub,
+            plaintext=plaintext,
+            request_id=request.request_id,
+            commit_aad=commit.signing_payload(),
+        )
+        # Corrupt one byte.
+        ct_bytes = bytearray(ct)
+        ct_bytes[0] ^= 0xFF
+        return AggregateResponse(
+            request_id=request.request_id,
+            query_id=request.query_id,
+            commit=commit,
+            commit_signature=sig,
+            encrypted_plaintext=bytes(ct_bytes),
+            nonce=nonce,
+            aggregator_pubkey=agg_pub,
+            privacy_budget_consumed=0.0,
+            contributing_creators=("creator-1",),
+            completed_unix=int(time.time()),
+        )
+
+    transport = _StubTransport(response_factory=factory)
+    adapter = AggregatorClientAdapter(
+        prompter_pubkey=pp_pub,
+        prompter_node_id="p",
+        prompter_signer=pp_priv.sign,
+        prompter_privkey=pp_priv.private_bytes_raw(),
+        beacon_provider=lambda: b"\xa1" * 32,
+        transport=transport,
+    )
+    with pytest.raises(AggregationCommitMismatchError, match="DECRYPT_FAILED"):
+        asyncio.run(adapter.aggregate(
+            aggregator=_staked_node(agg_pkh),
+            manifest=_manifest(),
+            partials=[_partial(shard_cid="s-0")],
+            query_id=b"q" * 32,
+        ))
+
+
+def test_short_prompter_privkey_rejected_at_construction():
+    pp_priv, pp_pub = _prompter_keypair()
+    transport = _StubTransport(response_factory=lambda req: None)
+    with pytest.raises(ValueError, match="prompter_privkey"):
+        AggregatorClientAdapter(
+            prompter_pubkey=pp_pub,
+            prompter_node_id="p",
+            prompter_signer=pp_priv.sign,
+            beacon_provider=lambda: b"\xa1" * 32,
+            transport=transport,
+            prompter_privkey=b"\x00" * 16,
+        )

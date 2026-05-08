@@ -1747,6 +1747,7 @@ class PRSMNode:
                 prompter_pubkey=self.identity.public_key_bytes,
                 prompter_node_id=self.identity.node_id,
                 prompter_signer=self.identity.sign,
+                prompter_privkey=self.identity.private_key_bytes,
                 beacon_provider=beacon_provider,
                 transport=HttpAggregateTransport(
                     endpoint_resolver=_endpoint_resolver,

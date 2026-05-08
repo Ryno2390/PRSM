@@ -41,14 +41,18 @@ tasks tracked in `docs/2026-05-08-query-orchestrator-wiring-readiness.md`)
    SwarmDispatcherAdapter passes the agent's reported values
    through unchanged.
 
-2. Real X25519 + ChaCha20-Poly1305 encryption for the plaintext
-   transport leg. v1 treats ``encrypted_plaintext`` as plaintext
-   directly — the test stub returns plaintext = encrypted_plaintext.
-   Production needs to derive a shared X25519 secret from
-   prompter_privkey + aggregator_pubkey, ChaCha20-Poly1305-decrypt
-   with the response's nonce, then run the digest check on the
-   resulting cleartext. Tracked separately so encryption choices
-   can be debated without blocking the wire format.
+2. ✅ CLOSED — Real X25519 + XChaCha20-Poly1305 encryption.
+   ``partial_result_cipher.py`` now derives a per-request key from
+   the prompter's Ed25519 privkey + aggregator's Ed25519 pubkey
+   (Ed25519→X25519 conversion via libsodium), HKDF-SHA256 with
+   ``info = "prsm:aggregate-cipher:v1\n" || request_id``, and runs
+   XChaCha20-Poly1305 over plaintext with AAD = commit signing
+   payload. When ``prompter_privkey`` is configured, the adapter
+   decrypts; when None, it preserves legacy plaintext-passthrough
+   for tests. Honest scope: no forward secrecy yet (ephemeral keys
+   would require wire-format extension); marginal value over TLS;
+   no replay-cache. See partial_result_cipher.py docstring §"Honest
+   scope".
 
 3. ✅ CLOSED — ``ftns_budget`` constructor override.
    ``default_ftns_budget`` is now a constructor kwarg (default
@@ -186,6 +190,7 @@ class AggregatorClientAdapter:
         transport: AggregateTransport,
         request_timeout_seconds: float = 60.0,
         default_ftns_budget: int = 1000,
+        prompter_privkey: bytes | None = None,
     ) -> None:
         if not isinstance(prompter_pubkey, (bytes, bytearray)):
             raise TypeError(
@@ -197,6 +202,17 @@ class AggregatorClientAdapter:
                 f"prompter_pubkey must be 32 bytes, got "
                 f"{len(prompter_pubkey)}"
             )
+        if prompter_privkey is not None:
+            if not isinstance(prompter_privkey, (bytes, bytearray)):
+                raise TypeError(
+                    f"prompter_privkey must be bytes, got "
+                    f"{type(prompter_privkey).__name__}"
+                )
+            if len(prompter_privkey) != 32:
+                raise ValueError(
+                    f"prompter_privkey must be 32 bytes (Ed25519 raw), "
+                    f"got {len(prompter_privkey)}"
+                )
         if not isinstance(prompter_node_id, str) or not prompter_node_id:
             raise ValueError(
                 "prompter_node_id must be a non-empty string"
@@ -232,6 +248,9 @@ class AggregatorClientAdapter:
         self._transport = transport
         self._timeout = float(request_timeout_seconds)
         self._default_ftns_budget = int(default_ftns_budget)
+        self._prompter_privkey = (
+            bytes(prompter_privkey) if prompter_privkey is not None else None
+        )
 
     async def aggregate(
         self,
@@ -385,11 +404,32 @@ class AggregatorClientAdapter:
                 f"{aggregator.node_id} signature did not verify: {exc}"
             ) from exc
 
-        # Step 7: decrypt — v1 placeholder. See module docstring §2.
-        # The test stub returns encrypted_plaintext = plaintext, so
-        # we just pass it through. Production wires real X25519 +
-        # ChaCha20-Poly1305 here.
-        plaintext = bytes(response.encrypted_plaintext)
+        # Step 7: decrypt via X25519 ECDH + XChaCha20-Poly1305
+        # (see partial_result_cipher.py). When prompter_privkey is
+        # not configured, we fall back to plaintext-passthrough so
+        # legacy test fixtures still round-trip; production wiring
+        # always sets prompter_privkey.
+        if self._prompter_privkey is not None:
+            from prsm.compute.query_orchestrator.partial_result_cipher import (
+                PartialResultCipherError,
+                decrypt_aggregate_response,
+            )
+            try:
+                plaintext = decrypt_aggregate_response(
+                    prompter_ed25519_privkey=self._prompter_privkey,
+                    aggregator_ed25519_pubkey=response.aggregator_pubkey,
+                    ciphertext=bytes(response.encrypted_plaintext),
+                    nonce=bytes(response.nonce),
+                    request_id=request.request_id,
+                    commit_aad=response.commit.signing_payload(),
+                )
+            except PartialResultCipherError as exc:
+                raise AggregationCommitMismatchError(
+                    f"DECRYPT_FAILED — aggregator "
+                    f"{aggregator.node_id} ciphertext failed cipher: {exc}"
+                ) from exc
+        else:
+            plaintext = bytes(response.encrypted_plaintext)
 
         # Step 8: digest check (A9 defense-in-depth).
         if hashlib.sha256(plaintext).digest() != response.commit.result_digest:
