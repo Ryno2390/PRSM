@@ -24,8 +24,15 @@ from prsm.compute.query_orchestrator.aggregator_selector import (
     select_aggregator,
     verify_aggregation_commit,
 )
+from prsm.compute.query_orchestrator.decomposer import (
+    DecomposerOutputError,
+    QueryDecomposer,
+    RuleBasedDecomposer,
+    decompose_query,
+)
 
 __all__ = [
+    # aggregator_selector
     "AggregationCommit",
     "AggregationCommitMismatchError",
     "InsufficientCandidatesError",
@@ -33,4 +40,9 @@ __all__ = [
     "StakedNode",
     "select_aggregator",
     "verify_aggregation_commit",
+    # decomposer
+    "DecomposerOutputError",
+    "QueryDecomposer",
+    "RuleBasedDecomposer",
+    "decompose_query",
 ]
