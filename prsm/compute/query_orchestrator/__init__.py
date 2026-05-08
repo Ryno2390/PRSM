@@ -59,6 +59,25 @@ from prsm.compute.query_orchestrator.semantic_index_adapter import (
 from prsm.compute.query_orchestrator.swarm_dispatcher_adapter import (
     SwarmDispatcherAdapter,
 )
+from prsm.compute.query_orchestrator.aggregator_client_adapter import (
+    AggregateTransport,
+    AggregatorClientAdapter,
+)
+from prsm.compute.query_orchestrator.aggregate_protocol import (
+    AggregateRequest,
+    AggregateResponse,
+    SignedPartial,
+)
+from prsm.compute.query_orchestrator.aggregate_server import (
+    AggregateServer,
+    AggregateServerError,
+    PrivacyBudgetExhaustedError,
+    UnsupportedAgentOpError,
+    combine_partials,
+    enforce_a5_marker,
+    sum_privacy_budgets,
+    verify_partial_signature,
+)
 
 __all__ = [
     # aggregator_selector
@@ -99,4 +118,20 @@ __all__ = [
     "SemanticIndexAdapter",
     # swarm_dispatcher_adapter
     "SwarmDispatcherAdapter",
+    # aggregator_client_adapter (B5)
+    "AggregateTransport",
+    "AggregatorClientAdapter",
+    # aggregate_protocol (B3.1b wire format)
+    "AggregateRequest",
+    "AggregateResponse",
+    "SignedPartial",
+    # aggregate_server (B3.2 server-side combination)
+    "AggregateServer",
+    "AggregateServerError",
+    "PrivacyBudgetExhaustedError",
+    "UnsupportedAgentOpError",
+    "combine_partials",
+    "enforce_a5_marker",
+    "sum_privacy_budgets",
+    "verify_partial_signature",
 ]
