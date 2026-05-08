@@ -30,6 +30,11 @@ from prsm.compute.query_orchestrator.decomposer import (
     RuleBasedDecomposer,
     decompose_query,
 )
+from prsm.compute.query_orchestrator.shard_finder import (
+    SemanticIndex,
+    ShardCandidate,
+    find_relevant_shards,
+)
 
 __all__ = [
     # aggregator_selector
@@ -45,4 +50,8 @@ __all__ = [
     "QueryDecomposer",
     "RuleBasedDecomposer",
     "decompose_query",
+    # shard_finder
+    "SemanticIndex",
+    "ShardCandidate",
+    "find_relevant_shards",
 ]
