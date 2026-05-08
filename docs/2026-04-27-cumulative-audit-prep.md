@@ -2494,7 +2494,7 @@ Audit goal: confirm each guard's intended catch + that ceremony rollback semanti
 
 11. **Symmetric text + binary lanes**. T6.5.x mirrors the embedding-path 3-band branch into the binary-fingerprint path (image-phash / audio-chromaprint / video-multihash kinds) so text and binary uploads now flow through identical 3-band logic. Resolver consults YAML by `FingerprintMatch.kind.value` (matches YAML key directly); falls back to `FingerprintIndex` built-in 2-band thresholds when resolver unwired or kind not in YAML.
 
-12. **Node-startup wiring** (`prsm/node/node.py`). Three builder helpers (`_build_threshold_resolver_or_none` / `_build_arbitration_queue_or_none` / `_build_arbitration_proposal_sink_or_none`) constructed eagerly + threaded into `ContentUploader` kwargs. Each independently optional; missing any one degrades to legacy 2-band auto-attribute behavior. Operator activation: set `PRSM_ARBITRATION_PROPOSER_ID=<Foundation Safe address>` env var.
+12. **Node-startup wiring** (`prsm/node/node.py`). Three builder helpers (`_build_threshold_resolver_or_none` / `_build_arbitration_queue_or_none` / `_build_arbitration_proposal_sink_or_none`) constructed eagerly + threaded into `ContentUploader` kwargs. Each independently optional; missing any one degrades to legacy 2-band auto-attribute behavior. Operator activation: set `PRSM_ARBITRATION_PROPOSER_ID=<Foundation Safe address>` env var. Full activation runbook at `docs/2026-05-08-prsm-prov-1-item-6-operator-activation-runbook.md` (3 tiers, monitoring guidance, council resolution flow, rollback procedures, troubleshooting catalog).
 
 ### Trust seams (auditor focus)
 
