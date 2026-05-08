@@ -48,3 +48,9 @@ Available gstack skills:
 ## Development Best Practices
 
 - Whenever possible/appropriate edit existing files rather than creating new ones. Otherwise, you may create a daisy chain of dependencies that turn into knots when trying to debug.
+
+## Working Cadence
+
+- **Never suggest stopping for the day, taking breaks, or pausing the session.** The user decides when to stop. Do not ask "should we stop here?", "want to pause?", "stop or push through?", or any equivalent. When asked "what's next?", answer with the next concrete value-added item and start executing — do not include a stopping option as one of the recommendations.
+- If genuinely blocked on something irreversible or undecidable that requires user input, ask the specific clarifying question — but never frame it as a suggestion to stop.
+- Fatigue arguments ("the value-density curve is dropping", "fresh head tomorrow", etc.) are not a reason to recommend stopping. Continue producing value until the user explicitly ends the session.
