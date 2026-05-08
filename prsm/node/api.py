@@ -13,6 +13,7 @@ Security Features (Phase 4.2):
 """
 
 import logging
+import os
 import time as _time_for_history
 import uuid as _uuid
 from typing import Any, Dict, List, Optional
@@ -425,6 +426,60 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 }
                 for tx in history
             ],
+        }
+
+    @app.get("/balance/onchain")
+    async def get_balance_onchain(
+        address: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Read on-chain FTNS balance + USD equivalent.
+
+        Backend for the prsm_balance_check MCP tool (v1 scope per
+        Vision §13 Phase 5 stand-in closure). Reads via the node's
+        already-initialized OnChainFTNSLedger; converts to USD using
+        ``PRSM_FTNS_USD_RATE`` env var (default 1.0; placeholder
+        until the Aerodrome USDC-FTNS pool is seeded per Vision
+        gantt 2026-06-15).
+
+        Query params:
+            address: optional override; defaults to the ledger's
+                connected address.
+        """
+        if not getattr(node, "ftns_ledger", None):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "On-chain ftns_ledger not initialized; "
+                    "set PRSM_ONCHAIN_FTNS=1 + FTNS_TOKEN_ADDRESS "
+                    "to enable."
+                ),
+            )
+
+        target = address or node.ftns_ledger._connected_address
+        balance_ftns = await node.ftns_ledger.get_balance(target)
+
+        # USD-rate parsing — graceful fallback to 1.0 on misconfig.
+        rate_raw = os.getenv("PRSM_FTNS_USD_RATE", "").strip()
+        usd_rate = 1.0
+        if rate_raw:
+            try:
+                parsed = float(rate_raw)
+                if parsed > 0:
+                    usd_rate = parsed
+            except ValueError:
+                pass  # keep default
+
+        decimals = getattr(node.ftns_ledger, "_decimals", 18)
+        balance_wei = int(balance_ftns * (10 ** decimals))
+        usd_equivalent = balance_ftns * usd_rate
+
+        return {
+            "address": target,
+            "balance_wei": balance_wei,
+            "balance_ftns": balance_ftns,
+            "usd_rate": usd_rate,
+            "usd_equivalent": usd_equivalent,
+            "source": "onchain",
         }
 
     @app.post("/compute/submit")

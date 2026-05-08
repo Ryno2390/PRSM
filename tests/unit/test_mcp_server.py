@@ -28,9 +28,11 @@ from prsm.mcp_server import (
 
 
 class TestMCPToolDefinitions:
-    def test_eighteen_tools_defined(self):
-        # 17 prior + prsm_billing_status (Phase 3.x.1 Task 7) = 18
-        assert len(TOOLS) == 18
+    def test_nineteen_tools_defined(self):
+        # 17 prior + prsm_billing_status (Phase 3.x.1 Task 7) = 18.
+        # +prsm_balance_check (2026-05-08, Vision §13 Phase 5
+        # stand-in closure) = 19.
+        assert len(TOOLS) == 19
 
     def test_tool_names(self):
         names = [t.name for t in TOOLS]

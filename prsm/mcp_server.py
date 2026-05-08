@@ -481,6 +481,31 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_balance_check",
+        description=(
+            "Check FTNS token balance + USD equivalent for a wallet "
+            "address. V1 reads on-chain via the node's "
+            "OnChainFTNSLedger and converts to USD using the "
+            "PRSM_FTNS_USD_RATE env var as a static placeholder until "
+            "the Aerodrome USDC-FTNS pool is seeded (Vision §13 "
+            "Phase 5 gantt: 2026-06-15). Defaults to the node's "
+            "connected wallet when no address is supplied."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": (
+                        "Optional 0x-prefixed Ethereum address. When "
+                        "omitted, returns balance for the node's "
+                        "connected wallet."
+                    ),
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_inference",
         description=(
             "Run TEE-attested model inference on PRSM with verifiable receipts. "
@@ -1652,6 +1677,58 @@ async def handle_prsm_billing_status(arguments: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_balance_check tool call.
+
+    V1 scope: GET /balance/onchain via the node API; format the
+    response as user-facing text. Closes the explicit Vision §13
+    Phase 5 stand-in.
+    """
+    address = arguments.get("address")
+    path = "/balance/onchain"
+    if address:
+        path = f"{path}?address={address}"
+
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    # 503 fallback path — endpoint returned a `detail` envelope rather
+    # than a balance. Common cause: ftns_ledger not initialized
+    # because PRSM_ONCHAIN_FTNS or FTNS_TOKEN_ADDRESS is unset.
+    if "balance_ftns" not in result:
+        detail = result.get("detail", "unknown error")
+        return (
+            f"On-chain FTNS not configured on this node.\n"
+            f"  Detail: {detail}\n"
+            f"  Set PRSM_ONCHAIN_FTNS=1 + FTNS_TOKEN_ADDRESS to enable."
+        )
+
+    addr = result["address"]
+    balance_ftns = result["balance_ftns"]
+    usd_rate = result["usd_rate"]
+    usd_equivalent = result["usd_equivalent"]
+
+    # Display: short address (first 10 chars) + full FTNS amount +
+    # USD equivalent (with explicit rate so users see the conversion
+    # they're trusting).
+    short_addr = (
+        addr[:10] + "…" + addr[-4:] if len(addr) > 14 else addr
+    )
+    return (
+        f"PRSM Wallet Balance\n"
+        f"  Address:  {short_addr}\n"
+        f"  Balance:  {balance_ftns:.6f} FTNS\n"
+        f"  USD:      ${usd_equivalent:,.2f}  "
+        f"(@ {usd_rate} USD/FTNS)\n"
+        f"  Source:   {result['source']}"
+    )
+
+
 # Tool dispatch map
 TOOL_HANDLERS = {
     "prsm_analyze": handle_prsm_analyze,
@@ -1672,6 +1749,7 @@ TOOL_HANDLERS = {
     "prsm_training_status": handle_prsm_training_status,
     "prsm_inference": handle_prsm_inference,
     "prsm_billing_status": handle_prsm_billing_status,
+    "prsm_balance_check": handle_prsm_balance_check,
 }
 
 

@@ -404,6 +404,13 @@ As of 2026-05-08, the previously-hidden tools (`prsm_analyze`, `prsm_dispatch_ag
 - `prsm_dispatch_agent` — async dispatch with JobHistoryRecord-backed status tracking
 - `prsm_agent_status` — surfaces the two-tier `/compute/status` response
 
+A new tool `prsm_balance_check` ships in v1.7.0+ (Vision §13 Phase 5 stand-in closure):
+
+- Reads on-chain FTNS balance via the node's `OnChainFTNSLedger` (gates on `PRSM_ONCHAIN_FTNS=1` + `FTNS_TOKEN_ADDRESS`).
+- Converts FTNS → USD using `PRSM_FTNS_USD_RATE` env var (default `1.0`; placeholder until the Aerodrome USDC-FTNS pool is seeded per Vision gantt 2026-06-15, after which the rate sources from the live pool).
+- Optional `address` arg overrides the node's connected wallet address.
+- Backed by the new `GET /balance/onchain` endpoint.
+
 `BROKEN_TOOLS_HIDDEN` is now an empty frozenset. If you re-add a tool to the hide-list mid-incident, also pin `tests/unit/test_mcp_server_hidden_tools.py` to match — the test asserts the exact set.
 
 ---
