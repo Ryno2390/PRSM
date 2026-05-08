@@ -219,6 +219,56 @@ class TestAgentCreationTools:
         # Will fail to connect to node but should validate the manifest
         assert "1 operations" in result or "dispatch failed" in result
 
+    @pytest.mark.asyncio
+    async def test_dispatch_agent_routes_through_compute_forge_qo_path(self):
+        """B8 unhide pass 2: confirm the handler forwards manifest.query
+        to /compute/forge and renders the QO-shaped response (route =
+        'qo_swarm'). The QO dispatch path was wired in B8 unhide pass 1."""
+        from unittest.mock import patch
+        from prsm.compute.agents.instruction_set import (
+            InstructionManifest, AgentInstruction, AgentOp,
+        )
+
+        manifest = InstructionManifest(
+            query="Count records",
+            instructions=[AgentInstruction(op=AgentOp.COUNT)],
+        )
+        captured = {}
+
+        async def _fake_call(method, path, body=None):
+            captured["method"] = method
+            captured["path"] = path
+            captured["body"] = body
+            return {
+                "job_id": "forge-test-xyz",
+                "query": "Count records",
+                "route": "qo_swarm",
+                "response": '{"count": 7}',
+                "result": {
+                    "status": "success",
+                    "route": "qo_swarm",
+                    "aggregator_node_id": "agg-test",
+                },
+                "budget_ftns": 1.0,
+            }
+
+        with patch("prsm.mcp_server._call_node_api", side_effect=_fake_call):
+            result = await handle_prsm_dispatch_agent({
+                "instructions_json": manifest.to_json(),
+                "budget_ftns": 1.0,
+            })
+
+        # /compute/forge was called with the manifest's query string.
+        assert captured["method"] == "POST"
+        assert captured["path"] == "/compute/forge"
+        assert captured["body"]["query"] == "Count records"
+        # Handler-rendered output surfaces the QO response.
+        assert "Agent Dispatched" in result
+        assert "Count records" in result
+        assert '{"count": 7}' in result
+        # Route surfaced in the cost-footer extra fields.
+        assert "qo_swarm" in result
+
 
 class TestFullToolSuite:
     @pytest.mark.asyncio

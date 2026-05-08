@@ -77,27 +77,34 @@ logger = logging.getLogger(__name__)
 # but list_tools() filters them so client-side tool discovery does
 # not surface them.
 #
-# 2026-05-08 (B8 unhide): prsm_analyze re-exposed. /compute/forge
-# now duck-type-dispatches on QueryOrchestrator.dispatch_query
-# (replacing the deleted Agent Forge surface) — operators with
-# PRSM_QUERY_ORCHESTRATOR_ENABLED=1 get a working analyze path
-# end-to-end. Operators without it still get 503 (agent_forge=None);
-# the tool surfaces in list_tools regardless so MCP clients can see
-# the capability and the 503 is the correct error to surface.
+# 2026-05-08 (B8 unhide pass 1): prsm_analyze re-exposed.
+# /compute/forge now duck-type-dispatches on
+# QueryOrchestrator.dispatch_query (replacing the deleted Agent
+# Forge surface) — operators with PRSM_QUERY_ORCHESTRATOR_ENABLED=1
+# get a working analyze path end-to-end.
+#
+# 2026-05-08 (B8 unhide pass 2): prsm_dispatch_agent re-exposed.
+# Its handler already routes through /compute/forge with
+# manifest.query — that path now works via the same QO dispatch.
+# Caveat: the user-supplied InstructionManifest is pre-validated
+# locally (catches malformed manifests early) but the
+# QueryOrchestrator re-decomposes server-side; the manifest's
+# instruction list is currently advisory rather than executed.
+# A separate sprint can wire end-to-end manifest pass-through
+# (add manifest= kwarg to QueryOrchestrator.dispatch_query +
+# extend /compute/forge body schema) when that becomes
+# load-bearing.
 #
 # Still hidden:
-# - prsm_dispatch_agent: requires the prsm_create_agent flow
-#   end-to-end; that path needs separate adaptation work.
 # - prsm_agent_status: backing /compute/status/{job_id} endpoint
 #   does not exist on node API → 404. Endpoint addition is a
 #   separate sprint (the QueryOrchestrator dispatch_query is
 #   currently synchronous-from-caller-view; status endpoint
 #   makes sense once async dispatch lands).
 #
-# Operators who want these visible (e.g. for testing reconstruction
+# Operators who want this visible (e.g. for testing reconstruction
 # work) can set PRSM_EXPOSE_BROKEN_TOOLS=1.
 BROKEN_TOOLS_HIDDEN = frozenset({
-    "prsm_dispatch_agent",
     "prsm_agent_status",
 })
 
@@ -1079,7 +1086,26 @@ async def handle_prsm_create_agent(arguments: Dict[str, Any]) -> str:
 
 
 async def handle_prsm_dispatch_agent(arguments: Dict[str, Any]) -> str:
-    """Handle prsm_dispatch_agent — dispatch an instruction manifest."""
+    """Handle prsm_dispatch_agent — dispatch an instruction manifest.
+
+    Flow (post-B8 unhide pass 2):
+      1. Parse the user-supplied InstructionManifest JSON locally
+         (early validation — malformed manifests rejected without
+         spending FTNS or hitting the node).
+      2. Forward ``manifest.query`` to /compute/forge with the
+         requested budget.
+      3. /compute/forge duck-type-dispatches on
+         ``node.agent_forge.dispatch_query`` (QueryOrchestrator) →
+         decomposes the query server-side → finds shards →
+         fans out → aggregates → returns.
+
+    Honest scope: the QueryOrchestrator currently RE-DECOMPOSES
+    the natural-language query rather than consuming the user's
+    pre-built manifest verbatim. The local manifest serves as a
+    structured precondition (validates op set, budget hint) but
+    its instruction list is not executed verbatim. A future
+    sprint may wire end-to-end manifest pass-through.
+    """
     instructions_json = arguments.get("instructions_json", "")
     budget = arguments.get("budget_ftns", 5.0)
 
