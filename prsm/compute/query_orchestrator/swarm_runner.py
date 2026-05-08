@@ -83,12 +83,26 @@ class PartialResult:
         Marker that the source agent applied `dp_noise.py` primitives
         before signing. The runner refuses to forward un-noised
         partials to the aggregator (A5 mitigation 2 enforcement).
+    source_agent_pubkey:
+        32-byte Ed25519 public key the source agent signed with.
+        Threaded through to `SignedPartial.source_agent_pubkey` in the
+        AggregatorClientAdapter so the aggregator's server-side
+        verification has the real key (not a placeholder). Defaults
+        to 32 zero bytes for backwards compatibility — the source
+        agent's dispatch path overrides at construction time.
+    privacy_budget_consumed:
+        Epsilon spent applying DP noise to this partial. Threaded
+        through to `SignedPartial.privacy_budget_consumed`; the
+        aggregator's `sum_privacy_budgets` enforces the per-query
+        ceiling. Defaults to 0.0 (no budget consumed reported).
     """
     shard_cid: str
     payload: bytes
     agent_signature: bytes
     creator_id: str
     dp_noise_applied: bool
+    source_agent_pubkey: bytes = b"\x00" * 32
+    privacy_budget_consumed: float = 0.0
 
 
 @dataclass(frozen=True)

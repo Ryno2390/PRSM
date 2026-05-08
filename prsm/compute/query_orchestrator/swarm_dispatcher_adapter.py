@@ -227,6 +227,15 @@ class SwarmDispatcherAdapter:
             the source agent didn't set the marker. Defaulting to
             False is the fail-safe: the runner's A5 gate will reject
             the swarm and the orchestrator's retry-loop will refund.
+          - source_agent_pubkey: 32-byte Ed25519 public key the source
+            agent signed payload+manifest with. Defaults to 32 zero
+            bytes if the result dict omits it (back-compat with older
+            dispatchers that don't surface the agent's identity key —
+            aggregator-side signature verification will fail loudly,
+            which is the correct fail-loud behavior).
+          - privacy_budget_consumed: epsilon spent applying DP noise.
+            Defaults to 0.0 — the aggregator's sum_privacy_budgets
+            ceiling check is permissive when no budget is reported.
         """
         return PartialResult(
             shard_cid=shard.cid,
@@ -234,4 +243,10 @@ class SwarmDispatcherAdapter:
             agent_signature=result["agent_signature"],
             creator_id=shard.creator_id,
             dp_noise_applied=bool(result.get("dp_noise_applied", False)),
+            source_agent_pubkey=bytes(
+                result.get("source_agent_pubkey", b"\x00" * 32)
+            ),
+            privacy_budget_consumed=float(
+                result.get("privacy_budget_consumed", 0.0)
+            ),
         )

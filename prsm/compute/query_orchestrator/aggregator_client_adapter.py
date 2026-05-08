@@ -32,15 +32,14 @@ KNOWN FOLLOW-ONS (NOT shipped here — separate orchestrator-wiring
 tasks tracked in `docs/2026-05-08-query-orchestrator-wiring-readiness.md`)
 ================================================================
 
-1. ``source_agent_pubkey`` + ``privacy_budget_consumed`` placeholders.
-   ``PartialResult`` (from swarm_runner) carries ``payload``,
-   ``agent_signature``, ``creator_id``, ``dp_noise_applied`` — but NOT
-   the source-agent pubkey or per-partial epsilon. We hardcode
-   ``source_agent_pubkey = b"\\x00" * 32`` and
-   ``privacy_budget_consumed = 0.0`` in the SignedPartial. Threading
-   real values through ``PartialResult`` is a separate orchestrator-
-   wiring follow-on (mirrors B4's MobileAgent.manifest type-mismatch
-   flag pattern). DO NOT modify swarm_runner.py here.
+1. ✅ CLOSED — ``source_agent_pubkey`` + ``privacy_budget_consumed``
+   threading. ``PartialResult`` now carries both fields directly
+   (defaulted to 32 zero bytes + 0.0 for backwards compatibility).
+   The adapter threads these straight from PartialResult into
+   SignedPartial — no more hardcoded placeholders. Source agents
+   set real values when constructing PartialResult; the
+   SwarmDispatcherAdapter passes the agent's reported values
+   through unchanged.
 
 2. Real X25519 + ChaCha20-Poly1305 encryption for the plaintext
    transport leg. v1 treats ``encrypted_plaintext`` as plaintext
@@ -82,9 +81,6 @@ from prsm.compute.query_orchestrator.aggregator_selector import (
 from prsm.compute.query_orchestrator.swarm_runner import PartialResult
 
 
-# v1 placeholder — see module docstring §1
-_SOURCE_AGENT_PUBKEY_PLACEHOLDER: bytes = b"\x00" * 32
-_PRIVACY_BUDGET_PLACEHOLDER: float = 0.0
 # v1 placeholder — see module docstring §3
 _FTNS_BUDGET_PLACEHOLDER: int = 1000
 
@@ -243,18 +239,21 @@ class AggregatorClientAdapter:
             query_id + os.urandom(16)
         ).digest()[:32]
 
-        # Step 2: convert PartialResults → SignedPartials.
+        # Step 2: convert PartialResults → SignedPartials. As of the
+        # PartialResult schema extension, source_agent_pubkey +
+        # privacy_budget_consumed are real fields threaded from the
+        # source agent — no more placeholders here. Defaults at the
+        # PartialResult level (32 zero bytes + 0.0) keep older
+        # callsites working.
         signed_partials = tuple(
             SignedPartial(
                 shard_cid=p.shard_cid,
                 payload=p.payload,
                 creator_id=p.creator_id,
                 dp_noise_applied=p.dp_noise_applied,
-                # See module docstring §1 — placeholders pending
-                # PartialResult schema extension.
-                source_agent_pubkey=_SOURCE_AGENT_PUBKEY_PLACEHOLDER,
+                source_agent_pubkey=p.source_agent_pubkey,
                 source_agent_signature=p.agent_signature,
-                privacy_budget_consumed=_PRIVACY_BUDGET_PLACEHOLDER,
+                privacy_budget_consumed=p.privacy_budget_consumed,
             )
             for p in partials
         )
