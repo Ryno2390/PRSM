@@ -23,12 +23,22 @@ from prsm.node.api import create_api_app
 
 
 @dataclass
+class _StubParticipant:
+    """Mirrors prsm.compute.query_orchestrator.ParticipantAttribution
+    (post §4 step 6 settlement extension)."""
+    shard_cid: str
+    source_agent_pubkey: bytes
+    creator_id: str
+
+
+@dataclass
 class _StubAggregatedResult:
     """Mirrors prsm.compute.query_orchestrator.AggregatedResult."""
     query_id: bytes
     payload: bytes
     aggregator_node_id: str
     contributing_shards: tuple
+    participants: tuple = ()
 
 
 class _StubQueryOrchestrator:
@@ -36,10 +46,14 @@ class _StubQueryOrchestrator:
     Records the kwargs it was called with so tests can assert routing
     correctness."""
 
-    def __init__(self, *, payload: bytes = b'{"count": 7}', shards=()):
+    def __init__(
+        self, *, payload: bytes = b'{"count": 7}', shards=(),
+        participants: tuple = (),
+    ):
         self.calls = []
         self._payload = payload
         self._shards = shards
+        self._participants = participants
 
     async def dispatch_query(
         self,
@@ -62,6 +76,7 @@ class _StubQueryOrchestrator:
             payload=self._payload,
             aggregator_node_id="agg-node-7",
             contributing_shards=tuple(self._shards),
+            participants=tuple(self._participants),
         )
 
 

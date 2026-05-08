@@ -763,6 +763,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "aggregator_node_id": qo_result.aggregator_node_id,
                     "contributing_shards": list(qo_result.contributing_shards),
                     "response": response_text,
+                    # §4 step 6 settlement attribution. List of
+                    # {shard_cid, source_agent_pubkey_hex, creator_id}
+                    # — settlement layer below builds the escrow
+                    # split from this.
+                    "participants": [
+                        {
+                            "shard_cid": pa.shard_cid,
+                            "source_agent_pubkey_hex": pa.source_agent_pubkey.hex(),
+                            "creator_id": pa.creator_id,
+                        }
+                        for pa in qo_result.participants
+                    ],
                 }
             else:
                 # Legacy AgentForge path — preserved for any operator
@@ -789,13 +801,55 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 epsilon = epsilon_map.get(privacy_level_str, 8.0)
                 node.privacy_budget.record_spend(epsilon, "forge_query", job_id)
 
-            # Release escrow on success
+            # Release escrow on success. Two paths:
+            #   (a) QO swarm path: §4 step 6 settlement — split the
+            #       prompter's compute budget across the N compute
+            #       participants (one per shard) + the aggregator
+            #       coordination fee. Operator-tunable aggregator
+            #       share via PRSM_AGGREGATOR_SHARE_BPS env var
+            #       (default 500 = 5%).
+            #   (b) Legacy path: single-provider release (prompter's
+            #       own node) — preserves pre-QO behavior for
+            #       AgentForge backends.
             if escrow_entry and node._payment_escrow and result.get("status") == "success":
                 try:
-                    await node._payment_escrow.release_escrow(
-                        job_id=job_id,
-                        provider_id=node.identity.node_id,
-                    )
+                    qo_participants = result.get("participants") or []
+                    if qo_participants:
+                        # Build the split: aggregator share +
+                        # uniform per-participant compute share.
+                        import os as _os_for_share_bps
+                        try:
+                            agg_share_bps = int(_os_for_share_bps.environ.get(
+                                "PRSM_AGGREGATOR_SHARE_BPS", "500",
+                            ))
+                        except ValueError:
+                            agg_share_bps = 500
+                        if not (0 <= agg_share_bps <= 10000):
+                            agg_share_bps = 500
+                        aggregator_share = budget_ftns * (agg_share_bps / 10000.0)
+                        compute_share_total = budget_ftns - aggregator_share
+                        # Uniform split across compute participants;
+                        # PCU-weighted variant deferred to a follow-on
+                        # once partials carry per-shard PCU metrics.
+                        per_participant = (
+                            compute_share_total / len(qo_participants)
+                        )
+                        splits = [
+                            (result["aggregator_node_id"], aggregator_share),
+                        ] + [
+                            (p["source_agent_pubkey_hex"], per_participant)
+                            for p in qo_participants
+                        ]
+                        await node._payment_escrow.release_escrow_split(
+                            job_id=job_id,
+                            splits=splits,
+                        )
+                    else:
+                        # Legacy path
+                        await node._payment_escrow.release_escrow(
+                            job_id=job_id,
+                            provider_id=node.identity.node_id,
+                        )
                 except Exception as e:
                     logger.warning(f"Forge escrow release failed: {e}")
 

@@ -244,6 +244,188 @@ class PaymentEscrow:
             logger.warning(f"Escrow release failed: {e}")
             return None
 
+    async def release_escrow_split(
+        self,
+        job_id: str,
+        splits: List[tuple],
+        consensus_reached: bool = True,
+    ) -> Optional[List[Transaction]]:
+        """Release an escrow to multiple recipients atomically.
+
+        Closes the §4 step 6 settlement gap for QueryOrchestrator
+        swarm queries: the prompter's compute budget escrow is
+        distributed across the actual compute participants (one
+        share per shard) + the aggregator coordination fee, rather
+        than collapsed onto the prompter's own node.
+
+        Args:
+            job_id: Job identifier whose escrow to release.
+            splits: List of (recipient_id, amount) tuples. Sum
+                of amounts must be <= the escrow's total amount.
+                Any remainder is refunded to the requester.
+            consensus_reached: Whether the swarm reached consensus
+                (recorded in transaction descriptions).
+
+        Returns:
+            List of ledger Transactions (one per recipient) on
+            success, or None if no pending escrow / split-amount
+            invariant violated.
+
+        State-machine guards mirror ``release_escrow``: double-
+        release on a RELEASED escrow is a no-op (warns, returns
+        None); release on a REFUNDED escrow raises
+        ``EscrowAlreadyFinalizedError``.
+        """
+        if not splits:
+            logger.warning(
+                f"release_escrow_split called with empty splits for "
+                f"job {job_id[:8]}... — returning None"
+            )
+            return None
+        # Validate split shape eagerly so a bad caller can't waste
+        # the escrow lookup work.
+        for entry in splits:
+            if not (isinstance(entry, tuple) and len(entry) == 2):
+                raise ValueError(
+                    f"splits entries must be (recipient_id, amount) "
+                    f"tuples, got {entry!r}"
+                )
+            recipient, amount = entry
+            if not isinstance(recipient, str) or not recipient:
+                raise ValueError(
+                    f"split recipient_id must be a non-empty string, "
+                    f"got {recipient!r}"
+                )
+            if not isinstance(amount, (int, float)) or amount <= 0:
+                raise ValueError(
+                    f"split amount must be positive number, got "
+                    f"{amount!r} for recipient {recipient[:12]}..."
+                )
+
+        escrow_any = None
+        escrow = None
+        for e in self._escrows.values():
+            if e.job_id == job_id:
+                escrow_any = e
+                if e.status == EscrowStatus.PENDING:
+                    escrow = e
+                    break
+        if not escrow:
+            if escrow_any is not None:
+                if escrow_any.status == EscrowStatus.RELEASED:
+                    logger.warning(
+                        f"escrow for job {job_id[:8]}... already released; "
+                        f"release_escrow_split is a no-op"
+                    )
+                    return None
+                if escrow_any.status == EscrowStatus.REFUNDED:
+                    raise EscrowAlreadyFinalizedError(
+                        f"escrow for job {job_id!r} is already REFUNDED; "
+                        f"cannot release"
+                    )
+            logger.warning(
+                f"No pending escrow found for job {job_id[:8]}..."
+            )
+            return None
+
+        total_split = sum(amount for _, amount in splits)
+        if total_split > escrow.amount + 1e-9:  # tolerance for fp
+            raise ValueError(
+                f"sum of splits ({total_split}) exceeds escrow amount "
+                f"({escrow.amount}) for job {job_id!r}"
+            )
+
+        escrow_wallet = f"escrow-{escrow.escrow_id}"
+        escrow_balance = await self.ledger.get_balance(escrow_wallet)
+        if escrow_balance < total_split:
+            logger.warning(
+                f"Escrow wallet has {escrow_balance:.6f}, trying to "
+                f"split-release {total_split:.6f}"
+            )
+            return None
+
+        # Atomic-from-caller-view: any per-recipient transfer
+        # failure rolls the call into a no-op (escrow stays PENDING
+        # so the cleanup_expired_escrows path can refund later, OR
+        # the operator can retry).
+        txs = []
+        for recipient, amount in splits:
+            try:
+                tx = await self.ledger.transfer(
+                    from_wallet=escrow_wallet,
+                    to_wallet=recipient,
+                    amount=amount,
+                    description=(
+                        f"Split payment for job {job_id[:8]} "
+                        f"(consensus={'yes' if consensus_reached else 'partial'})"
+                    ),
+                )
+                txs.append(tx)
+            except ValueError as exc:
+                logger.error(
+                    f"Split payment failed for recipient "
+                    f"{recipient[:12]}...: {exc}. Reverting "
+                    f"escrow to PENDING."
+                )
+                # No partial state — escrow stays PENDING.
+                return None
+
+        # Mark escrow released. provider_winner stores a stable
+        # "split:N" marker since there's no single winner.
+        escrow.provider_winner = f"split:{len(splits)}"
+        escrow.tx_release = txs[0].tx_id  # head of the split chain
+        escrow.status = EscrowStatus.RELEASED
+        escrow.completed_at = time.time()
+        # Stash the per-recipient breakdown in metadata so audit
+        # trails can reconstruct the split without log replay.
+        escrow.metadata.setdefault("splits", []).extend(
+            {"recipient": r, "amount": a, "tx_id": txs[i].tx_id}
+            for i, (r, a) in enumerate(splits)
+        )
+
+        # Refund remainder to requester if total_split < escrow.amount.
+        remainder = escrow_balance - total_split
+        refund_tx = None
+        if remainder > 0:
+            try:
+                refund_tx = await self.ledger.transfer(
+                    from_wallet=escrow_wallet,
+                    to_wallet=escrow.requester_id,
+                    amount=remainder,
+                    description=(
+                        f"Escrow split-release remainder for job "
+                        f"{job_id[:8]}"
+                    ),
+                )
+                logger.info(
+                    f"Refunded {remainder:.6f} FTNS to requester "
+                    f"{escrow.requester_id[:12]}..."
+                )
+            except ValueError as exc:
+                logger.warning(
+                    f"Remainder refund failed (non-fatal — splits "
+                    f"already released): {exc}"
+                )
+
+        # Broadcast on-chain after local ledger commit.
+        if self.broadcast_tx:
+            for tx in txs:
+                try:
+                    await self.broadcast_tx(tx)
+                except Exception:
+                    pass
+            if refund_tx:
+                try:
+                    await self.broadcast_tx(refund_tx)
+                except Exception:
+                    pass
+
+        logger.info(
+            f"Escrow split-released: {total_split:.6f} FTNS across "
+            f"{len(splits)} recipients for job {job_id[:8]}..."
+        )
+        return txs
+
     async def refund_escrow(self, job_id: str, reason: str = "") -> bool:
         """Refund escrow to the requester (job failed or cancelled).
 

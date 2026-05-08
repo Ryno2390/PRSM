@@ -38,6 +38,7 @@ from prsm.compute.query_orchestrator.shard_finder import (
 from prsm.compute.query_orchestrator.swarm_runner import (
     AggregatedResult,
     AggregatorClient,
+    ParticipantAttribution,
     PartialResult,
     PartialResultIntegrityError,
     SwarmDispatcher,
@@ -126,6 +127,7 @@ __all__ = [
     # swarm_runner
     "AggregatedResult",
     "AggregatorClient",
+    "ParticipantAttribution",
     "PartialResult",
     "PartialResultIntegrityError",
     "SwarmDispatcher",

@@ -106,6 +106,32 @@ class PartialResult:
 
 
 @dataclass(frozen=True)
+class ParticipantAttribution:
+    """Per-shard provenance triple emitted alongside an
+    ``AggregatedResult`` so the settlement layer can pay each
+    compute participant the correct share + record each content
+    creator for the on-chain royalty leg.
+
+    Attributes
+    ----------
+    shard_cid:
+        The shard whose partial contributed to the aggregation.
+    source_agent_pubkey:
+        Ed25519 raw public key (32 bytes) of the WASM agent that
+        produced the partial. Settlement maps this to the compute
+        provider's FTNS wallet for the per-participant escrow split.
+    creator_id:
+        The original publisher's identifier — flows to the
+        ``RoyaltyDistributor`` content-access leg when the shard's
+        content was fetched (separate from the compute escrow leg
+        handled here).
+    """
+    shard_cid: str
+    source_agent_pubkey: bytes
+    creator_id: str
+
+
+@dataclass(frozen=True)
 class AggregatedResult:
     """The final swarm output, ready for the prompter.
 
@@ -121,11 +147,23 @@ class AggregatedResult:
     contributing_shards:
         Tuple of shard CIDs whose partials fed the aggregation.
         Settlement uses these for per-creator royalty distribution.
+    participants:
+        Per-shard provenance entries built from the input
+        ``SignedPartial``s. Closes the §4 step 6 settlement gap:
+        the prompter's compute budget escrow can be split across
+        the actual compute participants (one entry per shard) +
+        the aggregator coordination fee, rather than collapsed
+        onto the prompter's own node. Empty tuple is the legacy
+        single-provider release semantics; non-empty triggers
+        the multi-recipient split path.
     """
     query_id: bytes
     payload: bytes
     aggregator_node_id: str
     contributing_shards: tuple[str, ...] = field(default_factory=tuple)
+    participants: tuple[ParticipantAttribution, ...] = field(
+        default_factory=tuple,
+    )
 
 
 @runtime_checkable
@@ -256,4 +294,12 @@ async def run_swarm(
         payload=plaintext,
         aggregator_node_id=aggregator.node_id,
         contributing_shards=tuple(p.shard_cid for p in partials),
+        participants=tuple(
+            ParticipantAttribution(
+                shard_cid=p.shard_cid,
+                source_agent_pubkey=p.source_agent_pubkey,
+                creator_id=p.creator_id,
+            )
+            for p in partials
+        ),
     )
