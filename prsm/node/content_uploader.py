@@ -544,6 +544,7 @@ class ContentUploader:
         local_fingerprint_index: Optional[Any] = None,
         threshold_resolver: Optional[Any] = None,
         arbitration_queue: Optional[Any] = None,
+        arbitration_proposal_sink: Optional[Any] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -663,6 +664,12 @@ class ContentUploader:
         # 2-band auto-attribute behavior.
         self._threshold_resolver = threshold_resolver
         self._arbitration_queue = arbitration_queue
+        # T6.5.gov — optional governance proposal sink. When set,
+        # disputed-band records are not just enqueued but also
+        # surfaced as ProposalCategory.ARBITRATION_DISPUTE proposals
+        # to a council. Sink failures are logged + swallowed so the
+        # upload always completes (anti-griefing).
+        self._arbitration_proposal_sink = arbitration_proposal_sink
 
     async def close(self) -> None:
         pass
@@ -2077,14 +2084,18 @@ class ContentUploader:
         self, new_cid: str, pending: Dict[str, Any],
     ) -> None:
         """Enqueue a ``DisputedAttributionRecord`` once the upload's
-        new_cid is known. Best-effort — upload completion must NEVER
-        be blocked by an arbitration-queue failure (see T6.5 design
-        §"What we deliberately defer" — anti-griefing rate limits).
+        new_cid is known, then optionally surface it as a
+        governance proposal via the configured proposal sink.
+
+        Best-effort — upload completion must NEVER be blocked by an
+        arbitration-queue failure or a proposal-sink failure (see
+        T6.5 design §"What we deliberately defer" — anti-griefing
+        rate limits).
         """
+        from prsm.data.dedup.arbitration import (
+            DisputedAttributionRecord,
+        )
         try:
-            from prsm.data.dedup.arbitration import (
-                DisputedAttributionRecord,
-            )
             record = DisputedAttributionRecord(
                 new_cid=new_cid,
                 new_creator=self.creator_address or "",
@@ -2095,12 +2106,48 @@ class ContentUploader:
                 flagged_at=int(time.time()),
                 proposal_id=None,
             )
-            await self._arbitration_queue.enqueue(record)
+            record_id = await self._arbitration_queue.enqueue(record)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "arbitration enqueue failed for cid=%s: %s — upload "
                 "still completes (record lost; griefing-safe)",
                 new_cid[:16],
+                exc,
+            )
+            return
+
+        # T6.5.gov — link a governance proposal if a sink is wired.
+        # Failures here only lose the proposal-link; the record itself
+        # is already persisted and councils can still discover it via
+        # ArbitrationQueue.list_pending().
+        if self._arbitration_proposal_sink is None:
+            return
+        try:
+            proposal_id = await (
+                self._arbitration_proposal_sink.create_arbitration_proposal(
+                    record, record_id,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "arbitration proposal-sink raised for cid=%s: %s — "
+                "record still queued, no proposal_id linked",
+                new_cid[:16],
+                exc,
+            )
+            return
+        if proposal_id is None:
+            return
+        try:
+            await self._arbitration_queue.set_proposal_id(
+                record_id, proposal_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "arbitration set_proposal_id failed for cid=%s "
+                "proposal_id=%s: %s",
+                new_cid[:16],
+                proposal_id,
                 exc,
             )
 

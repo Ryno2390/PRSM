@@ -110,6 +110,78 @@ class _ResolutionRecord:
 
 
 @runtime_checkable
+class ArbitrationProposalSink(Protocol):
+    """Hook from the arbitration queue to a governance proposal layer.
+
+    Implementations wrap the chosen governance backend (Phase 6
+    ``TokenWeightedVoting``, an on-chain arbitration contract, or a
+    test stub) and create a proposal of category
+    ``ProposalCategory.ARBITRATION_DISPUTE`` for council review.
+
+    Contract:
+      - Returns the created proposal's identifier as a string, or
+        ``None`` if no proposal could be created (sink configured but
+        backend rejected the call). The caller links the returned
+        ``proposal_id`` back to the queued record via
+        ``ArbitrationQueue.set_proposal_id``.
+      - MUST NOT raise out — any backend failure is the sink's
+        responsibility to log + swallow. The arbitration queue's
+        contract guarantees the upload completes regardless.
+    """
+
+    async def create_arbitration_proposal(
+        self,
+        record: DisputedAttributionRecord,
+        record_id: str,
+    ) -> Optional[str]: ...
+
+
+class NullArbitrationProposalSink:
+    """Default no-op sink. Returns ``None`` for every record.
+
+    Used when:
+      - Governance backend not yet wired (single-node testnet).
+      - Operators want the queue's audit trail without auto-creating
+        proposals (manual proposal authoring per record).
+    Production wires a real ``ArbitrationProposalSink`` once the
+    governance API is ratified (see T6.5 design doc §"Phase 6
+    governance hook")."""
+
+    async def create_arbitration_proposal(
+        self,
+        record: DisputedAttributionRecord,
+        record_id: str,
+    ) -> Optional[str]:
+        return None
+
+
+def render_arbitration_body(record: DisputedAttributionRecord) -> str:
+    """Format a disputed-attribution record into a deterministic
+    proposal body. Public so test harnesses + alternate sinks can
+    reproduce the exact rendering councils see.
+
+    Determinism matters: an off-chain audit trail or a future
+    on-chain arbitration contract may want to verify the body
+    bytes the council voted against. Field order, line breaks, and
+    decimal formatting are pinned here.
+    """
+    return (
+        "PRSM-PROV-1 disputed-attribution review\n"
+        f"\n"
+        f"Fingerprint kind: {record.fingerprint_kind}\n"
+        f"Similarity: {record.similarity:.6f}\n"
+        f"\n"
+        f"Candidate parent CID: {record.candidate_parent_cid}\n"
+        f"Candidate parent creator: {record.candidate_parent_creator}\n"
+        f"\n"
+        f"New CID (uploader's content): {record.new_cid}\n"
+        f"New uploader: {record.new_creator}\n"
+        f"\n"
+        f"Flagged at (unix): {record.flagged_at}\n"
+    )
+
+
+@runtime_checkable
 class ArbitrationQueue(Protocol):
     async def enqueue(self, record: DisputedAttributionRecord) -> str: ...
     async def get(

@@ -25,6 +25,7 @@ import pytest
 from prsm.data.dedup.arbitration import (
     DisputedAttributionRecord,
     InMemoryArbitrationQueue,
+    NullArbitrationProposalSink,
 )
 from prsm.data.dedup.thresholds import ThresholdResolver
 from prsm.node.content_uploader import ContentUploader, _SemanticIndex
@@ -41,6 +42,7 @@ def _make_uploader(
     threshold_resolver=None,
     arbitration_queue=None,
     embedding_model_id=None,
+    arbitration_proposal_sink=None,
 ):
     identity = generate_node_identity("test-node")
     # gossip.publish is awaited inside upload() — must be AsyncMock.
@@ -54,6 +56,7 @@ def _make_uploader(
         embedding_model_id=embedding_model_id,
         threshold_resolver=threshold_resolver,
         arbitration_queue=arbitration_queue,
+        arbitration_proposal_sink=arbitration_proposal_sink,
     )
 
 
@@ -513,3 +516,198 @@ class TestUploadBinaryThreeBandRouting:
         assert result is not None
         # No auto-parent (sim < derivative) and no queue to enqueue to.
         assert "cid-bin-old" not in (result.parent_cids or [])
+
+
+# ──────────────────────────────────────────────────────────────────────
+# T6.5.gov — ARBITRATION_DISPUTE proposal-sink hook
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _RecordingSink:
+    """Test sink that captures every (record, record_id) it sees and
+    returns a synthetic proposal_id."""
+
+    def __init__(self, proposal_id="prop-test-1"):
+        self.calls: list[tuple[DisputedAttributionRecord, str]] = []
+        self._proposal_id = proposal_id
+
+    async def create_arbitration_proposal(self, record, record_id):
+        self.calls.append((record, record_id))
+        return self._proposal_id
+
+
+class _NullReturningSink:
+    """Test sink that returns None — the link step must skip cleanly
+    rather than calling set_proposal_id with None."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def create_arbitration_proposal(self, record, record_id):
+        self.calls += 1
+        return None
+
+
+class _RaisingSink:
+    """Test sink whose create_arbitration_proposal always raises.
+    Used to verify the upload still completes."""
+
+    async def create_arbitration_proposal(self, record, record_id):
+        raise RuntimeError("backend down")
+
+
+class TestProposalSinkConstructor:
+    def test_default_sink_is_none(self):
+        uploader = _make_uploader()
+        assert uploader._arbitration_proposal_sink is None
+
+    def test_null_sink_storable(self):
+        sink = NullArbitrationProposalSink()
+        uploader = _make_uploader(arbitration_proposal_sink=sink)
+        assert uploader._arbitration_proposal_sink is sink
+
+
+class TestEnqueueWithSink:
+    """Direct tests for ``_enqueue_arbitration`` with sinks of varying
+    behavior — covers the happy path + every failure mode."""
+
+    def _pending(self):
+        return {
+            "candidate_parent_cid": "cid-old",
+            "candidate_parent_creator": "0xold",
+            "similarity": 0.78,
+            "fingerprint_kind": "text-vector",
+        }
+
+    def test_sink_called_and_proposal_id_linked(self):
+        queue = InMemoryArbitrationQueue()
+        sink = _RecordingSink(proposal_id="prop-42")
+        uploader = _make_uploader(
+            arbitration_queue=queue,
+            arbitration_proposal_sink=sink,
+        )
+        uploader.creator_address = "0x" + "11" * 20
+        asyncio.run(uploader._enqueue_arbitration(
+            "cid-new", self._pending(),
+        ))
+        # Sink saw exactly one record.
+        assert len(sink.calls) == 1
+        record, record_id = sink.calls[0]
+        assert record.new_cid == "cid-new"
+        # Queue's record now carries the proposal_id link.
+        recovered = asyncio.run(queue.get(record_id))
+        assert recovered is not None
+        assert recovered.proposal_id == "prop-42"
+
+    def test_no_sink_skips_proposal_step(self):
+        queue = InMemoryArbitrationQueue()
+        uploader = _make_uploader(
+            arbitration_queue=queue,
+            arbitration_proposal_sink=None,
+        )
+        uploader.creator_address = "0x" + "11" * 20
+        asyncio.run(uploader._enqueue_arbitration(
+            "cid-new", self._pending(),
+        ))
+        records = asyncio.run(queue.list_pending())
+        assert len(records) == 1
+        # No sink → no proposal_id link.
+        assert records[0].proposal_id is None
+
+    def test_sink_returning_none_does_not_link(self):
+        queue = InMemoryArbitrationQueue()
+        sink = _NullReturningSink()
+        uploader = _make_uploader(
+            arbitration_queue=queue,
+            arbitration_proposal_sink=sink,
+        )
+        uploader.creator_address = "0x" + "11" * 20
+        asyncio.run(uploader._enqueue_arbitration(
+            "cid-new", self._pending(),
+        ))
+        assert sink.calls == 1
+        records = asyncio.run(queue.list_pending())
+        assert len(records) == 1
+        assert records[0].proposal_id is None
+
+    def test_sink_raising_does_not_break_upload(self):
+        # Sink raises but the record is still queued.
+        queue = InMemoryArbitrationQueue()
+        sink = _RaisingSink()
+        uploader = _make_uploader(
+            arbitration_queue=queue,
+            arbitration_proposal_sink=sink,
+        )
+        uploader.creator_address = "0x" + "11" * 20
+        # Must not raise.
+        asyncio.run(uploader._enqueue_arbitration(
+            "cid-new", self._pending(),
+        ))
+        records = asyncio.run(queue.list_pending())
+        assert len(records) == 1
+        assert records[0].proposal_id is None
+
+    def test_set_proposal_id_failure_swallowed(self):
+        # The link step is also wrapped — a queue that raises on
+        # set_proposal_id must NOT crash the upload.
+        sink = _RecordingSink(proposal_id="prop-99")
+        bad_queue = MagicMock()
+        bad_queue.enqueue = AsyncMock(return_value="rid-1")
+        bad_queue.set_proposal_id = AsyncMock(
+            side_effect=RuntimeError("link-storage-down"),
+        )
+        uploader = _make_uploader(
+            arbitration_queue=bad_queue,
+            arbitration_proposal_sink=sink,
+        )
+        uploader.creator_address = "0x" + "11" * 20
+        # Must not raise.
+        asyncio.run(uploader._enqueue_arbitration(
+            "cid-new", self._pending(),
+        ))
+        # Sink was still called — just couldn't link back.
+        assert len(sink.calls) == 1
+
+
+class TestUploadWithProposalSink:
+    """End-to-end through ``upload()`` with a real
+    InMemoryArbitrationQueue + recording sink. Verifies the
+    disputed-band branch surfaces the proposal correctly when both
+    queue and sink are wired."""
+
+    def test_disputed_band_creates_proposal_and_links_to_record(self):
+        from prsm.data.dedup.thresholds import ThresholdResolver
+        resolver = ThresholdResolver.from_default_path()
+        queue = InMemoryArbitrationQueue()
+        sink = _RecordingSink(proposal_id="prop-from-upload")
+
+        uploader = _make_uploader(
+            threshold_resolver=resolver,
+            arbitration_queue=queue,
+            arbitration_proposal_sink=sink,
+        )
+        uploader.creator_address = "0x" + "11" * 20
+
+        async def _embedding_fn(content):
+            return np.array([1.0, 0.0], dtype=np.float32)
+        uploader._get_embedding = _embedding_fn
+        uploader._semantic_index.find_nearest = (
+            lambda emb: ("cid-old", 0.86, "0xoldcreator")  # disputed band
+        )
+        async def _publish_stub(content, filename, ph):
+            return "cid-new-uploaded"
+        uploader._publish_content = _publish_stub
+        uploader._register_local_embedding = MagicMock()
+        uploader._register_local_content = MagicMock()
+        uploader._broadcast_provenance = AsyncMock()
+
+        result = asyncio.run(uploader.upload(b"some content"))
+        assert result is not None
+        # Sink received the record (with the post-publish CID).
+        assert len(sink.calls) == 1
+        record, record_id = sink.calls[0]
+        assert record.new_cid == "cid-new-uploaded"
+        # The record in the queue is linked back to the proposal.
+        linked = asyncio.run(queue.get(record_id))
+        assert linked is not None
+        assert linked.proposal_id == "prop-from-upload"

@@ -59,6 +59,7 @@ class ProposalCategory(str, Enum):
     OPERATIONAL = "operational"  # Day-to-day operations
     COMMUNITY = "community"  # Community programs, initiatives
     EMERGENCY = "emergency"  # Emergency measures
+    ARBITRATION_DISPUTE = "arbitration_dispute"  # PRSM-PROV-1 T6.5 — disputed-attribution review
 
 
 class VotingPeriod(str, Enum):

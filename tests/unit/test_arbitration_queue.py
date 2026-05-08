@@ -16,9 +16,12 @@ import pytest
 
 from prsm.data.dedup.arbitration import (
     ArbitrationDecision,
+    ArbitrationProposalSink,
     DisputedAttributionRecord,
     FilesystemArbitrationQueue,
     InMemoryArbitrationQueue,
+    NullArbitrationProposalSink,
+    render_arbitration_body,
 )
 
 
@@ -243,3 +246,66 @@ class TestFilesystemQueue:
         # Reload — must not raise.
         q2 = FilesystemArbitrationQueue(tmp_path / "queue")
         assert asyncio.run(q2.list_pending()) == []
+
+
+# ──────────────────────────────────────────────────────────────────────
+# T6.5.gov — proposal sink + body renderer
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestRenderArbitrationBody:
+    """The body string is the deterministic representation councils
+    will read AND a future on-chain arbitration contract may verify
+    bytes against. Pin field order, line breaks, decimal formatting."""
+
+    def test_includes_all_load_bearing_fields(self):
+        rec = _record(
+            new_cid="cid-uploader",
+            candidate="cid-claimed-parent",
+            sim=0.78,
+            kind="image-phash",
+        )
+        body = render_arbitration_body(rec)
+        assert "cid-uploader" in body
+        assert "cid-claimed-parent" in body
+        assert "image-phash" in body
+        assert "0xnew" in body
+        assert "0xold" in body
+        # Similarity must show 6-decimal precision so two near-identical
+        # disputed-band records don't render identically.
+        assert "0.780000" in body
+        # Flagged-at unix timestamp surfaced for audit history.
+        assert str(rec.flagged_at) in body
+
+    def test_deterministic_for_equal_records(self):
+        a = _record()
+        b = _record()
+        assert render_arbitration_body(a) == render_arbitration_body(b)
+
+    def test_distinguishes_records_by_similarity(self):
+        a = _record(sim=0.78)
+        b = _record(sim=0.79)
+        assert render_arbitration_body(a) != render_arbitration_body(b)
+
+    def test_starts_with_pinned_header(self):
+        # The first line is part of the deterministic contract — a
+        # future on-chain arbitration contract may sign over the
+        # bytes of this body to commit the council's review target.
+        body = render_arbitration_body(_record())
+        assert body.startswith(
+            "PRSM-PROV-1 disputed-attribution review\n"
+        )
+
+
+class TestNullArbitrationProposalSink:
+    def test_satisfies_protocol(self):
+        sink = NullArbitrationProposalSink()
+        assert isinstance(sink, ArbitrationProposalSink)
+
+    def test_returns_none_for_any_record(self):
+        sink = NullArbitrationProposalSink()
+        rec = _record()
+        result = asyncio.run(
+            sink.create_arbitration_proposal(rec, "rid-123"),
+        )
+        assert result is None
