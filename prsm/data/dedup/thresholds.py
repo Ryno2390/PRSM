@@ -62,6 +62,10 @@ class EffectiveThresholds:
 
     derivative: float
     duplicate: float
+    # T6.5 — disputed-band lower bound. Hits in
+    # ``[arbitration_floor, derivative)`` route to the human-review
+    # arbitration queue rather than auto-attributing.
+    arbitration_floor: float
     # The lookup key used to resolve these (e.g. "text-vector/openai/...").
     # Surfaced for telemetry / debugging — not part of the dedup decision.
     resolved_key: str
@@ -81,6 +85,17 @@ class EffectiveThresholds:
             raise ValueError(
                 f"duplicate ({self.duplicate}) must be >= derivative "
                 f"({self.derivative}) — duplicate is the stricter tier"
+            )
+        if not (0.0 <= self.arbitration_floor <= 1.0):
+            raise ValueError(
+                f"arbitration_floor must be in [0,1], got "
+                f"{self.arbitration_floor!r}"
+            )
+        if self.arbitration_floor > self.derivative:
+            raise ValueError(
+                f"arbitration_floor ({self.arbitration_floor}) must be "
+                f"<= derivative ({self.derivative}) — the disputed band "
+                f"sits below auto-attribution"
             )
 
 
@@ -242,6 +257,16 @@ class ThresholdResolver:
 
         derivative = float(base_entry["derivative"])
         duplicate = float(base_entry["duplicate"])
+        # T6.5 — explicit arbitration_floor wins; otherwise fall back
+        # to derivative - 0.10 (clamped to >= 0.0). The 0.10 default
+        # is the design-doc conservative starting point until T6.4
+        # calibrates per-kind ROC values.
+        if "arbitration_floor" in base_entry and isinstance(
+            base_entry["arbitration_floor"], (int, float),
+        ):
+            arbitration_floor = float(base_entry["arbitration_floor"])
+        else:
+            arbitration_floor = max(0.0, derivative - 0.10)
 
         hint_applied: Optional[str] = None
         if content_type_hint:
@@ -262,6 +287,18 @@ class ThresholdResolver:
                     duplicate = self._apply_multiplier(
                         duplicate, mult_entry.get("duplicate", 1.0),
                     )
+                    # Same multiplier applies to arbitration_floor so a
+                    # tightening hint also tightens the disputed band's
+                    # lower bound. If hint omits arbitration_floor, mirror
+                    # the derivative multiplier (T6.5 design §"hint
+                    # propagation").
+                    arb_mult = mult_entry.get(
+                        "arbitration_floor",
+                        mult_entry.get("derivative", 1.0),
+                    )
+                    arbitration_floor = self._apply_multiplier(
+                        arbitration_floor, arb_mult,
+                    )
                     hint_applied = content_type_hint
 
         # Apply per-kind floor.
@@ -281,15 +318,22 @@ class ThresholdResolver:
         # Clamp to [0, 1] regardless — defends against pathological YAML.
         derivative = min(1.0, max(0.0, derivative))
         duplicate = min(1.0, max(0.0, duplicate))
+        arbitration_floor = min(1.0, max(0.0, arbitration_floor))
 
         # Invariant: duplicate >= derivative (duplicate is stricter).
         # If a hint multiplier inverted them, push duplicate up.
         if duplicate < derivative:
             duplicate = derivative
+        # Invariant: arbitration_floor <= derivative. If a hint pushed
+        # the floor above derivative, clamp down — the disputed band
+        # collapses (effectively no arbitration zone).
+        if arbitration_floor > derivative:
+            arbitration_floor = derivative
 
         return EffectiveThresholds(
             derivative=derivative,
             duplicate=duplicate,
+            arbitration_floor=arbitration_floor,
             resolved_key=resolved_key or fingerprint_kind,
             hint_applied=hint_applied,
         )

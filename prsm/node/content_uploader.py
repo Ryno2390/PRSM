@@ -542,6 +542,8 @@ class ContentUploader:
         content_retriever: Optional[Any] = None,
         fingerprint_index_path: Optional[Path] = None,
         local_fingerprint_index: Optional[Any] = None,
+        threshold_resolver: Optional[Any] = None,
+        arbitration_queue: Optional[Any] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -645,6 +647,22 @@ class ContentUploader:
 
         # Manifest tracking: manifest_content_id -> manifest data
         self.shard_manifests: Dict[str, Any] = {}
+
+        # PRSM-PROV-1 T6.3 + T6.5 — per-content-type thresholds + arbitration.
+        # ``threshold_resolver`` is a ``ThresholdResolver``: when set,
+        # the embedding-path dedup branch consults it for
+        # ``EffectiveThresholds`` (with arbitration_floor) instead of
+        # the legacy ``_SemanticIndex.DERIVATIVE_THRESHOLD`` /
+        # ``DUPLICATE_THRESHOLD`` class constants.
+        # ``arbitration_queue`` is an ``ArbitrationQueue``: when set
+        # AND a similarity hit lands in ``[arbitration_floor,
+        # derivative)``, the upload completes WITHOUT auto-attributing
+        # the candidate parent and instead enqueues a
+        # ``DisputedAttributionRecord`` for council review.
+        # Both default to None — backwards-compatible with legacy
+        # 2-band auto-attribute behavior.
+        self._threshold_resolver = threshold_resolver
+        self._arbitration_queue = arbitration_queue
 
     async def close(self) -> None:
         pass
@@ -1207,12 +1225,30 @@ class ContentUploader:
         near_dup_cid: Optional[str] = None
         near_dup_sim: Optional[float] = None
 
+        # Per-call pending arbitration record. Filled in by the
+        # disputed-band branch below; enqueued post-publish so the
+        # CID assigned by ``_publish_content`` lands in ``new_cid``.
+        # Cleared on every upload() entry so a previous flagged upload
+        # does not leak into this one.
+        pending_arbitration: Optional[Dict[str, Any]] = None
         if embedding is not None:
             match = self._semantic_index.find_nearest(embedding)
             if match is not None:
-                match_cid, match_sim, _match_creator = match
-                if match_sim >= _SemanticIndex.DERIVATIVE_THRESHOLD:
-                    if match_sim >= _SemanticIndex.DUPLICATE_THRESHOLD:
+                match_cid, match_sim, match_creator = match
+                # Resolve effective thresholds. With ThresholdResolver
+                # configured, consult per-(kind, model_id, hint).
+                # Without one, fall back to legacy class constants.
+                eff = self._resolve_text_thresholds(metadata)
+                if eff is not None:
+                    deriv_thr = eff.derivative
+                    dup_thr = eff.duplicate
+                    arb_floor = eff.arbitration_floor
+                else:
+                    deriv_thr = _SemanticIndex.DERIVATIVE_THRESHOLD
+                    dup_thr = _SemanticIndex.DUPLICATE_THRESHOLD
+                    arb_floor = deriv_thr  # disables disputed band
+                if match_sim >= deriv_thr:
+                    if match_sim >= dup_thr:
                         logger.warning(
                             f"Near-exact duplicate detected for '{filename}': "
                             f"CID {match_cid[:16]}... (similarity={match_sim:.4f}). "
@@ -1229,6 +1265,30 @@ class ContentUploader:
                     # Auto-prepend matching CID as a parent so royalty splits apply
                     if match_cid not in parents:
                         parents = [match_cid] + parents
+                elif (
+                    self._arbitration_queue is not None
+                    and match_sim >= arb_floor
+                ):
+                    # PRSM-PROV-1 T6.5 — disputed band. Upload proceeds
+                    # but we do NOT auto-attribute the candidate parent.
+                    # Enqueue happens post-publish (see below) once the
+                    # new content's CID is known.
+                    logger.info(
+                        "Disputed-band similarity for '%s': CID %s... "
+                        "(similarity=%.4f, floor=%.4f, derivative=%.4f). "
+                        "Flagged for arbitration; no auto-parent.",
+                        filename,
+                        match_cid[:16],
+                        match_sim,
+                        arb_floor,
+                        deriv_thr,
+                    )
+                    pending_arbitration = {
+                        "candidate_parent_cid": match_cid,
+                        "candidate_parent_creator": match_creator or "",
+                        "similarity": float(match_sim),
+                        "fingerprint_kind": "text-vector",
+                    }
         # ─────────────────────────────────────────────────────────────────────
 
         # ── Binary-fingerprint deduplication (PRSM-PROV-1 Item 4 T4.7) ──
@@ -1305,6 +1365,12 @@ class ContentUploader:
         if not cid:
             logger.error(f"Failed to publish {filename}")
             return None
+
+        # PRSM-PROV-1 T6.5 — enqueue any disputed-band record now that
+        # the new CID is known. Failures must NOT break the upload —
+        # log + drop. Sharded path mirrors this in _upload_with_sharding.
+        if pending_arbitration is not None and self._arbitration_queue is not None:
+            await self._enqueue_arbitration(cid, pending_arbitration)
 
         embedding_id = f"emb:{cid}" if embedding is not None else None
 
@@ -1903,6 +1969,72 @@ class ContentUploader:
     # server produced — so it was both dead and broken after Task 3b
     # moved the server side to ContentProvider. The real client path
     # is ContentProvider.request_content.
+
+    def _resolve_text_thresholds(
+        self, metadata: Optional[Dict[str, Any]],
+    ):
+        """Resolve effective dedup thresholds for the text-vector lane.
+
+        Returns ``EffectiveThresholds`` when ``threshold_resolver`` is
+        configured; otherwise ``None`` and the upload path falls back
+        to legacy 2-band class constants. Resolver lookup failures
+        (unknown kind, malformed YAML) also degrade to ``None`` —
+        operator misconfiguration must NOT block uploads.
+        """
+        if self._threshold_resolver is None:
+            return None
+        hint = None
+        if metadata:
+            hint_value = metadata.get("content_type_hint")
+            if isinstance(hint_value, str) and hint_value:
+                hint = hint_value
+        try:
+            return self._threshold_resolver.resolve(
+                "text-vector",
+                model_id=self._embedding_model_id,
+                content_type_hint=hint,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ThresholdResolver lookup failed (kind=text-vector "
+                "model=%s hint=%s): %s — falling back to legacy "
+                "class-constant thresholds",
+                self._embedding_model_id,
+                hint,
+                exc,
+            )
+            return None
+
+    async def _enqueue_arbitration(
+        self, new_cid: str, pending: Dict[str, Any],
+    ) -> None:
+        """Enqueue a ``DisputedAttributionRecord`` once the upload's
+        new_cid is known. Best-effort — upload completion must NEVER
+        be blocked by an arbitration-queue failure (see T6.5 design
+        §"What we deliberately defer" — anti-griefing rate limits).
+        """
+        try:
+            from prsm.data.dedup.arbitration import (
+                DisputedAttributionRecord,
+            )
+            record = DisputedAttributionRecord(
+                new_cid=new_cid,
+                new_creator=self.creator_address or "",
+                candidate_parent_cid=pending["candidate_parent_cid"],
+                candidate_parent_creator=pending["candidate_parent_creator"],
+                similarity=pending["similarity"],
+                fingerprint_kind=pending["fingerprint_kind"],
+                flagged_at=int(time.time()),
+                proposal_id=None,
+            )
+            await self._arbitration_queue.enqueue(record)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "arbitration enqueue failed for cid=%s: %s — upload "
+                "still completes (record lost; griefing-safe)",
+                new_cid[:16],
+                exc,
+            )
 
     async def _publish_content(
         self,

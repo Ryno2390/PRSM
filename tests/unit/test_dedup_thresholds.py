@@ -261,12 +261,12 @@ def test_duplicate_geq_derivative_after_multiplier():
 def test_effective_thresholds_dataclass_validates():
     with pytest.raises(ValueError, match=r"\[0,1\]"):
         EffectiveThresholds(
-            derivative=1.5, duplicate=1.6,
+            derivative=1.5, duplicate=1.6, arbitration_floor=0.5,
             resolved_key="x", hint_applied=None,
         )
     with pytest.raises(ValueError, match=r"duplicate.*>= derivative"):
         EffectiveThresholds(
-            derivative=0.9, duplicate=0.5,
+            derivative=0.9, duplicate=0.5, arbitration_floor=0.5,
             resolved_key="x", hint_applied=None,
         )
 
@@ -386,3 +386,102 @@ def test_canonical_yaml_scientific_abstract_hint_tightens():
         "scientific_abstract hint must tighten the derivative threshold"
     )
     assert hinted.hint_applied == "scientific_abstract"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# T6.5 — arbitration_floor
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestArbitrationFloor:
+    """The arbitration_floor field gates the disputed band:
+    [arbitration_floor, derivative) → human-review queue rather
+    than auto-attribute."""
+
+    def test_default_yaml_exposes_arbitration_floor_per_kind(self):
+        resolver = ThresholdResolver.from_default_path()
+        for kind in (
+            "text-vector",
+            "image-phash",
+            "audio-chromaprint",
+            "video-multihash",
+        ):
+            thr = resolver.resolve(kind)
+            assert hasattr(thr, "arbitration_floor"), (
+                f"{kind} thresholds missing arbitration_floor field"
+            )
+            assert 0.0 <= thr.arbitration_floor <= thr.derivative, (
+                f"{kind}: arbitration_floor {thr.arbitration_floor} must "
+                f"be <= derivative {thr.derivative}"
+            )
+
+    def test_arbitration_floor_default_is_derivative_minus_010(self, tmp_path):
+        # When YAML omits arbitration_floor, the resolver falls back to
+        # max(derivative - 0.10, 0.0) per the T6.5 design conservative
+        # default.
+        yaml_path = tmp_path / "t.yaml"
+        yaml_path.write_text(
+            "defaults:\n"
+            "  text-vector:\n"
+            "    derivative: 0.92\n"
+            "    duplicate: 0.99\n",
+            encoding="utf-8",
+        )
+        resolver = ThresholdResolver.from_yaml_path(yaml_path)
+        thr = resolver.resolve("text-vector")
+        assert thr.arbitration_floor == pytest.approx(0.82)
+
+    def test_explicit_arbitration_floor_in_yaml_honored(self, tmp_path):
+        yaml_path = tmp_path / "t.yaml"
+        yaml_path.write_text(
+            "defaults:\n"
+            "  text-vector:\n"
+            "    derivative: 0.92\n"
+            "    duplicate: 0.99\n"
+            "    arbitration_floor: 0.70\n",
+            encoding="utf-8",
+        )
+        resolver = ThresholdResolver.from_yaml_path(yaml_path)
+        thr = resolver.resolve("text-vector")
+        assert thr.arbitration_floor == pytest.approx(0.70)
+
+    def test_arbitration_floor_above_derivative_rejected_at_construction(
+        self,
+    ):
+        # Direct dataclass construction with a bogus floor must raise —
+        # invariant check guards downstream branch logic.
+        with pytest.raises(ValueError, match="arbitration_floor"):
+            EffectiveThresholds(
+                derivative=0.85,
+                duplicate=0.97,
+                arbitration_floor=0.90,  # > derivative — invalid
+                resolved_key="text-vector",
+                hint_applied=None,
+            )
+
+    def test_negative_arbitration_floor_rejected(self):
+        with pytest.raises(ValueError, match="arbitration_floor"):
+            EffectiveThresholds(
+                derivative=0.85,
+                duplicate=0.97,
+                arbitration_floor=-0.1,
+                resolved_key="text-vector",
+                hint_applied=None,
+            )
+
+    def test_arbitration_floor_clamped_at_zero_when_derivative_below_010(
+        self, tmp_path,
+    ):
+        # Pathological: derivative=0.05, default rule would yield
+        # arbitration_floor=-0.05. Resolver clamps to 0.0.
+        yaml_path = tmp_path / "t.yaml"
+        yaml_path.write_text(
+            "defaults:\n"
+            "  text-vector:\n"
+            "    derivative: 0.05\n"
+            "    duplicate: 0.99\n",
+            encoding="utf-8",
+        )
+        resolver = ThresholdResolver.from_yaml_path(yaml_path)
+        thr = resolver.resolve("text-vector")
+        assert thr.arbitration_floor == pytest.approx(0.0)
