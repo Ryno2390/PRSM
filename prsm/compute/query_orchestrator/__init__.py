@@ -52,6 +52,10 @@ from prsm.compute.query_orchestrator.retry_loop import (
     SlashClient,
     dispatch_with_retries,
 )
+from prsm.compute.query_orchestrator.semantic_index_adapter import (
+    Embedder,
+    SemanticIndexAdapter,
+)
 
 __all__ = [
     # aggregator_selector
@@ -80,4 +84,14 @@ __all__ = [
     "run_swarm",
     # orchestrator (composition class)
     "QueryOrchestrator",
+    # retry-loop shell
+    "EscrowClient",
+    "PreemptionRecorder",
+    "QueryRetriesExhaustedError",
+    "RetryPolicy",
+    "SlashClient",
+    "dispatch_with_retries",
+    # semantic_index_adapter
+    "Embedder",
+    "SemanticIndexAdapter",
 ]
