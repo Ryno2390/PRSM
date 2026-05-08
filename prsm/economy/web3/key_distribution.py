@@ -299,6 +299,58 @@ class KeyDistributionClient:
             ).build_transaction(self._tx_overrides())
             return self._sign_and_send(tx)
 
+    # ── Event stream ──────────────────────────────────────────
+
+    def latest_block(self) -> int:
+        return int(self.web3.eth.block_number)
+
+    def get_key_released_events(
+        self, from_block: int, to_block: int,
+    ) -> "list[KeyReleasedEvent]":
+        """Fetch KeyReleased events in [from_block, to_block].
+
+        Caller chunks large ranges (RPCs typically cap get_logs at
+        ~10k blocks).
+        """
+        if from_block > to_block:
+            return []
+        logs = self.contract.events.KeyReleased().get_logs(
+            from_block=from_block, to_block=to_block,
+        )
+        return [KeyReleasedEvent.from_decoded_args(log["args"]) for log in logs]
+
+    def get_key_deposited_events(
+        self, from_block: int, to_block: int,
+    ):
+        """Fetch KeyDeposited events. Returns list of
+        KeyDepositedEvent (from key_distribution_watcher).
+        """
+        if from_block > to_block:
+            return []
+        from prsm.economy.web3.key_distribution_watcher import (
+            KeyDepositedEvent,
+        )
+        logs = self.contract.events.KeyDeposited().get_logs(
+            from_block=from_block, to_block=to_block,
+        )
+        return [KeyDepositedEvent.from_decoded_args(log["args"]) for log in logs]
+
+    def get_key_deauthorized_events(
+        self, from_block: int, to_block: int,
+    ):
+        if from_block > to_block:
+            return []
+        from prsm.economy.web3.key_distribution_watcher import (
+            KeyDeauthorizedEvent,
+        )
+        logs = self.contract.events.KeyDeauthorized().get_logs(
+            from_block=from_block, to_block=to_block,
+        )
+        return [
+            KeyDeauthorizedEvent.from_decoded_args(log["args"])
+            for log in logs
+        ]
+
     def deauthorize(
         self,
         content_hash: bytes,

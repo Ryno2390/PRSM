@@ -330,6 +330,23 @@ class CompensationDistributorClient:
     def scheduled_at(self) -> int:
         return int(self.contract.functions.scheduledAt().call())
 
+    # ── Event stream ──────────────────────────────────────────
+
+    def latest_block(self) -> int:
+        return int(self.web3.eth.block_number)
+
+    def get_distributed_events(
+        self, from_block: int, to_block: int,
+    ) -> "list[DistributedEvent]":
+        if from_block > to_block:
+            return []
+        logs = self.contract.events.Distributed().get_logs(
+            from_block=from_block, to_block=to_block,
+        )
+        return [
+            DistributedEvent.from_decoded_args(log["args"]) for log in logs
+        ]
+
     # ── Helpers ────────────────────────────────────────────────
 
     def _tx_overrides(self) -> dict:

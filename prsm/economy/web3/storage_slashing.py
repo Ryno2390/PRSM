@@ -443,6 +443,50 @@ class StorageSlashingClient:
         _validate_bytes32(slash_id, "slash_id")
         return bool(self.contract.functions.slashRecorded(slash_id).call())
 
+    # ── Event stream ──────────────────────────────────────────
+
+    def latest_block(self) -> int:
+        return int(self.web3.eth.block_number)
+
+    def get_heartbeat_recorded_events(
+        self, from_block: int, to_block: int,
+    ) -> "list[HeartbeatRecordedEvent]":
+        if from_block > to_block:
+            return []
+        logs = self.contract.events.HeartbeatRecorded().get_logs(
+            from_block=from_block, to_block=to_block,
+        )
+        return [
+            HeartbeatRecordedEvent.from_decoded_args(log["args"])
+            for log in logs
+        ]
+
+    def get_proof_failure_slashed_events(
+        self, from_block: int, to_block: int,
+    ) -> "list[ProofFailureSlashedEvent]":
+        if from_block > to_block:
+            return []
+        logs = self.contract.events.ProofFailureSlashed().get_logs(
+            from_block=from_block, to_block=to_block,
+        )
+        return [
+            ProofFailureSlashedEvent.from_decoded_args(log["args"])
+            for log in logs
+        ]
+
+    def get_heartbeat_missing_slashed_events(
+        self, from_block: int, to_block: int,
+    ) -> "list[HeartbeatMissingSlashedEvent]":
+        if from_block > to_block:
+            return []
+        logs = self.contract.events.HeartbeatMissingSlashed().get_logs(
+            from_block=from_block, to_block=to_block,
+        )
+        return [
+            HeartbeatMissingSlashedEvent.from_decoded_args(log["args"])
+            for log in logs
+        ]
+
     # ── Helpers ────────────────────────────────────────────────
 
     def _tx_overrides(self) -> dict:
