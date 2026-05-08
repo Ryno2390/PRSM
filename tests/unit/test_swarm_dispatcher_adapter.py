@@ -166,9 +166,17 @@ async def test_happy_path_three_shards_three_partials():
 
 
 @pytest.mark.asyncio
-async def test_per_shard_mobile_agent_built_from_manifest():
+async def test_per_shard_mobile_agent_built_with_proper_agent_manifest():
     """The dispatcher's `dispatch` receives an agent whose manifest
-    round-trips back to the input InstructionManifest."""
+    is a real `AgentManifest` (resource declaration), NOT the
+    InstructionManifest. The InstructionManifest is the WASM-input
+    payload — it's a separate concern from the agent's resource
+    declaration. This pin closes the type-unification follow-on:
+    `agent.manifest.to_dict()` (called by the dispatcher's gossip
+    payload at `prsm/compute/agents/dispatcher.py:135`) now produces
+    the correct AgentManifest dict shape."""
+    from prsm.compute.agents.models import AgentManifest
+
     shards = _shards(2)
     manifest = _manifest()
     ad = _stub_dispatcher([_result_dict(), _result_dict()])
@@ -177,11 +185,19 @@ async def test_per_shard_mobile_agent_built_from_manifest():
     await adapter.fan_out(manifest, shards)
 
     assert ad.dispatch.await_count == 2
-    for call in ad.dispatch.await_args_list:
+    for i, call in enumerate(ad.dispatch.await_args_list):
         agent = call.args[0] if call.args else call.kwargs["agent"]
         assert isinstance(agent, MobileAgent)
-        # The manifest passed to fan_out is the one carried by the agent
-        assert agent.manifest is manifest
+        # The agent's manifest is a real AgentManifest with the
+        # shard's CID in required_content_ids — NOT the
+        # InstructionManifest payload.
+        assert isinstance(agent.manifest, AgentManifest)
+        assert agent.manifest.required_content_ids == [shards[i].cid]
+        # to_dict() produces the AgentManifest dict shape, not the
+        # InstructionManifest dict shape.
+        d = agent.manifest.to_dict()
+        assert "required_content_ids" in d
+        assert "min_hardware_tier" in d
 
 
 @pytest.mark.asyncio

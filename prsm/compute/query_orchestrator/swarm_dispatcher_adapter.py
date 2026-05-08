@@ -62,7 +62,7 @@ from typing import Sequence
 
 from prsm.compute.agents.dispatcher import AgentDispatcher
 from prsm.compute.agents.instruction_set import InstructionManifest
-from prsm.compute.agents.models import MobileAgent
+from prsm.compute.agents.models import AgentManifest, MobileAgent
 from prsm.compute.query_orchestrator.shard_finder import ShardCandidate
 from prsm.compute.query_orchestrator.swarm_runner import PartialResult
 
@@ -156,7 +156,7 @@ class SwarmDispatcherAdapter:
 
         partials: list[PartialResult] = []
         for shard in shards:
-            agent = self._build_agent(manifest)
+            agent = self._build_agent(manifest, shard)
 
             # Open the dispatch (gossip-publish manifest, escrow hold,
             # bidding starts).
@@ -183,29 +183,57 @@ class SwarmDispatcherAdapter:
 
     # ── Internals ───────────────────────────────────────────────────
 
-    def _build_agent(self, manifest: InstructionManifest) -> MobileAgent:
-        """Construct a per-shard MobileAgent carrying the manifest +
-        configured FTNS budget + executor binary.
+    def _build_agent(
+        self,
+        instruction_manifest: InstructionManifest,
+        shard: ShardCandidate,
+    ) -> MobileAgent:
+        """Construct a per-shard MobileAgent carrying:
+          - resource declaration (AgentManifest)
+          - configured FTNS budget + executor binary
+          - per-shard agent_id
 
-        The agent_id is freshly minted per call so the dispatcher can
-        track each shard's lifecycle independently. The signature
-        field on MobileAgent is set by the dispatcher's
-        `create_agent` flow — the adapter does NOT pre-sign here
-        because that requires an identity key, which the dispatcher
-        already owns.
+        The InstructionManifest (DSL payload the WASM executor will
+        consume via `to_wasm_input()`) is NOT carried on
+        `MobileAgent.manifest` — that field is an `AgentManifest`
+        declaring resource needs, not a DSL payload. The InstructionManifest
+        is delivered to the WASM executor through a separate channel
+        the dispatcher's transfer flow owns (see follow-on note below).
 
-        Note: `MobileAgent.manifest` is typed as AgentManifest in the
-        original models, but the InstructionManifest is the live
-        payload the WASM executor consumes (via `to_wasm_input()`).
-        Passing it here flows the InstructionManifest end-to-end; a
-        future refactor (out of B4 scope) may unify the two manifest
-        shapes or add a `to_dict()` shim to InstructionManifest for
-        full wire-format symmetry.
+        Type unification: this commit closes the B4 teammate's
+        flagged divergence — `agent.manifest.to_dict()` (called by
+        the dispatcher's gossip payload at
+        `prsm/compute/agents/dispatcher.py:135`) now correctly
+        produces an `AgentManifest` dict, not an `InstructionManifest`
+        dict.
+
+        Follow-on (separate sprint, NOT in this commit): wire the
+        InstructionManifest to the target WASM executor at agent
+        transfer time. The orchestrator's swarm_runner already passes
+        the InstructionManifest into `fan_out`; the dispatcher's
+        transfer pathway needs a sidecar field to carry the
+        `to_wasm_input()` bytes alongside the WASM binary itself.
+        Until that lands, the WASM executor on the target node
+        receives no DSL — production deployment requires the
+        orchestrator-wiring task to bridge that gap.
         """
+        agent_manifest = AgentManifest(
+            required_content_ids=[shard.cid],
+            # Tier inherited from shard's source listing if available
+            # (per Vision §6 the shard holder's tier was verified at
+            # marketplace ingestion). Default to "t1" for v1 — Tier C
+            # constraints land at the aggregator-selector via
+            # `requires_tee` rather than at agent-dispatch time.
+            min_hardware_tier="t1",
+            max_memory_bytes=256 * 1024 * 1024,
+            max_execution_seconds=60,
+            max_output_bytes=10 * 1024 * 1024,
+            required_capabilities=[],
+        )
         return MobileAgent(
             agent_id=str(uuid.uuid4()),
             wasm_binary=self._wasm_binary,
-            manifest=manifest,  # type: ignore[arg-type]
+            manifest=agent_manifest,
             origin_node="",  # filled in by dispatcher's create_agent path
             signature="",
             ftns_budget=self._budget,
