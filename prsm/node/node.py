@@ -187,6 +187,95 @@ def _build_provenance_client_or_none():
         return None
 
 
+# ──────────────────────────────────────────────────────────────────────
+# PRSM-PROV-1 Item 6 — three-band dedup component builders.
+# All three return None on any failure; the upload path falls back
+# to legacy 2-band auto-attribute behavior when any component is None.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _build_threshold_resolver_or_none():
+    """Construct the canonical ``ThresholdResolver`` from the
+    project's ``prsm/data/dedup_thresholds.yaml``. Returns None on
+    any IO/parse failure — uploads fall back to ``_SemanticIndex``
+    class-constant thresholds.
+    """
+    try:
+        from prsm.data.dedup.thresholds import ThresholdResolver
+        return ThresholdResolver.from_default_path()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "failed to load ThresholdResolver: %s — uploads will use "
+            "legacy 2-band class-constant thresholds",
+            exc,
+        )
+        return None
+
+
+def _build_arbitration_queue_or_none():
+    """Construct a ``FilesystemArbitrationQueue`` rooted at
+    ``~/.prsm/arbitration_queue/``. Returns None on any IO failure
+    — uploads then run without disputed-band recording (legacy 2-band).
+    """
+    try:
+        from prsm.data.dedup.arbitration import FilesystemArbitrationQueue
+        queue_dir = Path.home() / ".prsm" / "arbitration_queue"
+        return FilesystemArbitrationQueue(queue_dir)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "failed to construct FilesystemArbitrationQueue: %s — "
+            "uploads will not record disputed-band records",
+            exc,
+        )
+        return None
+
+
+def _build_arbitration_proposal_sink_or_none():
+    """Construct a ``TokenWeightedVotingProposalSink`` if the operator
+    has configured a system proposer address. Returns None otherwise.
+
+    Required env var:
+      ``PRSM_ARBITRATION_PROPOSER_ID`` — system-level proposer (the
+      Foundation Safe address or a delegate). Must hold sufficient
+      FTNS to cover proposal submission fees. Without this, the
+      arbitration queue still runs (records persist + are retrievable
+      via ``list_pending``), but no governance proposals are auto-
+      created — councils may author proposals by hand from queue
+      entries.
+
+    Disable explicitly with ``PRSM_ARBITRATION_PROPOSER_ID=""``.
+    """
+    proposer_id = os.getenv("PRSM_ARBITRATION_PROPOSER_ID", "").strip()
+    if not proposer_id:
+        return None
+    try:
+        from prsm.economy.governance.arbitration_sink import (
+            TokenWeightedVotingProposalSink,
+        )
+        from prsm.economy.governance.voting import TokenWeightedVoting
+        voting = TokenWeightedVoting()
+        sink = TokenWeightedVotingProposalSink(
+            voting=voting,
+            proposer_id=proposer_id,
+        )
+        logger.info(
+            "TokenWeightedVotingProposalSink wired with proposer_id=%s "
+            "(disputed-band records will surface as ARBITRATION_DISPUTE "
+            "proposals)",
+            proposer_id,
+        )
+        return sink
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "failed to construct TokenWeightedVotingProposalSink "
+            "(proposer_id=%s): %s — disputed-band records still queued, "
+            "but no governance proposals auto-created",
+            proposer_id,
+            exc,
+        )
+        return None
+
+
 class _FailClosedAnchor:
     """Pre-T3c stub: every lookup returns None, so cross-node manifest
     verification refuses to trust. Used when no production
@@ -735,6 +824,13 @@ class PRSMNode:
         # restarts so warm-cache dedup survives a process bounce.
         _fingerprint_index_path = Path.home() / ".prsm" / "fingerprint_index.json"
 
+        # PRSM-PROV-1 Item 6 — three-band dedup wiring. All three
+        # components degrade to None on failure; uploads still work
+        # without arbitration (legacy 2-band behavior).
+        _threshold_resolver = _build_threshold_resolver_or_none()
+        _arbitration_queue = _build_arbitration_queue_or_none()
+        _arbitration_proposal_sink = _build_arbitration_proposal_sink_or_none()
+
         # T3.6 (PRSM-PROV-1): LocalEmbeddingIndex backs the
         # EmbeddingDHT — every successful upload + embedding gets a
         # creator-signed record persisted here, so peers querying us
@@ -903,6 +999,13 @@ class PRSMNode:
             # uploader's _register_local_fingerprint and the
             # EmbeddingDHTServer's fetch handler share a single store.
             local_fingerprint_index=_local_fingerprint_index,
+            # PRSM-PROV-1 Item 6 (T6.3 + T6.5 + T6.5.gov.next):
+            # disputed-band three-tier wiring. All three may be None
+            # — when so, uploads fall back to legacy 2-band auto-
+            # attribute behavior.
+            threshold_resolver=_threshold_resolver,
+            arbitration_queue=_arbitration_queue,
+            arbitration_proposal_sink=_arbitration_proposal_sink,
         )
 
         # ── Ledger Sync ──────────────────────────────────────────
