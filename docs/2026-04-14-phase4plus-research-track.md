@@ -234,6 +234,18 @@ Earlier drafts positioned the Foundation as a confidential-inference silicon sta
 - OR at least two complementary layers (e.g., robust fingerprinting + output watermarking) reach research maturity simultaneously, allowing a composition prototype to ship and be demoed to frontier labs as a persuasion artifact.
 - OR H100 CC is publicly broken in a way that forces the defense stack forward regardless of market signal.
 
+## R10: Cross-Node Arbitration for Disputed Content (Added 2026-05-08) ⏳ SCOPING DOC DRAFTED
+
+**2026-05-08 update:** scoping doc drafted at `docs/2026-05-08-r10-cross-node-arbitration-scoping.md` (**R10-SCOPING-1**). Promotes today's per-node `FilesystemArbitrationQueue` (Item 6, shipped 2026-05-08) to a network-wide mechanism. Three candidate architectures (DHT-anchored / on-chain `ArbitrationRegistry.sol` / hybrid) with explicit tradeoffs. Eight cross-node adversaries catalogued (Sybil flood, eclipse, replay, front-running, Foundation censorship, duplicate proposals, stale state, mixed-band poisoning). Seven named promotion triggers (T1 cross-node duplicate observed / T2 council resolution SLA breach / T3 Sybil-flood attempt / T4 TVL > $50K / T5 VC term sheet / T6 external auditor flag / T7 calibration corpus persistent disputed band). Four-phase integration plan (R10.1 reconciliation read-only / R10.2 dedup-on-write / R10.3 binding settlement / R10.4 audit + deploy) over 11-21 weeks depending on architecture choice.
+
+**Foundation boundary:** even after R10 promotion, Foundation Safe explicitly does NOT decide individual disputes, maintain a curated registry, adjudicate cross-jurisdictional disputes, fast-track high-stakes disputes, or pre-empt governance. Token-weighted voting remains the sole resolution authority. R10 changes _how proposals reach voting and how outcomes propagate_, not _who decides outcomes_.
+
+**Relationship to per-node mechanism:** R10 layers above; it does not replace. Operators running today's per-node setup MUST continue to work post-R10. The per-node queue stays load-bearing for per-node honesty even after R10 ships.
+
+**Relationship to other research tracks:** R10 is the only item targeting governance-scale coordination rather than cryptographic-primitive research. It composes with R3 (threat-model substrate) and R6 (post-quantum signature transition would require dispute-record sig-schema migration).
+
+**Effort if pursued:** 2-3 weeks for Architecture A / 4-6 weeks for B / 6-9 weeks for C. Research-track until at least one §8 trigger fires.
+
 ---
 
 ## Governance and Tracking
