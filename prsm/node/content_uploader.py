@@ -270,6 +270,77 @@ class _SemanticIndex:
                 best_sim, best_content_id, best_creator = sim, content_id, creator
         return (best_content_id, best_sim, best_creator)
 
+    def _scan_index_top_k(
+        self, normalised_query: "np.ndarray", k: int
+    ) -> List[Tuple[str, float, str]]:
+        """O(n log k) top-k cosine-similarity scan against the local
+        index. Returns up to k triples in descending-similarity order.
+
+        Caller is responsible for L2-normalising the query vector + for
+        passing k > 0. An empty index returns []."""
+        if not self._index:
+            return []
+        # Computing all sims and sorting is O(n log n) — fine because n
+        # is bounded by the local index size, which is the same input
+        # _scan_index already walks. For tens-of-thousands of entries
+        # this is sub-millisecond.
+        scored = [
+            (cid, float(np.dot(normalised_query, stored)), creator)
+            for cid, (stored, creator) in self._index.items()
+        ]
+        scored.sort(key=lambda t: t[1], reverse=True)
+        return scored[:k]
+
+    def find_top_k(
+        self, embedding: "np.ndarray", k: int
+    ) -> List[Tuple[str, float, str]]:
+        """Return up to k (content_id, cosine_similarity, creator_id)
+        triples in descending-similarity order.
+
+        Per the QueryOrchestrator wiring-readiness assessment
+        (docs/2026-05-08-query-orchestrator-wiring-readiness.md), this
+        is the multi-result generalization of ``find_nearest``. The
+        shard_finder ``SemanticIndex`` Protocol consumes this via a
+        wiring-layer adapter that converts a query string to an
+        embedding vector before calling.
+
+        Empty index, zero-norm query, k <= 0, or numpy unavailable all
+        return ``[]``.
+
+        At k=1 this MUST return the same single triple ``find_nearest``
+        does — pinned by ``test_k_one_matches_find_nearest``.
+
+        DHT escalation: same trigger as ``find_nearest``. If the
+        local-best similarity is below ``DERIVATIVE_THRESHOLD`` we
+        pull peer embeddings into the local cache and re-scan top-k.
+        Strong local hits skip the network round-trip.
+        """
+        if not _HAS_NUMPY:
+            return []
+        if k <= 0:
+            return []
+        norm = float(np.linalg.norm(embedding))
+        if norm == 0:
+            return []
+        query = embedding / norm
+
+        local_best = self._scan_index(query)
+
+        # Mirror find_nearest's escalation trigger so the two paths
+        # stay consistent. If a future change adjusts the trigger in
+        # one place, update both — paired tests in
+        # test_semantic_index_dht_escalation.py + test_semantic_index_find_top_k.py
+        # pin both behaviours.
+        if (
+            self.dht_enabled
+            and (local_best is None or local_best[1] < self.DERIVATIVE_THRESHOLD)
+        ):
+            pulled = self._pull_remote_embeddings()
+            if pulled > 0:
+                pass  # fall-through to re-scan below
+
+        return self._scan_index_top_k(query, k)
+
     def _pull_remote_embeddings(self) -> int:
         """Walk peer-candidates and pull missing embeddings from the
         DHT into the local index.

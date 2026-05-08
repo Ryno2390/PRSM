@@ -44,6 +44,14 @@ from prsm.compute.query_orchestrator.swarm_runner import (
     run_swarm,
 )
 from prsm.compute.query_orchestrator.orchestrator import QueryOrchestrator
+from prsm.compute.query_orchestrator.retry_loop import (
+    EscrowClient,
+    PreemptionRecorder,
+    QueryRetriesExhaustedError,
+    RetryPolicy,
+    SlashClient,
+    dispatch_with_retries,
+)
 
 __all__ = [
     # aggregator_selector
