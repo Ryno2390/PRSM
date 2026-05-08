@@ -82,6 +82,9 @@ from prsm.compute.query_orchestrator.marketplace_candidate_pool_provider import 
     DEFAULT_STAKE_PER_TIER,
     MarketplaceCandidatePoolProvider,
 )
+from prsm.compute.query_orchestrator.foundation_beacon_provider import (
+    FoundationBeaconProvider,
+)
 
 __all__ = [
     # aggregator_selector
@@ -141,4 +144,6 @@ __all__ = [
     # marketplace_candidate_pool_provider (B7-prep)
     "DEFAULT_STAKE_PER_TIER",
     "MarketplaceCandidatePoolProvider",
+    # foundation_beacon_provider (B7-prep)
+    "FoundationBeaconProvider",
 ]
