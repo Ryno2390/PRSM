@@ -56,6 +56,10 @@ from prsm.compute.query_orchestrator.semantic_index_adapter import (
     Embedder,
     SemanticIndexAdapter,
 )
+from prsm.compute.query_orchestrator.sentence_transformer_embedder import (
+    DEFAULT_MODEL_NAME,
+    SentenceTransformerEmbedder,
+)
 from prsm.compute.query_orchestrator.swarm_dispatcher_adapter import (
     SwarmDispatcherAdapter,
 )
@@ -127,6 +131,9 @@ __all__ = [
     # semantic_index_adapter
     "Embedder",
     "SemanticIndexAdapter",
+    # sentence_transformer_embedder (B7-prep)
+    "DEFAULT_MODEL_NAME",
+    "SentenceTransformerEmbedder",
     # swarm_dispatcher_adapter
     "SwarmDispatcherAdapter",
     # aggregator_client_adapter (B5)
