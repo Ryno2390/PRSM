@@ -38,7 +38,7 @@ Earnings depend on what you contribute and how much:
 | Data Sharing | 1-50 FTNS/dataset | Curated, verified datasets |
 | Model Development | 10-100+ FTNS/model | Working AI models |
 
-*Note: FTNS is currently in Sepolia testnet bake-in as of April 2026; Phase 1 on-chain royalty contracts are mainnet-imminent. FTNS price is not set by the foundation — it emerges organically from secondary-market activity on third-party venues once the network is live. The foundation does not operate FTNS sales, does not announce prices, and does not guarantee appreciation. Earnings above are illustrative targets that depend on network adoption and are not commitments.*
+*Note: FTNS is **live on Base mainnet** as of 2026-05-04 (treasury / provenance) + 2026-05-07 (full audit-bundle + Phase 8 + Phase 7-storage). FTNS price is not set by the foundation. The foundation does not run continuous market-making, does not announce prices, and does not guarantee appreciation; secondary-market price emerges from third-party trading. Earnings above are illustrative targets that depend on network adoption and are not commitments.*
 
 ### Getting Your First FTNS
 
@@ -73,7 +73,7 @@ prsm setup             # interactive wizard
 
 On first run, PRSM generates an Ed25519 identity keypair (stored in `~/.prsm/identity.json`) and credits your node with a welcome grant of 100 FTNS. There is no separate "account" — your node identity *is* your account. Back up `~/.prsm/identity.json` the same way you would back up a crypto wallet: losing it means losing access to your FTNS balance.
 
-A browser/SDK-based wallet UX is planned for Phase 4 (Q4 2026) per the [master roadmap](2026-04-10-audit-gap-roadmap.md). Until then, the CLI is the primary interface.
+Phase 4 wallet SDK has shipped (EIP-4361 SIWE backend verifier + identity-binding + JS SDK + Coinbase Wallet helper + USD-equivalent display wrapper). For the architectural roadmap of remaining work, see `PRSM_Vision.md` §13. The CLI remains the primary interface for node operation; the new MCP tools (below) are the user-facing surface for the most common workflows.
 
 #### Step 3: Start Contributing
 
@@ -101,7 +101,7 @@ curl http://localhost:8000/balance         # FTNS balance + recent transactions
 prsm ftns yield-estimate --hours 24        # projected daily earnings
 ```
 
-Operator dashboard UI with historical charts and leaderboards is planned for Phase 3 per the [master roadmap](2026-04-10-audit-gap-roadmap.md).
+For richer balance + USD-equivalent views (post-2026-05-08), use the `prsm_balance_check` MCP tool from Claude Code / Gemini CLI / Cursor / Antigravity — it surfaces FTNS + USD equivalent + node-connected address in one call. See "Cashing Out to Bank" below.
 
 **Tips for Maximum Earnings:**
 - Keep your node online during peak hours (typically 9 AM - 9 PM UTC)
@@ -169,19 +169,30 @@ You'll earn FTNS automatically when:
 
 **PRSM does not host AI models.** The reasoning layer is always a third-party LLM (Claude, GPT, Gemini, local Ollama, etc.). PRSM provides the compute, storage, and data-access substrate *underneath* your LLM via MCP. You spend FTNS when your LLM invokes PRSM tools — not for the reasoning itself.
 
-#### Using PRSM from an MCP-compatible LLM client
+#### Using PRSM from an MCP-compatible LLM client (live)
 
-When Phase 3's MCP server ships (target Q3 2026, per the [roadmap](2026-04-10-audit-gap-roadmap.md)), any MCP client (Claude Desktop, Cursor, Gemini CLI, etc.) can invoke PRSM tools such as:
+The PRSM MCP server is **shipped and live** as of v1.7.0+. Any MCP client (Claude Code, Claude Desktop, Cursor, Gemini CLI, Antigravity, etc.) can invoke 20 PRSM tools. The most user-facing of those:
 
-- `prsm_retrieve` — retrieve data from PRSM's data layer with creator royalty settlement
-- `prsm_compute` — dispatch heavy compute via the PRSM compute mesh
-- `prsm_inference` — run private inference via PRSM's zero-trust stack
+- `prsm_analyze` — submit a natural-language query to the PRSM distributed compute network (decompose → find shards → dispatch WASM agents → aggregate → settle FTNS)
+- `prsm_quote` — get a cost estimate BEFORE committing to a paid query
+- `prsm_balance_check` — read FTNS balance + USD equivalent (post-2026-05-08; see "Cashing Out to Bank" below)
+- `coinbase_offramp_initiate` — pre-flight cash-out quote (post-2026-05-08; composer-only until CDP commission)
+- `prsm_inference` — run TEE-attested model inference with verifiable receipts
+- `prsm_dispatch_agent` — async dispatch with JobHistoryRecord-backed status tracking
+- `prsm_agent_status` — surfaces job lifecycle (history + escrow tiers)
+- `prsm_list_datasets` — browse available datasets with pricing
+- `prsm_node_status` — local node health + capability rings
+- `prsm_hardware_benchmark` — measure your node's compute tier (T1-T4)
+- `prsm_billing_status` — escrow lifecycle for billing reconciliation
+- `prsm_search_shards` / `prsm_upload_dataset` — content layer
+- `prsm_yield_estimate` / `prsm_stake` / `prsm_revenue_split` / `prsm_settlement_stats` — economic surface
+- `prsm_privacy_status` / `prsm_training_status` / `prsm_create_agent` — system surfaces
 
-Your LLM does the reasoning; PRSM tools provide data and compute the LLM can't hold in its own context. Every PRSM tool call debits FTNS from your node's balance.
+Your LLM does the reasoning; PRSM tools provide data, compute, and economic primitives the LLM can't hold in its own context. Every paid PRSM tool call debits FTNS from your node's balance.
 
-#### Using PRSM directly via CLI (today)
+#### Using PRSM directly via CLI
 
-Before the MCP server ships, you can interact with PRSM's compute pipeline via CLI:
+For terminal-native workflows or scripting, the CLI mirrors the MCP-tool surface:
 
 ```bash
 # Get a cost estimate first (free)
@@ -199,6 +210,64 @@ This routes through the Ring 1-10 pipeline — decompose → plan → quote → 
 - `prsm compute quote ...` estimates cost before committing
 - Higher tier (T2, T3) = faster compute but higher cost
 - More shards = more parallelism but higher aggregate cost
+
+## Cashing Out to Bank
+
+PRSM is designed so end-users never have to learn crypto-native skills (seed phrases, gas tokens, fragmented exchange/bridge UIs) to access their FTNS earnings. The architecture per `PRSM_Vision.md` §13 Phase 5:
+
+> A user types into Claude Code: *"Cash out $500 of my FTNS to my primary bank account."* The AI invokes `prsm_balance_check` to confirm funds, then `coinbase_offramp_initiate` to compose the transaction. The user's hardware (Pixel + Titan-M2, iPhone + Secure Enclave) prompts for biometric authorization. FTNS swaps to USDC on the Aerodrome pool, USDC offramps via Coinbase to USD, and dollars land in the user's bank account.
+
+### Today's status (2026-05-08)
+
+The MCP-tool layer is **shipped end-to-end**:
+
+- **`prsm_balance_check`** (MCP tool) — read FTNS balance + USD-equivalent + node-connected address. Live now. Backed by `GET /balance/onchain`.
+
+- **`coinbase_offramp_initiate`** (MCP tool) — pre-flight transaction-summary composer. Live now. Returns a quote artifact: *"Swap 500 FTNS → 500 USDC via Aerodrome → $500 USD via Coinbase CDP → primary bank."* **Status: `PENDING_COMMISSION`.** Today's tool returns the quote summary; **it does NOT initiate any on-chain swap or fiat off-ramp.**
+
+### Why "PENDING_COMMISSION"
+
+The execution side gates on three external commissioning events scheduled per `PRSM_Vision.md` §13 gantt for 2026-06-15:
+
+1. **Aerodrome USDC-FTNS pool seeding** — anchors the on-chain exchange rate.
+2. **Coinbase Developer Platform (CDP) production credentials** — wires the fiat-edge.
+3. **Initial liquidity bootstrap funding decision** — Foundation vs Prismatica balance sheet (under active discussion).
+
+When all three commission, the same `coinbase_offramp_initiate` tool gains an `execute=true` argument that triggers the real flow — the response shape is forward-compatible, so MCP clients you build today against the v1 quote surface continue to work post-commission.
+
+### What's in the box at commission
+
+When CDP commissions, the cash-out flow becomes:
+
+1. **Intent** — you say to your AI: *"Cash out $X to my bank."*
+2. **Quote** — the AI invokes `coinbase_offramp_initiate` and shows you the summary (FTNS amount, swap rate, bank account, status).
+3. **Hardware authorization** — Coinbase sends a Passkey challenge to your phone (Pixel + Titan-M2, iPhone + Secure Enclave, etc.). You approve via fingerprint or Face Unlock; the private key never leaves the device.
+4. **Settlement** — FTNS swaps to USDC on Aerodrome, USDC offramps via Coinbase, USD lands in your bank via ACH or instant-cashout to debit card.
+5. **Confirmation** — your AI confirms: *"$X is on its way to your bank."*
+
+### Why no seed phrases / no gas tokens
+
+- **Coinbase Smart Wallet via Passkeys** — wallets are created via FaceID / TouchID / Google or Apple sign-in at `npm install` time. No 12-word seed phrase. Recovery is platform-level (your Apple/Google account), not custodied by PRSM.
+- **Paymasters (gasless transactions)** — Coinbase paymaster infrastructure sponsors gas for routine on-chain operations. You "Cash Out" without holding ETH; gas is either deducted from the FTNS being cashed out, or covered by the Foundation as a UX subsidy in the early bootstrap phase.
+- **Zero-fee USDC offramp on Base** — Coinbase's recent zero-fee USDC offramp on Base means the Coinbase leg is free. You only pay the Aerodrome pool's swap fee (which is split across the LPs, not extracted by Coinbase or the foundation).
+
+### Privacy + regulatory framing
+
+- **Coinbase, not the foundation, performs KYC** — when your cumulative cash-out volume crosses regulatory thresholds, Coinbase's compliance flow triggers natively. PRSM does NOT build a KYC department, does NOT store sensitive banking data, does NOT make AML determinations. Coinbase is the regulated gateway; PRSM is the upstream protocol. See `PRSM_Tokenomics.md` §5.5.
+- **PRSM never transmits banking PII over the wire.** The MCP tools accept a USD amount + an optional bank-account *nickname* (e.g. `"primary"`, `"savings"`); CDP's Offramp SDK resolves the nickname to your actual linked Coinbase account during the Passkey handshake. PRSM does NOT store routing numbers, account numbers, SSNs, or any banking PII.
+- **You retain custody.** The Smart Wallet's private key lives in your phone's Secure Enclave / Titan-M2 chip. PRSM cannot move funds without your biometric authorization at execute-time.
+
+### Topping up FTNS for high-cost queries
+
+The reverse path also works — if you need more FTNS for a complex multi-day compute job:
+
+1. Click "Buy Credits" in the dashboard (or invoke the future `prsm_topup_initiate` MCP tool when it ships).
+2. Apple Pay / Google Pay / debit → CDP Onramp buys USDC → Aerodrome swap → FTNS deposited to your wallet.
+3. Confirmation: "Purchase Successful."
+
+Same biometric flow as cash-out, run in reverse.
+
+---
 
 ## Frequently Asked Questions
 
@@ -234,13 +303,15 @@ When you contribute compute, your personal files are **never** accessed. PRSM on
 
 ### What is FTNS worth?
 
-As of April 2026, PRSM is in Sepolia testnet bake-in with mainnet launch imminent. During the testnet phase FTNS has no secondary-market value — it can only be earned and spent within the testnet.
+PRSM is **live on Base mainnet** (since 2026-05-04 / 2026-05-07). FTNS now has real-world value once the bootstrap-phase liquidity venue (Aerodrome USDC-FTNS pool, scheduled per `PRSM_Vision.md` §13 gantt for 2026-06-15) is seeded and gauge-eligible for AERO emissions.
 
-**Post-mainnet (important framing):**
+**Important framing:**
 
-- **The foundation does not set FTNS price and does not operate a sale venue.** FTNS is distributed exclusively as compensation for services rendered (creator royalties, node operator compensation, contributor grants). It is never sold by the foundation to anyone.
-- **Secondary-market value emerges organically** via third-party exchanges (Aerodrome on Base, eventual CEX listings) once the network is live. The foundation does not seed AMM pools, announce prices, or guarantee appreciation.
+- **The foundation does not set ongoing FTNS price.** FTNS is distributed exclusively as compensation for services rendered (creator royalties, node operator compensation, contributor grants). It is never sold by the foundation to retail.
+- **Initial pool seeding is a one-time bootstrap act, distinct from ongoing market-making.** The foundation (or Prismatica, depending on which entity holds the bootstrap inventory) deposits both tokens at the intended starting ratio when the Aerodrome USDC-FTNS pool launches — this is a discrete event that anchors price discovery, NOT continuous market-making operations. Post-seeding, the pool is permissionless infrastructure that any LP can deepen. Same shape as Helium / io.net / other DePIN-token pool launches. See `PRSM_Tokenomics.md` §3.7 for full pool architecture.
+- **Day-to-day price discovery is third-party-driven** via the Aerodrome pool + future CEX listings. The foundation does NOT run continuous market-making, does NOT announce prices, does NOT guarantee appreciation.
 - **The protocol includes value-trajectory mechanisms** (Bitcoin-style halving schedule, 20% burn on every transaction, staking locks, organic demand growth) that collectively produce modest appreciation during bootstrap and steady-state stabilization as adoption matures. Appreciation is a consequence of protocol design, not a foundation promise. See `PRSM_Tokenomics.md` §4 for the full design.
+- **USD-denominated services pricing.** Service prices on PRSM are denominated in USD and settled in FTNS at the live exchange rate. As FTNS appreciates, services become *cheaper in FTNS terms* — your earned FTNS purchasing power grows even when USD-denominated job costs stay stable. See `PRSM_Tokenomics.md` §4.10.
 - **Bear case is a real possibility.** If PRSM fails to achieve adoption, FTNS remains low-value regardless of the halving / burn mechanics. Contribute what you can afford to lose the USD-equivalent value of.
 
 ### How do I get started without any FTNS?
@@ -251,9 +322,9 @@ New users receive a **100 FTNS welcome grant** upon registration. This is enough
 - Participate in governance votes
 
 If you run low on FTNS, you can:
-- Contribute compute to earn more
-- Share data for ongoing earnings
-- Wait for daily login bonuses (coming soon)
+- Contribute compute to earn more (Option A above)
+- Share data for ongoing earnings (Option B above)
+- Top up via the Coinbase Onramp once CDP commission completes (post-2026-06-15 per Vision §13 gantt; Apple Pay / Google Pay / debit → USDC → FTNS via Aerodrome pool, all in the background)
 
 ### Can I run PRSM on multiple computers?
 
