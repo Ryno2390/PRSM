@@ -457,6 +457,23 @@ Permissionless on-chain — anyone can run this. Calls `CompensationDistributorC
 
 To disable either daemon mid-incident: unset the matching `*_ENABLED` env var and restart, OR unset the address env var (which also disables the underlying client). See `docs/security/EXPLOIT_RESPONSE_PLAYBOOK_ANNEX_2026_05.md` for the full operator-pause runbook.
 
+### Event watchers (post-2026-05-08)
+
+Three async event watchers ship alongside the schedulers. Each polls on-chain event logs at a configurable cadence and fires callbacks. Default callbacks log each event at INFO/WARNING level for out-of-the-box observability.
+
+| Variable | Default | Description |
+|---|---|---|
+| `PRSM_KEY_DISTRIBUTION_WATCHER_ENABLED` | `0` | Set to `1` to launch `KeyDistributionWatcher`. **Material for Tier C publishers** — surfaces `KeyReleased` events in seconds for payment-verification reconciliation (annex §5.4 detection). |
+| `PRSM_KEY_DISTRIBUTION_WATCHER_POLL_SECONDS` | `30` | Cadence. |
+| `PRSM_STORAGE_SLASHING_WATCHER_ENABLED` | `0` | Set to `1` to launch `StorageSlashingWatcher`. **Material for storage providers** — surfaces `HeartbeatMissingSlashed` + `ProofFailureSlashed` against your provider address. |
+| `PRSM_STORAGE_SLASHING_WATCHER_POLL_SECONDS` | `30` | Cadence. |
+| `PRSM_COMPENSATION_DISTRIBUTOR_WATCHER_ENABLED` | `0` | Set to `1` to launch `CompensationDistributorWatcher`. Surfaces `Distributed` events for accounting-reconciliation purposes. |
+| `PRSM_COMPENSATION_DISTRIBUTOR_WATCHER_POLL_SECONDS` | `30` | Cadence. |
+
+**Activation requires the matching contract-address env var to be set** (so the underlying client can construct). For the KeyDistribution watcher, that's `PRSM_KEY_DISTRIBUTION_ADDRESS`. The address env vars are documented in the "Mainnet On-chain Surface" section above.
+
+Operators wanting custom callbacks (instead of the default INFO-log) should construct the watchers programmatically rather than via env-var activation. See module docstrings in `prsm/economy/web3/*_watcher.py` for the API.
+
 ---
 
 ## Monitoring

@@ -451,6 +451,45 @@ def _build_compensation_distributor_client_or_none():
         return None
 
 
+def _build_key_distribution_client_or_none():
+    """Construct a KeyDistributionClient if env-driven config is
+    complete.
+
+    Required env vars:
+      PRSM_KEY_DISTRIBUTION_ADDRESS=<0x...>
+      FTNS_WALLET_PRIVATE_KEY=<0x...>  (optional for read-only paths;
+        required for deposit_key / release / deauthorize writes)
+      PRSM_BASE_RPC_URL=<https://...>  (optional; defaults to Base mainnet)
+
+    Returns None on any miss / construction failure. Without it the
+    node cannot drive Tier C key deposit / release-on-payment, and
+    the KeyDistributionWatcher cannot launch.
+    """
+    addr = os.getenv("PRSM_KEY_DISTRIBUTION_ADDRESS", "").strip()
+    if not addr:
+        return None
+    pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip() or None
+    try:
+        from prsm.economy.web3.key_distribution import KeyDistributionClient
+        rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+        client = KeyDistributionClient(
+            rpc_url=rpc_url,
+            contract_address=addr,
+            private_key=pk,
+        )
+        logger.info(
+            f"KeyDistributionClient wired: {addr} via {rpc_url}"
+            f"{' (read-only)' if pk is None else ''}"
+        )
+        return client
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"KeyDistributionClient construction failed: "
+            f"{type(exc).__name__}: {exc} — Tier C surface unavailable."
+        )
+        return None
+
+
 def _build_storage_slashing_client_or_none():
     """Construct a StorageSlashingClient if env-driven config is
     complete.
@@ -582,6 +621,215 @@ def _build_compensation_scheduler_or_none(*, client):
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             f"PullAndDistributeScheduler construction failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Phase 7-storage + Phase 8 event-watcher builders (2026-05-08).
+#
+# Watchers poll on-chain event logs and fire callbacks. Without a
+# callback wired, the watcher does no polling (per its contract);
+# the builders ship default INFO/WARNING-log callbacks so the watcher
+# launches with out-of-the-box visibility. Operators wanting custom
+# behavior can replace `node.<watcher>._on_<event>` post-construction
+# OR construct the watcher directly with their own callbacks.
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _parse_poll_interval(env_name: str, default: float) -> float:
+    raw = os.getenv(env_name, "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = float(raw)
+        if parsed > 0:
+            return parsed
+    except ValueError:
+        pass
+    return default
+
+
+def _build_key_distribution_watcher_or_none(*, client):
+    """Construct a KeyDistributionWatcher if operator opted in AND
+    underlying client is non-None.
+
+    Activation:
+      PRSM_KEY_DISTRIBUTION_WATCHER_ENABLED=1     (required)
+      PRSM_KEY_DISTRIBUTION_WATCHER_POLL_SECONDS=30   (optional)
+
+    Default callbacks log each event at INFO level. Closes annex §5.4
+    detection-actionability gap (KeyReleased monitoring).
+    """
+    if client is None:
+        return None
+    if os.getenv("PRSM_KEY_DISTRIBUTION_WATCHER_ENABLED", "").lower() not in (
+        "1", "true", "yes",
+    ):
+        return None
+    interval = _parse_poll_interval(
+        "PRSM_KEY_DISTRIBUTION_WATCHER_POLL_SECONDS", 30.0,
+    )
+    try:
+        from prsm.economy.web3.key_distribution_watcher import (
+            KeyDistributionWatcher,
+        )
+
+        def _on_released(event):
+            logger.info(
+                "KeyDistributionWatcher: KeyReleased "
+                "content_hash=0x%s recipient=%s",
+                event.content_hash.hex(), event.recipient,
+            )
+
+        def _on_deposited(event):
+            logger.info(
+                "KeyDistributionWatcher: KeyDeposited "
+                "content_hash=0x%s publisher=%s release_fee=%d",
+                event.content_hash.hex(), event.publisher,
+                event.release_fee_ftns_wei,
+            )
+
+        def _on_deauthorized(event):
+            logger.info(
+                "KeyDistributionWatcher: KeyDeauthorized "
+                "content_hash=0x%s publisher=%s",
+                event.content_hash.hex(), event.publisher,
+            )
+
+        watcher = KeyDistributionWatcher(
+            client=client,
+            on_key_released=_on_released,
+            on_key_deposited=_on_deposited,
+            on_key_deauthorized=_on_deauthorized,
+            poll_interval_sec=interval,
+        )
+        logger.info(
+            f"KeyDistributionWatcher wired (interval={interval}s)"
+        )
+        return watcher
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"KeyDistributionWatcher construction failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
+
+def _build_storage_slashing_watcher_or_none(*, client):
+    """Construct a StorageSlashingWatcher if operator opted in AND
+    underlying client is non-None.
+
+    Activation:
+      PRSM_STORAGE_SLASHING_WATCHER_ENABLED=1     (required)
+      PRSM_STORAGE_SLASHING_WATCHER_POLL_SECONDS=30   (optional)
+
+    Default callbacks: HeartbeatRecorded → INFO; ProofFailureSlashed
+    + HeartbeatMissingSlashed → WARNING (own-provider monitoring is
+    higher-attention than fleet-liveness observation).
+    """
+    if client is None:
+        return None
+    if os.getenv("PRSM_STORAGE_SLASHING_WATCHER_ENABLED", "").lower() not in (
+        "1", "true", "yes",
+    ):
+        return None
+    interval = _parse_poll_interval(
+        "PRSM_STORAGE_SLASHING_WATCHER_POLL_SECONDS", 30.0,
+    )
+    try:
+        from prsm.economy.web3.storage_slashing_watcher import (
+            StorageSlashingWatcher,
+        )
+
+        def _on_recorded(event):
+            logger.info(
+                "StorageSlashingWatcher: HeartbeatRecorded "
+                "provider=%s timestamp=%d",
+                event.provider, event.timestamp,
+            )
+
+        def _on_proof(event):
+            logger.warning(
+                "StorageSlashingWatcher: ProofFailureSlashed "
+                "provider=%s challenger=%s shard_id=0x%s slash_id=0x%s",
+                event.provider, event.challenger,
+                event.shard_id.hex(), event.slash_id.hex(),
+            )
+
+        def _on_missing(event):
+            logger.warning(
+                "StorageSlashingWatcher: HeartbeatMissingSlashed "
+                "provider=%s challenger=%s last_heartbeat_at=%d "
+                "slash_id=0x%s",
+                event.provider, event.challenger,
+                event.last_heartbeat_at, event.slash_id.hex(),
+            )
+
+        watcher = StorageSlashingWatcher(
+            client=client,
+            on_heartbeat_recorded=_on_recorded,
+            on_proof_failure_slashed=_on_proof,
+            on_heartbeat_missing_slashed=_on_missing,
+            poll_interval_sec=interval,
+        )
+        logger.info(
+            f"StorageSlashingWatcher wired (interval={interval}s)"
+        )
+        return watcher
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"StorageSlashingWatcher construction failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
+
+def _build_compensation_distributor_watcher_or_none(*, client):
+    """Construct a CompensationDistributorWatcher if operator opted in
+    AND underlying client is non-None.
+
+    Activation:
+      PRSM_COMPENSATION_DISTRIBUTOR_WATCHER_ENABLED=1     (required)
+      PRSM_COMPENSATION_DISTRIBUTOR_WATCHER_POLL_SECONDS=30   (optional)
+
+    Default callback: Distributed → INFO (operator-side accounting
+    visibility; not P0).
+    """
+    if client is None:
+        return None
+    if os.getenv(
+        "PRSM_COMPENSATION_DISTRIBUTOR_WATCHER_ENABLED", "",
+    ).lower() not in ("1", "true", "yes"):
+        return None
+    interval = _parse_poll_interval(
+        "PRSM_COMPENSATION_DISTRIBUTOR_WATCHER_POLL_SECONDS", 30.0,
+    )
+    try:
+        from prsm.economy.web3.compensation_distributor_watcher import (
+            CompensationDistributorWatcher,
+        )
+
+        def _on_distributed(event):
+            logger.info(
+                "CompensationDistributorWatcher: Distributed "
+                "to_creator=%d to_operator=%d to_grant=%d",
+                event.to_creator, event.to_operator, event.to_grant,
+            )
+
+        watcher = CompensationDistributorWatcher(
+            client=client,
+            on_distributed=_on_distributed,
+            poll_interval_sec=interval,
+        )
+        logger.info(
+            f"CompensationDistributorWatcher wired (interval={interval}s)"
+        )
+        return watcher
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"CompensationDistributorWatcher construction failed: "
             f"{type(exc).__name__}: {exc}"
         )
         return None
@@ -1031,9 +1279,34 @@ class PRSMNode:
         self._heartbeat_scheduler = _build_heartbeat_scheduler_or_none(
             client=self._storage_slashing_client,
         )
+        # Event watchers — same client-sharing as schedulers; activation
+        # is independent (operator can want watching without scheduling
+        # or vice versa). KeyDistributionClient is constructed here for
+        # the watcher; it does NOT auto-launch any heartbeat-style
+        # daemon (KeyDistribution is event-driven on the operator side,
+        # not cadence-driven).
+        self._key_distribution_client = _build_key_distribution_client_or_none()
+        self._key_distribution_watcher = (
+            _build_key_distribution_watcher_or_none(
+                client=self._key_distribution_client,
+            )
+        )
+        self._storage_slashing_watcher = (
+            _build_storage_slashing_watcher_or_none(
+                client=self._storage_slashing_client,
+            )
+        )
+        self._compensation_distributor_watcher = (
+            _build_compensation_distributor_watcher_or_none(
+                client=self._compensation_distributor_client,
+            )
+        )
         # Tasks created on start() — None until then.
         self._compensation_scheduler_task = None
         self._heartbeat_scheduler_task = None
+        self._key_distribution_watcher_task = None
+        self._storage_slashing_watcher_task = None
+        self._compensation_distributor_watcher_task = None
 
         # T3.6 (PRSM-PROV-1): LocalEmbeddingIndex backs the
         # EmbeddingDHT — every successful upload + embedding gets a
@@ -1910,6 +2183,25 @@ class PRSMNode:
             )
             logger.info("PullAndDistributeScheduler launched")
 
+        # Phase 7-storage + Phase 8 event watchers. Same opt-in shape
+        # as the schedulers; default-callback wired in the builders so
+        # the watcher polls and logs events out-of-the-box.
+        if self._key_distribution_watcher is not None:
+            self._key_distribution_watcher_task = asyncio.create_task(
+                self._key_distribution_watcher.run_forever(),
+            )
+            logger.info("KeyDistributionWatcher launched")
+        if self._storage_slashing_watcher is not None:
+            self._storage_slashing_watcher_task = asyncio.create_task(
+                self._storage_slashing_watcher.run_forever(),
+            )
+            logger.info("StorageSlashingWatcher launched")
+        if self._compensation_distributor_watcher is not None:
+            self._compensation_distributor_watcher_task = asyncio.create_task(
+                self._compensation_distributor_watcher.run_forever(),
+            )
+            logger.info("CompensationDistributorWatcher launched")
+
         # Start management API in background
         self._api_task = asyncio.create_task(self._run_api())
 
@@ -2128,16 +2420,26 @@ class PRSMNode:
             self._api_task.cancel()
             self._api_task = None
 
-        # Phase 7-storage + Phase 8 daemons — graceful stop signals
-        # the loop to exit at next iteration; await the task to ensure
-        # any in-flight tick completes before we tear down further.
+        # Phase 7-storage + Phase 8 daemons + watchers — graceful stop
+        # signals the loop to exit at next iteration; await the task
+        # to ensure any in-flight tick completes before we tear down
+        # further.
         if self._heartbeat_scheduler is not None:
             await self._heartbeat_scheduler.stop()
         if self._compensation_scheduler is not None:
             await self._compensation_scheduler.stop()
+        if self._key_distribution_watcher is not None:
+            await self._key_distribution_watcher.stop()
+        if self._storage_slashing_watcher is not None:
+            await self._storage_slashing_watcher.stop()
+        if self._compensation_distributor_watcher is not None:
+            await self._compensation_distributor_watcher.stop()
         for task_attr in (
             "_heartbeat_scheduler_task",
             "_compensation_scheduler_task",
+            "_key_distribution_watcher_task",
+            "_storage_slashing_watcher_task",
+            "_compensation_distributor_watcher_task",
         ):
             task = getattr(self, task_attr, None)
             if task is not None:
