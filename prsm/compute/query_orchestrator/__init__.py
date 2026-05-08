@@ -78,6 +78,10 @@ from prsm.compute.query_orchestrator.aggregate_server import (
     sum_privacy_budgets,
     verify_partial_signature,
 )
+from prsm.compute.query_orchestrator.marketplace_candidate_pool_provider import (
+    DEFAULT_STAKE_PER_TIER,
+    MarketplaceCandidatePoolProvider,
+)
 
 __all__ = [
     # aggregator_selector
@@ -134,4 +138,7 @@ __all__ = [
     "enforce_a5_marker",
     "sum_privacy_budgets",
     "verify_partial_signature",
+    # marketplace_candidate_pool_provider (B7-prep)
+    "DEFAULT_STAKE_PER_TIER",
+    "MarketplaceCandidatePoolProvider",
 ]
