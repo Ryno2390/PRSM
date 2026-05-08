@@ -35,6 +35,14 @@ from prsm.compute.query_orchestrator.shard_finder import (
     ShardCandidate,
     find_relevant_shards,
 )
+from prsm.compute.query_orchestrator.swarm_runner import (
+    AggregatedResult,
+    AggregatorClient,
+    PartialResult,
+    PartialResultIntegrityError,
+    SwarmDispatcher,
+    run_swarm,
+)
 
 __all__ = [
     # aggregator_selector
@@ -54,4 +62,11 @@ __all__ = [
     "SemanticIndex",
     "ShardCandidate",
     "find_relevant_shards",
+    # swarm_runner
+    "AggregatedResult",
+    "AggregatorClient",
+    "PartialResult",
+    "PartialResultIntegrityError",
+    "SwarmDispatcher",
+    "run_swarm",
 ]
