@@ -1710,10 +1710,11 @@ class PRSMNode:
                 AggregatorClientAdapter,
                 HttpAggregateTransport,
             )
+            from prsm.compute.query_orchestrator.foundation_safe_resolver import (
+                resolve_foundation_safe_address,
+            )
             beacon_provider = FoundationBeaconProvider(
-                foundation_safe_address=(
-                    "0x91b0000000000000000000000000000000005791"
-                ),
+                foundation_safe_address=resolve_foundation_safe_address(),
             )
             aggregator_client = AggregatorClientAdapter(
                 prompter_pubkey=self.identity.public_key_bytes,

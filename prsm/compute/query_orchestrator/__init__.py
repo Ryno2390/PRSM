@@ -93,6 +93,11 @@ from prsm.compute.query_orchestrator.marketplace_candidate_pool_provider import 
 from prsm.compute.query_orchestrator.foundation_beacon_provider import (
     FoundationBeaconProvider,
 )
+from prsm.compute.query_orchestrator.foundation_safe_resolver import (
+    DEFAULT_MAINNET_FOUNDATION_SAFE_ADDRESS,
+    FOUNDATION_SAFE_ADDRESS_ENV,
+    resolve_foundation_safe_address,
+)
 
 __all__ = [
     # aggregator_selector
@@ -160,4 +165,8 @@ __all__ = [
     "MarketplaceCandidatePoolProvider",
     # foundation_beacon_provider (B7-prep)
     "FoundationBeaconProvider",
+    # foundation_safe_resolver (per-network override)
+    "DEFAULT_MAINNET_FOUNDATION_SAFE_ADDRESS",
+    "FOUNDATION_SAFE_ADDRESS_ENV",
+    "resolve_foundation_safe_address",
 ]
