@@ -63,6 +63,10 @@ from prsm.compute.query_orchestrator.aggregator_client_adapter import (
     AggregateTransport,
     AggregatorClientAdapter,
 )
+from prsm.compute.query_orchestrator.http_aggregate_transport import (
+    AggregateTransportError,
+    HttpAggregateTransport,
+)
 from prsm.compute.query_orchestrator.aggregate_protocol import (
     AggregateRequest,
     AggregateResponse,
@@ -128,6 +132,9 @@ __all__ = [
     # aggregator_client_adapter (B5)
     "AggregateTransport",
     "AggregatorClientAdapter",
+    # http_aggregate_transport (B7 — HTTP/TLS transport)
+    "AggregateTransportError",
+    "HttpAggregateTransport",
     # aggregate_protocol (B3.1b wire format)
     "AggregateRequest",
     "AggregateResponse",
