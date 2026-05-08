@@ -1708,7 +1708,10 @@ class PRSMNode:
             # extension (separate ratification + tooling sprint).
             from prsm.compute.query_orchestrator import (
                 AggregatorClientAdapter,
+                ChainedEndpointResolver,
                 HttpAggregateTransport,
+                StaticMapEndpointResolver,
+                TransportPeerEndpointResolver,
             )
             from prsm.compute.query_orchestrator.foundation_safe_resolver import (
                 resolve_foundation_safe_address,
@@ -1716,19 +1719,37 @@ class PRSMNode:
             beacon_provider = FoundationBeaconProvider(
                 foundation_safe_address=resolve_foundation_safe_address(),
             )
+            # Endpoint resolver: ordered list of backends. Operators
+            # supply a static map via PRSM_AGGREGATOR_ENDPOINT_MAP
+            # (JSON of {node_id: base_url}) for known aggregators;
+            # unknown node_ids fall back to the WS transport peer
+            # registry (host:port from the live connection).
+            import json as _json_for_endpoints
+            import os as _os_for_endpoints
+            _static_map_raw = _os_for_endpoints.environ.get(
+                "PRSM_AGGREGATOR_ENDPOINT_MAP", "",
+            ).strip()
+            _static_map = {}
+            if _static_map_raw:
+                try:
+                    _static_map = _json_for_endpoints.loads(_static_map_raw)
+                except (ValueError, TypeError) as exc:
+                    logger.warning(
+                        "PRSM_AGGREGATOR_ENDPOINT_MAP malformed JSON: %s — "
+                        "ignoring static map, using transport-peer fallback only",
+                        exc,
+                    )
+            _endpoint_resolver = ChainedEndpointResolver([
+                StaticMapEndpointResolver(_static_map),
+                TransportPeerEndpointResolver(self.transport),
+            ])
             aggregator_client = AggregatorClientAdapter(
                 prompter_pubkey=self.identity.public_key_bytes,
                 prompter_node_id=self.identity.node_id,
                 prompter_signer=self.identity.sign,
                 beacon_provider=beacon_provider,
                 transport=HttpAggregateTransport(
-                    # Production wiring: a real endpoint resolver that
-                    # consults MarketplaceDirectory + per-node listing
-                    # endpoints. v1 stub raises on resolve — operator
-                    # supplies a real resolver via subclass override.
-                    endpoint_resolver=lambda node_id: (
-                        f"https://{node_id}/compute/aggregate"
-                    ),
+                    endpoint_resolver=_endpoint_resolver,
                 ),
             )
             candidate_pool_provider = MarketplaceCandidatePoolProvider(

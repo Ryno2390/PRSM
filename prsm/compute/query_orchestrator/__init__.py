@@ -98,6 +98,12 @@ from prsm.compute.query_orchestrator.foundation_safe_resolver import (
     FOUNDATION_SAFE_ADDRESS_ENV,
     resolve_foundation_safe_address,
 )
+from prsm.compute.query_orchestrator.aggregate_endpoint_resolver import (
+    AggregateEndpointUnresolvedError,
+    ChainedEndpointResolver,
+    StaticMapEndpointResolver,
+    TransportPeerEndpointResolver,
+)
 
 __all__ = [
     # aggregator_selector
@@ -169,4 +175,9 @@ __all__ = [
     "DEFAULT_MAINNET_FOUNDATION_SAFE_ADDRESS",
     "FOUNDATION_SAFE_ADDRESS_ENV",
     "resolve_foundation_safe_address",
+    # aggregate_endpoint_resolver (HTTP endpoint resolver follow-on)
+    "AggregateEndpointUnresolvedError",
+    "ChainedEndpointResolver",
+    "StaticMapEndpointResolver",
+    "TransportPeerEndpointResolver",
 ]
