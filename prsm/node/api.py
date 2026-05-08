@@ -734,15 +734,50 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
 
         try:
-            # Run the full forge pipeline
-            result = await node.agent_forge.run(
-                query=query,
-                budget_ftns=budget_ftns,
-                shard_cids=shard_cids,
-            )
+            # Dispatch on agent_forge type. The QueryOrchestrator
+            # (Ring 5 replacement, wired via PRSM_QUERY_ORCHESTRATOR_ENABLED)
+            # exposes ``dispatch_query`` instead of the legacy
+            # ``run`` surface; we route both through this endpoint
+            # so MCP clients see a single /compute/forge.
+            if hasattr(node.agent_forge, "dispatch_query"):
+                # PRSM-PROV-1 / QueryOrchestrator path. Build a 32-byte
+                # query_id (binds A6/A9 invariants per the aggregator-
+                # selector threat model) and call dispatch_query.
+                import os as _os_for_qid
+                query_id = _os_for_qid.urandom(32)
+                qo_result = await node.agent_forge.dispatch_query(
+                    query=query,
+                    prompter_node_id=node.identity.node_id,
+                    query_id=query_id,
+                )
+                # Marshal AggregatedResult → /compute/forge response shape.
+                # payload is the aggregator's combined output (UTF-8 bytes
+                # for COUNT op; opaque for other ops).
+                try:
+                    response_text = qo_result.payload.decode("utf-8")
+                except UnicodeDecodeError:
+                    response_text = qo_result.payload.hex()
+                result = {
+                    "status": "success",
+                    "route": "qo_swarm",
+                    "aggregator_node_id": qo_result.aggregator_node_id,
+                    "contributing_shards": list(qo_result.contributing_shards),
+                    "response": response_text,
+                }
+            else:
+                # Legacy AgentForge path — preserved for any operator
+                # running a non-orchestrator backend (e.g. test fixture).
+                result = await node.agent_forge.run(
+                    query=query,
+                    budget_ftns=budget_ftns,
+                    shard_cids=shard_cids,
+                )
 
-            if result is None:
-                raise HTTPException(status_code=500, detail="Forge pipeline returned no result")
+                if result is None:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Forge pipeline returned no result",
+                    )
 
             # Track privacy budget if confidential compute is active
             if (
@@ -764,9 +799,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 except Exception as e:
                     logger.warning(f"Forge escrow release failed: {e}")
 
-            # Extract response text based on route
+            # Extract response text based on route. The QO path already
+            # set "response" + "route" above; legacy paths populate
+            # "route" via AgentForge result keys.
             route = result.get("route", "unknown")
-            if route == "direct_llm":
+            if route == "qo_swarm":
+                response_text = result.get("response", str(result))
+            elif route == "direct_llm":
                 response_text = result.get("response", str(result))
             elif route == "swarm":
                 output = result.get("aggregated_output", {})
@@ -784,7 +823,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "response": response_text,
                 "result": result,
                 "budget_ftns": budget_ftns,
-                "traces_collected": len(node.agent_forge.traces),
+                # QueryOrchestrator has no .traces attribute (a legacy
+                # AgentForge concept); default to 0 when absent.
+                "traces_collected": (
+                    len(getattr(node.agent_forge, "traces", []))
+                ),
             }
 
         except HTTPException:

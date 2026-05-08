@@ -70,24 +70,33 @@ logger = logging.getLogger(__name__)
 
 # ── Tool Definitions ─────────────────────────────────────────────────────
 
-# 2026-05-07 (canonical-workflow gap-list delta): three tools are
-# currently broken end-to-end and MUST NOT be advertised to LLM
-# clients in production. The Tool definitions remain in TOOLS below
-# (so the call_tool dispatch table still works for explicit
-# invocations) but list_tools() filters them so client-side tool
-# discovery does not surface them. When QueryOrchestrator lands
-# (replacing the deleted Agent Forge), drop the entry from this set
-# to re-expose the relevant tool.
+# 2026-05-07 (canonical-workflow gap-list delta): tools were hidden
+# end-to-end because their backends depended on the deleted Agent
+# Forge. The Tool definitions remain in TOOLS below (so the
+# call_tool dispatch table still works for explicit invocations)
+# but list_tools() filters them so client-side tool discovery does
+# not surface them.
 #
-# - prsm_analyze: depends on /compute/forge → 503 (agent_forge=None)
-# - prsm_dispatch_agent: same backend
+# 2026-05-08 (B8 unhide): prsm_analyze re-exposed. /compute/forge
+# now duck-type-dispatches on QueryOrchestrator.dispatch_query
+# (replacing the deleted Agent Forge surface) — operators with
+# PRSM_QUERY_ORCHESTRATOR_ENABLED=1 get a working analyze path
+# end-to-end. Operators without it still get 503 (agent_forge=None);
+# the tool surfaces in list_tools regardless so MCP clients can see
+# the capability and the 503 is the correct error to surface.
+#
+# Still hidden:
+# - prsm_dispatch_agent: requires the prsm_create_agent flow
+#   end-to-end; that path needs separate adaptation work.
 # - prsm_agent_status: backing /compute/status/{job_id} endpoint
-#   does not exist on node API → 404
+#   does not exist on node API → 404. Endpoint addition is a
+#   separate sprint (the QueryOrchestrator dispatch_query is
+#   currently synchronous-from-caller-view; status endpoint
+#   makes sense once async dispatch lands).
 #
 # Operators who want these visible (e.g. for testing reconstruction
 # work) can set PRSM_EXPOSE_BROKEN_TOOLS=1.
 BROKEN_TOOLS_HIDDEN = frozenset({
-    "prsm_analyze",
     "prsm_dispatch_agent",
     "prsm_agent_status",
 })

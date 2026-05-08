@@ -40,21 +40,34 @@ def _filtered_tools(*, expose_broken: bool):
 
 
 class TestBrokenToolsHidden:
-    def test_constant_contains_three_known_broken_tools(self):
+    def test_constant_contains_two_known_broken_tools(self):
         """Pin the membership of BROKEN_TOOLS_HIDDEN. If a future
         commit adds or removes a name without updating this test, we
-        want a deliberate decision — not silent drift."""
+        want a deliberate decision — not silent drift.
+
+        2026-05-08 (B8 unhide): prsm_analyze removed from the set —
+        /compute/forge now duck-type-dispatches on
+        QueryOrchestrator.dispatch_query so the tool's backend works
+        end-to-end on operators with PRSM_QUERY_ORCHESTRATOR_ENABLED=1.
+        """
         assert BROKEN_TOOLS_HIDDEN == frozenset({
-            "prsm_analyze",
             "prsm_dispatch_agent",
             "prsm_agent_status",
         })
 
-    def test_default_filter_omits_broken_tools(self):
-        """Without PRSM_EXPOSE_BROKEN_TOOLS, the three names must
-        not appear in the discovery list."""
+    def test_prsm_analyze_now_visible_by_default(self):
+        """B8 unhide: prsm_analyze is back in the discovery list.
+        Without PRSM_QUERY_ORCHESTRATOR_ENABLED, calling it returns
+        503 from /compute/forge (agent_forge=None) — the right error
+        for clients to surface. With the env var, the QO path
+        handles it end-to-end."""
         names = {t.name for t in _filtered_tools(expose_broken=False)}
-        assert "prsm_analyze" not in names
+        assert "prsm_analyze" in names
+
+    def test_default_filter_omits_remaining_broken_tools(self):
+        """Without PRSM_EXPOSE_BROKEN_TOOLS, the two still-broken
+        names must not appear in the discovery list."""
+        names = {t.name for t in _filtered_tools(expose_broken=False)}
         assert "prsm_dispatch_agent" not in names
         assert "prsm_agent_status" not in names
 
