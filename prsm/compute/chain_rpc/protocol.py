@@ -124,6 +124,12 @@ class ChainRpcMessageType(str, Enum):
     # Phase 3.x.11.y — speculative-decoding cache rollback signal:
     ROLLBACK_CACHE_REQUEST = "rollback_cache_request"  # executor → stage on rejected speculative suffix
     ROLLBACK_CACHE_RESPONSE = "rollback_cache_response"  # stage → executor ack
+    # QueryOrchestrator B3.1b — aggregator handoff RPC for the
+    # data-query path. Per-shard partials → selected aggregator →
+    # combined plaintext + commit (A9). See
+    # docs/2026-05-08-aggregate-rpc-design.md.
+    AGGREGATE_REQUEST = "aggregate_request"
+    AGGREGATE_RESPONSE = "aggregate_response"
 
 
 class DecodeMode(str, Enum):
@@ -178,6 +184,12 @@ class StageErrorCode(str, Enum):
     ACTIVATION_INVALID = "ACTIVATION_INVALID"
     TIMEOUT = "TIMEOUT"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+    # QueryOrchestrator B3.1b — aggregate-RPC failure modes per
+    # docs/2026-05-08-aggregate-rpc-design.md. EXPIRED_DEADLINE
+    # is intentionally omitted; reuse DEADLINE_EXCEEDED above.
+    DP_NOISE_MARKER_MISSING = "DP_NOISE_MARKER_MISSING"  # A5 enforcement at server
+    PRIVACY_BUDGET_EXHAUSTED = "PRIVACY_BUDGET_EXHAUSTED"  # epsilon ceiling tripped
+    INVALID_PARTIAL_SIGNATURE = "INVALID_PARTIAL_SIGNATURE"  # source agent's sig fails
 
 
 # ──────────────────────────────────────────────────────────────────────────
