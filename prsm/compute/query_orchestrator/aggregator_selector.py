@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from typing import ClassVar
 
 
 class InsufficientCandidatesError(RuntimeError):
@@ -288,6 +289,49 @@ class AggregationCommit:
     query_id: bytes
     aggregator_pubkey_hash: bytes
     result_digest: bytes
+
+    # Signing payload prefix — pinned by golden-vector test in
+    # test_aggregation_commit_signing_payload.py. Renaming the prefix
+    # would invalidate every previously-signed commit; if a future
+    # version genuinely needs a new payload shape, bump to "v2" and
+    # support both during the transition window.
+    SIGNING_PREFIX: ClassVar[bytes] = b"prsm:aggregation-commit:v1\n"
+
+    def signing_payload(self) -> bytes:
+        """Canonical signing payload for the aggregator's signature
+        over this commit (per `docs/2026-05-08-aggregate-rpc-design.md`
+        — pattern-lift from Phase 3.x.1 InferenceReceipt).
+
+        Layout (96 bytes after prefix):
+            SIGNING_PREFIX (28 bytes)
+            query_id              (32 bytes)
+            aggregator_pubkey_hash(32 bytes)
+            result_digest         (32 bytes)
+
+        All three fields are fixed-width 32 bytes — no length-prefixing
+        needed. Total: 124 bytes.
+        """
+        if len(self.query_id) != 32:
+            raise ValueError(
+                f"query_id must be 32 bytes for signing payload, "
+                f"got {len(self.query_id)}"
+            )
+        if len(self.aggregator_pubkey_hash) != 32:
+            raise ValueError(
+                f"aggregator_pubkey_hash must be 32 bytes for signing "
+                f"payload, got {len(self.aggregator_pubkey_hash)}"
+            )
+        if len(self.result_digest) != 32:
+            raise ValueError(
+                f"result_digest must be 32 bytes for signing payload, "
+                f"got {len(self.result_digest)}"
+            )
+        return (
+            self.SIGNING_PREFIX
+            + self.query_id
+            + self.aggregator_pubkey_hash
+            + self.result_digest
+        )
 
 
 def verify_aggregation_commit(
