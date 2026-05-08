@@ -1308,12 +1308,24 @@ class ContentUploader:
                     binary_fingerprint_record,
                 )
                 if bin_match is not None:
-                    dup_threshold = self._fingerprint_index.duplicate_threshold(
-                        bin_match.kind,
-                    )
-                    deriv_threshold = self._fingerprint_index.derivative_threshold(
-                        bin_match.kind,
-                    )
+                    # Resolver-first thresholds: when a ThresholdResolver
+                    # is wired AND the YAML has an entry for this kind,
+                    # use it (so arbitration_floor is available).
+                    # Otherwise fall back to FingerprintIndex built-in
+                    # 2-band thresholds. T6.5.x.
+                    eff_bin = self._resolve_binary_thresholds(bin_match.kind)
+                    if eff_bin is not None:
+                        deriv_threshold = eff_bin.derivative
+                        dup_threshold = eff_bin.duplicate
+                        bin_arb_floor = eff_bin.arbitration_floor
+                    else:
+                        dup_threshold = self._fingerprint_index.duplicate_threshold(
+                            bin_match.kind,
+                        )
+                        deriv_threshold = self._fingerprint_index.derivative_threshold(
+                            bin_match.kind,
+                        )
+                        bin_arb_floor = deriv_threshold  # disables disputed band
                     if bin_match.similarity >= deriv_threshold:
                         if bin_match.similarity >= dup_threshold:
                             logger.warning(
@@ -1333,6 +1345,33 @@ class ContentUploader:
                         near_dup_sim = bin_match.similarity
                         if bin_match.content_id not in parents:
                             parents = [bin_match.content_id] + parents
+                    elif (
+                        self._arbitration_queue is not None
+                        and bin_match.similarity >= bin_arb_floor
+                    ):
+                        # T6.5.x — disputed band on the binary lane.
+                        # Same shape as embedding-path: upload proceeds
+                        # but no auto-parent; record enqueued post-publish.
+                        logger.info(
+                            "Disputed-band binary similarity "
+                            "(kind=%s) for '%s': CID %s... "
+                            "(similarity=%.4f, floor=%.4f, "
+                            "derivative=%.4f). Flagged for arbitration; "
+                            "no auto-parent.",
+                            bin_match.kind.value,
+                            filename,
+                            bin_match.content_id[:16],
+                            bin_match.similarity,
+                            bin_arb_floor,
+                            deriv_threshold,
+                        )
+                        pending_arbitration = {
+                            "candidate_parent_cid": bin_match.content_id,
+                            "candidate_parent_creator":
+                                getattr(bin_match, "creator_id", "") or "",
+                            "similarity": float(bin_match.similarity),
+                            "fingerprint_kind": bin_match.kind.value,
+                        }
         # ─────────────────────────────────────────────────────────────────────
 
         # Check if content should be sharded
@@ -2001,6 +2040,35 @@ class ContentUploader:
                 "class-constant thresholds",
                 self._embedding_model_id,
                 hint,
+                exc,
+            )
+            return None
+
+    def _resolve_binary_thresholds(self, fingerprint_kind):
+        """Resolve effective dedup thresholds for a binary-fingerprint
+        lane (image-phash / audio-chromaprint / video-multihash).
+
+        Returns ``EffectiveThresholds`` when ``threshold_resolver`` is
+        configured AND the YAML has an entry for the kind; otherwise
+        ``None`` and the upload path falls back to the
+        ``FingerprintIndex``'s built-in 2-band thresholds.
+
+        ``content_type_hint`` is intentionally NOT plumbed here — the
+        YAML's ``content_type_multipliers`` section only carries
+        text-vector multipliers in v1. Binary-kind hint multipliers
+        are a calibration follow-on (T6.4 territory).
+        """
+        if self._threshold_resolver is None:
+            return None
+        try:
+            return self._threshold_resolver.resolve(
+                fingerprint_kind.value,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ThresholdResolver lookup failed (kind=%s): %s — "
+                "falling back to FingerprintIndex built-in thresholds",
+                fingerprint_kind.value,
                 exc,
             )
             return None

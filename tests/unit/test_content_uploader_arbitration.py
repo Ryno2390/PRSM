@@ -315,3 +315,201 @@ class TestUploadThreeBandRouting:
         assert "cid-old" not in (result.parent_cids or [])
         # Even with a queue wired, no resolver = no disputed band.
         assert asyncio.run(queue.list_pending()) == []
+
+
+# ──────────────────────────────────────────────────────────────────────
+# T6.5.x — binary-path 3-band wiring (image-phash / audio / video)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestResolveBinaryThresholds:
+    def test_returns_none_when_resolver_unwired(self):
+        from prsm.data.fingerprints.base import FingerprintKind
+        uploader = _make_uploader()
+        assert uploader._resolve_binary_thresholds(
+            FingerprintKind.IMAGE_PHASH,
+        ) is None
+
+    def test_returns_effective_thresholds_for_image(self):
+        from prsm.data.fingerprints.base import FingerprintKind
+        resolver = ThresholdResolver.from_default_path()
+        uploader = _make_uploader(threshold_resolver=resolver)
+        eff = uploader._resolve_binary_thresholds(
+            FingerprintKind.IMAGE_PHASH,
+        )
+        assert eff is not None
+        # image-phash YAML: derivative=0.81, arbitration_floor defaults
+        # to 0.71 (derivative - 0.10).
+        assert eff.derivative == pytest.approx(0.81)
+        assert eff.arbitration_floor == pytest.approx(0.71)
+
+    def test_returns_effective_thresholds_for_audio(self):
+        from prsm.data.fingerprints.base import FingerprintKind
+        resolver = ThresholdResolver.from_default_path()
+        uploader = _make_uploader(threshold_resolver=resolver)
+        eff = uploader._resolve_binary_thresholds(
+            FingerprintKind.AUDIO_CHROMAPRINT,
+        )
+        assert eff is not None
+        assert eff.derivative == pytest.approx(0.75)
+
+    def test_returns_effective_thresholds_for_video(self):
+        from prsm.data.fingerprints.base import FingerprintKind
+        resolver = ThresholdResolver.from_default_path()
+        uploader = _make_uploader(threshold_resolver=resolver)
+        eff = uploader._resolve_binary_thresholds(
+            FingerprintKind.VIDEO_MULTIHASH,
+        )
+        assert eff is not None
+        assert eff.derivative == pytest.approx(0.625)
+
+    def test_resolver_failure_falls_back_to_none(self):
+        from prsm.data.fingerprints.base import FingerprintKind
+        bad_resolver = MagicMock()
+        bad_resolver.resolve.side_effect = RuntimeError("boom")
+        uploader = _make_uploader(threshold_resolver=bad_resolver)
+        assert uploader._resolve_binary_thresholds(
+            FingerprintKind.IMAGE_PHASH,
+        ) is None
+
+
+class TestUploadBinaryThreeBandRouting:
+    """End-to-end: drive ``upload()`` through the binary-fingerprint
+    path. Embedding stub returns None so that branch falls through to
+    the bin_match logic."""
+
+    def _seed_binary_uploader(
+        self, *, kind, similarity: float, threshold_resolver=None,
+        arbitration_queue=None,
+    ):
+        from prsm.data.fingerprints.index import FingerprintMatch
+        uploader = _make_uploader(
+            threshold_resolver=threshold_resolver,
+            arbitration_queue=arbitration_queue,
+        )
+        uploader.creator_address = "0x" + "11" * 20
+        # No embedding -> binary path fires.
+        async def _embedding_fn(content):
+            return None
+        uploader._get_embedding = _embedding_fn
+        # Stub the binary-fingerprint computation to a real
+        # FingerprintRecord (downstream code calls .kind on it after
+        # publish to register the fingerprint with the index).
+        from prsm.data.fingerprints.base import FingerprintRecord
+        uploader._maybe_compute_binary_fingerprint = (
+            lambda content, filename: FingerprintRecord(
+                kind=kind, payload=b"\x00" * 8,
+            )
+        )
+        # Suppress the post-publish fingerprint registration side-effects
+        # (we don't need them for these tests).
+        uploader._fingerprint_index.store = MagicMock()
+        uploader._register_local_fingerprint = MagicMock()
+        match = FingerprintMatch(
+            content_id="cid-bin-old",
+            similarity=similarity,
+            creator_id="0xbincreator",
+            kind=kind,
+        )
+        uploader._fingerprint_index.find_nearest = lambda rec: match
+        # Backstops needed when resolver is None (legacy path
+        # consults the index directly).
+        uploader._fingerprint_index.derivative_threshold = (
+            lambda k: 0.81 if k == kind else 0.5
+        )
+        uploader._fingerprint_index.duplicate_threshold = (
+            lambda k: 0.94 if k == kind else 0.95
+        )
+        async def _publish_stub(content, filename, ph):
+            return "cid-bin-new"
+        uploader._publish_content = _publish_stub
+        uploader._register_local_embedding = MagicMock()
+        uploader._register_local_content = MagicMock()
+        uploader._broadcast_provenance = AsyncMock()
+        return uploader
+
+    def test_image_disputed_band_enqueues_no_auto_parent(self):
+        from prsm.data.fingerprints.base import FingerprintKind
+        resolver = ThresholdResolver.from_default_path()
+        queue = InMemoryArbitrationQueue()
+        # image-phash: derivative=0.81, arbitration_floor=0.71.
+        uploader = self._seed_binary_uploader(
+            kind=FingerprintKind.IMAGE_PHASH,
+            similarity=0.75,  # in disputed band
+            threshold_resolver=resolver,
+            arbitration_queue=queue,
+        )
+        result = asyncio.run(uploader.upload(b"binary content"))
+        assert result is not None
+        assert "cid-bin-old" not in (result.parent_cids or [])
+        records = asyncio.run(queue.list_pending())
+        assert len(records) == 1
+        rec = records[0]
+        assert rec.fingerprint_kind == "image-phash"
+        assert rec.candidate_parent_cid == "cid-bin-old"
+        assert rec.candidate_parent_creator == "0xbincreator"
+        assert rec.similarity == pytest.approx(0.75)
+
+    def test_audio_above_derivative_auto_attributes(self):
+        from prsm.data.fingerprints.base import FingerprintKind
+        resolver = ThresholdResolver.from_default_path()
+        queue = InMemoryArbitrationQueue()
+        uploader = self._seed_binary_uploader(
+            kind=FingerprintKind.AUDIO_CHROMAPRINT,
+            similarity=0.80,  # > derivative=0.75
+            threshold_resolver=resolver,
+            arbitration_queue=queue,
+        )
+        # Make the fallback thresholds match the audio kind so the
+        # legacy-path checks (called when resolver returns) line up.
+        result = asyncio.run(uploader.upload(b"binary content"))
+        assert result is not None
+        assert "cid-bin-old" in (result.parent_cids or [])
+        assert asyncio.run(queue.list_pending()) == []
+
+    def test_video_below_floor_no_op(self):
+        from prsm.data.fingerprints.base import FingerprintKind
+        resolver = ThresholdResolver.from_default_path()
+        queue = InMemoryArbitrationQueue()
+        uploader = self._seed_binary_uploader(
+            kind=FingerprintKind.VIDEO_MULTIHASH,
+            similarity=0.30,  # < arbitration_floor=0.525
+            threshold_resolver=resolver,
+            arbitration_queue=queue,
+        )
+        result = asyncio.run(uploader.upload(b"binary content"))
+        assert result is not None
+        assert "cid-bin-old" not in (result.parent_cids or [])
+        assert asyncio.run(queue.list_pending()) == []
+
+    def test_no_resolver_preserves_legacy_2_band_behavior(self):
+        from prsm.data.fingerprints.base import FingerprintKind
+        # Without a resolver, the FingerprintIndex's built-in
+        # 2-band thresholds apply (derivative=0.81 for image-phash).
+        # Sim=0.75 falls below derivative → no-op (legacy).
+        queue = InMemoryArbitrationQueue()
+        uploader = self._seed_binary_uploader(
+            kind=FingerprintKind.IMAGE_PHASH,
+            similarity=0.75,
+            threshold_resolver=None,
+            arbitration_queue=queue,
+        )
+        result = asyncio.run(uploader.upload(b"binary content"))
+        assert result is not None
+        assert "cid-bin-old" not in (result.parent_cids or [])
+        # No resolver → no disputed band, even with queue wired.
+        assert asyncio.run(queue.list_pending()) == []
+
+    def test_no_arbitration_queue_disables_binary_disputed_band(self):
+        from prsm.data.fingerprints.base import FingerprintKind
+        resolver = ThresholdResolver.from_default_path()
+        uploader = self._seed_binary_uploader(
+            kind=FingerprintKind.IMAGE_PHASH,
+            similarity=0.75,  # would-be disputed band
+            threshold_resolver=resolver,
+            arbitration_queue=None,
+        )
+        result = asyncio.run(uploader.upload(b"binary content"))
+        assert result is not None
+        # No auto-parent (sim < derivative) and no queue to enqueue to.
+        assert "cid-bin-old" not in (result.parent_cids or [])
