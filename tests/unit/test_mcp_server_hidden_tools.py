@@ -40,21 +40,19 @@ def _filtered_tools(*, expose_broken: bool):
 
 
 class TestBrokenToolsHidden:
-    def test_constant_contains_one_known_broken_tool(self):
+    def test_constant_is_empty(self):
         """Pin the membership of BROKEN_TOOLS_HIDDEN. If a future
-        commit adds or removes a name without updating this test, we
-        want a deliberate decision — not silent drift.
+        commit adds a name without updating this test, we want a
+        deliberate decision — not silent drift.
 
         2026-05-08 (B8 unhide pass 1): prsm_analyze removed.
         2026-05-08 (B8 unhide pass 2): prsm_dispatch_agent removed —
-        its handler already routes through /compute/forge with
-        manifest.query, which now works via the same QO dispatch.
-        Manifest is pre-validated locally; QO re-decomposes
-        server-side (caveat documented in handler).
+        handler routes through /compute/forge with manifest.query.
+        2026-05-08 (B8 unhide pass 3): prsm_agent_status removed —
+        /compute/status/{job_id} now reads from PaymentEscrow.
+        All three originally-hidden tools now functional.
         """
-        assert BROKEN_TOOLS_HIDDEN == frozenset({
-            "prsm_agent_status",
-        })
+        assert BROKEN_TOOLS_HIDDEN == frozenset()
 
     def test_prsm_analyze_now_visible_by_default(self):
         """B8 unhide pass 1: prsm_analyze is back in the discovery
@@ -73,13 +71,14 @@ class TestBrokenToolsHidden:
         names = {t.name for t in _filtered_tools(expose_broken=False)}
         assert "prsm_dispatch_agent" in names
 
-    def test_default_filter_omits_remaining_broken_tool(self):
-        """Without PRSM_EXPOSE_BROKEN_TOOLS, the one still-broken
-        name (prsm_agent_status) must not appear in the discovery
-        list — its backing /compute/status/{job_id} endpoint
-        doesn't exist."""
+    def test_prsm_agent_status_now_visible_by_default(self):
+        """B8 unhide pass 3: prsm_agent_status is back.
+        /compute/status/{job_id} now reads from PaymentEscrow and
+        returns the escrow lifecycle (pending/released/refunded/
+        disputed + amount + timing). Limited to jobs that locked
+        an escrow (budget > 0); budget=0 jobs return 404."""
         names = {t.name for t in _filtered_tools(expose_broken=False)}
-        assert "prsm_agent_status" not in names
+        assert "prsm_agent_status" in names
 
     def test_default_filter_keeps_real_tools(self):
         """Real tools must still be visible. If this fails, the gate

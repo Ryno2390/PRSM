@@ -842,6 +842,55 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             logger.error(f"Forge pipeline error: {e}")
             raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
+    @app.get("/compute/status/{job_id}")
+    async def compute_status(job_id: str) -> Dict[str, Any]:
+        """Look up the status of a /compute/forge job by its job_id.
+
+        Backs the ``prsm_agent_status`` MCP tool. Reads from the
+        node's ``PaymentEscrow`` (the only per-job persistent state
+        in the synchronous-from-caller-view forge pipeline) and
+        returns the escrow's lifecycle: pending / released /
+        refunded / disputed plus amount + timing + provider winner.
+
+        Coverage limitation (honest scope): only jobs that locked an
+        escrow are tracked. Jobs that completed with budget=0 (test
+        fixtures, free-tier dev mode) are not retrievable here. A
+        future async-dispatch sprint can add a richer JobHistory
+        record covering the result + route + traces; v1 covers the
+        load-bearing case (paid jobs that need billing reconciliation).
+
+        Returns 404 if the job_id is not in the escrow ledger.
+        """
+        if not getattr(node, "_payment_escrow", None):
+            raise HTTPException(
+                status_code=503,
+                detail="Payment escrow not initialized on this node.",
+            )
+        escrow = node._payment_escrow.get_escrow(job_id)
+        if escrow is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No escrow record for job_id={job_id!r}. Either the "
+                    f"job never ran on this node, or it ran without a "
+                    f"locked escrow (budget=0). Status retrieval is "
+                    f"only supported for paid jobs."
+                ),
+            )
+        return {
+            "job_id": escrow.job_id,
+            "escrow_id": escrow.escrow_id,
+            "requester_id": escrow.requester_id,
+            "amount_ftns": escrow.amount,
+            "status": escrow.status.value,
+            "provider_winner": escrow.provider_winner,
+            "tx_lock": escrow.tx_lock,
+            "tx_release": escrow.tx_release,
+            "created_at": escrow.created_at,
+            "completed_at": escrow.completed_at,
+            "metadata": dict(escrow.metadata or {}),
+        }
+
     @app.post("/compute/inference")
     async def compute_inference(body: Dict[str, Any] = {}) -> Dict[str, Any]:
         """Run TEE-attested model inference with verifiable signed receipts.

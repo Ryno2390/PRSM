@@ -95,18 +95,19 @@ logger = logging.getLogger(__name__)
 # extend /compute/forge body schema) when that becomes
 # load-bearing.
 #
-# Still hidden:
-# - prsm_agent_status: backing /compute/status/{job_id} endpoint
-#   does not exist on node API → 404. Endpoint addition is a
-#   separate sprint (the QueryOrchestrator dispatch_query is
-#   currently synchronous-from-caller-view; status endpoint
-#   makes sense once async dispatch lands).
+# 2026-05-08 (B8 unhide pass 3): prsm_agent_status re-exposed.
+# /compute/status/{job_id} now reads from node._payment_escrow
+# (the only per-job persistent state in the synchronous-from-
+# caller-view forge pipeline) and returns the escrow's lifecycle:
+# pending / released / refunded / disputed + amount + timing +
+# provider winner. Coverage limitation: only jobs that locked an
+# escrow (budget > 0) are retrievable; budget=0 jobs (test
+# fixtures, free-tier dev mode) are not.
 #
-# Operators who want this visible (e.g. for testing reconstruction
-# work) can set PRSM_EXPOSE_BROKEN_TOOLS=1.
-BROKEN_TOOLS_HIDDEN = frozenset({
-    "prsm_agent_status",
-})
+# All three originally-hidden tools now functional. The
+# BROKEN_TOOLS_HIDDEN set is empty; the constant remains in case
+# future endpoints need temporary hiding.
+BROKEN_TOOLS_HIDDEN = frozenset()
 
 TOOLS = [
     Tool(
