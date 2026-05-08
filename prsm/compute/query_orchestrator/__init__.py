@@ -43,6 +43,7 @@ from prsm.compute.query_orchestrator.swarm_runner import (
     SwarmDispatcher,
     run_swarm,
 )
+from prsm.compute.query_orchestrator.orchestrator import QueryOrchestrator
 
 __all__ = [
     # aggregator_selector
@@ -69,4 +70,6 @@ __all__ = [
     "PartialResultIntegrityError",
     "SwarmDispatcher",
     "run_swarm",
+    # orchestrator (composition class)
+    "QueryOrchestrator",
 ]
