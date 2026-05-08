@@ -476,3 +476,101 @@ def test_adapter_satisfies_aggregator_client_protocol():
         transport=transport, prompter_priv=pp_priv, prompter_pub=pp_pub,
     )
     assert isinstance(adapter, AggregatorClient)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# default_ftns_budget — closes the §3 placeholder follow-on
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_default_ftns_budget_default_is_1000():
+    """Backwards compat: omit the kwarg → default 1000 (matches the
+    old _FTNS_BUDGET_PLACEHOLDER value)."""
+    agg_priv, agg_pub, agg_pkh = _aggregator_keypair()
+    pp_priv, pp_pub = _prompter_keypair()
+    captured = {}
+
+    def factory(req):
+        captured["request"] = req
+        return _build_response(
+            request=req, aggregator_priv=agg_priv, aggregator_pub=agg_pub,
+            aggregator_pub_hash=agg_pkh, plaintext=b"x",
+        )
+
+    transport = _StubTransport(response_factory=factory)
+    adapter = AggregatorClientAdapter(
+        prompter_pubkey=pp_pub,
+        prompter_node_id="p",
+        prompter_signer=pp_priv.sign,
+        beacon_provider=lambda: b"\xa1" * 32,
+        transport=transport,
+    )
+    aggregator = StakedNode(
+        node_id="agg-1",
+        pubkey_hash=agg_pkh,
+        stake_amount_ftns=1000,
+        tier="T2",
+        has_tee=False,
+        reputation_score=1.0,
+    )
+    asyncio.run(adapter.aggregate(
+        aggregator=aggregator,
+        manifest=_manifest(),
+        partials=[_partial(shard_cid="s-0")],
+        query_id=b"q" * 32,
+    ))
+    assert captured["request"].ftns_budget == 1000
+
+
+def test_default_ftns_budget_constructor_override_threads_through():
+    """Operator sets a non-default budget; it lands in the
+    AggregateRequest the adapter constructs."""
+    agg_priv, agg_pub, agg_pkh = _aggregator_keypair()
+    pp_priv, pp_pub = _prompter_keypair()
+    captured = {}
+
+    def factory(req):
+        captured["request"] = req
+        return _build_response(
+            request=req, aggregator_priv=agg_priv, aggregator_pub=agg_pub,
+            aggregator_pub_hash=agg_pkh, plaintext=b"x",
+        )
+
+    transport = _StubTransport(response_factory=factory)
+    adapter = AggregatorClientAdapter(
+        prompter_pubkey=pp_pub,
+        prompter_node_id="p",
+        prompter_signer=pp_priv.sign,
+        beacon_provider=lambda: b"\xa1" * 32,
+        transport=transport,
+        default_ftns_budget=5_000,
+    )
+    aggregator = StakedNode(
+        node_id="agg-1",
+        pubkey_hash=agg_pkh,
+        stake_amount_ftns=1000,
+        tier="T2",
+        has_tee=False,
+        reputation_score=1.0,
+    )
+    asyncio.run(adapter.aggregate(
+        aggregator=aggregator,
+        manifest=_manifest(),
+        partials=[_partial(shard_cid="s-0")],
+        query_id=b"q" * 32,
+    ))
+    assert captured["request"].ftns_budget == 5_000
+
+
+def test_negative_default_ftns_budget_rejected():
+    pp_priv, pp_pub = _prompter_keypair()
+    transport = _StubTransport(response_factory=lambda req: None)
+    with pytest.raises(ValueError, match="default_ftns_budget"):
+        AggregatorClientAdapter(
+            prompter_pubkey=pp_pub,
+            prompter_node_id="p",
+            prompter_signer=pp_priv.sign,
+            beacon_provider=lambda: b"\xa1" * 32,
+            transport=transport,
+            default_ftns_budget=-1,
+        )

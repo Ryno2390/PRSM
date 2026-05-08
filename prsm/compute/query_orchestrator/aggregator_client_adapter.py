@@ -50,11 +50,15 @@ tasks tracked in `docs/2026-05-08-query-orchestrator-wiring-readiness.md`)
    resulting cleartext. Tracked separately so encryption choices
    can be debated without blocking the wire format.
 
-3. ``ftns_budget = 1000`` placeholder. Real budget threading from
-   the orchestrator's per-query allocation lands when the
-   QueryOrchestrator wiring sprint connects budget tracking through
-   to the adapter. Until then a fixed cap is fine — the server-side
-   handler doesn't enforce a tight ceiling for v1.
+3. ✅ CLOSED — ``ftns_budget`` constructor override.
+   ``default_ftns_budget`` is now a constructor kwarg (default
+   1000) — operators set it once per deployment. Per-query budget
+   threading (where each prompter passes a different budget per
+   call) is a separate orchestrator-level design pass: the
+   ``AggregatorClient`` Protocol in ``swarm_runner.py`` doesn't
+   currently take ``ftns_budget`` as a per-call kwarg, so per-call
+   variation requires the Protocol contract to change too —
+   tracked as a future swarm_runner Protocol extension.
 """
 from __future__ import annotations
 
@@ -81,8 +85,6 @@ from prsm.compute.query_orchestrator.aggregator_selector import (
 from prsm.compute.query_orchestrator.swarm_runner import PartialResult
 
 
-# v1 placeholder — see module docstring §3
-_FTNS_BUDGET_PLACEHOLDER: int = 1000
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -155,6 +157,18 @@ class AggregatorClientAdapter:
     request_timeout_seconds:
         Per-request timeout. Threaded into the transport AND into
         ``deadline_unix`` (deadline = now + timeout). Default 60s.
+    default_ftns_budget:
+        FTNS allocation embedded in every ``AggregateRequest`` this
+        adapter constructs. The budget bounds the aggregator's
+        per-query compensation; it's enforced at the server side via
+        the privacy_budget_consumed accumulator. v1 ships a flat
+        per-deployment default — operators set this once at adapter
+        construction time. Per-query budget threading (where each
+        prompter passes a different budget per call) is a separate
+        orchestrator-level design pass; the AggregatorClient Protocol
+        doesn't currently take ``ftns_budget`` as a per-call kwarg
+        because that would require touching swarm_runner's Protocol
+        contract. Default 1000.
 
     The adapter's ``aggregate(...)`` is the only method the swarm
     runner calls. Each call is independent — the adapter holds no
@@ -171,6 +185,7 @@ class AggregatorClientAdapter:
         beacon_provider: Callable[[], bytes],
         transport: AggregateTransport,
         request_timeout_seconds: float = 60.0,
+        default_ftns_budget: int = 1000,
     ) -> None:
         if not isinstance(prompter_pubkey, (bytes, bytearray)):
             raise TypeError(
@@ -200,6 +215,15 @@ class AggregatorClientAdapter:
                 f"request_timeout_seconds must be > 0, got "
                 f"{request_timeout_seconds}"
             )
+        if (
+            not isinstance(default_ftns_budget, int)
+            or isinstance(default_ftns_budget, bool)
+            or default_ftns_budget < 0
+        ):
+            raise ValueError(
+                f"default_ftns_budget must be non-negative int, got "
+                f"{default_ftns_budget!r}"
+            )
 
         self._prompter_pubkey = bytes(prompter_pubkey)
         self._prompter_node_id = prompter_node_id
@@ -207,6 +231,7 @@ class AggregatorClientAdapter:
         self._beacon_provider = beacon_provider
         self._transport = transport
         self._timeout = float(request_timeout_seconds)
+        self._default_ftns_budget = int(default_ftns_budget)
 
     async def aggregate(
         self,
@@ -284,7 +309,7 @@ class AggregatorClientAdapter:
             prompter_node_id=self._prompter_node_id,
             beacon_used=bytes(beacon),
             aggregator_pubkey_hash=aggregator.pubkey_hash,
-            ftns_budget=_FTNS_BUDGET_PLACEHOLDER,
+            ftns_budget=self._default_ftns_budget,
             deadline_unix=deadline_unix,
             prompter_signature=b"\x00" * 64,  # placeholder
         )
