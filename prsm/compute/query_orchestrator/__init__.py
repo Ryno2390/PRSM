@@ -56,6 +56,9 @@ from prsm.compute.query_orchestrator.semantic_index_adapter import (
     Embedder,
     SemanticIndexAdapter,
 )
+from prsm.compute.query_orchestrator.swarm_dispatcher_adapter import (
+    SwarmDispatcherAdapter,
+)
 
 __all__ = [
     # aggregator_selector
@@ -94,4 +97,6 @@ __all__ = [
     # semantic_index_adapter
     "Embedder",
     "SemanticIndexAdapter",
+    # swarm_dispatcher_adapter
+    "SwarmDispatcherAdapter",
 ]
