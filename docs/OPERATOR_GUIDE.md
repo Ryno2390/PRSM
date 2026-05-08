@@ -55,8 +55,10 @@ DATABASE_URL=sqlite:///./prsm_node.db
 INITIAL_ADMIN_EMAIL=admin@example.com
 INITIAL_ADMIN_PASSWORD=<secure-password>
 
-# P2P Network
-P2P_BOOTSTRAP_NODES=bootstrap1.prsm.io:8765,bootstrap2.prsm.io:8765
+# P2P Network — production bootstrap is hosted on DigitalOcean.
+# `prsm/node/bootstrap.py:_DEFAULT_BOOTSTRAP` already points at this; you
+# only need to set this env var if you want to override or pin secondaries.
+P2P_BOOTSTRAP_NODES=wss://bootstrap1.prsm-network.com:8765
 ```
 
 ### Step 3: Launch
@@ -79,7 +81,7 @@ docker-compose logs -f prsm-api
 curl http://localhost:8000/health
 
 # Expected response:
-# {"status": "healthy", "version": "1.0.0", ...}
+# {"status": "healthy", "version": "1.7.0", ...}
 ```
 
 ---
@@ -92,7 +94,7 @@ curl http://localhost:8000/health
 |-----------|---------|-------------|-------|
 | CPU | 2 cores | 8 cores | More cores = more concurrent queries |
 | RAM | 4 GB | 32 GB | AI workloads benefit from more RAM |
-| Storage | 50 GB SSD | 500 GB NVMe | Fast storage improves IPFS performance |
+| Storage | 50 GB SSD | 500 GB NVMe | Fast storage improves content-store + BitTorrent shard read throughput |
 | Network | 10 Mbps | 100 Mbps | Low latency is critical for P2P |
 | OS | Ubuntu 22.04 LTS | Ubuntu 22.04 LTS | Also supports macOS, Windows |
 
@@ -115,7 +117,7 @@ Best for: Most production deployments
 
 ```yaml
 # docker-compose.yml
-version: '3.8'
+# Note: the `version:` key is obsolete in Docker Compose v2 — omit it.
 
 services:
   prsm-api:
@@ -125,7 +127,7 @@ services:
       - "8765:8765"
     environment:
       - SECRET_KEY=${SECRET_KEY}
-      - DATABASE_URL=postgresql://prsm:password@db:5432/prsm
+      - DATABASE_URL=postgresql://prsm:${POSTGRES_PASSWORD}@db:5432/prsm
       - REDIS_URL=redis://redis:6379
     volumes:
       - prsm-data:/data
@@ -139,7 +141,7 @@ services:
     image: postgres:15
     environment:
       - POSTGRES_USER=prsm
-      - POSTGRES_PASSWORD=password
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}  # set in .env, never commit
       - POSTGRES_DB=prsm
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -169,7 +171,13 @@ Best for: Servers where you want direct control
 ```bash
 # Install dependencies
 sudo apt update
-sudo apt install python3.11 python3.11-venv ipfs
+sudo apt install python3.11 python3.11-venv
+
+# NOTE: as of v1.7.0, IPFS is no longer used. Native content-store +
+# BitTorrent transport replaced it during the 2026-05-07 migration.
+# See `prsm/data/native_storage/`. Existing nodes upgrading from <v1.7
+# can remove the `ipfs` daemon and its repo after the alembic 016
+# migration runs (renames `ipfs_cid` columns → `content_cid`).
 
 # Clone and setup
 git clone https://github.com/prsm-network/PRSM.git /opt/prsm
@@ -229,6 +237,8 @@ helm install prsm ./k8s/helm/prsm \
 
 ## Configuration Reference
 
+> **Note:** post-2026-05 surface (QueryOrchestrator, Item 6 arbitration, DHT transport, mainnet contract overrides) is documented in dedicated sections below. The tables here cover the pre-existing baseline.
+
 ### Required Environment Variables
 
 | Variable | Description | Example |
@@ -265,6 +275,156 @@ helm install prsm ./k8s/helm/prsm \
 
 ---
 
+## Mainnet On-chain Surface (v1.7.0+)
+
+PRSM is live on **Base mainnet** as of 2026-05-04 (treasury / provenance) and 2026-05-07 (full audit-bundle + Phase 8 + Phase 7-storage). Operators do **not** need to set contract addresses manually for the canonical mainnet deploy — `prsm/config/networks.py` ships them pinned.
+
+### Default mainnet contract addresses (informational)
+
+| Contract | Address | Verified |
+|---|---|---|
+| FTNSTokenSimple | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` | Basescan |
+| Foundation Safe (2-of-3) | `0x91b0...5791` | Basescan |
+| ProvenanceRegistry V2 | `0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf` | Basescan |
+| RoyaltyDistributor | `0x3E82...D6c2` | Basescan |
+| EmissionController + CompensationDistributor + StorageSlashing + KeyDistribution + audit-bundle (BSR / EscrowPool / StakeBond / Ed25519Verifier) | see `prsm/config/networks.py` MAINNET block | Basescan |
+
+The Foundation Safe is sole owner of every contract above. Operator nodes hold no admin keys — see "On-chain Keypairs" below.
+
+### Optional override env vars
+
+Operators rarely need these; they exist for testnet pinning, post-incident migration, or operator-controlled deployments.
+
+| Variable | Purpose |
+|---|---|
+| `FTNS_TOKEN_ADDRESS` (alias: `FTNS_CONTRACT_ADDRESS`) | Override FTNS token address |
+| `PRSM_PROVENANCE_REGISTRY_ADDRESS` | Override ProvenanceRegistry; legacy V1 addr |
+| `PRSM_PROVENANCE_REGISTRY_V2_ADDRESS` | **Set this to use V2 (post-2026-05-06)** |
+| `PRSM_ROYALTY_DISTRIBUTOR_ADDRESS` | Override RoyaltyDistributor |
+| `PRSM_FOUNDATION_SAFE` | Override Foundation Safe; rarely needed |
+| `PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS` | Override PublisherKeyAnchor (DHT lane) |
+| `PRSM_SETTLEMENT_REGISTRY_ADDRESS` | Override BatchSettlementRegistry |
+| `PRSM_ESCROW_POOL_ADDRESS` | Override EscrowPool |
+| `PRSM_STAKE_BOND_ADDRESS` | Override StakeBond |
+| `PRSM_EMISSION_CONTROLLER_ADDRESS` | Override EmissionController |
+| `PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS` | Override CompensationDistributor |
+| `PRSM_STORAGE_SLASHING_ADDRESS` | Override StorageSlashing |
+| `PRSM_KEY_DISTRIBUTION_ADDRESS` | Override KeyDistribution (Tier C) |
+
+### On-chain ingest opt-in
+
+| Variable | Default | Description |
+|---|---|---|
+| `PRSM_ONCHAIN_PROVENANCE` | `0` (off) | Set to `1` to register uploads on-chain via ProvenanceRegistry. **Requires** `PRSM_PROVENANCE_REGISTRY_ADDRESS` (or V2) AND `PRSM_ROYALTY_DISTRIBUTOR_ADDRESS`. Without these the node will hard-fail at startup rather than silently skipping the on-chain step. |
+
+---
+
+## QueryOrchestrator + Aggregation (Ring 5 replacement)
+
+As of 2026-05-08, the legacy `AgentForge` dispatcher has been replaced by the **QueryOrchestrator** stack. New deployments default to it; existing operators must opt in.
+
+### Activation
+
+| Variable | Default | Description |
+|---|---|---|
+| `PRSM_QUERY_ORCHESTRATOR_ENABLED` | `0` | Set to `1` to enable QueryOrchestrator on `/compute/forge`. When unset (or set to anything other than `1`/`true`/`yes`), the legacy AgentForge path is used. |
+
+`/compute/forge` duck-type-dispatches based on `hasattr(node.agent_forge, "dispatch_query")`, so the swap is transparent to clients.
+
+### Settlement split
+
+When QueryOrchestrator handles a job, payment escrow is released across all swarm participants via `PaymentEscrow.release_escrow_split` (multi-recipient atomic distribution).
+
+| Variable | Default | Description |
+|---|---|---|
+| `PRSM_AGGREGATOR_SHARE_BPS` | `500` (= 5%) | Aggregator's share in basis points. Remaining `10_000 - N` bps split evenly across compute participants. Operator-tunable; valid range `[0, 10_000]`. |
+
+### Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `POST /compute/forge` | Submit a query. Returns 32-byte `query_id` and (in QO mode) an `AggregatedResult` block including `participants: [...]`. |
+| `GET /compute/status/{job_id}` | Two-tier response: `{"history": {...}, "escrow": {...}}`. The `history` block reports IN_PROGRESS / COMPLETED / FAILED from `JobHistoryStore`; the `escrow` block reports `PaymentEscrow` state. Either tier may be `null` if the job is unknown to that subsystem. |
+
+### JobHistoryStore
+
+In-memory LRU-bounded store (default 1024 entries). Records `IN_PROGRESS` → `COMPLETED` / `FAILED` transitions for `/compute/forge` jobs. **Process restart clears history** — `escrow` tier of `/compute/status` survives the restart, but `history` does not. A filesystem-backed variant is on the deferred follow-on list; until then, do not page operators on transient `history: null` responses for jobs older than the most recent restart.
+
+---
+
+## Per-Content-Type Dedup + Arbitration (PRSM-PROV-1 Item 6)
+
+Three-band attribution pipeline shipped 2026-05-08: clear-uphold (≥ derivative threshold) / disputed-band (between `arbitration_floor` and `derivative`) / clear-reject (< `arbitration_floor`). Disputed-band records land in an arbitration queue and (optionally) a token-weighted governance proposal.
+
+### Activation tiers
+
+The pipeline is layered. Operators choose how deep to go:
+
+| Tier | What runs | Activation |
+|---|---|---|
+| 0 | Three-band routing only | Always on (no env vars) |
+| 1 | + Filesystem queue persistence | `~/.prsm/arbitration_queue/` (created automatically on first disputed record) |
+| 2 | + Governance proposal sink (token-weighted voting) | Set `PRSM_ARBITRATION_PROPOSER_ID=<your-proposer-id>` |
+
+Set `PRSM_ARBITRATION_PROPOSER_ID=""` (empty string) to explicitly disable Tier 2 even if accidentally inherited from a parent shell.
+
+### Failure isolation
+
+The upload path uses three-tier failure isolation: `queue.enqueue` / `sink.create_proposal` / `queue.set_proposal_id` are independently wrapped in try/except. A failure in any tier logs and proceeds — uploads stay green even if governance is broken.
+
+### Operator runbook
+
+For full activation, monitoring, alert thresholds, council resolution flow, rollback levels, and troubleshooting see:
+
+`docs/2026-05-08-prsm-prov-1-item-6-operator-activation-runbook.md`
+
+Threat model: `docs/2026-05-08-prsm-prov-1-threat-model-addendum-item-6.md` (§3.18, A1–A8).
+
+---
+
+## DHT Embedding Transport (cross-node fingerprint dedup)
+
+Optional cross-node binary fingerprint deduplication via Kademlia DHT.
+
+| Variable | Default | Description |
+|---|---|---|
+| `PRSM_DHT_ENABLED` | `0` | Set to `1` to enable two-way DHT transport (clients ASK, servers ANSWER). Lockstep with embedding lane via `LocalFingerprintIndex`. Off by default — opt in deliberately. |
+
+When enabled, the node spins up an asyncio-loop-backed `SyncDHTTransport` + `DHTListener` + `EmbeddingDHTServer`. Cross-node hits are Ed25519-signature-verified before being trusted.
+
+---
+
+## MCP Server (Tool Surface)
+
+The MCP server exposes a curated subset of tools for agentic clients.
+
+As of 2026-05-08, the previously-hidden tools (`prsm_analyze`, `prsm_dispatch_agent`, `prsm_agent_status`) have all been restored:
+
+- `prsm_analyze` — exposes the QueryOrchestrator + AggregatorClient stack
+- `prsm_dispatch_agent` — async dispatch with JobHistoryRecord-backed status tracking
+- `prsm_agent_status` — surfaces the two-tier `/compute/status` response
+
+`BROKEN_TOOLS_HIDDEN` is now an empty frozenset. If you re-add a tool to the hide-list mid-incident, also pin `tests/unit/test_mcp_server_hidden_tools.py` to match — the test asserts the exact set.
+
+---
+
+## KeyDistribution Client (Tier C content)
+
+Tier C ("encrypt-then-distribute") content uses on-chain `KeyDistribution.sol` to release decryption shards only after payment is verified.
+
+`prsm/economy/web3/key_distribution.py` provides the `KeyDistributionClient`:
+
+- `deposit_key()` — uploader deposits shards
+- `release()` — operator releases on payment proof
+- `deauthorize()` — revoke previously-released access
+- `KeyReleasedEvent` — typed event for downstream listeners
+
+Errors are typed: `KeyAlreadyDepositedError` / `KeyNotFoundError` / `PaymentNotVerifiedError`. All Web3 calls go through the per-keypair `TX_LOCK_REGISTRY` lock — see "On-chain Keypairs" for the one-keypair-per-process invariant.
+
+**Limitation:** an event-watcher daemon that reacts to `KeyReleasedEvent` is on the deferred-follow-ons list. Until it ships, operators wanting end-to-end automation should poll the contract or wire their own Web3 event subscription. The synchronous client is correct on its own; only the daemon-side reactivity is missing.
+
+---
+
 ## Monitoring
 
 ### Health Endpoints
@@ -291,7 +451,8 @@ GET /health/ready
 | `error_rate` | < 1% | > 5% |
 | `active_connections` | Varies | > 80% max |
 | `ftns_queue_depth` | < 100 | > 500 |
-| `ipfs_repo_size` | < 80% disk | > 90% |
+| `content_store_size` | < 80% disk | > 90% |
+| `bittorrent_active_torrents` | varies | > 80% configured max |
 | `p2p_peers_connected` | > 3 | < 2 |
 
 ### Grafana Dashboard
@@ -354,7 +515,8 @@ kubectl rollout undo deployment/prsm-api
 | Database | Daily | 30 days |
 | `node_identity.json` | Once | Forever |
 | `.env` file | On change | Keep last 3 |
-| IPFS repo (optional) | Weekly | 4 weeks |
+| Content store + BitTorrent shards (optional, derivable from peers) | Weekly | 4 weeks |
+| `~/.prsm/arbitration_queue/` (if Item 6 governance hook enabled) | Daily | Until disputes resolved |
 
 ### Backup Commands
 
@@ -396,7 +558,8 @@ curl http://localhost:8000/health
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
 | Node won't connect to bootstrap | Firewall blocking port 8765 | `sudo ufw allow 8765/tcp` |
-| IPFS not starting | ipfs binary not on PATH | `sudo apt install ipfs` or add to PATH |
+| Bootstrap WSS handshake fails | Operator pinned legacy `prsm.io` host | Update `P2P_BOOTSTRAP_NODES` to `wss://bootstrap1.prsm-network.com:8765` |
+| Native content-store fails to write | Permissions on `~/.prsm/content_store/` | `chmod -R u+rwX ~/.prsm/content_store/` |
 | "JWT secret too short" | SECRET_KEY missing or weak | Generate: `openssl rand -hex 32` |
 | FTNS balance stuck | Database locked | Restart node; check for orphaned SQLite WAL |
 | High memory usage | Too many concurrent queries | Reduce `MAX_CONCURRENT_QUERIES` |
@@ -420,11 +583,17 @@ netstat -tlnp | grep -E '8000|8765'
 # Test database connection
 python -c "from prsm.core.database import get_db; print('OK')"
 
-# Test IPFS
-ipfs id
+# Inspect native content-store
+ls -lh ~/.prsm/content_store/ | head
 
 # Check P2P peers
 curl http://localhost:8000/api/v1/p2p/peers
+
+# Inspect arbitration queue (if Item 6 governance hook enabled)
+ls -lh ~/.prsm/arbitration_queue/
+
+# Inspect Job history (in-memory; restart clears)
+curl http://localhost:8000/compute/status/<job_id>
 ```
 
 ### Log Analysis
@@ -555,13 +724,27 @@ LOG_LEVEL=DEBUG
 ```bash
 # .env (production)
 SECRET_KEY=<32+ character random string>
-DATABASE_URL=postgresql://prsm:password@db:5432/prsm
+DATABASE_URL=postgresql://prsm:${POSTGRES_PASSWORD}@db:5432/prsm
 REDIS_URL=redis://redis:6379
-P2P_BOOTSTRAP_NODES=bootstrap1.prsm.io:8765,bootstrap2.prsm.io:8765
+P2P_BOOTSTRAP_NODES=wss://bootstrap1.prsm-network.com:8765
 RATE_LIMIT_REQUESTS=100
 RATE_LIMIT_WINDOW=60
 LOG_LEVEL=INFO
 DEBUG=false
+
+# QueryOrchestrator (opt in to Ring 5 replacement)
+PRSM_QUERY_ORCHESTRATOR_ENABLED=1
+PRSM_AGGREGATOR_SHARE_BPS=500   # 5% — operator-tunable
+
+# On-chain ingest (uncomment to register uploads on Base mainnet)
+# PRSM_ONCHAIN_PROVENANCE=1
+# PRSM_PROVENANCE_REGISTRY_V2_ADDRESS=0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf
+
+# DHT cross-node fingerprint dedup (off by default)
+# PRSM_DHT_ENABLED=1
+
+# Item 6 governance proposal sink (off by default)
+# PRSM_ARBITRATION_PROPOSER_ID=foundation-proposer-1
 ```
 
 ### High-Performance Compute Node
@@ -569,7 +752,7 @@ DEBUG=false
 ```bash
 # .env (compute provider)
 SECRET_KEY=<random>
-DATABASE_URL=postgresql://prsm:password@db:5432/prsm
+DATABASE_URL=postgresql://prsm:${POSTGRES_PASSWORD}@db:5432/prsm
 MAX_CONCURRENT_QUERIES=50
 WORKER_THREADS=16
 QUERY_TIMEOUT=600
