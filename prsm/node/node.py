@@ -1273,8 +1273,18 @@ class PRSMNode:
         
         self._settler_registry.on_settlement_ready(_on_batch_approved)
 
-        # Agent Forge (Ring 5) removed in v1.6.0 — legacy NWTN AGI framework
-        self.agent_forge = None
+        # Agent Forge (Ring 5) removed in v1.6.0 — legacy NWTN AGI framework.
+        #
+        # Replacement = QueryOrchestrator (data-query path per Vision §4).
+        # Default-disabled. Operators opt in via PRSM_QUERY_ORCHESTRATOR_ENABLED=1
+        # AFTER verifying their deployment delivers the canonical workflow
+        # end-to-end. Disabled-by-default keeps `agent_forge = None` so the
+        # MCP `BROKEN_TOOLS_HIDDEN` gate stays effective until B8 lands.
+        #
+        # See:
+        #   docs/2026-05-08-query-orchestrator-wiring-readiness.md
+        #   docs/2026-05-07-aggregator-selector-threat-model.md
+        self.agent_forge = self._build_query_orchestrator_or_none()
 
         # ── Confidential Compute (Ring 7) ─────────────────────────────
         try:
@@ -1612,6 +1622,138 @@ class PRSMNode:
             "Node onboarding UI available",
             url=f"http://127.0.0.1:{self.config.api_port}/onboarding/"
         )
+
+    def _build_query_orchestrator_or_none(self):
+        """Construct QueryOrchestrator from this node's primitives, or
+        return None if the operator hasn't opted in via
+        `PRSM_QUERY_ORCHESTRATOR_ENABLED=1` OR if any required adapter
+        cannot be constructed against current node state.
+
+        Default-disabled. Behavior identical to v1.6.0
+        (`agent_forge = None`) until the operator explicitly enables.
+
+        On any wiring failure with the env var set, logs the reason
+        and falls back to None — the operator gets a clear signal
+        that their deployment is missing something + the canonical
+        workflow stays gated rather than half-broken.
+
+        See `prsm/compute/query_orchestrator/node_wiring.py` for the
+        factory contract + `docs/2026-05-08-query-orchestrator-wiring-readiness.md`
+        for the wiring program.
+        """
+        from prsm.compute.query_orchestrator.node_wiring import (
+            is_query_orchestrator_enabled,
+        )
+        if not is_query_orchestrator_enabled():
+            return None
+
+        try:
+            from prsm.compute.query_orchestrator import (
+                FoundationBeaconProvider,
+                MarketplaceCandidatePoolProvider,
+                SemanticIndexAdapter,
+                SentenceTransformerEmbedder,
+                SwarmDispatcherAdapter,
+            )
+            from prsm.compute.query_orchestrator.node_wiring import (
+                build_query_orchestrator_for_node,
+            )
+            from prsm.marketplace.directory import MarketplaceDirectory
+            from prsm.marketplace.reputation import ReputationTracker
+        except ImportError as exc:
+            logger.warning(
+                "QueryOrchestrator wiring unavailable: %s — falling back "
+                "to agent_forge=None",
+                exc,
+            )
+            return None
+
+        # All 5 adapter dependencies required. Each construction step
+        # raises clearly if a node-side primitive is missing.
+        try:
+            if self.content_uploader is None:
+                raise RuntimeError(
+                    "content_uploader not initialized — cannot wire "
+                    "SemanticIndexAdapter"
+                )
+            if self.agent_dispatcher is None:
+                raise RuntimeError(
+                    "agent_dispatcher not initialized — cannot wire "
+                    "SwarmDispatcherAdapter"
+                )
+            if self.gossip is None:
+                raise RuntimeError(
+                    "gossip not initialized — cannot wire "
+                    "MarketplaceDirectory"
+                )
+
+            # Marketplace + reputation primitives are constructed here
+            # because node.py doesn't currently own them. Once the
+            # marketplace orchestrator becomes a top-level node
+            # subsystem (separate sprint), pull these from self.* instead.
+            marketplace_directory = MarketplaceDirectory(self.gossip)
+            reputation_tracker = ReputationTracker()
+
+            semantic_index = SemanticIndexAdapter(
+                embedder=SentenceTransformerEmbedder(),
+                index=self.content_uploader._semantic_index,
+            )
+            dispatcher = SwarmDispatcherAdapter(
+                agent_dispatcher=self.agent_dispatcher,
+                per_shard_budget_ftns=100,  # placeholder; orch retry-loop owns
+            )
+            # AggregatorClient + beacon need a Foundation Safe address
+            # that this deployment trusts. Default to mainnet Safe;
+            # operators on other networks override via constructor
+            # extension (separate ratification + tooling sprint).
+            from prsm.compute.query_orchestrator import (
+                AggregatorClientAdapter,
+                HttpAggregateTransport,
+            )
+            beacon_provider = FoundationBeaconProvider(
+                foundation_safe_address=(
+                    "0x91b0000000000000000000000000000000005791"
+                ),
+            )
+            aggregator_client = AggregatorClientAdapter(
+                prompter_pubkey=self.identity.public_key_bytes,
+                prompter_node_id=self.identity.node_id,
+                prompter_signer=self.identity.sign,
+                beacon_provider=beacon_provider,
+                transport=HttpAggregateTransport(
+                    # Production wiring: a real endpoint resolver that
+                    # consults MarketplaceDirectory + per-node listing
+                    # endpoints. v1 stub raises on resolve — operator
+                    # supplies a real resolver via subclass override.
+                    endpoint_resolver=lambda node_id: (
+                        f"https://{node_id}/compute/aggregate"
+                    ),
+                ),
+            )
+            candidate_pool_provider = MarketplaceCandidatePoolProvider(
+                directory=marketplace_directory,
+                reputation=reputation_tracker,
+            )
+
+            orchestrator = build_query_orchestrator_for_node(
+                semantic_index=semantic_index,
+                dispatcher=dispatcher,
+                aggregator_client=aggregator_client,
+                candidate_pool_provider=candidate_pool_provider,
+                beacon_provider=beacon_provider,
+            )
+            logger.info(
+                "QueryOrchestrator wired (env-enabled). agent_forge live."
+            )
+            return orchestrator
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "QueryOrchestrator construction failed: %s — falling "
+                "back to agent_forge=None. (Operator must wire missing "
+                "primitive before re-enabling.)",
+                exc,
+            )
+            return None
 
     async def stop(self) -> None:
         """Gracefully shut down all subsystems."""
