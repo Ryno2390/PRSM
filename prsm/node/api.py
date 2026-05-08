@@ -482,6 +482,101 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "source": "onchain",
         }
 
+    class _OfframpQuoteRequest(BaseModel):
+        # Validation is in the handler so the 400 vs 422 boundary is
+        # explicit (Pydantic's gt=0 returns 422; we want 400 for
+        # operator-misconfig-class errors).
+        usd_amount: float
+        bank_account_alias: str = "primary"
+
+    @app.post("/wallet/offramp/quote")
+    async def post_offramp_quote(
+        body: _OfframpQuoteRequest,
+        address: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Pre-flight quote for FTNS → USDC → USD off-ramp via
+        Aerodrome + Coinbase CDP.
+
+        V1 scope: returns the transaction-summary artifact described
+        in Vision §13 Phase 5 step 2 ("Gemini presents an Artifact in
+        your side panel"). Does NOT initiate any on-chain swap or
+        Coinbase off-ramp; actual execution gates on CDP commission
+        per Vision gantt 2026-06-15. Until then status is
+        ``PENDING_COMMISSION``.
+
+        Validation:
+          - ``usd_amount`` must be positive (Pydantic gt=0).
+          - Source balance must be ≥ requested USD; otherwise 422.
+          - ``ftns_ledger`` must be initialized; otherwise 503.
+        """
+        # Pydantic gt=0 catches usd_amount <= 0 with 422; the test
+        # suite expects 400 for explicit negative/zero. Re-validate
+        # to surface the simpler 400.
+        if body.usd_amount <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="usd_amount must be positive (> 0)",
+            )
+
+        if not getattr(node, "ftns_ledger", None):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "On-chain ftns_ledger not initialized; "
+                    "cannot quote off-ramp without source balance."
+                ),
+            )
+
+        target = address or node.ftns_ledger._connected_address
+        balance_ftns = await node.ftns_ledger.get_balance(target)
+
+        rate_raw = os.getenv("PRSM_FTNS_USD_RATE", "").strip()
+        usd_rate = 1.0
+        if rate_raw:
+            try:
+                parsed = float(rate_raw)
+                if parsed > 0:
+                    usd_rate = parsed
+            except ValueError:
+                pass
+
+        balance_usd = balance_ftns * usd_rate
+        ftns_to_swap = body.usd_amount / usd_rate
+
+        if balance_usd < body.usd_amount:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Insufficient balance: requested ${body.usd_amount:.2f}, "
+                    f"available ${balance_usd:.2f} "
+                    f"({balance_ftns:.6f} FTNS @ {usd_rate} USD/FTNS)"
+                ),
+            )
+
+        return {
+            "requested_usd": body.usd_amount,
+            "source_address": target,
+            "source_balance_ftns": balance_ftns,
+            "source_balance_usd": balance_usd,
+            "quote": {
+                "ftns_to_swap": ftns_to_swap,
+                "usdc_received": body.usd_amount,
+                "usd_settled": body.usd_amount,
+                "swap_route": "aerodrome",
+                "offramp_route": "coinbase-cdp",
+                "bank_account_alias": body.bank_account_alias,
+            },
+            "usd_rate": usd_rate,
+            "status": "PENDING_COMMISSION",
+            "commission_gate_note": (
+                "Coinbase CDP commission gates on Aerodrome USDC-FTNS "
+                "pool seeding (Vision gantt 2026-06-15). The summary "
+                "above shows what the transaction will look like once "
+                "execution ships; it does NOT initiate any on-chain "
+                "swap or fiat off-ramp."
+            ),
+        }
+
     @app.post("/compute/submit")
     async def submit_compute_job(job: JobSubmission) -> Dict[str, Any]:
         """Submit a compute job to the network."""

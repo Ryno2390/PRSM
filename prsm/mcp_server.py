@@ -506,6 +506,43 @@ TOOLS = [
         },
     ),
     Tool(
+        name="coinbase_offramp_initiate",
+        description=(
+            "Compose a pre-flight transaction summary for cashing out "
+            "FTNS to USD via the Aerodrome USDC-FTNS pool + Coinbase "
+            "CDP off-ramp. V1 returns the artifact described in "
+            "Vision §13 Phase 5 step 2 ('Gemini presents an Artifact "
+            "in your side panel'); does NOT initiate any on-chain "
+            "swap or fiat off-ramp. Status is PENDING_COMMISSION "
+            "until the CDP integration commissions (gates on "
+            "Aerodrome pool seeding per Vision gantt 2026-06-15). "
+            "Use prsm_balance_check first to confirm sufficient "
+            "balance before quoting larger amounts."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "usd_amount": {
+                    "type": "number",
+                    "description": (
+                        "USD amount to off-ramp. Must be positive. "
+                        "Tool returns 422 if exceeds available balance."
+                    ),
+                    "minimum": 0.01,
+                },
+                "bank_account_alias": {
+                    "type": "string",
+                    "description": (
+                        "Optional bank-account nickname (e.g. 'primary', "
+                        "'savings'). Defaults to 'primary'."
+                    ),
+                    "default": "primary",
+                },
+            },
+            "required": ["usd_amount"],
+        },
+    ),
+    Tool(
         name="prsm_inference",
         description=(
             "Run TEE-attested model inference on PRSM with verifiable receipts. "
@@ -1729,6 +1766,81 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_coinbase_offramp_initiate(arguments: Dict[str, Any]) -> str:
+    """Handle coinbase_offramp_initiate tool call.
+
+    V1 scope: pre-flight quote composer per Vision §13 Phase 5
+    step 2. Calls POST /wallet/offramp/quote and formats the
+    response as a transaction-summary artifact. Does NOT initiate
+    any on-chain or fiat-side action — actual execution gates on
+    CDP commission per Vision gantt 2026-06-15.
+    """
+    if "usd_amount" not in arguments:
+        return (
+            "Missing required argument: usd_amount.\n"
+            "Example: {\"usd_amount\": 500.0}"
+        )
+
+    body = {
+        "usd_amount": arguments["usd_amount"],
+        "bank_account_alias": arguments.get("bank_account_alias", "primary"),
+    }
+
+    try:
+        result = await _call_node_api("POST", "/wallet/offramp/quote", body)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    # 4xx/503 fallback path — endpoint returned a `detail` envelope
+    # rather than a quote.
+    if "quote" not in result:
+        detail = result.get("detail", "unknown error")
+        # Distinguish insufficient-balance (422) from misconfig (503).
+        if "insufficient" in detail.lower() or "balance" in detail.lower():
+            return (
+                f"Insufficient balance for off-ramp.\n"
+                f"  Detail: {detail}\n"
+                f"  Use prsm_balance_check to verify available funds."
+            )
+        if "not initialized" in detail.lower() or "ftns_ledger" in detail.lower():
+            return (
+                f"On-chain FTNS not configured on this node.\n"
+                f"  Detail: {detail}\n"
+                f"  Set PRSM_ONCHAIN_FTNS=1 + FTNS_TOKEN_ADDRESS to enable."
+            )
+        return f"Off-ramp quote failed.\n  Detail: {detail}"
+
+    quote = result["quote"]
+    addr = result["source_address"]
+    short_addr = (
+        addr[:10] + "…" + addr[-4:] if len(addr) > 14 else addr
+    )
+
+    return (
+        f"PRSM Cash-Out Pre-Flight\n"
+        f"  Requested:    ${result['requested_usd']:,.2f} USD\n"
+        f"  Source:       {short_addr}\n"
+        f"  Balance:      {result['source_balance_ftns']:.6f} FTNS  "
+        f"(${result['source_balance_usd']:,.2f} @ "
+        f"{result['usd_rate']} USD/FTNS)\n"
+        f"\n"
+        f"  Quote:\n"
+        f"    Swap:       {quote['ftns_to_swap']:.6f} FTNS  "
+        f"→  {quote['usdc_received']:,.2f} USDC  (via {quote['swap_route']})\n"
+        f"    Off-ramp:   {quote['usdc_received']:,.2f} USDC  "
+        f"→  ${quote['usd_settled']:,.2f} USD  "
+        f"(via {quote['offramp_route']})\n"
+        f"    Bank:       {quote['bank_account_alias']}\n"
+        f"\n"
+        f"  Status:       {result['status']}\n"
+        f"\n"
+        f"  Note: {result['commission_gate_note']}"
+    )
+
+
 # Tool dispatch map
 TOOL_HANDLERS = {
     "prsm_analyze": handle_prsm_analyze,
@@ -1750,6 +1862,7 @@ TOOL_HANDLERS = {
     "prsm_inference": handle_prsm_inference,
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
+    "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
 }
 
 

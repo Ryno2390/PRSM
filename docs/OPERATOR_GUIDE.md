@@ -411,6 +411,15 @@ A new tool `prsm_balance_check` ships in v1.7.0+ (Vision §13 Phase 5 stand-in c
 - Optional `address` arg overrides the node's connected wallet address.
 - Backed by the new `GET /balance/onchain` endpoint.
 
+A companion tool `coinbase_offramp_initiate` ships v1 alongside (Vision §13 Phase 5 step 2 — pre-flight composer):
+
+- Returns the transaction-summary artifact users see in their AI side-panel before authorizing a cash-out (FTNS → USDC via Aerodrome → USD via Coinbase CDP off-ramp).
+- **Does NOT initiate any on-chain or fiat-side action in v1** — status is `PENDING_COMMISSION` until CDP commissioning completes (gates on Aerodrome pool seeding per Vision gantt 2026-06-15).
+- Required arg: `usd_amount` (positive; 422 if exceeds available balance). Optional: `bank_account_alias` (default `"primary"`).
+- Backed by the new `POST /wallet/offramp/quote` endpoint.
+
+Suggested usage flow today: `prsm_balance_check` (read available funds) → `coinbase_offramp_initiate` (pre-flight quote) → operator inspects the summary, plans for the eventual execution path.
+
 `BROKEN_TOOLS_HIDDEN` is now an empty frozenset. If you re-add a tool to the hide-list mid-incident, also pin `tests/unit/test_mcp_server_hidden_tools.py` to match — the test asserts the exact set.
 
 ---
