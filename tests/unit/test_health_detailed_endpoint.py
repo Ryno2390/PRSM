@@ -440,6 +440,14 @@ class TestRemainingDaemonSubsystems:
         assert jr["available"] is True
         assert jr["task_running"] is True
 
+    def test_daemon_watchdog_subsystem(self):
+        node = _node_full()
+        self._setup(node, ("_daemon_watchdog", "_daemon_watchdog_task"))
+        resp = _client(node).get("/health/detailed")
+        dw = resp.json()["subsystems"]["daemon_watchdog"]
+        assert dw["available"] is True
+        assert dw["task_running"] is True
+
 
 class TestHealthDetailedFailSoft:
     def test_subsystem_check_raising_does_not_500(self):

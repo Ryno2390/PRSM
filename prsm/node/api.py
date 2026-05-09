@@ -3778,6 +3778,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "_job_reaper_task",
             "1 if JobReaper duration-cap task is alive, 0 if crashed",
         )
+        _emit_task_gauge(
+            "prsm_daemon_watchdog_running",
+            "_daemon_watchdog_task",
+            "1 if DaemonWatchdog crash-webhook task is alive, 0 if crashed",
+        )
 
         # prsm_arbitration_pending_count
         try:
@@ -4053,6 +4058,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "job_reaper",
             "_job_reaper",
             "_job_reaper_task",
+        )
+        _daemon_subsystem(
+            "daemon_watchdog",
+            "_daemon_watchdog",
+            "_daemon_watchdog_task",
         )
 
         # HeartbeatScheduler (optional). Same task-liveness pattern

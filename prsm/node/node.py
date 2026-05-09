@@ -1898,6 +1898,56 @@ class PRSMNode:
             self._job_reaper = None
             self._job_reaper_task = None
 
+        # DaemonWatchdog: dispatches webhook event when any daemon
+        # task crashes silently. Operators wire PRSM_WEBHOOK_URL
+        # (+ optional PRSM_WEBHOOK_SECRET for HMAC signing) to
+        # opt in. Disabled when URL unset.
+        self._daemon_watchdog = None
+        self._daemon_watchdog_task = None
+        try:
+            import os as _os
+            webhook_url = _os.getenv("PRSM_WEBHOOK_URL", "").strip()
+            if webhook_url:
+                from prsm.node.webhook_delivery import WebhookDeliverer
+                from prsm.node.daemon_watchdog import DaemonWatchdog
+                webhook_secret = _os.getenv(
+                    "PRSM_WEBHOOK_SECRET", "",
+                ).strip() or None
+                deliverer = WebhookDeliverer()
+                self._webhook_deliverer = deliverer
+                interval_raw = _os.getenv(
+                    "PRSM_DAEMON_WATCHDOG_INTERVAL_SEC", "",
+                ).strip()
+                wd_kwargs = {
+                    "node": self,
+                    "webhook_deliverer": deliverer,
+                    "webhook_url": webhook_url,
+                    "webhook_secret": webhook_secret,
+                }
+                if interval_raw:
+                    try:
+                        ival = float(interval_raw)
+                        if ival > 0:
+                            wd_kwargs["interval_seconds"] = ival
+                    except ValueError:
+                        logger.warning(
+                            "PRSM_DAEMON_WATCHDOG_INTERVAL_SEC=%r "
+                            "not numeric; using default",
+                            interval_raw,
+                        )
+                self._daemon_watchdog = DaemonWatchdog(**wd_kwargs)
+                logger.info(
+                    "DaemonWatchdog wired (url=%s%s)",
+                    webhook_url,
+                    " [signed]" if webhook_secret else "",
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "DaemonWatchdog construction failed: %s — "
+                "crash webhooks disabled.", exc,
+            )
+            self._daemon_watchdog = None
+
         self._result_consensus = ResultConsensus(
             epsilon=0.01,
             timeout_seconds=300.0,
@@ -2451,6 +2501,12 @@ class PRSMNode:
                 self._job_reaper.run_forever(),
             )
             logger.info("JobReaper launched")
+        # DaemonWatchdog (active-push of daemon-crash events).
+        if getattr(self, "_daemon_watchdog", None) is not None:
+            self._daemon_watchdog_task = asyncio.create_task(
+                self._daemon_watchdog.watch(),
+            )
+            logger.info("DaemonWatchdog launched")
 
         # Phase 7-storage + Phase 8 event watchers. Same opt-in shape
         # as the schedulers; default-callback wired in the builders so
@@ -2705,9 +2761,12 @@ class PRSMNode:
             await self._compensation_distributor_watcher.stop()
         if getattr(self, "_job_reaper", None) is not None:
             await self._job_reaper.stop()
+        if getattr(self, "_daemon_watchdog", None) is not None:
+            await self._daemon_watchdog.stop()
         for task_attr in (
             "_heartbeat_scheduler_task",
             "_job_reaper_task",
+            "_daemon_watchdog_task",
             "_compensation_scheduler_task",
             "_key_distribution_watcher_task",
             "_storage_slashing_watcher_task",
