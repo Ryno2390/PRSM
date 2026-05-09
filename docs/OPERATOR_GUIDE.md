@@ -432,6 +432,41 @@ scrape_configs:
       - targets: ['localhost:8000']
 ```
 
+### Webhook delivery primitive (`prsm.node.webhook_delivery`, ships 2026-05-09)
+
+`WebhookDeliverer` is the operator-facing event-hook primitive. Future commits subscribe it to specific event sources (daemon crashes, escrow leaks, etc.); this module ships the delivery + signing + retry primitives standalone.
+
+Wire format on POST to operator-config'd URL:
+
+```
+POST <webhook_url>
+Content-Type: application/json
+X-PRSM-Event: <event_name>
+X-PRSM-Signature: sha256=<hmac>     (when shared secret set)
+User-Agent: prsm-node/<version>
+
+<canonical-JSON body>
+```
+
+Receiving systems verify by recomputing HMAC-SHA256 over the raw body using the shared secret and comparing in constant time. Reference recipe (Python):
+
+```python
+import hmac, hashlib
+expected = "sha256=" + hmac.new(SECRET.encode(), request.body, hashlib.sha256).hexdigest()
+if not hmac.compare_digest(expected, request.headers["X-PRSM-Signature"]):
+    abort(403)
+```
+
+Retry behavior:
+- `max_attempts` (default 3) with exponential backoff (1s, 2s, 4s, ...)
+- per-attempt `timeout_seconds` (default 10s)
+- 2xx → immediate success
+- 408/429/5xx → retry with backoff
+- other 4xx → give up immediately (operator misconfiguration; retry-storming a wrong URL helps no one)
+- exception (DNS / connect / etc.) → retry
+
+Final failure returns `DeliveryResult(success=False, attempts, status_code, error)` for ops triage.
+
 ### CORS allowlist (`PRSM_ALLOWED_ORIGINS`, ships 2026-05-09)
 
 Production-hardening for nodes serving browser-based clients (operator dashboards, prsm-ui, etc.). Operator declares the explicit list of origins permitted to make cross-origin requests; everything else gets blocked at the CORS layer before reaching any endpoint.
