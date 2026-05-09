@@ -3606,6 +3606,61 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             result["path_prefix_filter"] = path_prefix
         return result
 
+    @app.post("/admin/webhook-test")
+    async def post_webhook_test() -> Dict[str, Any]:
+        """Smoke-test the configured webhook URL. Synthesizes a
+        webhook.test event + dispatches; returns the
+        DeliveryResult so operators verify config without
+        waiting for a real daemon crash.
+
+        Returns 200 even on delivery failure (failure detail is
+        in the response body) so operators can distinguish
+        "endpoint broken" from "webhook delivery failed."
+
+        Status:
+          503 — webhook not configured (PRSM_WEBHOOK_URL unset)
+          200 — DeliveryResult shape (success, status_code,
+                attempts, error)
+        """
+        deliverer = getattr(node, "_webhook_deliverer", None)
+        watchdog = getattr(node, "_daemon_watchdog", None)
+        if deliverer is None or watchdog is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Webhook not configured. Set "
+                    "PRSM_WEBHOOK_URL env var to enable."
+                ),
+            )
+        url = getattr(watchdog, "_webhook_url", None)
+        secret = getattr(watchdog, "_webhook_secret", None)
+        if not url:
+            raise HTTPException(
+                status_code=503,
+                detail="Webhook URL not configured on watchdog.",
+            )
+        result = await deliverer.deliver(
+            url=url,
+            event="webhook.test",
+            payload={
+                "event": "webhook.test",
+                "node_id": (
+                    node.identity.node_id if node.identity else "unknown"
+                ),
+                "note": (
+                    "Operator-triggered smoke test from "
+                    "POST /admin/webhook-test"
+                ),
+            },
+            secret=secret,
+        )
+        return {
+            "success": result.success,
+            "status_code": result.status_code,
+            "attempts": result.attempts,
+            "error": result.error,
+        }
+
     @app.get("/info")
     async def get_info() -> Dict[str, Any]:
         """Static node metadata. Useful for operator triage +
