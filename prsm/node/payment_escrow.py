@@ -345,10 +345,12 @@ class PaymentEscrow:
             return None
 
         # Atomic-from-caller-view: any per-recipient transfer
-        # failure rolls the call into a no-op (escrow stays PENDING
-        # so the cleanup_expired_escrows path can refund later, OR
-        # the operator can retry).
+        # failure triggers compensating reverse-transfers for the
+        # legs that already succeeded, restoring the escrow wallet
+        # to its pre-call state. Escrow stays PENDING so cleanup
+        # or operator retry can re-attempt.
         txs = []
+        succeeded_legs: List[tuple] = []  # (recipient, amount) per success
         for recipient, amount in splits:
             try:
                 tx = await self.ledger.transfer(
@@ -361,13 +363,60 @@ class PaymentEscrow:
                     ),
                 )
                 txs.append(tx)
+                succeeded_legs.append((recipient, amount))
             except ValueError as exc:
                 logger.error(
                     f"Split payment failed for recipient "
-                    f"{recipient[:12]}...: {exc}. Reverting "
-                    f"escrow to PENDING."
+                    f"{recipient[:12]}...: {exc}. Compensating "
+                    f"{len(succeeded_legs)} prior leg(s) to restore "
+                    f"escrow wallet."
                 )
-                # No partial state — escrow stays PENDING.
+                # Compensate already-succeeded legs.
+                compensated: List[Dict[str, Any]] = []
+                leaked: List[Dict[str, Any]] = []
+                for prior_recipient, prior_amount in succeeded_legs:
+                    try:
+                        await self.ledger.transfer(
+                            from_wallet=prior_recipient,
+                            to_wallet=escrow_wallet,
+                            amount=prior_amount,
+                            description=(
+                                f"Atomic rollback: compensating reverse "
+                                f"of split-leg for job {job_id[:8]} "
+                                f"(failed at recipient "
+                                f"{recipient[:12]}...)"
+                            ),
+                        )
+                        compensated.append({
+                            "recipient": prior_recipient,
+                            "amount": prior_amount,
+                        })
+                    except Exception as comp_exc:
+                        logger.error(
+                            f"Atomic rollback FAILED for prior leg "
+                            f"{prior_recipient[:12]}... amount "
+                            f"{prior_amount}: {comp_exc}. Escrow "
+                            f"is partially-released and unrecoverable "
+                            f"without operator reconciliation."
+                        )
+                        leaked.append({
+                            "recipient": prior_recipient,
+                            "amount": prior_amount,
+                        })
+                # Always record the failed-leg history for audit.
+                escrow.metadata.setdefault("rollback_history", []).append({
+                    "failed_recipient": recipient,
+                    "failed_amount": amount,
+                    "failed_reason": str(exc),
+                    "compensated": compensated,
+                    "ts": time.time(),
+                })
+                if leaked:
+                    escrow.metadata["partial_release_unrecoverable"] = True
+                    escrow.metadata.setdefault(
+                        "leaked_recipients", [],
+                    ).extend(leaked)
+                # Escrow stays PENDING for retry / cleanup paths.
                 return None
 
         # Mark escrow released. provider_winner stores a stable

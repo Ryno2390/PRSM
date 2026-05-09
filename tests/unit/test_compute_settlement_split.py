@@ -247,8 +247,7 @@ class TestSplitFailureMode:
     def test_per_recipient_failure_keeps_escrow_pending(self):
         # If one recipient transfer fails partway, we want the
         # caller to see None + the escrow stay PENDING (so cleanup
-        # can refund or operator can retry). v1 doesn't roll back
-        # already-completed transfers — operator must reconcile.
+        # can refund or operator can retry).
         escrow, ledger = _make_escrow(fail_for={"bad-worker"})
         entry = _seed_escrow(escrow)
         result = asyncio.run(escrow.release_escrow_split(
@@ -257,6 +256,146 @@ class TestSplitFailureMode:
         ))
         assert result is None
         assert entry.status == EscrowStatus.PENDING
+
+
+class TestSplitAtomicRollback:
+    """v2 partial-failure recovery (shipped 2026-05-09): when one
+    recipient transfer fails after others have succeeded, compensating
+    reverse-transfers restore the escrow wallet to its pre-call state.
+    Operator no longer has to manually reconcile leaked legs.
+    """
+
+    def test_successful_first_leg_compensated_on_second_leg_failure(self):
+        """First transfer succeeds, second fails. Atomic-rollback
+        issues a compensating transfer (recipient → escrow_wallet)
+        to undo the first leg. Net effect on escrow_wallet balance
+        is zero."""
+        escrow, ledger = _make_escrow(fail_for={"bad-worker"})
+        entry = _seed_escrow(escrow, amount=100.0)
+        result = asyncio.run(escrow.release_escrow_split(
+            job_id="job-x",
+            splits=[("good-a", 30.0), ("bad-worker", 20.0)],
+        ))
+        assert result is None
+        assert entry.status == EscrowStatus.PENDING
+        # Compensating transfer: good-a → escrow_wallet for 30.0.
+        compensations = [
+            t for t in ledger.transfers
+            if t["from"] == "good-a"
+        ]
+        assert len(compensations) == 1
+        assert compensations[0]["to"].startswith("escrow-")
+        assert compensations[0]["amount"] == pytest.approx(30.0)
+
+    def test_compensation_records_in_metadata_for_audit(self):
+        """The metadata must record what was rolled back so audit
+        trails can reconstruct what happened, even though the
+        escrow is reverted to PENDING."""
+        escrow, ledger = _make_escrow(fail_for={"bad-worker"})
+        entry = _seed_escrow(escrow, amount=100.0)
+        asyncio.run(escrow.release_escrow_split(
+            job_id="job-x",
+            splits=[("good-a", 30.0), ("bad-worker", 20.0)],
+        ))
+        # New metadata key: list of (recipient, amount) tuples that
+        # were issued + then compensated.
+        assert "rollback_history" in entry.metadata
+        history = entry.metadata["rollback_history"]
+        assert len(history) >= 1
+        # Most recent rollback entry covers the failed split.
+        last = history[-1]
+        assert last["failed_recipient"] == "bad-worker"
+        assert last["compensated"] == [
+            {"recipient": "good-a", "amount": 30.0},
+        ]
+
+    def test_three_successful_then_one_fail_compensates_all_three(self):
+        """When N-1 transfers succeed and the Nth fails, all N-1
+        prior legs get compensating reverses."""
+        escrow, ledger = _make_escrow(fail_for={"bad-worker"})
+        entry = _seed_escrow(escrow, amount=100.0)
+        result = asyncio.run(escrow.release_escrow_split(
+            job_id="job-x",
+            splits=[
+                ("a", 10.0), ("b", 15.0), ("c", 20.0), ("bad-worker", 5.0),
+            ],
+        ))
+        assert result is None
+        assert entry.status == EscrowStatus.PENDING
+        # Three compensating reverses, one per successful leg.
+        compensations = {
+            t["from"]: t["amount"] for t in ledger.transfers
+            if t["to"].startswith("escrow-")
+        }
+        assert compensations == {"a": 10.0, "b": 15.0, "c": 20.0}
+
+    def test_first_leg_failure_no_compensations_needed(self):
+        """If the very first transfer fails, no compensating
+        reverses are needed (no leaked legs). The escrow stays
+        PENDING and rollback_history records empty compensated."""
+        escrow, ledger = _make_escrow(fail_for={"bad-worker"})
+        entry = _seed_escrow(escrow, amount=100.0)
+        result = asyncio.run(escrow.release_escrow_split(
+            job_id="job-x",
+            splits=[("bad-worker", 10.0), ("good-a", 30.0)],
+        ))
+        assert result is None
+        assert entry.status == EscrowStatus.PENDING
+        # No compensating reverses; only the failed-first attempt.
+        assert not any(
+            t["to"].startswith("escrow-")
+            for t in ledger.transfers
+        )
+        # rollback_history records the failed-first case explicitly.
+        history = entry.metadata.get("rollback_history", [])
+        assert len(history) == 1
+        assert history[-1]["failed_recipient"] == "bad-worker"
+        assert history[-1]["compensated"] == []
+
+    def test_compensation_failure_records_unrecoverable_flag(self):
+        """If compensating transfer ALSO fails (e.g., recipient
+        wallet unreachable), escrow stays PENDING but metadata
+        records `partial_release_unrecoverable: True` + the
+        leaked-recipient list. Operator can manually reconcile
+        only the leaked legs from the audit trail."""
+        # good-a accepts the forward transfer but rejects the
+        # compensating reverse (simulates wallet locked / RPC
+        # error on the reverse direction).
+        class _OneWayLedger(_StubLedger):
+            def __init__(self, **kw):
+                super().__init__(**kw)
+
+            async def transfer(
+                self, from_wallet, to_wallet, amount, description,
+            ):
+                # Reverse direction (recipient → escrow_wallet) for
+                # good-a fails; everything else uses normal logic.
+                if from_wallet == "good-a" and to_wallet.startswith(
+                    "escrow-"
+                ):
+                    raise ValueError(
+                        "compensating reverse failed for good-a"
+                    )
+                return await super().transfer(
+                    from_wallet, to_wallet, amount, description,
+                )
+
+        ledger = _OneWayLedger(
+            escrow_balance=100.0, fail_for={"bad-worker"},
+        )
+        escrow = PaymentEscrow(ledger=ledger, node_id="test-node")
+        entry = _seed_escrow(escrow, amount=100.0)
+
+        result = asyncio.run(escrow.release_escrow_split(
+            job_id="job-x",
+            splits=[("good-a", 30.0), ("bad-worker", 20.0)],
+        ))
+        assert result is None
+        assert entry.status == EscrowStatus.PENDING
+        # Unrecoverable flag set; leaked recipients listed.
+        assert entry.metadata.get("partial_release_unrecoverable") is True
+        leaked = entry.metadata.get("leaked_recipients", [])
+        assert {"recipient": "good-a", "amount": 30.0} in leaked
 
 
 # ──────────────────────────────────────────────────────────────────────
