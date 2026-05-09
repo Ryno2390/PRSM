@@ -549,6 +549,99 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         usd_amount: float
         bank_account_alias: str = "primary"
 
+    class _RoyaltyClaimRequest(BaseModel):
+        dry_run: bool = True
+
+    @app.post("/wallet/royalty/claim")
+    async def post_royalty_claim(
+        body: _RoyaltyClaimRequest,
+    ) -> Dict[str, Any]:
+        """Claim accumulated royalties from RoyaltyDistributor.
+
+        Closes the loop on the offramp-quote claim_required path:
+        when /wallet/offramp/quote returns claim_required=True,
+        operators authorize the claim via this endpoint (or via
+        the prsm_royalty_claim MCP composer that calls it).
+
+        Behavior:
+          - dry_run=True (default): read claimable + return artifact
+            without on-chain action; status="DRY_RUN"
+          - dry_run=False: call client.claim(); status="EXECUTED"
+            with tx_hash + amount_claimed
+          - claimable=0 + dry_run=False: skip the claim() call
+            (avoids on-chain ZeroClaim revert + gas burn);
+            status="SKIPPED_ZERO"
+        """
+        client = getattr(node, "_royalty_distributor_client", None)
+        if client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "RoyaltyDistributor client not wired on this "
+                    "node. Set PRSM_ROYALTY_DISTRIBUTOR_ADDRESS + "
+                    "FTNS_TOKEN_ADDRESS to enable."
+                ),
+            )
+
+        ftns_ledger = getattr(node, "ftns_ledger", None)
+        decimals = getattr(ftns_ledger, "_decimals", 18) if ftns_ledger else 18
+
+        try:
+            claimable_wei = client.claimable()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "RoyaltyDistributorClient.claimable raised: %s", exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"claimable() RPC failed: {exc}",
+            )
+
+        claimable_ftns = float(claimable_wei) / (10 ** decimals)
+
+        if body.dry_run:
+            return {
+                "status": "DRY_RUN",
+                "claimable_ftns": claimable_ftns,
+                "amount_claimed_ftns": 0.0,
+                "tx_hash": None,
+            }
+
+        if claimable_wei == 0:
+            return {
+                "status": "SKIPPED_ZERO",
+                "claimable_ftns": 0.0,
+                "amount_claimed_ftns": 0.0,
+                "tx_hash": None,
+                "note": (
+                    "Skipped on-chain claim() call to avoid "
+                    "ZeroClaim revert + gas burn."
+                ),
+            }
+
+        try:
+            tx_hash, transfer_status = client.claim()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "RoyaltyDistributorClient.claim raised: %s", exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"claim() failed: {exc}",
+            )
+
+        return {
+            "status": "EXECUTED",
+            "claimable_ftns": claimable_ftns,
+            "amount_claimed_ftns": claimable_ftns,
+            "tx_hash": tx_hash,
+            "transfer_status": (
+                transfer_status.value
+                if hasattr(transfer_status, "value")
+                else str(transfer_status)
+            ),
+        }
+
     @app.post("/wallet/offramp/quote")
     async def post_offramp_quote(
         body: _OfframpQuoteRequest,

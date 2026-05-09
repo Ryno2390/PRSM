@@ -506,6 +506,35 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_royalty_claim",
+        description=(
+            "Claim accumulated FTNS royalties from RoyaltyDistributor. "
+            "Closes the loop on the offramp claim_required path: when "
+            "coinbase_offramp_initiate reports `Prerequisite: Claim X "
+            "FTNS in royalties`, this tool executes the claim. "
+            "Defaults to dry_run=true (returns the artifact + claimable "
+            "amount without on-chain action). Pass dry_run=false to "
+            "actually execute the on-chain claim() call. v1 caveat: "
+            "operator authorization is implicit via running the node "
+            "with the configured FTNS private key."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "dry_run": {
+                    "type": "boolean",
+                    "description": (
+                        "When true (default), returns the claimable "
+                        "amount + artifact without on-chain action. "
+                        "When false, executes the claim() on-chain "
+                        "and returns the tx hash."
+                    ),
+                    "default": True,
+                },
+            },
+        },
+    ),
+    Tool(
         name="coinbase_offramp_initiate",
         description=(
             "Compose a pre-flight transaction summary for cashing out "
@@ -1812,6 +1841,65 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_royalty_claim(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_royalty_claim tool call.
+
+    Closes the loop on the offramp claim_required path. Defaults
+    to dry_run=true; pass dry_run=false to execute the on-chain
+    claim() call.
+    """
+    dry_run = bool(arguments.get("dry_run", True))
+    body = {"dry_run": dry_run}
+
+    try:
+        result = await _call_node_api("POST", "/wallet/royalty/claim", body)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    if "status" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not wired" in detail.lower() or "distributor" in detail.lower():
+            return (
+                f"RoyaltyDistributor not configured on this node.\n"
+                f"  Detail: {detail}\n"
+                f"  Set PRSM_ROYALTY_DISTRIBUTOR_ADDRESS + "
+                f"FTNS_TOKEN_ADDRESS to enable."
+            )
+        return f"Royalty claim failed.\n  Detail: {detail}"
+
+    status = result["status"]
+    claimable = result.get("claimable_ftns", 0.0)
+
+    if status == "DRY_RUN":
+        return (
+            f"PRSM Royalty Claim (dry-run)\n"
+            f"  Claimable:    {claimable:.6f} FTNS\n"
+            f"  Status:       DRY_RUN  (no on-chain action)\n"
+            f"\n"
+            f"  Pass dry_run=false to execute the on-chain claim().\n"
+            f"  Example: prsm_royalty_claim {{\"dry_run\": false}}"
+        )
+    if status == "SKIPPED_ZERO":
+        return (
+            f"PRSM Royalty Claim\n"
+            f"  Claimable:    0.000000 FTNS\n"
+            f"  Status:       SKIPPED_ZERO\n"
+            f"  Note: {result.get('note', 'No claimable balance.')}"
+        )
+    if status == "EXECUTED":
+        return (
+            f"PRSM Royalty Claim (executed)\n"
+            f"  Claimed:      {result['amount_claimed_ftns']:.6f} FTNS\n"
+            f"  Tx hash:      {result['tx_hash']}\n"
+            f"  Status:       EXECUTED  "
+            f"({result.get('transfer_status', 'OK')})"
+        )
+    return f"Royalty claim returned unknown status: {status}"
+
+
 async def handle_coinbase_offramp_initiate(arguments: Dict[str, Any]) -> str:
     """Handle coinbase_offramp_initiate tool call.
 
@@ -1930,6 +2018,7 @@ TOOL_HANDLERS = {
     "prsm_inference": handle_prsm_inference,
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
+    "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
 }
 

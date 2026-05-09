@@ -438,6 +438,14 @@ A companion tool `coinbase_offramp_initiate` ships v1 alongside (Vision §13 Pha
 
 **Source-aware available-balance check (v2, ships 2026-05-09):** The quote endpoint now checks the request against `available_ftns = on-chain + claimable royalties` (escrowed FTNS does NOT count — locked in pending compute jobs). When on-chain alone is insufficient but claimable royalties bridge the gap, the endpoint returns 200 with `claim_required: true` + `claim_amount_ftns` (the FTNS shortfall the operator must claim before the eventual swap can execute). The MCP handler renders a `Prerequisite: Claim X FTNS in royalties before swap can execute` block ahead of the quote summary so the chain-of-actions is explicit. Royalty client RPC failures are fail-soft: claimable treated as 0, request validated against on-chain only.
 
+A companion tool `prsm_royalty_claim` ships v1 alongside (closes the loop on the offramp claim_required path):
+
+- Defaults to `dry_run=true` — returns the artifact + claimable amount without on-chain action; `status: "DRY_RUN"`.
+- Pass `dry_run=false` to execute the on-chain `RoyaltyDistributor.claim()` call; returns `status: "EXECUTED"` + `tx_hash`.
+- 0 claimable + `dry_run=false` returns `status: "SKIPPED_ZERO"` (avoids on-chain ZeroClaim revert + gas burn).
+- Backed by the new `POST /wallet/royalty/claim` endpoint.
+- v1 caveat: operator authorization is implicit via running the node with the configured FTNS private key. There is no per-call passkey/biometric prompt; if you don't trust auto-claim execution from your AI side-panel, default to `dry_run=true` and surface the artifact for confirmation in the chat first.
+
 Suggested usage flow today: `prsm_balance_check` (read available funds) → `coinbase_offramp_initiate` (pre-flight quote) → operator inspects the summary, plans for the eventual execution path.
 
 `BROKEN_TOOLS_HIDDEN` is now an empty frozenset. If you re-add a tool to the hide-list mid-incident, also pin `tests/unit/test_mcp_server_hidden_tools.py` to match — the test asserts the exact set.
