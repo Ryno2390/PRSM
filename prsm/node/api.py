@@ -1640,6 +1640,96 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             logger.error(f"Forge pipeline error: {e}")
             raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
+    class _ArbitrationPreviewRequest(BaseModel):
+        record_id: str
+        decision: str
+        by_council: List[str]
+
+    @app.post("/content/arbitration/preview-resolution")
+    async def post_arbitration_preview(
+        body: _ArbitrationPreviewRequest,
+    ) -> Dict[str, Any]:
+        """Composer-only preview of what queue.resolve() WOULD
+        do for the given (record_id, decision, by_council).
+
+        DOES NOT call queue.resolve(). Returns the would-be-applied
+        resolution shape + conflict-with-existing detection +
+        operator action hint to sign on-chain governance proposal
+        separately.
+
+        Status:
+          503 — arbitration_queue not wired
+          404 — record_id unknown
+          422 — invalid decision (not in upheld_parent /
+                rejected_parent / insufficient) OR empty by_council
+          200 — DRY_RUN preview artifact
+        """
+        from prsm.data.dedup.arbitration import ArbitrationDecision
+
+        # Validation
+        try:
+            decision_enum = ArbitrationDecision(body.decision)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"invalid decision {body.decision!r}; "
+                    f"allowed: "
+                    f"{[d.value for d in ArbitrationDecision]}"
+                ),
+            )
+        if not body.by_council:
+            raise HTTPException(
+                status_code=422,
+                detail="by_council must be a non-empty list",
+            )
+
+        queue = getattr(node, "_arbitration_queue", None)
+        if queue is None:
+            raise HTTPException(
+                status_code=503,
+                detail="ArbitrationQueue not initialized on this node.",
+            )
+
+        try:
+            rec = await queue.get(body.record_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("arbitration get raised: %s", exc)
+            raise HTTPException(status_code=502, detail=str(exc))
+        if rec is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No arbitration record for id={body.record_id!r}",
+            )
+
+        try:
+            current_resolution = await queue.get_resolution(body.record_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("arbitration get_resolution raised: %s", exc)
+            current_resolution = None
+
+        conflict = False
+        if current_resolution is not None:
+            existing_decision = current_resolution.get("decision")
+            conflict = existing_decision != decision_enum.value
+
+        return {
+            "status": "DRY_RUN",
+            "record": rec.to_dict(),
+            "proposed": {
+                "decision": decision_enum.value,
+                "by_council": list(body.by_council),
+            },
+            "current_resolution": current_resolution,
+            "conflict_with_existing": conflict,
+            "note": (
+                "Composer-only artifact; does NOT call queue.resolve(). "
+                "Council member confirms intent + signs on-chain "
+                "governance proposal separately. Local-resolve auth "
+                "model pending council ratification."
+            ),
+        }
+
     @app.get("/content/arbitration/queue/{record_id}")
     async def get_arbitration_record(record_id: str) -> Dict[str, Any]:
         """Detail view of a single arbitration record + its
