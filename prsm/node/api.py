@@ -1260,7 +1260,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         # PRSM_FORGE_MAX_RPS_PER_REQUESTER rate limiting (DoS
         # protection). Default unset → no limiting. Per-requester
-        # token bucket with burst = 2 × rate.
+        # token bucket. Named "forge" so /compute/inference's bucket
+        # is independent.
         _rps_raw = os.getenv(
             "PRSM_FORGE_MAX_RPS_PER_REQUESTER", "",
         ).strip()
@@ -1271,7 +1272,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     from prsm.node.rate_limiter import (
                         get_or_build_bucket,
                     )
-                    bucket = get_or_build_bucket(_rps)
+                    bucket = get_or_build_bucket(_rps, name="forge")
                     if bucket is not None:
                         requester = (
                             node.identity.node_id if node.identity
@@ -1284,6 +1285,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                 detail=(
                                     f"Rate limit exceeded for "
                                     f"requester {requester[:12]}... "
+                                    f"on /compute/forge "
                                     f"(cap {_rps}/sec). Retry "
                                     f"after {retry:.2f}s."
                                 ),
@@ -2164,6 +2166,46 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "temperature": 0.7,                // optional
         }
         """
+        # PRSM_INFERENCE_MAX_RPS_PER_REQUESTER rate limiting (DoS
+        # protection). Independent bucket from /compute/forge so
+        # operators can tune the two endpoints separately.
+        _rps_raw = os.getenv(
+            "PRSM_INFERENCE_MAX_RPS_PER_REQUESTER", "",
+        ).strip()
+        if _rps_raw:
+            try:
+                _rps = float(_rps_raw)
+                if _rps > 0:
+                    from prsm.node.rate_limiter import (
+                        get_or_build_bucket,
+                    )
+                    bucket = get_or_build_bucket(_rps, name="inference")
+                    if bucket is not None:
+                        requester = (
+                            node.identity.node_id if node.identity
+                            else "anonymous"
+                        )
+                        if not bucket.try_consume(requester):
+                            retry = bucket.retry_after(requester)
+                            raise HTTPException(
+                                status_code=429,
+                                detail=(
+                                    f"Rate limit exceeded for "
+                                    f"requester {requester[:12]}... "
+                                    f"on /compute/inference "
+                                    f"(cap {_rps}/sec). Retry "
+                                    f"after {retry:.2f}s."
+                                ),
+                                headers={
+                                    "Retry-After": f"{retry:.2f}",
+                                },
+                            )
+            except ValueError:
+                logger.warning(
+                    "PRSM_INFERENCE_MAX_RPS_PER_REQUESTER=%r not "
+                    "numeric; rate limiting disabled", _rps_raw,
+                )
+
         # Lazy imports keep the inference module's dependencies (and any
         # future heavy ones like wasmtime/torch) out of the API import graph
         # for nodes that don't run inference.

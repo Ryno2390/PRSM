@@ -66,30 +66,62 @@ class SimpleTokenBucket:
         return deficit / self.rate
 
 
+_GLOBAL_BUCKETS: Dict[str, SimpleTokenBucket] = {}
+_GLOBAL_RATES: Dict[str, float] = {}
+
+# Backwards-compat aliases — older callers expecting the legacy
+# single-bucket API (pre-2026-05-09) keep working.
 _GLOBAL_BUCKET: Optional[SimpleTokenBucket] = None
 _GLOBAL_RATE: Optional[float] = None
 
 
-def get_or_build_bucket(rate: Optional[float]) -> Optional[SimpleTokenBucket]:
-    """Process-global cached bucket. Returns None when rate is
-    falsy (no limiting). Rebuilds on rate change."""
-    global _GLOBAL_BUCKET, _GLOBAL_RATE
+def get_or_build_bucket(
+    rate: Optional[float],
+    *,
+    name: str = "_default",
+) -> Optional[SimpleTokenBucket]:
+    """Process-global cached bucket, keyed by ``name``. Returns
+    None when rate is falsy (no limiting). Rebuilds on rate
+    change.
+
+    The ``name`` argument lets distinct endpoints maintain
+    independent rate-limit windows. Default name preserves the
+    pre-2026-05-09 single-bucket behavior for callers passing
+    no name.
+    """
+    global _GLOBAL_BUCKET, _GLOBAL_RATE  # legacy aliases
     if not rate or rate <= 0:
+        _GLOBAL_BUCKETS.pop(name, None)
+        _GLOBAL_RATES.pop(name, None)
+        if name == "_default":
+            _GLOBAL_BUCKET = None
+            _GLOBAL_RATE = None
+        return None
+    cached_rate = _GLOBAL_RATES.get(name)
+    if name not in _GLOBAL_BUCKETS or cached_rate != rate:
+        # Burst = rate (steady-state cap, no extra burst capacity).
+        burst = max(1, int(rate))
+        bucket = SimpleTokenBucket(rate=rate, burst=burst)
+        _GLOBAL_BUCKETS[name] = bucket
+        _GLOBAL_RATES[name] = rate
+        if name == "_default":
+            _GLOBAL_BUCKET = bucket
+            _GLOBAL_RATE = rate
+    return _GLOBAL_BUCKETS[name]
+
+
+def reset_global_bucket(name: Optional[str] = None) -> None:
+    """Test helper — wipe a named bucket (or all buckets when
+    name is None) between cases."""
+    global _GLOBAL_BUCKET, _GLOBAL_RATE
+    if name is None:
+        _GLOBAL_BUCKETS.clear()
+        _GLOBAL_RATES.clear()
         _GLOBAL_BUCKET = None
         _GLOBAL_RATE = None
-        return None
-    if _GLOBAL_BUCKET is None or _GLOBAL_RATE != rate:
-        # Burst = rate (steady-state cap, no extra burst capacity).
-        # Operators that want burst > rate can override by editing
-        # this builder; the env var maps cleanly to "N/sec".
-        burst = max(1, int(rate))
-        _GLOBAL_BUCKET = SimpleTokenBucket(rate=rate, burst=burst)
-        _GLOBAL_RATE = rate
-    return _GLOBAL_BUCKET
-
-
-def reset_global_bucket() -> None:
-    """Test helper — wipe the process-global bucket between cases."""
-    global _GLOBAL_BUCKET, _GLOBAL_RATE
-    _GLOBAL_BUCKET = None
-    _GLOBAL_RATE = None
+        return
+    _GLOBAL_BUCKETS.pop(name, None)
+    _GLOBAL_RATES.pop(name, None)
+    if name == "_default":
+        _GLOBAL_BUCKET = None
+        _GLOBAL_RATE = None
