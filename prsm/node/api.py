@@ -308,6 +308,23 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         openapi_url="/openapi.json",
     )
 
+    # X-Request-ID correlation middleware (ships 2026-05-09).
+    # Every response carries an X-Request-ID header for log
+    # correlation across distributed systems. Client-supplied
+    # IDs (e.g. from upstream LBs) are echoed back; missing /
+    # empty IDs trigger server-side UUID generation. Cap at
+    # 128 chars defends against log-poisoning via gigantic IDs.
+    @app.middleware("http")
+    async def request_id_middleware(request, call_next):
+        supplied = request.headers.get("x-request-id", "").strip()
+        if supplied:
+            request_id = supplied[:128]
+        else:
+            request_id = str(_uuid.uuid4())
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
     # CORS allowlist (PRSM_ALLOWED_ORIGINS env var, ships 2026-05-09).
     # Production-hardening for nodes serving browser-based clients.
     # Operator declares the explicit list of origins permitted to make
