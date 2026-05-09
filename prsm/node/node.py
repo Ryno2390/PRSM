@@ -1394,6 +1394,10 @@ class PRSMNode:
         # without arbitration (legacy 2-band behavior).
         _threshold_resolver = _build_threshold_resolver_or_none()
         _arbitration_queue = _build_arbitration_queue_or_none()
+        # Expose on self so /content/arbitration/queue + the
+        # prsm_arbitration_status MCP tool can surface pending
+        # disputes for operator review.
+        self._arbitration_queue = _arbitration_queue
         _arbitration_proposal_sink = _build_arbitration_proposal_sink_or_none()
 
         # Phase 7-storage + Phase 8 client/scheduler wiring (2026-05-08).

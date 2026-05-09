@@ -506,6 +506,21 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_arbitration_status",
+        description=(
+            "List pending content-attribution disputes awaiting "
+            "council adjudication. Surfaces records flagged in "
+            "the disputed similarity band (PRSM-PROV-1 Item 6). "
+            "Backed by GET /content/arbitration/queue. Operators "
+            "watching for council-action items use this to track "
+            "which content uploads are blocked pending arbitration."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
         name="prsm_cleanup_stale_escrows",
         description=(
             "Force-cleanup expired PENDING escrows (refund to "
@@ -1970,6 +1985,47 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_arbitration_status(
+    arguments: Dict[str, Any],
+) -> str:
+    """Handle prsm_arbitration_status: render pending arbitration
+    records."""
+    try:
+        result = await _call_node_api(
+            "GET", "/content/arbitration/queue",
+        )
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "pending" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"Arbitration query failed.\n  Detail: {detail}"
+
+    pending = result["pending"]
+    total = result["total"]
+    if total == 0:
+        return "No pending arbitration disputes."
+
+    lines = [
+        f"PRSM Arbitration Queue ({total} pending)",
+        "  CID                    Similarity  Kind     Proposal",
+        "  " + "-" * 60,
+    ]
+    for r in pending[:20]:  # cap at 20 for sanity
+        cid = r.get("new_cid", "")[:20]
+        sim = r.get("similarity", 0.0)
+        kind = r.get("fingerprint_kind", "?")
+        prop = r.get("proposal_id") or "(no-proposal)"
+        lines.append(
+            f"  {cid:<22} {sim:>6.4f}     {kind:<8} {prop}"
+        )
+    if total > 20:
+        lines.append(f"  ... ({total - 20} more not shown)")
+    return "\n".join(lines)
+
+
 async def handle_prsm_cleanup_stale_escrows(
     arguments: Dict[str, Any],
 ) -> str:
@@ -2383,6 +2439,7 @@ TOOL_HANDLERS = {
     "prsm_inference": handle_prsm_inference,
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
+    "prsm_arbitration_status": handle_prsm_arbitration_status,
     "prsm_cleanup_stale_escrows": handle_prsm_cleanup_stale_escrows,
     "prsm_node_health": handle_prsm_node_health,
     "prsm_spend_summary": handle_prsm_spend_summary,

@@ -1456,6 +1456,41 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             logger.error(f"Forge pipeline error: {e}")
             raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
+    @app.get("/content/arbitration/queue")
+    async def get_arbitration_queue() -> Dict[str, Any]:
+        """List pending content-attribution disputes awaiting
+        council adjudication. Closes the operator-UX gap from
+        PRSM-PROV-1 Item 6: the FilesystemArbitrationQueue
+        persists disputes at ``~/.prsm/arbitration_queue/`` but
+        operators previously had no way to see them without
+        scanning the directory by hand.
+
+        Backs the ``prsm_arbitration_status`` MCP tool.
+
+        Status:
+          503 — arbitration_queue not wired
+          502 — list_pending raised (disk error, lock timeout)
+          200 — {pending: [...], total: N}
+        """
+        queue = getattr(node, "_arbitration_queue", None)
+        if queue is None:
+            raise HTTPException(
+                status_code=503,
+                detail="ArbitrationQueue not initialized on this node.",
+            )
+        try:
+            records = await queue.list_pending()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("list_pending raised: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail=str(exc),
+            )
+        return {
+            "pending": [r.to_dict() for r in records],
+            "total": len(records),
+        }
+
     @app.post("/compute/cleanup-stale")
     async def post_compute_cleanup_stale() -> Dict[str, Any]:
         """Manually trigger PaymentEscrow.cleanup_expired_escrows.
