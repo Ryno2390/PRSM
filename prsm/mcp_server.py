@@ -506,6 +506,35 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_spend_summary",
+        description=(
+            "Sum operator's FTNS spend on completed compute jobs "
+            "over the last N days (default 30). Counts RELEASED "
+            "escrows only — REFUNDED + PENDING are excluded. "
+            "Backed by GET /wallet/spend. Useful for cost-tracking "
+            "dashboards + budget reconciliation."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "integer",
+                    "description": "Window in days (1..365). Default 30.",
+                    "minimum": 1,
+                    "maximum": 365,
+                    "default": 30,
+                },
+                "address": {
+                    "type": "string",
+                    "description": (
+                        "Optional 0x address override; defaults "
+                        "to node's connected wallet."
+                    ),
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_node_health",
         description=(
             "One-shot operator diagnostic surfacing per-subsystem "
@@ -1926,6 +1955,45 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_spend_summary(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_spend_summary tool call: aggregate operator's
+    FTNS spend over the last N days from RELEASED escrows."""
+    params = []
+    days = arguments.get("days", 30)
+    params.append(f"days={days}")
+    if "address" in arguments:
+        params.append(f"address={arguments['address']}")
+    path = "/wallet/spend?" + "&".join(params)
+
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    if "total_spent_ftns" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"Spend summary failed.\n  Detail: {detail}"
+
+    addr = result.get("address", "")
+    short = addr[:10] + "…" + addr[-4:] if len(addr) > 14 else addr
+    days_v = result["days"]
+    total = result["total_spent_ftns"]
+    count = result["escrows_count"]
+
+    return (
+        f"PRSM Spend Summary\n"
+        f"  Address:        {short}\n"
+        f"  Window:         last {days_v} day(s)\n"
+        f"  Total spent:    {total:.6f} FTNS\n"
+        f"  Released jobs:  {count}\n"
+        f"  Avg / job:      "
+        f"{(total / count if count else 0):.6f} FTNS"
+    )
+
+
 async def handle_prsm_node_health(arguments: Dict[str, Any]) -> str:
     """Handle prsm_node_health tool call: render structured
     per-subsystem readiness from /health/detailed."""
@@ -2275,6 +2343,7 @@ TOOL_HANDLERS = {
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
     "prsm_node_health": handle_prsm_node_health,
+    "prsm_spend_summary": handle_prsm_spend_summary,
     "prsm_escrow_summary": handle_prsm_escrow_summary,
     "prsm_jobs_list": handle_prsm_jobs_list,
     "prsm_royalty_claim": handle_prsm_royalty_claim,

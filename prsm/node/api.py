@@ -549,6 +549,72 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         usd_amount: float
         bank_account_alias: str = "primary"
 
+    @app.get("/wallet/spend")
+    async def get_wallet_spend(
+        days: int = 30,
+        address: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Sum FTNS spent on completed compute jobs over the last
+        N days. RELEASED escrows count; REFUNDED + PENDING do not.
+
+        Backs the ``prsm_spend_summary`` MCP tool.
+        """
+        if days <= 0 or days > 365:
+            raise HTTPException(
+                status_code=422,
+                detail=f"days must be in [1, 365], got {days}",
+            )
+
+        escrow_svc = getattr(node, "_payment_escrow", None)
+        ftns_ledger = getattr(node, "ftns_ledger", None)
+        if escrow_svc is None or ftns_ledger is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "PaymentEscrow or ftns_ledger not initialized."
+                ),
+            )
+        target = address or getattr(
+            ftns_ledger, "_connected_address", None,
+        )
+        if not target:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "No connected address; pass ?address=0x... explicitly."
+                ),
+            )
+
+        try:
+            entries = escrow_svc.list_escrows_by_requester(
+                target, pending_only=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("list_escrows_by_requester raised: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"escrow listing failed: {exc}",
+            )
+
+        from prsm.node.payment_escrow import EscrowStatus as _ES
+        cutoff = _time_for_history.time() - days * 86400.0
+        total = 0.0
+        count = 0
+        for e in entries:
+            if e.status != _ES.RELEASED:
+                continue
+            if e.completed_at is None or e.completed_at < cutoff:
+                continue
+            total += e.amount
+            count += 1
+
+        return {
+            "address": target,
+            "days": days,
+            "total_spent_ftns": total,
+            "escrows_count": count,
+        }
+
     @app.get("/wallet/escrows")
     async def get_wallet_escrows(
         address: Optional[str] = None,
