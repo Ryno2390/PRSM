@@ -250,6 +250,66 @@ class TestNodeHealthCanonicalMatch:
         assert "MISMATCH" not in result
 
 
+class TestCleanupTaskRendering:
+    """payment_escrow cleanup_task_running surfaces explicitly in
+    the rendered output so operators see silent-crash signal in
+    the AI side panel."""
+
+    @pytest.mark.asyncio
+    async def test_cleanup_task_crashed_renders_loud_marker(self):
+        async def fake_call_node_api(method, path, data=None):
+            return {
+                "status": "healthy",
+                "node_id": "test-node",
+                "subsystems": {
+                    "ftns_ledger": {"available": True, "status": "ok"},
+                    "payment_escrow": {
+                        "available": True, "status": "ok",
+                        "pending_count": 2,
+                        "cleanup_task_running": False,  # CRASHED
+                    },
+                    "job_history": {"available": True, "status": "ok"},
+                    "royalty_distributor": {
+                        "available": True, "status": "ok",
+                    },
+                },
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_node_health({})
+        assert "CRASHED" in result
+        assert "[!]" in result
+
+    @pytest.mark.asyncio
+    async def test_cleanup_task_ok_renders_subtle_indicator(self):
+        async def fake_call_node_api(method, path, data=None):
+            return {
+                "status": "healthy",
+                "node_id": "test-node",
+                "subsystems": {
+                    "ftns_ledger": {"available": True, "status": "ok"},
+                    "payment_escrow": {
+                        "available": True, "status": "ok",
+                        "pending_count": 2,
+                        "cleanup_task_running": True,
+                    },
+                    "job_history": {"available": True, "status": "ok"},
+                    "royalty_distributor": {
+                        "available": True, "status": "ok",
+                    },
+                },
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_node_health({})
+        assert "cleanup_task: ok" in result
+        assert "CRASHED" not in result
+
+
 class TestNodeHealthErrors:
     @pytest.mark.asyncio
     async def test_node_unreachable(self):

@@ -2492,6 +2492,12 @@ async def handle_prsm_node_health(arguments: Dict[str, Any]) -> str:
             line += f"  (error: {info['error']})"
         elif name == "payment_escrow" and "pending_count" in info:
             line += f"  (pending: {info['pending_count']})"
+            # Surface cleanup-task crash explicitly with [!] marker
+            # since it's a high-sev silent failure.
+            if info.get("cleanup_task_running") is False:
+                line += "  [!] cleanup_task CRASHED"
+            elif info.get("cleanup_task_running") is True:
+                line += "  cleanup_task: ok"
         elif name == "job_history" and "count" in info:
             persisted = info.get("persisted", False)
             line += (
