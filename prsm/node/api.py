@@ -3324,15 +3324,41 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 # Probe via claimable() — a read-only call that
                 # exercises RPC connectivity.
                 _claimable_wei = royalty.claimable()
-                subsystems["royalty_distributor"] = {
+                entry = {
                     "available": True, "status": "ok",
                     "claimable_wei": _claimable_wei,
                 }
             except Exception as exc:  # noqa: BLE001
-                subsystems["royalty_distributor"] = {
+                entry = {
                     "available": False, "status": "error",
                     "error": str(exc),
                 }
+            # Canonical-match check (post-A-08 ceremony 2026-05-09).
+            # Operators get an instant signal whether their wired
+            # distributor address matches the canonical pin in
+            # networks.py for the active PRSM_NETWORK. Mismatch
+            # = stale env override (e.g., still pinned to v1
+            # post-migration).
+            wired = getattr(royalty, "distributor_address", None)
+            if wired is not None:
+                entry["wired_address"] = wired
+                try:
+                    from prsm.config.networks import (
+                        get_network_config, _resolve_network_name,
+                    )
+                    cfg = get_network_config(_resolve_network_name())
+                    canonical = cfg.royalty_distributor
+                    if canonical is not None:
+                        entry["canonical_address"] = canonical
+                        entry["canonical_match"] = (
+                            wired.lower() == canonical.lower()
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "canonical-match lookup failed for "
+                        "royalty_distributor: %s", exc,
+                    )
+            subsystems["royalty_distributor"] = entry
         else:
             subsystems["royalty_distributor"] = {
                 "available": False, "status": "not_wired",

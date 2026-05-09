@@ -422,6 +422,8 @@ scrape_configs:
   
   Each subsystem entry has `{available, status, ...details, error?}`. Subsystem probes are fail-soft — an exception in one subsystem's check (e.g., royalty RPC down) surfaces in that entry's `error` field rather than 500-ing the endpoint. Use this against your ops alerting (PagerDuty, Grafana, etc.) — alarm on `status != "healthy"` for paging, `status == "unhealthy"` for high-sev.
 
+  **Canonical-address match check (added 2026-05-09 post-A-08 ceremony):** for subsystems that wire on-chain contracts, the entry surfaces `wired_address`, `canonical_address` (from `prsm/config/networks.py` for the active `PRSM_NETWORK`), and `canonical_match: bool`. Operators get an instant verification signal post-migration — e.g., after the v1→v2 RoyaltyDistributor migration, an operator pinned to v1 via `PRSM_ROYALTY_DISTRIBUTOR_ADDRESS` env override sees `canonical_match: false` + the canonical v2 address surfaced for comparison. When `PRSM_NETWORK` is set to a value with no canonical addresses (e.g., `local`), `canonical_*` fields are omitted gracefully. Currently shipped for `royalty_distributor`; same pattern extends to other contract subsystems.
+
 ### PaymentEscrow timeouts (configurable, ships 2026-05-09)
 
 Two env vars tune the auto-refund behavior for stale escrows:

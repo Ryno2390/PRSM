@@ -15,7 +15,7 @@ Per-subsystem fields: {available, status, error?}.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -151,6 +151,64 @@ class TestHealthDetailedSubsystems:
 # ──────────────────────────────────────────────────────────────────────
 # Subsystem fail-soft
 # ──────────────────────────────────────────────────────────────────────
+
+
+class TestHealthDetailedCanonicalMatch:
+    """Post-A-08-ceremony addition (2026-05-09): /health/detailed
+    surfaces whether the operator's wired addresses match the
+    canonical pins in networks.py. Operators get an instant
+    verification step after a contract migration without curling
+    individual contract addresses by hand.
+    """
+
+    def test_royalty_distributor_canonical_match_true(self):
+        """When the wired royalty distributor matches the canonical
+        mainnet pin, canonical_match is True."""
+        node = _node_full()
+        # _node_full's royalty mock has no distributor_address attr,
+        # so add it pointing at the canonical v2.
+        node._royalty_distributor_client.distributor_address = (
+            "0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e"
+        )
+        with patch.dict(__import__("os").environ, {"PRSM_NETWORK": "mainnet"}):
+            resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        royalty = body["subsystems"]["royalty_distributor"]
+        assert royalty["available"] is True
+        assert "wired_address" in royalty
+        assert "canonical_address" in royalty
+        assert royalty["canonical_match"] is True
+
+    def test_royalty_distributor_canonical_match_false_on_v1_pin(self):
+        """If operator is still pinned to v1 RoyaltyDistributor
+        post-ceremony, canonical_match is False — gives operators
+        an explicit signal to update their env override."""
+        node = _node_full()
+        node._royalty_distributor_client.distributor_address = (
+            "0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2"  # v1
+        )
+        with patch.dict(__import__("os").environ, {"PRSM_NETWORK": "mainnet"}):
+            resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        royalty = body["subsystems"]["royalty_distributor"]
+        assert royalty["canonical_match"] is False
+        # canonical_address still surfaced so operator can see
+        # what it SHOULD be.
+        assert royalty["canonical_address"].lower() == \
+            "0xfea9aeb99e02fdb799e2df3c9195dc4e5323df7e"
+
+    def test_canonical_check_handles_unknown_network_gracefully(self):
+        """If PRSM_NETWORK is set to a value with no canonical
+        addresses (e.g., 'local'), canonical_match should be
+        omitted or null rather than crashing."""
+        node = _node_full()
+        node._royalty_distributor_client.distributor_address = (
+            "0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e"
+        )
+        with patch.dict(__import__("os").environ, {"PRSM_NETWORK": "local"}):
+            resp = _client(node).get("/health/detailed")
+        # Endpoint must NOT 500 when canonical lookup fails.
+        assert resp.status_code == 200
 
 
 class TestHealthDetailedFailSoft:
