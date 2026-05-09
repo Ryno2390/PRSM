@@ -314,6 +314,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     # IDs (e.g. from upstream LBs) are echoed back; missing /
     # empty IDs trigger server-side UUID generation. Cap at
     # 128 chars defends against log-poisoning via gigantic IDs.
+    #
+    # Also sets the request_id contextvar so log records produced
+    # during the request's processing get tagged with the current
+    # request_id (operators wiring %(request_id)s in their log
+    # formatter see end-to-end correlation in log files).
+    from prsm.node.request_id_logging import (
+        set_request_id, clear_request_id,
+    )
+
     @app.middleware("http")
     async def request_id_middleware(request, call_next):
         supplied = request.headers.get("x-request-id", "").strip()
@@ -321,7 +330,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             request_id = supplied[:128]
         else:
             request_id = str(_uuid.uuid4())
-        response = await call_next(request)
+        token = set_request_id(request_id)
+        try:
+            response = await call_next(request)
+        finally:
+            clear_request_id(token)
         response.headers["X-Request-ID"] = request_id
         return response
 
