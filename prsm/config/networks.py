@@ -30,6 +30,12 @@ class NetworkConfig:
     # Phase 1.3 contracts (deployed)
     ftns_token: Optional[str] = None
     provenance_registry: Optional[str] = None
+    # provenance_registry_v2 — added 2026-05-09 in lockstep with the
+    # A-08 RoyaltyDistributor v2 mainnet ceremony. The v2 RoyaltyDistributor
+    # uses _registry == provenance_registry_v2; operators wiring the
+    # provenance pipeline should pin to V2 going forward. V1 retained
+    # for legacy Item 7 client compatibility.
+    provenance_registry_v2: Optional[str] = None
     royalty_distributor: Optional[str] = None
     foundation_safe: Optional[str] = None
 
@@ -82,7 +88,8 @@ MAINNET = NetworkConfig(
     explorer_url="https://basescan.org",
     # Phase 1.3 Task 8 deploys (2026-05-04):
     ftns_token="0x5276a3756C85f2E9e46f6D34386167a209aa16e5",
-    provenance_registry="0xdF470BFa9eF310B196801D5105468515d0069915",
+    provenance_registry="0xdF470BFa9eF310B196801D5105468515d0069915",  # V1 (retained for legacy Item 7 ProvenanceRegistry callers)
+    provenance_registry_v2="0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf",  # V2 deployed 2026-05-06 per PRSM-CR-2026-05-06-2; wired as _registry on the A-08 v2 RoyaltyDistributor
     royalty_distributor="0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e",  # v2 (A-08 ceremony 2026-05-09); was v1 0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2 (retained for legacy claimable balances per ceremony plan §5.3)
     foundation_safe="0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791",
     # Audit-bundle + Phase 8 + Phase 7-storage deployed 2026-05-07
