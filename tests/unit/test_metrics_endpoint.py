@@ -78,6 +78,12 @@ def _node(*, escrows=0, history_size=0, claimable_wei=0,
     # Default no cleanup task wired — tests that need one set
     # _escrow_cleanup_task explicitly.
     node._escrow_cleanup_task = None
+    # Default no daemon tasks wired — same rationale as cleanup_task.
+    node._heartbeat_scheduler_task = None
+    node._compensation_scheduler_task = None
+    node._key_distribution_watcher_task = None
+    node._storage_slashing_watcher_task = None
+    node._compensation_distributor_watcher_task = None
     return node
 
 
@@ -176,6 +182,65 @@ class TestCleanupTaskGauge:
         node = _node()  # no _escrow_cleanup_task attr
         body = _client(node).get("/metrics").text
         assert "prsm_escrow_cleanup_task_running" not in body
+
+
+class TestDaemonGauges:
+    """Same task_running gauge pattern applied to the remaining 4
+    daemons so operators get full Prometheus alerting coverage."""
+
+    def _setup(self, node, attr_pair, running=True):
+        scheduler_attr, task_attr = attr_pair
+        setattr(node, scheduler_attr, MagicMock())
+        fake_task = MagicMock()
+        fake_task.done.return_value = not running
+        setattr(node, task_attr, fake_task)
+
+    def test_heartbeat_scheduler_gauge(self):
+        node = _node()
+        self._setup(node, ("_heartbeat_scheduler", "_heartbeat_scheduler_task"))
+        body = _client(node).get("/metrics").text
+        assert "prsm_heartbeat_scheduler_running 1" in body
+
+    def test_compensation_scheduler_gauge_crash(self):
+        node = _node()
+        self._setup(
+            node,
+            ("_compensation_scheduler", "_compensation_scheduler_task"),
+            running=False,
+        )
+        body = _client(node).get("/metrics").text
+        assert "prsm_compensation_scheduler_running 0" in body
+
+    def test_key_distribution_watcher_gauge(self):
+        node = _node()
+        self._setup(
+            node,
+            ("_key_distribution_watcher", "_key_distribution_watcher_task"),
+        )
+        body = _client(node).get("/metrics").text
+        assert "prsm_key_distribution_watcher_running 1" in body
+
+    def test_storage_slashing_watcher_gauge(self):
+        node = _node()
+        self._setup(
+            node,
+            ("_storage_slashing_watcher", "_storage_slashing_watcher_task"),
+        )
+        body = _client(node).get("/metrics").text
+        assert "prsm_storage_slashing_watcher_running 1" in body
+
+    def test_compensation_distributor_watcher_gauge(self):
+        node = _node()
+        self._setup(
+            node,
+            ("_compensation_distributor_watcher",
+             "_compensation_distributor_watcher_task"),
+        )
+        body = _client(node).get("/metrics").text
+        assert (
+            "prsm_compensation_distributor_watcher_running 1"
+            in body
+        )
 
 
 class TestMetricsFailSoft:

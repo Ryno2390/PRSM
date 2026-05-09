@@ -3533,26 +3533,53 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             logger.warning("metrics royalty probe failed: %s", exc)
 
-        # prsm_escrow_cleanup_task_running
-        cleanup_task = getattr(node, "_escrow_cleanup_task", None)
-        if cleanup_task is not None:
+        # prsm_escrow_cleanup_task_running + per-daemon task_running
+        # gauges. Same lifecycle-watch pattern as the
+        # /health/detailed daemon subsystems.
+        def _emit_task_gauge(metric_name: str, task_attr: str, help_text: str):
+            task = getattr(node, task_attr, None)
+            if task is None:
+                return
             try:
-                running = 0 if cleanup_task.done() else 1
-                lines.append(
-                    "# HELP prsm_escrow_cleanup_task_running "
-                    "1 if escrow auto-refund cleanup task is alive, "
-                    "0 if crashed (alarm signal)"
-                )
-                lines.append(
-                    "# TYPE prsm_escrow_cleanup_task_running gauge"
-                )
-                lines.append(
-                    f"prsm_escrow_cleanup_task_running {running}"
-                )
+                running = 0 if task.done() else 1
+                lines.append(f"# HELP {metric_name} {help_text}")
+                lines.append(f"# TYPE {metric_name} gauge")
+                lines.append(f"{metric_name} {running}")
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "metrics cleanup-task probe failed: %s", exc,
+                    "metrics %s probe failed: %s", metric_name, exc,
                 )
+
+        _emit_task_gauge(
+            "prsm_escrow_cleanup_task_running",
+            "_escrow_cleanup_task",
+            "1 if escrow auto-refund cleanup task is alive, 0 if crashed",
+        )
+        _emit_task_gauge(
+            "prsm_heartbeat_scheduler_running",
+            "_heartbeat_scheduler_task",
+            "1 if HeartbeatScheduler task is alive, 0 if crashed",
+        )
+        _emit_task_gauge(
+            "prsm_compensation_scheduler_running",
+            "_compensation_scheduler_task",
+            "1 if CompensationScheduler task is alive, 0 if crashed",
+        )
+        _emit_task_gauge(
+            "prsm_key_distribution_watcher_running",
+            "_key_distribution_watcher_task",
+            "1 if KeyDistribution watcher task is alive, 0 if crashed",
+        )
+        _emit_task_gauge(
+            "prsm_storage_slashing_watcher_running",
+            "_storage_slashing_watcher_task",
+            "1 if StorageSlashing watcher task is alive, 0 if crashed",
+        )
+        _emit_task_gauge(
+            "prsm_compensation_distributor_watcher_running",
+            "_compensation_distributor_watcher_task",
+            "1 if CompensationDistributor watcher task is alive, 0 if crashed",
+        )
 
         # prsm_arbitration_pending_count
         try:
