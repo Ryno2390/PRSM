@@ -43,10 +43,19 @@ class JobStatus(str, Enum):
       - IN_PROGRESS: pipeline started; result not yet available.
       - COMPLETED: pipeline finished; ``response`` populated.
       - FAILED: pipeline raised; ``error`` populated.
+      - CANCELLED: operator-initiated abort via /compute/cancel
+        (v2, ships 2026-05-09); v1 caveat: in-flight Python
+        coroutines are NOT interrupted — cancellation marks
+        intent + refunds the budget, but the underlying compute
+        may still complete (its release_escrow_split call will
+        then race-lose against the now-REFUNDED escrow and raise
+        EscrowAlreadyFinalizedError, which is the correct
+        race-loss outcome).
     """
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -1295,6 +1295,157 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             }
         return body
 
+    @app.post("/compute/cancel/{job_id}")
+    async def compute_cancel(job_id: str) -> Dict[str, Any]:
+        """Cancel a /compute/forge job: mark history.status as
+        CANCELLED + refund any PENDING escrow.
+
+        v1 caveat: in-flight Python coroutines are NOT interrupted.
+        Cancellation marks intent + refunds the budget. If the
+        coroutine completes successfully later, its
+        release_escrow_split call will race-lose against the
+        REFUNDED escrow and raise EscrowAlreadyFinalizedError —
+        the correct race-loss outcome.
+
+        Status:
+          503 — neither JobHistoryStore nor PaymentEscrow wired.
+          404 — neither has the job.
+          409 — job already terminal (COMPLETED/FAILED/CANCELLED on
+                history side, RELEASED/REFUNDED on escrow side).
+          200 — cancelled. Response surfaces history_cancelled,
+                escrow_refunded, refund_amount_ftns.
+        """
+        from prsm.node.job_history import (
+            JobHistoryRecord, JobStatus,
+        )
+        from prsm.node.payment_escrow import (
+            EscrowAlreadyFinalizedError, EscrowStatus,
+        )
+
+        history = getattr(node, "_job_history", None)
+        escrow_svc = getattr(node, "_payment_escrow", None)
+
+        if history is None and escrow_svc is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Neither JobHistoryStore nor PaymentEscrow "
+                    "is initialized on this node."
+                ),
+            )
+
+        # Look up both surfaces.
+        history_record = None
+        if history is not None:
+            try:
+                history_record = history.get(job_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "JobHistoryStore.get raised for job_id=%s: %s",
+                    job_id, exc,
+                )
+
+        escrow = None
+        if escrow_svc is not None:
+            try:
+                escrow = escrow_svc.get_escrow(job_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "PaymentEscrow.get_escrow raised for job_id=%s: %s",
+                    job_id, exc,
+                )
+
+        if history_record is None and escrow is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No history or escrow record for job_id={job_id!r}; "
+                    f"nothing to cancel."
+                ),
+            )
+
+        # 409 — already terminal on either surface.
+        if history_record is not None and history_record.status in {
+            JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED,
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Job {job_id!r} is already in terminal state "
+                    f"{history_record.status.value!r}; cannot cancel."
+                ),
+            )
+        if escrow is not None and escrow.status in {
+            EscrowStatus.RELEASED, EscrowStatus.REFUNDED,
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Escrow for job {job_id!r} is already "
+                    f"{escrow.status.value!r}; cannot cancel."
+                ),
+            )
+
+        # Mark history CANCELLED.
+        history_cancelled = False
+        if history_record is not None:
+            try:
+                cancelled_record = JobHistoryRecord(
+                    job_id=history_record.job_id,
+                    query=history_record.query,
+                    status=JobStatus.CANCELLED,
+                    started_at=history_record.started_at,
+                    completed_at=_time_for_history.time(),
+                    route=history_record.route,
+                    response=history_record.response,
+                    aggregator_node_id=history_record.aggregator_node_id,
+                    contributing_shards=history_record.contributing_shards,
+                    participants=history_record.participants,
+                    traces_collected=history_record.traces_collected,
+                    error=history_record.error,
+                )
+                history.put(cancelled_record)
+                history_cancelled = True
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "JobHistoryStore.put (CANCELLED) failed for "
+                    "job_id=%s: %s", job_id, exc,
+                )
+
+        # Refund the escrow if PENDING.
+        escrow_refunded = False
+        refund_amount_ftns = 0.0
+        if escrow is not None and escrow.status == EscrowStatus.PENDING:
+            try:
+                ok = await escrow_svc.refund_escrow(
+                    job_id, reason="operator-cancelled via /compute/cancel",
+                )
+                escrow_refunded = bool(ok)
+                if escrow_refunded:
+                    refund_amount_ftns = escrow.amount
+            except EscrowAlreadyFinalizedError:
+                # Race-loss: release_escrow_split landed between
+                # our check + our refund. Treat as best-effort
+                # cancel; history already CANCELLED.
+                logger.info(
+                    "Escrow for job_id=%s race-finalized during "
+                    "cancel; treating as race-loss.", job_id,
+                )
+                escrow_refunded = False
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "PaymentEscrow.refund_escrow raised for "
+                    "job_id=%s: %s", job_id, exc,
+                )
+                escrow_refunded = False
+
+        return {
+            "job_id": job_id,
+            "history_cancelled": history_cancelled,
+            "escrow_refunded": escrow_refunded,
+            "refund_amount_ftns": refund_amount_ftns,
+        }
+
     @app.post("/compute/inference")
     async def compute_inference(body: Dict[str, Any] = {}) -> Dict[str, Any]:
         """Run TEE-attested model inference with verifiable signed receipts.

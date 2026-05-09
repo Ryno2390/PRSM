@@ -344,7 +344,8 @@ When QueryOrchestrator handles a job, payment escrow is released across all swar
 | Endpoint | Description |
 |---|---|
 | `POST /compute/forge` | Submit a query. Returns 32-byte `query_id` and (in QO mode) an `AggregatedResult` block including `participants: [...]`. |
-| `GET /compute/status/{job_id}` | Two-tier response: `{"history": {...}, "escrow": {...}}`. The `history` block reports IN_PROGRESS / COMPLETED / FAILED from `JobHistoryStore`; the `escrow` block reports `PaymentEscrow` state. Either tier may be `null` if the job is unknown to that subsystem. |
+| `GET /compute/status/{job_id}` | Two-tier response: `{"history": {...}, "escrow": {...}}`. The `history` block reports IN_PROGRESS / COMPLETED / FAILED / CANCELLED from `JobHistoryStore`; the `escrow` block reports `PaymentEscrow` state. Either tier may be `null` if the job is unknown to that subsystem. |
+| `POST /compute/cancel/{job_id}` | Cancel an in-progress job: marks history.status as CANCELLED + refunds any PENDING escrow. **v1 caveat:** in-flight Python coroutines are NOT interrupted — cancellation marks intent + refunds the budget. If the coroutine completes successfully later, its release_escrow_split call race-loses against the REFUNDED escrow. Returns 503 if neither subsystem wired, 404 if neither has the job, 409 if already terminal, 200 with `{job_id, history_cancelled, escrow_refunded, refund_amount_ftns}` on success. |
 
 ### JobHistoryStore
 
