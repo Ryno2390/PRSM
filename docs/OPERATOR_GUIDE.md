@@ -428,6 +428,8 @@ A companion tool `coinbase_offramp_initiate` ships v1 alongside (Vision §13 Pha
 - Required arg: `usd_amount` (positive; 422 if exceeds available balance). Optional: `bank_account_alias` (default `"primary"`).
 - Backed by the new `POST /wallet/offramp/quote` endpoint.
 
+**Source-aware available-balance check (v2, ships 2026-05-09):** The quote endpoint now checks the request against `available_ftns = on-chain + claimable royalties` (escrowed FTNS does NOT count — locked in pending compute jobs). When on-chain alone is insufficient but claimable royalties bridge the gap, the endpoint returns 200 with `claim_required: true` + `claim_amount_ftns` (the FTNS shortfall the operator must claim before the eventual swap can execute). The MCP handler renders a `Prerequisite: Claim X FTNS in royalties before swap can execute` block ahead of the quote summary so the chain-of-actions is explicit. Royalty client RPC failures are fail-soft: claimable treated as 0, request validated against on-chain only.
+
 Suggested usage flow today: `prsm_balance_check` (read available funds) → `coinbase_offramp_initiate` (pre-flight quote) → operator inspects the summary, plans for the eventual execution path.
 
 `BROKEN_TOOLS_HIDDEN` is now an empty frozenset. If you re-add a tool to the hide-list mid-incident, also pin `tests/unit/test_mcp_server_hidden_tools.py` to match — the test asserts the exact set.

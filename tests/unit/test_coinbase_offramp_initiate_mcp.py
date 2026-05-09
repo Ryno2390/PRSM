@@ -210,3 +210,108 @@ class TestOfframpInitiateHandlerErrors:
             "not initialized" in result.lower()
             or "not configured" in result.lower()
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Aggregate-source: claim-required prerequisite rendering
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _quote_response_with_claim_required(
+    *,
+    requested_usd: float = 50.0,
+    onchain_ftns: float = 10.0,
+    claimable_ftns: float = 50.0,
+    usd_rate: float = 1.0,
+):
+    """Build a v2-shape quote response with claim_required True.
+    on-chain alone insufficient; claimable bridges the gap."""
+    available = onchain_ftns + claimable_ftns
+    ftns_to_swap = requested_usd / usd_rate
+    claim_amount = max(0.0, ftns_to_swap - onchain_ftns)
+    return {
+        "requested_usd": requested_usd,
+        "source_address": "0x" + "11" * 20,
+        "source_balance_ftns": onchain_ftns,
+        "source_balance_usd": onchain_ftns * usd_rate,
+        "available_ftns": available,
+        "available_usd": available * usd_rate,
+        "claimable_royalties_ftns": claimable_ftns,
+        "claim_required": True,
+        "claim_amount_ftns": claim_amount,
+        "quote": {
+            "ftns_to_swap": ftns_to_swap,
+            "usdc_received": requested_usd,
+            "usd_settled": requested_usd,
+            "swap_route": "aerodrome",
+            "offramp_route": "coinbase-cdp",
+            "bank_account_alias": "primary",
+        },
+        "usd_rate": usd_rate,
+        "status": "PENDING_COMMISSION",
+        "commission_gate_note": "...",
+    }
+
+
+class TestClaimRequiredRendering:
+    @pytest.mark.asyncio
+    async def test_renders_prerequisite_block_when_claim_required(self):
+        """Handler must surface the claim prerequisite before the
+        quote so the operator knows the eventual swap depends on
+        claiming the royalties first."""
+        response = _quote_response_with_claim_required(
+            requested_usd=50.0,
+            onchain_ftns=10.0,
+            claimable_ftns=50.0,
+        )
+
+        async def fake_call_node_api(method, path, data=None):
+            return response
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_coinbase_offramp_initiate(
+                {"usd_amount": 50.0},
+            )
+
+        assert "Prerequisite" in result
+        # Required claim amount visible (FTNS shortfall on on-chain).
+        assert "40.000000 FTNS" in result
+        # Aggregate breakdown lines present.
+        assert "Available (aggregate)" in result
+        assert "60.000000 FTNS" in result  # 10 + 50
+        assert "Claimable royalties:" in result
+        assert "50.000000 FTNS" in result
+        # Status still PENDING_COMMISSION.
+        assert "PENDING_COMMISSION" in result
+
+    @pytest.mark.asyncio
+    async def test_no_prerequisite_block_when_claim_not_required(self):
+        """When on-chain alone covers the request, no prerequisite
+        block — render the standard quote summary."""
+        response = _quote_response_with_claim_required(
+            requested_usd=50.0,
+            onchain_ftns=600.0,  # on-chain alone covers
+            claimable_ftns=0.0,
+        )
+        # Override claim_required to False since helper sets True.
+        response["claim_required"] = False
+        response["claim_amount_ftns"] = 0.0
+
+        async def fake_call_node_api(method, path, data=None):
+            return response
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_coinbase_offramp_initiate(
+                {"usd_amount": 50.0},
+            )
+
+        # No prereq block.
+        assert "Prerequisite" not in result
+        assert "Available (aggregate)" not in result
+        # Quote summary still rendered.
+        assert "PENDING_COMMISSION" in result
+        assert "aerodrome" in result.lower()

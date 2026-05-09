@@ -1865,6 +1865,27 @@ async def handle_coinbase_offramp_initiate(arguments: Dict[str, Any]) -> str:
         addr[:10] + "…" + addr[-4:] if len(addr) > 14 else addr
     )
 
+    # Aggregate-source claim-required prerequisite block (v2 endpoint
+    # field). When on-chain alone insufficient but claimable royalties
+    # bridge the gap, surface the required claim before the quote so
+    # the operator knows the eventual swap depends on it.
+    prereq_block = ""
+    if result.get("claim_required"):
+        claim_amount = result.get("claim_amount_ftns", 0.0)
+        available_ftns = result.get("available_ftns", 0.0)
+        available_usd = result.get("available_usd", 0.0)
+        claimable = result.get("claimable_royalties_ftns", 0.0)
+        prereq_block = (
+            f"\n"
+            f"  Prerequisite: Claim {claim_amount:.6f} FTNS in royalties "
+            f"before swap can execute\n"
+            f"    Available (aggregate):  {available_ftns:.6f} FTNS  "
+            f"(${available_usd:,.2f})\n"
+            f"    On-chain:               "
+            f"{result['source_balance_ftns']:.6f} FTNS\n"
+            f"    Claimable royalties:    {claimable:.6f} FTNS\n"
+        )
+
     return (
         f"PRSM Cash-Out Pre-Flight\n"
         f"  Requested:    ${result['requested_usd']:,.2f} USD\n"
@@ -1872,6 +1893,7 @@ async def handle_coinbase_offramp_initiate(arguments: Dict[str, Any]) -> str:
         f"  Balance:      {result['source_balance_ftns']:.6f} FTNS  "
         f"(${result['source_balance_usd']:,.2f} @ "
         f"{result['usd_rate']} USD/FTNS)\n"
+        f"{prereq_block}"
         f"\n"
         f"  Quote:\n"
         f"    Swap:       {quote['ftns_to_swap']:.6f} FTNS  "

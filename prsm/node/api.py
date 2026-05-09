@@ -600,23 +600,60 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 pass
 
         balance_usd = balance_ftns * usd_rate
+
+        # Aggregate-source available: on-chain + claimable royalties.
+        # Escrowed FTNS does NOT count (locked in pending compute jobs).
+        # Each source fail-soft: RPC errors → treat as 0 contribution.
+        decimals = getattr(node.ftns_ledger, "_decimals", 18)
+        claimable_ftns = 0.0
+        royalty_client = getattr(node, "_royalty_distributor_client", None)
+        if royalty_client is not None:
+            try:
+                claimable_wei = royalty_client.claimable(target)
+                claimable_ftns = float(claimable_wei) / (10 ** decimals)
+            except Exception as e:
+                logger.warning(
+                    "offramp/quote: royalty claimable() raised — "
+                    "treating as 0 (fail-soft): %s", e,
+                )
+
+        available_ftns = balance_ftns + claimable_ftns
+        available_usd = available_ftns * usd_rate
         ftns_to_swap = body.usd_amount / usd_rate
 
-        if balance_usd < body.usd_amount:
+        if available_usd < body.usd_amount:
             raise HTTPException(
                 status_code=422,
                 detail=(
                     f"Insufficient balance: requested ${body.usd_amount:.2f}, "
-                    f"available ${balance_usd:.2f} "
-                    f"({balance_ftns:.6f} FTNS @ {usd_rate} USD/FTNS)"
+                    f"available ${available_usd:.2f} "
+                    f"({available_ftns:.6f} FTNS @ {usd_rate} USD/FTNS"
+                    f"; on-chain {balance_ftns:.6f} + claimable "
+                    f"{claimable_ftns:.6f})"
                 ),
             )
+
+        # Claim-required path: on-chain alone insufficient but
+        # aggregate covers. Operator must claim royalties before the
+        # eventual swap can execute. Surface the claim amount so the
+        # composer can chain a claim step.
+        claim_required = balance_ftns < ftns_to_swap
+        claim_amount_ftns = (
+            max(0.0, ftns_to_swap - balance_ftns) if claim_required else 0.0
+        )
 
         return {
             "requested_usd": body.usd_amount,
             "source_address": target,
             "source_balance_ftns": balance_ftns,
             "source_balance_usd": balance_usd,
+            # Aggregate-source mirror (additive — clients reading
+            # legacy fields keep working).
+            "available_ftns": available_ftns,
+            "available_usd": available_usd,
+            "claimable_royalties_ftns": claimable_ftns,
+            "claim_required": claim_required,
+            "claim_amount_ftns": claim_amount_ftns,
             "quote": {
                 "ftns_to_swap": ftns_to_swap,
                 "usdc_received": body.usd_amount,
