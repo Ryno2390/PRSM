@@ -290,6 +290,54 @@ class TestPersistence:
         )
         assert list(target.glob("*.json"))
 
+    def test_retention_prunes_old_disk_entries(self, tmp_path):
+        """retention_days arg deletes disk files older than the
+        retention window on startup. Closes the unbounded-disk-
+        growth concern for long-running operator nodes."""
+        import time as _time
+        # Pre-seed disk with one OLD and one RECENT entry.
+        ring_a = AuditLogRing(persist_dir=tmp_path)
+        old_ts = _time.time() - 10 * 86400  # 10 days ago
+        recent_ts = _time.time() - 1 * 3600  # 1 hour ago
+        ring_a.append(
+            method="POST", path="/old", requester="n1",
+            status_code=200, request_id="r-old",
+            timestamp=old_ts,
+        )
+        ring_a.append(
+            method="POST", path="/recent", requester="n1",
+            status_code=200, request_id="r-recent",
+            timestamp=recent_ts,
+        )
+        # Both files on disk.
+        assert len(list(tmp_path.glob("*.json"))) == 2
+        # Fresh ring with 7-day retention → prune the 10-day-old one.
+        ring_b = AuditLogRing(persist_dir=tmp_path, retention_days=7.0)
+        # Disk now has only the recent file.
+        on_disk = list(tmp_path.glob("*.json"))
+        assert len(on_disk) == 1
+        # In-memory ring also reflects pruning.
+        results = ring_b.recent()
+        assert len(results) == 1
+        assert results[0].path == "/recent"
+
+    def test_no_retention_keeps_all_disk_entries(self, tmp_path):
+        """Without retention_days set, all disk entries are
+        preserved (v1 behavior preserved bit-identically)."""
+        import time as _time
+        ring_a = AuditLogRing(persist_dir=tmp_path)
+        old_ts = _time.time() - 100 * 86400  # 100 days ago
+        ring_a.append(
+            method="POST", path="/old", requester="n1",
+            status_code=200, request_id="r-old",
+            timestamp=old_ts,
+        )
+        # Reload without retention.
+        ring_b = AuditLogRing(persist_dir=tmp_path)
+        results = ring_b.recent()
+        assert len(results) == 1
+        assert results[0].path == "/old"
+
     def test_lru_evicts_oldest_disk_on_startup_when_over_cap(self, tmp_path):
         """If disk has more entries than max_entries, oldest are
         dropped on startup so the in-memory ring respects its bound."""

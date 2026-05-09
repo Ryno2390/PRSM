@@ -460,6 +460,8 @@ Use cases:
 
 Filename format: `{timestamp:020.6f}-{hash8(request_id)}.json` — sortable by name, collision-resistant. Corrupt JSON files are logged + skipped (fail-soft) rather than crashing startup. When `PRSM_AUDIT_LOG_DIR` unset, v1 in-memory-only behavior is preserved bit-identically.
 
+**Disk retention (ships 2026-05-09):** Set `PRSM_AUDIT_LOG_RETENTION_DAYS=N` (positive float) to delete on-disk entries older than N days at node startup. Without this, persisted logs grow unbounded over time. Pruning happens once at startup; restart the node to re-prune. Set both `PRSM_AUDIT_LOG_DIR` + `PRSM_AUDIT_LOG_RETENTION_DAYS` for full disk-backed audit log with bounded retention. Non-numeric / zero / negative retention values silently disable pruning (log WARN).
+
 ### `GET /info` — static node metadata (ships 2026-05-09)
 
 Single read-only endpoint surfacing version, active network, chain_id, node identity, and canonical contract addresses for the active `PRSM_NETWORK`. Useful for operator triage + integration code needing to know "what network is this node on" without parsing `/health/detailed`.

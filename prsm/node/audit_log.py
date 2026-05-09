@@ -79,6 +79,7 @@ class AuditLogRing:
         max_entries: int = _DEFAULT_MAX_ENTRIES,
         *,
         persist_dir: Optional[Path] = None,
+        retention_days: Optional[float] = None,
     ) -> None:
         if not isinstance(max_entries, int) or max_entries <= 0:
             raise ValueError(
@@ -90,9 +91,43 @@ class AuditLogRing:
         self._persist_dir: Optional[Path] = (
             Path(persist_dir) if persist_dir is not None else None
         )
+        self._retention_seconds: Optional[float] = (
+            retention_days * 86400.0
+            if retention_days is not None and retention_days > 0
+            else None
+        )
         if self._persist_dir is not None:
             self._persist_dir.mkdir(parents=True, exist_ok=True)
+            if self._retention_seconds is not None:
+                self._prune_old_disk_entries()
             self._load_from_disk()
+
+    def _prune_old_disk_entries(self) -> None:
+        """Delete disk files older than the retention window.
+        Called once at startup when retention_days is set; the
+        operator can re-trigger by restarting the node."""
+        assert self._persist_dir is not None
+        assert self._retention_seconds is not None
+        cutoff = time.time() - self._retention_seconds
+        deleted = 0
+        for path in self._persist_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text())
+                ts = float(data.get("timestamp", 0))
+                if ts < cutoff:
+                    path.unlink()
+                    deleted += 1
+            except Exception as e:
+                logger.warning(
+                    "AuditLogRing: retention prune skip %s: %s",
+                    path, e,
+                )
+        if deleted > 0:
+            logger.info(
+                "AuditLogRing: pruned %d disk entries older "
+                "than %s seconds",
+                deleted, self._retention_seconds,
+            )
 
     @staticmethod
     def _entry_filename(entry: AuditEntry) -> str:

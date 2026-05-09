@@ -1807,11 +1807,30 @@ class PRSMNode:
             from prsm.node.audit_log import AuditLogRing
             audit_dir_raw = _os.getenv("PRSM_AUDIT_LOG_DIR", "").strip()
             audit_persist_dir = _Path(audit_dir_raw) if audit_dir_raw else None
-            self._audit_log = AuditLogRing(persist_dir=audit_persist_dir)
+            retention_raw = _os.getenv(
+                "PRSM_AUDIT_LOG_RETENTION_DAYS", "",
+            ).strip()
+            retention_days = None
+            if retention_raw:
+                try:
+                    retention_days = float(retention_raw)
+                    if retention_days <= 0:
+                        retention_days = None
+                except ValueError:
+                    logger.warning(
+                        "PRSM_AUDIT_LOG_RETENTION_DAYS=%r not "
+                        "numeric; retention disabled", retention_raw,
+                    )
+            self._audit_log = AuditLogRing(
+                persist_dir=audit_persist_dir,
+                retention_days=retention_days,
+            )
             logger.info(
-                "AuditLogRing wired (in-memory ring 1024%s)",
+                "AuditLogRing wired (in-memory ring 1024%s%s)",
                 f", persisted to {audit_persist_dir}"
                 if audit_persist_dir else "",
+                f", retention={retention_days}d"
+                if retention_days else "",
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
