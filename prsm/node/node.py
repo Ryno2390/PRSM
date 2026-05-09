@@ -1839,6 +1839,65 @@ class PRSMNode:
             )
             self._audit_log = None
 
+        # JobReaper for per-job duration cap (PRSM_FORGE_MAX_DURATION_SEC).
+        # Decoupled from /compute/forge body — runs as separate background
+        # task scanning JobHistoryStore for stale IN_PROGRESS records.
+        # Disabled when env var unset (v1 behavior preserved).
+        try:
+            import os as _os
+            from prsm.node.job_reaper import JobReaper
+            duration_raw = _os.getenv(
+                "PRSM_FORGE_MAX_DURATION_SEC", "",
+            ).strip()
+            interval_raw = _os.getenv(
+                "PRSM_FORGE_REAPER_INTERVAL_SEC", "",
+            ).strip()
+            self._job_reaper = None
+            self._job_reaper_task = None
+            if duration_raw and self._job_history is not None:
+                try:
+                    cap = float(duration_raw)
+                    if cap > 0:
+                        kwargs = {
+                            "job_history": self._job_history,
+                            "payment_escrow": getattr(
+                                self, "_payment_escrow", None,
+                            ),
+                            "max_duration_seconds": cap,
+                        }
+                        if interval_raw:
+                            try:
+                                ival = float(interval_raw)
+                                if ival > 0:
+                                    kwargs["interval_seconds"] = ival
+                            except ValueError:
+                                logger.warning(
+                                    "PRSM_FORGE_REAPER_INTERVAL_SEC=%r "
+                                    "not numeric; using default",
+                                    interval_raw,
+                                )
+                        self._job_reaper = JobReaper(**kwargs)
+                        logger.info(
+                            "JobReaper wired (cap=%ss, interval=%ss)",
+                            cap,
+                            kwargs.get(
+                                "interval_seconds",
+                                self._job_reaper.interval_seconds,
+                            ),
+                        )
+                except ValueError:
+                    logger.warning(
+                        "PRSM_FORGE_MAX_DURATION_SEC=%r not numeric; "
+                        "duration cap disabled", duration_raw,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "JobReaper construction failed: %s — "
+                "duration cap disabled.", exc,
+            )
+            self._job_reaper = None
+            self._job_reaper_task = None
+
         self._result_consensus = ResultConsensus(
             epsilon=0.01,
             timeout_seconds=300.0,
@@ -2386,6 +2445,12 @@ class PRSMNode:
                 self._compensation_scheduler.run_forever(),
             )
             logger.info("PullAndDistributeScheduler launched")
+        # JobReaper for per-job duration cap.
+        if getattr(self, "_job_reaper", None) is not None:
+            self._job_reaper_task = asyncio.create_task(
+                self._job_reaper.run_forever(),
+            )
+            logger.info("JobReaper launched")
 
         # Phase 7-storage + Phase 8 event watchers. Same opt-in shape
         # as the schedulers; default-callback wired in the builders so
@@ -2638,8 +2703,11 @@ class PRSMNode:
             await self._storage_slashing_watcher.stop()
         if self._compensation_distributor_watcher is not None:
             await self._compensation_distributor_watcher.stop()
+        if getattr(self, "_job_reaper", None) is not None:
+            await self._job_reaper.stop()
         for task_attr in (
             "_heartbeat_scheduler_task",
+            "_job_reaper_task",
             "_compensation_scheduler_task",
             "_key_distribution_watcher_task",
             "_storage_slashing_watcher_task",

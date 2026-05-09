@@ -3704,6 +3704,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "_compensation_distributor_watcher_task",
             "1 if CompensationDistributor watcher task is alive, 0 if crashed",
         )
+        _emit_task_gauge(
+            "prsm_job_reaper_running",
+            "_job_reaper_task",
+            "1 if JobReaper duration-cap task is alive, 0 if crashed",
+        )
 
         # prsm_arbitration_pending_count
         try:
@@ -3974,6 +3979,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "compensation_distributor_watcher",
             "_compensation_distributor_watcher",
             "_compensation_distributor_watcher_task",
+        )
+        _daemon_subsystem(
+            "job_reaper",
+            "_job_reaper",
+            "_job_reaper_task",
         )
 
         # HeartbeatScheduler (optional). Same task-liveness pattern

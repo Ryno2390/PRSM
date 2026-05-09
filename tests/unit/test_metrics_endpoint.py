@@ -84,6 +84,7 @@ def _node(*, escrows=0, history_size=0, claimable_wei=0,
     node._key_distribution_watcher_task = None
     node._storage_slashing_watcher_task = None
     node._compensation_distributor_watcher_task = None
+    node._job_reaper_task = None
     return node
 
 
@@ -241,6 +242,12 @@ class TestDaemonGauges:
             "prsm_compensation_distributor_watcher_running 1"
             in body
         )
+
+    def test_job_reaper_gauge(self):
+        node = _node()
+        self._setup(node, ("_job_reaper", "_job_reaper_task"))
+        body = _client(node).get("/metrics").text
+        assert "prsm_job_reaper_running 1" in body
 
 
 class TestMetricsFailSoft:

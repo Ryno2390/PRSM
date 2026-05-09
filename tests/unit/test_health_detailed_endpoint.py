@@ -432,6 +432,14 @@ class TestRemainingDaemonSubsystems:
         assert cd["available"] is True
         assert cd["task_running"] is True
 
+    def test_job_reaper_subsystem(self):
+        node = _node_full()
+        self._setup(node, ("_job_reaper", "_job_reaper_task"))
+        resp = _client(node).get("/health/detailed")
+        jr = resp.json()["subsystems"]["job_reaper"]
+        assert jr["available"] is True
+        assert jr["task_running"] is True
+
 
 class TestHealthDetailedFailSoft:
     def test_subsystem_check_raising_does_not_500(self):
