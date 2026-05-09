@@ -651,7 +651,60 @@ def _parse_poll_interval(env_name: str, default: float) -> float:
     return default
 
 
-def _build_key_distribution_watcher_or_none(*, client):
+def _build_watcher_state_store_or_none():
+    """Construct a shared FilesystemLastProcessedBlockStore for the
+    3 event watchers if operator opted in.
+
+    Activation:
+      PRSM_WATCHER_STATE_PERSISTENCE_ENABLED=1   (required to enable)
+      PRSM_WATCHER_STATE_DIR=<path>              (optional override
+        of default ~/.prsm/watchers/)
+
+    When the store is wired, each watcher's `last_processed_block`
+    baseline persists across process restarts — events that landed
+    during downtime get replayed when the watcher comes back online,
+    instead of being silently skipped. Without it, watchers fall
+    back to chain-tip baselining (legacy behavior).
+
+    Returns None when persistence is disabled OR when filesystem
+    construction fails (e.g., permission denied on the configured
+    base_dir). The caller passes None through to the watcher
+    builders, which preserves legacy behavior.
+    """
+    if os.getenv("PRSM_WATCHER_STATE_PERSISTENCE_ENABLED", "").lower() not in (
+        "1", "true", "yes",
+    ):
+        return None
+    try:
+        from prsm.economy.web3.last_processed_block_store import (
+            FilesystemLastProcessedBlockStore,
+        )
+        override = os.getenv("PRSM_WATCHER_STATE_DIR", "").strip()
+        if override:
+            from pathlib import Path
+            store = FilesystemLastProcessedBlockStore(
+                base_dir=Path(override),
+            )
+            logger.info(
+                f"FilesystemLastProcessedBlockStore wired: {override}"
+            )
+        else:
+            store = FilesystemLastProcessedBlockStore()
+            logger.info(
+                f"FilesystemLastProcessedBlockStore wired (default "
+                f"{store.base_dir})"
+            )
+        return store
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"FilesystemLastProcessedBlockStore construction failed: "
+            f"{type(exc).__name__}: {exc} — watchers will fall back "
+            f"to chain-tip baseline (legacy behavior)."
+        )
+        return None
+
+
+def _build_key_distribution_watcher_or_none(*, client, state_store=None):
     """Construct a KeyDistributionWatcher if operator opted in AND
     underlying client is non-None.
 
@@ -704,9 +757,11 @@ def _build_key_distribution_watcher_or_none(*, client):
             on_key_deposited=_on_deposited,
             on_key_deauthorized=_on_deauthorized,
             poll_interval_sec=interval,
+            state_store=state_store,
         )
         logger.info(
-            f"KeyDistributionWatcher wired (interval={interval}s)"
+            f"KeyDistributionWatcher wired (interval={interval}s, "
+            f"persistence={'on' if state_store is not None else 'off'})"
         )
         return watcher
     except Exception as exc:  # noqa: BLE001
@@ -717,7 +772,7 @@ def _build_key_distribution_watcher_or_none(*, client):
         return None
 
 
-def _build_storage_slashing_watcher_or_none(*, client):
+def _build_storage_slashing_watcher_or_none(*, client, state_store=None):
     """Construct a StorageSlashingWatcher if operator opted in AND
     underlying client is non-None.
 
@@ -773,9 +828,11 @@ def _build_storage_slashing_watcher_or_none(*, client):
             on_proof_failure_slashed=_on_proof,
             on_heartbeat_missing_slashed=_on_missing,
             poll_interval_sec=interval,
+            state_store=state_store,
         )
         logger.info(
-            f"StorageSlashingWatcher wired (interval={interval}s)"
+            f"StorageSlashingWatcher wired (interval={interval}s, "
+            f"persistence={'on' if state_store is not None else 'off'})"
         )
         return watcher
     except Exception as exc:  # noqa: BLE001
@@ -786,7 +843,7 @@ def _build_storage_slashing_watcher_or_none(*, client):
         return None
 
 
-def _build_compensation_distributor_watcher_or_none(*, client):
+def _build_compensation_distributor_watcher_or_none(*, client, state_store=None):
     """Construct a CompensationDistributorWatcher if operator opted in
     AND underlying client is non-None.
 
@@ -822,9 +879,11 @@ def _build_compensation_distributor_watcher_or_none(*, client):
             client=client,
             on_distributed=_on_distributed,
             poll_interval_sec=interval,
+            state_store=state_store,
         )
         logger.info(
-            f"CompensationDistributorWatcher wired (interval={interval}s)"
+            f"CompensationDistributorWatcher wired (interval={interval}s, "
+            f"persistence={'on' if state_store is not None else 'off'})"
         )
         return watcher
     except Exception as exc:  # noqa: BLE001
@@ -1286,19 +1345,26 @@ class PRSMNode:
         # daemon (KeyDistribution is event-driven on the operator side,
         # not cadence-driven).
         self._key_distribution_client = _build_key_distribution_client_or_none()
+        # Shared state store for the 3 watchers — single instance,
+        # 3 watcher_key namespaces inside. None when persistence is
+        # disabled (legacy chain-tip-baseline behavior preserved).
+        self._watcher_state_store = _build_watcher_state_store_or_none()
         self._key_distribution_watcher = (
             _build_key_distribution_watcher_or_none(
                 client=self._key_distribution_client,
+                state_store=self._watcher_state_store,
             )
         )
         self._storage_slashing_watcher = (
             _build_storage_slashing_watcher_or_none(
                 client=self._storage_slashing_client,
+                state_store=self._watcher_state_store,
             )
         )
         self._compensation_distributor_watcher = (
             _build_compensation_distributor_watcher_or_none(
                 client=self._compensation_distributor_client,
+                state_store=self._watcher_state_store,
             )
         )
         # Tasks created on start() — None until then.

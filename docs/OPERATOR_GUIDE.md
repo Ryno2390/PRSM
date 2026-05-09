@@ -490,6 +490,17 @@ Three async event watchers ship alongside the schedulers. Each polls on-chain ev
 
 Operators wanting custom callbacks (instead of the default INFO-log) should construct the watchers programmatically rather than via env-var activation. See module docstrings in `prsm/economy/web3/*_watcher.py` for the API.
 
+#### Watcher last_processed_block persistence (post-2026-05-09)
+
+By default, watchers reset their `last_processed_block` baseline to the chain tip on every node restart — events that landed during downtime are silently skipped. To enable restart-resilient detection (recommended for any storage provider or Tier C publisher relying on the watchers for incident detection), opt in to filesystem-backed persistence:
+
+| Variable | Default | Description |
+|---|---|---|
+| `PRSM_WATCHER_STATE_PERSISTENCE_ENABLED` | `0` | Set to `1` to enable shared `FilesystemLastProcessedBlockStore` for the 3 watchers. |
+| `PRSM_WATCHER_STATE_DIR` | `~/.prsm/watchers/` | Override the default state-store directory. Auto-created on first save; one JSON file per watcher (`key_distribution.json` / `storage_slashing.json` / `compensation_distributor.json`). |
+
+When enabled, each watcher loads its persisted block on first tick and polls the downtime-window range — recovering events that landed during the restart. Failures (corrupt JSON / IOError) fall back to chain-tip baseline + log a WARNING; the next successful baseline advance re-persists.
+
 ---
 
 ## Monitoring
