@@ -228,6 +228,41 @@ class TestHealthDetailedCanonicalMatch:
         ftns = body["subsystems"]["ftns_ledger"]
         assert ftns["canonical_match"] is False
 
+    def test_provenance_registry_canonical_match_v2(self):
+        """provenance_registry subsystem: canonical-match against
+        V2 (the post-2026-05-06 deploy used by the v2 RoyaltyDistributor)."""
+        node = _node_full()
+        provenance_client = MagicMock()
+        provenance_client.contract_address = (
+            "0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf"  # V2
+        )
+        node._provenance_client = provenance_client
+        with patch.dict(__import__("os").environ, {"PRSM_NETWORK": "mainnet"}):
+            resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        prov = body["subsystems"]["provenance_registry"]
+        assert prov["canonical_match"] is True
+        assert prov["canonical_address"].lower() == \
+            "0xe0cedda354f99526c7fbb9b9651e12adb2180dbf"
+
+    def test_provenance_registry_canonical_match_v1_pin_flagged(self):
+        """Operator pinned to V1 ProvenanceRegistry post-A-08 should
+        see canonical_match=False against the V2 canonical."""
+        node = _node_full()
+        provenance_client = MagicMock()
+        provenance_client.contract_address = (
+            "0xdF470BFa9eF310B196801D5105468515d0069915"  # V1
+        )
+        node._provenance_client = provenance_client
+        with patch.dict(__import__("os").environ, {"PRSM_NETWORK": "mainnet"}):
+            resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        prov = body["subsystems"]["provenance_registry"]
+        assert prov["canonical_match"] is False
+        # canonical surfaced is V2 so operator sees what to update to.
+        assert prov["canonical_address"].lower() == \
+            "0xe0cedda354f99526c7fbb9b9651e12adb2180dbf"
+
     def test_canonical_check_handles_unknown_network_gracefully(self):
         """If PRSM_NETWORK is set to a value with no canonical
         addresses (e.g., 'local'), canonical_match should be

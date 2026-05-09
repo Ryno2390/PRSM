@@ -3504,6 +3504,37 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "available": False, "status": "not_wired",
             }
 
+        # Provenance registry (optional). Canonical pin is V2
+        # (post-A-08 ceremony 2026-05-09); v1 callers will surface
+        # canonical_match=False as a signal to migrate.
+        provenance = getattr(node, "_provenance_client", None)
+        if provenance is not None:
+            entry = {"available": True, "status": "ok"}
+            wired = getattr(provenance, "contract_address", None)
+            if wired is not None:
+                entry["wired_address"] = wired
+                try:
+                    from prsm.config.networks import (
+                        get_network_config, _resolve_network_name,
+                    )
+                    cfg = get_network_config(_resolve_network_name())
+                    canonical = cfg.provenance_registry_v2
+                    if canonical is not None:
+                        entry["canonical_address"] = canonical
+                        entry["canonical_match"] = (
+                            wired.lower() == canonical.lower()
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "canonical-match lookup failed for "
+                        "provenance_registry: %s", exc,
+                    )
+            subsystems["provenance_registry"] = entry
+        else:
+            subsystems["provenance_registry"] = {
+                "available": False, "status": "not_wired",
+            }
+
         # Royalty distributor (optional).
         royalty = getattr(node, "_royalty_distributor_client", None)
         if royalty is not None:
