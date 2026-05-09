@@ -80,6 +80,9 @@ class PaymentEscrow:
         ledger: LocalLedger,
         node_id: str,
         broadcast_transaction: Optional[Callable] = None,
+        *,
+        default_timeout: Optional[float] = None,
+        cleanup_interval: Optional[float] = None,
     ):
         self.ledger = ledger
         self.node_id = node_id
@@ -88,8 +91,47 @@ class PaymentEscrow:
         self._tasks: List[asyncio.Task] = []
         self._running = False
 
-        # Timeout for unreleased escrows (default 1 hour)
-        self.default_timeout = 3600.0
+        # Timeout for unreleased escrows. Resolution order:
+        #   1) explicit constructor arg (wins)
+        #   2) PRSM_ESCROW_TIMEOUT_SEC env var
+        #   3) v1 default 3600s
+        # Invalid env values (non-numeric, zero, negative) → fall
+        # back to default; zero/negative would auto-expire every
+        # escrow which is a footgun.
+        import os as _os
+        DEFAULT_TIMEOUT = 3600.0
+        DEFAULT_CLEANUP_INTERVAL = 600.0
+
+        def _resolve(arg, env_name, default):
+            if arg is not None:
+                return float(arg)
+            raw = _os.getenv(env_name, "").strip()
+            if not raw:
+                return default
+            try:
+                v = float(raw)
+                if v <= 0:
+                    logger.warning(
+                        "%s=%r non-positive; using default %s",
+                        env_name, raw, default,
+                    )
+                    return default
+                return v
+            except ValueError:
+                logger.warning(
+                    "%s=%r not numeric; using default %s",
+                    env_name, raw, default,
+                )
+                return default
+
+        self.default_timeout = _resolve(
+            default_timeout, "PRSM_ESCROW_TIMEOUT_SEC", DEFAULT_TIMEOUT,
+        )
+        self.cleanup_interval = _resolve(
+            cleanup_interval,
+            "PRSM_ESCROW_CLEANUP_INTERVAL_SEC",
+            DEFAULT_CLEANUP_INTERVAL,
+        )
 
     async def create_escrow(
         self,
@@ -544,10 +586,12 @@ class PaymentEscrow:
         return cleaned
 
     async def periodic_cleanup(self) -> None:
-        """Run cleanup every 10 minutes."""
+        """Run cleanup every ``self.cleanup_interval`` seconds.
+        Configurable via constructor arg or
+        PRSM_ESCROW_CLEANUP_INTERVAL_SEC env var; default 600s."""
         self._running = True
         while self._running:
-            await asyncio.sleep(600)
+            await asyncio.sleep(self.cleanup_interval)
             try:
                 cleaned = await self.cleanup_expired_escrows()
                 if cleaned:

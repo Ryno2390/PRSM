@@ -350,6 +350,15 @@ When QueryOrchestrator handles a job, payment escrow is released across all swar
 | `GET /compute/jobs` | Paginated operator-side job list. Query params: `status` (in_progress/completed/failed/cancelled), `limit` (1..100, default 50), `offset` (default 0). Returns `{jobs: [...], total: N, offset: X, limit: Y}` ordered most-recent-first by `started_at`. 503 if JobHistoryStore not wired; 422 on validation errors. Backs the `prsm_jobs_list` MCP tool. |
 | `GET /wallet/escrows` | Operator-side escrow summary. Query params: `address` (optional 0x override; defaults to node's connected wallet), `include_terminal` (default false; when true returns RELEASED + REFUNDED for audit). Returns `{address, escrows: [...], total: N, total_locked_ftns: X, include_terminal: bool}`. 503 if PaymentEscrow or ftns_ledger not wired. Backs the `prsm_escrow_summary` MCP tool. |
 
+### PaymentEscrow timeouts (configurable, ships 2026-05-09)
+
+Two env vars tune the auto-refund behavior for stale escrows:
+
+- `PRSM_ESCROW_TIMEOUT_SEC` — escrow expiry duration. PENDING escrows older than this are auto-refunded by the periodic cleanup task. Default `3600` (1h). Operators with high-throughput workloads (jobs settling in seconds) want smaller values; long-running compute (multi-hour inference) wants larger.
+- `PRSM_ESCROW_CLEANUP_INTERVAL_SEC` — how often the cleanup task wakes up to scan for expired escrows. Default `600` (10min).
+
+Both env vars fail-soft: non-numeric / zero / negative values log a WARN and fall back to the default rather than crashing node startup. Constructor args (`default_timeout`, `cleanup_interval`) take precedence over env vars when PaymentEscrow is constructed programmatically (e.g. in tests).
+
 ### JobHistoryStore
 
 In-memory LRU-bounded store (default 1024 entries). Records `IN_PROGRESS` → `COMPLETED` / `FAILED` transitions for `/compute/forge` jobs.
