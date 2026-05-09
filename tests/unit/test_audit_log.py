@@ -270,6 +270,66 @@ class TestAuditEndpointRequesterFilter:
         assert body["entries"] == []
 
 
+class TestAuditEndpointPathFilter:
+    """?path_prefix= filter narrows by URL path prefix.
+    'What recently hit /compute/forge*' is a common operator query."""
+
+    def _seed(self, node):
+        for path in (
+            "/compute/forge",
+            "/compute/forge/quote",
+            "/compute/cancel/job-x",
+            "/wallet/royalty/claim",
+            "/wallet/escrows/esc-1",
+        ):
+            node._audit_log.append(
+                method="POST", path=path, requester="n1",
+                status_code=200, request_id=f"r-{path}",
+            )
+
+    def test_path_prefix_matches(self):
+        node = _node()
+        self._seed(node)
+        resp = _client(node).get(
+            "/audit/recent?path_prefix=/compute/forge"
+        )
+        body = resp.json()
+        # /compute/forge AND /compute/forge/quote
+        assert body["total_matched"] == 2
+        for e in body["entries"]:
+            assert e["path"].startswith("/compute/forge")
+
+    def test_path_prefix_wallet(self):
+        node = _node()
+        self._seed(node)
+        resp = _client(node).get("/audit/recent?path_prefix=/wallet")
+        body = resp.json()
+        # /wallet/royalty/claim + /wallet/escrows/esc-1
+        assert body["total_matched"] == 2
+
+    def test_path_prefix_combined_with_status(self):
+        node = _node()
+        node._audit_log.append(
+            method="POST", path="/compute/forge", requester="n1",
+            status_code=200, request_id="r1",
+        )
+        node._audit_log.append(
+            method="POST", path="/compute/forge", requester="n1",
+            status_code=422, request_id="r2",
+        )
+        node._audit_log.append(
+            method="POST", path="/wallet/royalty/claim", requester="n1",
+            status_code=422, request_id="r3",
+        )
+        resp = _client(node).get(
+            "/audit/recent?path_prefix=/compute&status=4xx"
+        )
+        body = resp.json()
+        assert body["total_matched"] == 1
+        assert body["entries"][0]["path"] == "/compute/forge"
+        assert body["entries"][0]["status_code"] == 422
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Middleware auto-population
 # ──────────────────────────────────────────────────────────────────────

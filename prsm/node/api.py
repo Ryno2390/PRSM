@@ -3491,6 +3491,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         offset: int = 0,
         status: Optional[str] = None,
         requester: Optional[str] = None,
+        path_prefix: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Recent state-changing API requests for operator review.
 
@@ -3552,9 +3553,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
 
         # Compose filters: status_predicate AND requester_match
-        # both optional. When both absent, no filter — paginated
-        # ring directly.
-        any_filter = status_predicate is not None or requester is not None
+        # AND path_prefix all optional. When all absent, no
+        # filter — paginated ring directly.
+        any_filter = (
+            status_predicate is not None
+            or requester is not None
+            or path_prefix is not None
+        )
         if not any_filter:
             entries = ring.recent(limit=limit, offset=offset)
             return {
@@ -3578,6 +3583,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 return False
             if requester is not None and e.requester != requester:
                 return False
+            if path_prefix is not None and not e.path.startswith(
+                path_prefix,
+            ):
+                return False
             return True
 
         matched = [e for e in all_entries if _matches(e)]
@@ -3593,6 +3602,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             result["status_filter"] = status
         if requester is not None:
             result["requester_filter"] = requester
+        if path_prefix is not None:
+            result["path_prefix_filter"] = path_prefix
         return result
 
     @app.get("/info")
