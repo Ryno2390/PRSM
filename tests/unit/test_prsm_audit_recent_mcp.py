@@ -146,6 +146,31 @@ class TestStatusFilterPassthrough:
         assert "requester=node-a" in captured["path"]
 
     @pytest.mark.asyncio
+    async def test_path_prefix_filter_propagates(self):
+        captured = {}
+
+        async def fake_call_node_api(method, path, data=None):
+            captured["path"] = path
+            return {
+                "entries": [],
+                "total": 0,
+                "total_matched": 0,
+                "path_prefix_filter": "/compute/forge",
+                "offset": 0,
+                "limit": 20,
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_audit_recent({
+                "path_prefix": "/compute/forge",
+            })
+        assert "path_prefix=/compute/forge" in captured["path"]
+        # Empty result mentions the filter.
+        assert "/compute/forge" in result
+
+    @pytest.mark.asyncio
     async def test_combined_filter_propagates(self):
         captured = {}
 

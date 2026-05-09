@@ -674,6 +674,15 @@ TOOLS = [
                         "node/identity. Composes with status filter."
                     ),
                 },
+                "path_prefix": {
+                    "type": "string",
+                    "description": (
+                        "Optional URL path-prefix filter. E.g. "
+                        "'/compute/forge' matches both "
+                        "/compute/forge AND /compute/forge/quote. "
+                        "Composes with status + requester filters."
+                    ),
+                },
             },
         },
     ),
@@ -2432,6 +2441,8 @@ async def handle_prsm_audit_recent(
         params.append(f"status={arguments['status']}")
     if "requester" in arguments and arguments["requester"]:
         params.append(f"requester={arguments['requester']}")
+    if "path_prefix" in arguments and arguments["path_prefix"]:
+        params.append(f"path_prefix={arguments['path_prefix']}")
     path = "/audit/recent?" + "&".join(params)
 
     try:
@@ -2451,11 +2462,14 @@ async def handle_prsm_audit_recent(
     total_matched = result.get("total_matched")  # only present with filter
     status_filter = result.get("status_filter")
     requester_filter = result.get("requester_filter")
+    path_prefix_filter = result.get("path_prefix_filter")
     filters_applied = []
     if status_filter:
         filters_applied.append(f"status={status_filter}")
     if requester_filter:
         filters_applied.append(f"requester={requester_filter}")
+    if path_prefix_filter:
+        filters_applied.append(f"path_prefix={path_prefix_filter}")
     filter_str = ", ".join(filters_applied) if filters_applied else None
     if not entries:
         if filter_str:
