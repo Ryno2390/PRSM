@@ -2201,6 +2201,27 @@ async def handle_prsm_node_health(arguments: Dict[str, Any]) -> str:
         elif name == "royalty_distributor" and "claimable_wei" in info:
             line += f"  (claimable: {info['claimable_wei']} wei)"
         lines.append(line)
+        # Canonical-match indicator (shipped post-A-08 ceremony):
+        # surface mismatches loudly so operators see stale env
+        # overrides without scrolling. Match=True is shown subtly;
+        # Match=False is the load-bearing signal.
+        if "canonical_match" in info:
+            if info["canonical_match"]:
+                lines.append(
+                    f"      -> canonical pin matches "
+                    f"({info.get('wired_address', '?')[:10]}...)"
+                )
+            else:
+                wired = info.get("wired_address", "?")
+                canon = info.get("canonical_address", "?")
+                lines.append(
+                    f"      [!] canonical MISMATCH: wired={wired}, "
+                    f"canonical={canon}"
+                )
+                lines.append(
+                    f"        (operator action: update "
+                    f"PRSM_*_ADDRESS env override or accept canonical)"
+                )
     return "\n".join(lines)
 
 

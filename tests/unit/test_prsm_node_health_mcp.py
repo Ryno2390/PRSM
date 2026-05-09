@@ -156,6 +156,100 @@ class TestNodeHealthHandler:
             "connection timeout" in result
 
 
+class TestNodeHealthCanonicalMatch:
+    """Renders canonical-match status for on-chain subsystems
+    (post-A-08 ceremony 2026-05-09)."""
+
+    @pytest.mark.asyncio
+    async def test_match_renders_concise_confirmation(self):
+        async def fake_call_node_api(method, path, data=None):
+            return {
+                "status": "healthy",
+                "node_id": "test-node",
+                "subsystems": {
+                    "ftns_ledger": {
+                        "available": True, "status": "ok",
+                        "wired_address": "0x5276a3756C85f2E9e46f6D34386167a209aa16e5",
+                        "canonical_address": "0x5276a3756C85f2E9e46f6D34386167a209aa16e5",
+                        "canonical_match": True,
+                    },
+                    "payment_escrow": {"available": True, "status": "ok"},
+                    "job_history": {"available": True, "status": "ok"},
+                    "royalty_distributor": {
+                        "available": True, "status": "ok",
+                        "wired_address": "0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e",
+                        "canonical_address": "0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e",
+                        "canonical_match": True,
+                    },
+                },
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_node_health({})
+        assert "canonical pin matches" in result
+        # Both subsystems should show match indicator.
+        assert result.count("canonical pin matches") >= 2
+
+    @pytest.mark.asyncio
+    async def test_mismatch_renders_loudly_with_action_hint(self):
+        """canonical_match: False operator-side surfaces loudly with
+        action hint. Specifically validates the post-A-08 v1→v2
+        scenario."""
+        async def fake_call_node_api(method, path, data=None):
+            return {
+                "status": "healthy",
+                "node_id": "test-node",
+                "subsystems": {
+                    "ftns_ledger": {"available": True, "status": "ok"},
+                    "payment_escrow": {"available": True, "status": "ok"},
+                    "job_history": {"available": True, "status": "ok"},
+                    "royalty_distributor": {
+                        "available": True, "status": "ok",
+                        "wired_address": "0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2",  # v1
+                        "canonical_address": "0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e",  # v2
+                        "canonical_match": False,
+                    },
+                },
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_node_health({})
+        assert "MISMATCH" in result
+        # Both wired and canonical addresses surfaced.
+        assert "0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2" in result  # wired (v1)
+        assert "0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e" in result  # canonical (v2)
+        # Action hint present.
+        assert "operator action" in result.lower()
+        assert "PRSM_" in result  # env override hint
+
+    @pytest.mark.asyncio
+    async def test_no_canonical_field_omitted_silently(self):
+        """When canonical_match is absent (e.g., local network),
+        the indicator line is simply not rendered."""
+        async def fake_call_node_api(method, path, data=None):
+            return {
+                "status": "healthy",
+                "node_id": "test-node",
+                "subsystems": {
+                    "ftns_ledger": {"available": True, "status": "ok"},
+                    "payment_escrow": {"available": True, "status": "ok"},
+                    "job_history": {"available": True, "status": "ok"},
+                    "royalty_distributor": {"available": True, "status": "ok"},
+                },
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_node_health({})
+        assert "canonical pin matches" not in result
+        assert "MISMATCH" not in result
+
+
 class TestNodeHealthErrors:
     @pytest.mark.asyncio
     async def test_node_unreachable(self):
