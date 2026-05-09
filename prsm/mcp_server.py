@@ -506,6 +506,22 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_node_health",
+        description=(
+            "One-shot operator diagnostic surfacing per-subsystem "
+            "readiness: ftns_ledger, payment_escrow, job_history, "
+            "royalty_distributor. Backed by GET /health/detailed. "
+            "Top-level status is healthy / degraded / unhealthy. "
+            "Distinct from prsm_node_status (which focuses on Ring "
+            "activation) — use this for ops/troubleshooting when a "
+            "subsystem is suspected of misbehaving."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
         name="prsm_escrow_summary",
         description=(
             "List active FTNS escrows for the operator's wallet "
@@ -1910,6 +1926,53 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_node_health(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_node_health tool call: render structured
+    per-subsystem readiness from /health/detailed."""
+    try:
+        result = await _call_node_api("GET", "/health/detailed")
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    status = result.get("status", "unknown")
+    node_id = result.get("node_id", "unknown")
+    subsystems = result.get("subsystems", {})
+
+    lines = [
+        f"PRSM Node Health",
+        f"  Node ID:     {node_id}",
+        f"  Status:      {status.upper()}",
+        f"",
+        f"  Subsystems:",
+    ]
+    for name, info in subsystems.items():
+        avail = info.get("available", False)
+        marker = "[ok]" if avail else "[--]"
+        sub_status = info.get("status", "?")
+        line = f"    {marker} {name:<22}  {sub_status}"
+        if not avail and "error" in info:
+            line += f"  (error: {info['error']})"
+        elif name == "payment_escrow" and "pending_count" in info:
+            line += f"  (pending: {info['pending_count']})"
+        elif name == "job_history" and "count" in info:
+            persisted = info.get("persisted", False)
+            line += (
+                f"  (count: {info['count']}, "
+                f"persisted: {'yes' if persisted else 'no'})"
+            )
+        elif name == "ftns_ledger" and info.get("connected_address"):
+            addr = info["connected_address"]
+            short = addr[:10] + "…" + addr[-4:] if len(addr) > 14 else addr
+            line += f"  ({short})"
+        elif name == "royalty_distributor" and "claimable_wei" in info:
+            line += f"  (claimable: {info['claimable_wei']} wei)"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 async def handle_prsm_escrow_summary(arguments: Dict[str, Any]) -> str:
     """Handle prsm_escrow_summary tool call: enumerate operator's
     active escrows."""
@@ -2211,6 +2274,7 @@ TOOL_HANDLERS = {
     "prsm_inference": handle_prsm_inference,
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
+    "prsm_node_health": handle_prsm_node_health,
     "prsm_escrow_summary": handle_prsm_escrow_summary,
     "prsm_jobs_list": handle_prsm_jobs_list,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
