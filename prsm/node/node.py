@@ -1799,10 +1799,20 @@ class PRSMNode:
             self._job_history = None
 
         # Operator audit log (in-memory ring buffer of state-changing
-        # API requests). Best-effort wiring — failure-soft.
+        # API requests). Optional filesystem persistence via
+        # PRSM_AUDIT_LOG_DIR. Best-effort wiring — failure-soft.
         try:
+            import os as _os
+            from pathlib import Path as _Path
             from prsm.node.audit_log import AuditLogRing
-            self._audit_log = AuditLogRing()
+            audit_dir_raw = _os.getenv("PRSM_AUDIT_LOG_DIR", "").strip()
+            audit_persist_dir = _Path(audit_dir_raw) if audit_dir_raw else None
+            self._audit_log = AuditLogRing(persist_dir=audit_persist_dir)
+            logger.info(
+                "AuditLogRing wired (in-memory ring 1024%s)",
+                f", persisted to {audit_persist_dir}"
+                if audit_persist_dir else "",
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "AuditLogRing construction failed: %s — "

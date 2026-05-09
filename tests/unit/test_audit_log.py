@@ -1,4 +1,4 @@
-"""Audit log ring buffer + GET /audit/recent endpoint."""
+"""Audit log ring buffer + GET /audit/recent endpoint + filesystem persistence."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -209,3 +209,104 @@ class TestMiddlewareAutoPopulate:
         entries = node._audit_log.recent()
         # Entry recorded with the actual response status code.
         assert any(e.status_code == resp.status_code for e in entries)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Filesystem persistence (PRSM_AUDIT_LOG_DIR opt-in)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestPersistence:
+    """Operator audit log survives restart when persist_dir set —
+    forensic continuity. Default unset preserves v1 in-memory-only
+    behavior bit-identically."""
+
+    def test_v1_behavior_when_persist_dir_none(self, tmp_path):
+        ring = AuditLogRing()
+        ring.append(
+            method="POST", path="/x", requester="n1",
+            status_code=200, request_id="r1",
+        )
+        # No files written.
+        assert list(tmp_path.iterdir()) == []
+        assert ring.count() == 1
+
+    def test_append_writes_to_disk_when_persist_dir_set(self, tmp_path):
+        ring = AuditLogRing(persist_dir=tmp_path)
+        ring.append(
+            method="POST", path="/x", requester="n1",
+            status_code=200, request_id="r1",
+        )
+        files = list(tmp_path.glob("*.json"))
+        assert len(files) == 1
+        import json
+        data = json.loads(files[0].read_text())
+        assert data["method"] == "POST"
+        assert data["path"] == "/x"
+
+    def test_startup_scan_loads_existing_entries(self, tmp_path):
+        ring_a = AuditLogRing(persist_dir=tmp_path)
+        ring_a.append(
+            method="POST", path="/x1", requester="n1",
+            status_code=200, request_id="r1",
+            timestamp=1000.0,
+        )
+        ring_a.append(
+            method="POST", path="/x2", requester="n1",
+            status_code=200, request_id="r2",
+            timestamp=2000.0,
+        )
+        # Fresh ring on same dir.
+        ring_b = AuditLogRing(persist_dir=tmp_path)
+        results = ring_b.recent()
+        assert len(results) == 2
+        # Most-recent-first by timestamp.
+        assert results[0].path == "/x2"
+        assert results[1].path == "/x1"
+
+    def test_corrupt_disk_file_skipped_fail_soft(self, tmp_path):
+        # Write a junk file directly.
+        (tmp_path / "corrupt.json").write_text("{not valid json")
+        # Write a valid one.
+        ring_a = AuditLogRing(persist_dir=tmp_path)
+        ring_a.append(
+            method="POST", path="/good", requester="n1",
+            status_code=200, request_id="r1",
+        )
+        # Reload — must not raise.
+        ring_b = AuditLogRing(persist_dir=tmp_path)
+        results = ring_b.recent()
+        # Valid entry loaded; corrupt one skipped.
+        assert any(e.path == "/good" for e in results)
+
+    def test_persist_dir_created_if_missing(self, tmp_path):
+        target = tmp_path / "subdir" / "audit"
+        assert not target.exists()
+        ring = AuditLogRing(persist_dir=target)
+        assert target.exists() and target.is_dir()
+        ring.append(
+            method="POST", path="/x", requester="n1",
+            status_code=200, request_id="r1",
+        )
+        assert list(target.glob("*.json"))
+
+    def test_lru_evicts_oldest_disk_on_startup_when_over_cap(self, tmp_path):
+        """If disk has more entries than max_entries, oldest are
+        dropped on startup so the in-memory ring respects its bound."""
+        ring_a = AuditLogRing(persist_dir=tmp_path, max_entries=3)
+        for i in range(5):
+            ring_a.append(
+                method="POST", path=f"/x{i}", requester="n1",
+                status_code=200, request_id=f"r{i}",
+                timestamp=float(i),
+            )
+        # All 5 on disk.
+        assert len(list(tmp_path.glob("*.json"))) == 5
+        # Fresh ring with max_entries=3 → only 3 most-recent loaded.
+        ring_b = AuditLogRing(persist_dir=tmp_path, max_entries=3)
+        results = ring_b.recent()
+        assert len(results) == 3
+        # Oldest dropped.
+        paths = {e.path for e in results}
+        assert "/x4" in paths and "/x3" in paths and "/x2" in paths
+        assert "/x0" not in paths and "/x1" not in paths

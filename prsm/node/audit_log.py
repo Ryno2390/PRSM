@@ -6,17 +6,26 @@ status_code, request_id). Operators investigating a complaint or
 unexpected state-change query the buffer via /audit/recent for a
 quick view of recent writes.
 
-Bounded by deque(maxlen=...) so memory is capped. v1 is in-process
-only; future filesystem persistence (similar to JobHistoryStore's
-v2 disk-backed mode) is the natural extension when in-process
-restarts become a recovery concern.
+Bounded by deque(maxlen=...) so memory is capped.
+
+v2 (2026-05-09): optional filesystem persistence via
+``persist_dir`` — node restart no longer wipes the audit log;
+operators have forensic continuity across restarts. v1
+in-memory-only behavior preserved when ``persist_dir`` is None.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, List, Optional
+from pathlib import Path
+from typing import Any, Deque, List, Optional
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -41,6 +50,17 @@ class AuditEntry:
             "request_id": self.request_id,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "AuditEntry":
+        return cls(
+            timestamp=float(data["timestamp"]),
+            method=str(data["method"]),
+            path=str(data["path"]),
+            requester=data.get("requester"),
+            status_code=int(data["status_code"]),
+            request_id=str(data["request_id"]),
+        )
+
 
 _DEFAULT_MAX_ENTRIES = 1024
 
@@ -54,7 +74,12 @@ class AuditLogRing:
     of recent() doesn't race with concurrent appends.
     """
 
-    def __init__(self, max_entries: int = _DEFAULT_MAX_ENTRIES) -> None:
+    def __init__(
+        self,
+        max_entries: int = _DEFAULT_MAX_ENTRIES,
+        *,
+        persist_dir: Optional[Path] = None,
+    ) -> None:
         if not isinstance(max_entries, int) or max_entries <= 0:
             raise ValueError(
                 f"max_entries must be a positive integer, "
@@ -62,6 +87,56 @@ class AuditLogRing:
             )
         self._max_entries = max_entries
         self._entries: Deque[AuditEntry] = deque(maxlen=max_entries)
+        self._persist_dir: Optional[Path] = (
+            Path(persist_dir) if persist_dir is not None else None
+        )
+        if self._persist_dir is not None:
+            self._persist_dir.mkdir(parents=True, exist_ok=True)
+            self._load_from_disk()
+
+    @staticmethod
+    def _entry_filename(entry: AuditEntry) -> str:
+        """Filename for an entry: timestamp + short hash of
+        request_id for uniqueness. Sortable by name (timestamp
+        prefix). Hash defends against same-timestamp collisions
+        + filesystem-unsafe request_id chars."""
+        h = hashlib.sha256(
+            entry.request_id.encode("utf-8"),
+        ).hexdigest()[:8]
+        return f"{entry.timestamp:020.6f}-{h}.json"
+
+    def _write_to_disk(self, entry: AuditEntry) -> None:
+        if self._persist_dir is None:
+            return
+        try:
+            path = self._persist_dir / self._entry_filename(entry)
+            path.write_text(json.dumps(entry.to_dict()))
+        except Exception as e:
+            logger.warning(
+                "AuditLogRing: disk write failed: %s", e,
+            )
+
+    def _load_from_disk(self) -> None:
+        """Scan persist_dir on init + populate the ring. Records
+        sorted by timestamp. Corrupt files logged + skipped.
+        Oldest dropped if disk count exceeds max_entries."""
+        assert self._persist_dir is not None
+        loaded: list = []
+        for path in self._persist_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text())
+                entry = AuditEntry.from_dict(data)
+                loaded.append(entry)
+            except Exception as e:
+                logger.warning(
+                    "AuditLogRing: skipping corrupt file %s: %s",
+                    path, e,
+                )
+        # Sort by timestamp ascending; deque maxlen will evict
+        # oldest if list is longer than max_entries.
+        loaded.sort(key=lambda e: e.timestamp)
+        for entry in loaded:
+            self._entries.append(entry)
 
     def append(
         self,
@@ -73,14 +148,16 @@ class AuditLogRing:
         request_id: str,
         timestamp: Optional[float] = None,
     ) -> None:
-        self._entries.append(AuditEntry(
+        entry = AuditEntry(
             timestamp=timestamp if timestamp is not None else time.time(),
             method=method,
             path=path,
             requester=requester,
             status_code=status_code,
             request_id=request_id,
-        ))
+        )
+        self._entries.append(entry)
+        self._write_to_disk(entry)
 
     def recent(
         self,

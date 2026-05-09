@@ -456,7 +456,9 @@ Use cases:
 
 503 if `_audit_log` not wired (test fixtures, single-shot scripts); 422 on invalid `limit` (must be 1..1000) / `offset` (must be ≥ 0).
 
-In-process buffer only; restart loses the buffer. Filesystem persistence (similar to JobHistoryStore's v2 disk-backed mode) is the natural extension if persistence becomes necessary.
+**Filesystem persistence (v2, ships 2026-05-09):** Set `PRSM_AUDIT_LOG_DIR=/path/to/dir` to enable disk-backed continuity. Each `append()` writes through to a timestamp-prefixed JSON file under the directory; on node startup, the ring scans the directory and rehydrates entries sorted by timestamp ascending (deque maxlen evicts oldest if disk has more than `max_entries`).
+
+Filename format: `{timestamp:020.6f}-{hash8(request_id)}.json` — sortable by name, collision-resistant. Corrupt JSON files are logged + skipped (fail-soft) rather than crashing startup. When `PRSM_AUDIT_LOG_DIR` unset, v1 in-memory-only behavior is preserved bit-identically.
 
 ### `GET /info` — static node metadata (ships 2026-05-09)
 
