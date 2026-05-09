@@ -1797,6 +1797,19 @@ class PRSMNode:
                 exc,
             )
             self._job_history = None
+
+        # Operator audit log (in-memory ring buffer of state-changing
+        # API requests). Best-effort wiring — failure-soft.
+        try:
+            from prsm.node.audit_log import AuditLogRing
+            self._audit_log = AuditLogRing()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "AuditLogRing construction failed: %s — "
+                "/audit/recent will return 503.", exc,
+            )
+            self._audit_log = None
+
         self._result_consensus = ResultConsensus(
             epsilon=0.01,
             timeout_seconds=300.0,
