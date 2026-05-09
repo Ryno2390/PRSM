@@ -633,6 +633,35 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_audit_recent",
+        description=(
+            "Show recent state-changing API requests (POST/PUT/"
+            "PATCH/DELETE) on this node from the in-memory audit "
+            "ring buffer. Each entry: timestamp, method, path, "
+            "requester, status_code, request_id. Useful for "
+            "operator triage: 'what just happened on my node?' "
+            "Optionally paginate via limit/offset."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Page size (1..1000). Default 20.",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 20,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Pagination offset. Default 0.",
+                    "minimum": 0,
+                    "default": 0,
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_canonical_check",
         description=(
             "Verify operator's wired contract addresses match the "
@@ -2350,6 +2379,59 @@ async def handle_prsm_spend_summary(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_audit_recent(
+    arguments: Dict[str, Any],
+) -> str:
+    """Render recent state-changing requests from the audit ring."""
+    params = []
+    limit = arguments.get("limit", 20)
+    params.append(f"limit={limit}")
+    if "offset" in arguments:
+        params.append(f"offset={arguments['offset']}")
+    path = "/audit/recent?" + "&".join(params)
+
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    if "entries" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"Audit fetch failed.\n  Detail: {detail}"
+
+    entries = result["entries"]
+    total = result["total"]
+    if not entries:
+        return (
+            f"No state-changing requests recorded in audit ring "
+            f"(buffer total: {total})."
+        )
+
+    lines = [
+        f"PRSM Audit Log (showing {len(entries)} of {total}):",
+        f"  Time  Method  Status  Path",
+        f"  " + "-" * 70,
+    ]
+    import datetime
+    for e in entries:
+        ts = e.get("timestamp", 0)
+        try:
+            t = datetime.datetime.fromtimestamp(
+                ts,
+            ).strftime("%H:%M:%S")
+        except Exception:
+            t = "????"
+        lines.append(
+            f"  {t}  {e.get('method', '?'):<6}  "
+            f"{e.get('status_code', 0):>3}     "
+            f"{e.get('path', '')}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_canonical_check(
     arguments: Dict[str, Any],
 ) -> str:
@@ -2839,6 +2921,7 @@ TOOL_HANDLERS = {
     "prsm_arbitration_preview_resolution": handle_prsm_arbitration_preview_resolution,
     "prsm_arbitration_record_detail": handle_prsm_arbitration_record_detail,
     "prsm_arbitration_status": handle_prsm_arbitration_status,
+    "prsm_audit_recent": handle_prsm_audit_recent,
     "prsm_canonical_check": handle_prsm_canonical_check,
     "prsm_metrics_summary": handle_prsm_metrics_summary,
     "prsm_cleanup_stale_escrows": handle_prsm_cleanup_stale_escrows,
