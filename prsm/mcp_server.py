@@ -506,6 +506,31 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_arbitration_record_detail",
+        description=(
+            "Fetch full context for a single content-attribution "
+            "dispute record by ID, including its current resolution "
+            "state. Council members reviewing a flagged record use "
+            "this to gather context (similarity, kind, flagged_at, "
+            "resolution if any) before signing on-chain governance "
+            "proposals. Backed by GET /content/arbitration/queue/"
+            "{record_id}."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "record_id": {
+                    "type": "string",
+                    "description": (
+                        "The arbitration record ID returned by "
+                        "prsm_arbitration_status (list view)."
+                    ),
+                },
+            },
+            "required": ["record_id"],
+        },
+    ),
+    Tool(
         name="prsm_arbitration_status",
         description=(
             "List pending content-attribution disputes awaiting "
@@ -2012,6 +2037,66 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_arbitration_record_detail(
+    arguments: Dict[str, Any],
+) -> str:
+    """Handle prsm_arbitration_record_detail: fetch full context
+    for a single record + its resolution state."""
+    record_id = arguments.get("record_id")
+    if not record_id:
+        return (
+            "Missing required argument: record_id.\n"
+            "Use prsm_arbitration_status to list pending records first."
+        )
+
+    try:
+        result = await _call_node_api(
+            "GET", f"/content/arbitration/queue/{record_id}",
+        )
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "record" not in result:
+        detail = result.get("detail", "unknown error")
+        if "No arbitration record" in detail or "404" in detail:
+            return (
+                f"Record not found: {record_id}\n"
+                f"  Detail: {detail}\n"
+                f"  List pending records via prsm_arbitration_status."
+            )
+        return f"Detail fetch failed.\n  Detail: {detail}"
+
+    record = result["record"]
+    resolution = result.get("resolution")
+    status = result.get("status", "?")
+
+    lines = [
+        f"PRSM Arbitration Record Detail",
+        f"  Record ID:        {record_id}",
+        f"  Status:           {status.upper()}",
+        f"",
+        f"  Disputed CID:     {record.get('new_cid', '')}",
+        f"  Disputing creator: {record.get('new_creator', '')}",
+        f"  Candidate parent: {record.get('candidate_parent_cid', '')}",
+        f"  Parent creator:   {record.get('candidate_parent_creator', '')}",
+        f"  Similarity:       {record.get('similarity', 0.0):.4f}",
+        f"  Fingerprint kind: {record.get('fingerprint_kind', '?')}",
+        f"  Flagged at:       {record.get('flagged_at', 0)} (unix)",
+    ]
+    proposal_id = record.get("proposal_id")
+    if proposal_id:
+        lines.append(f"  Proposal ID:      {proposal_id}")
+    if resolution is not None:
+        lines.append("")
+        lines.append("  Resolution:")
+        lines.append(f"    Decision:    {resolution.get('decision', '?')}")
+        signers = resolution.get("by_council", [])
+        lines.append(f"    By council:  {', '.join(signers) or '(none)'}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_arbitration_status(
     arguments: Dict[str, Any],
 ) -> str:
@@ -2526,6 +2611,7 @@ TOOL_HANDLERS = {
     "prsm_inference": handle_prsm_inference,
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
+    "prsm_arbitration_record_detail": handle_prsm_arbitration_record_detail,
     "prsm_arbitration_status": handle_prsm_arbitration_status,
     "prsm_metrics_summary": handle_prsm_metrics_summary,
     "prsm_cleanup_stale_escrows": handle_prsm_cleanup_stale_escrows,
