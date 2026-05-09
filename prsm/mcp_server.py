@@ -721,6 +721,30 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_escrow_lookup",
+        description=(
+            "Direct-lookup detail view of a single escrow by "
+            "escrow_id. Companion to prsm_escrow_summary (list "
+            "view); operators investigating a specific escrow "
+            "from logs / on-chain tx receipts use this to fetch "
+            "full lifecycle metadata. Backed by GET /wallet/escrows/"
+            "{escrow_id}."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "escrow_id": {
+                    "type": "string",
+                    "description": (
+                        "Escrow ID (the unique primary key, "
+                        "distinct from job_id)."
+                    ),
+                },
+            },
+            "required": ["escrow_id"],
+        },
+    ),
+    Tool(
         name="prsm_escrow_summary",
         description=(
             "List active FTNS escrows for the operator's wallet "
@@ -2643,6 +2667,53 @@ async def handle_prsm_node_health(arguments: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+async def handle_prsm_escrow_lookup(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_escrow_lookup: direct lookup by escrow_id."""
+    escrow_id = arguments.get("escrow_id")
+    if not escrow_id:
+        return (
+            "Missing required argument: escrow_id.\n"
+            "Use prsm_escrow_summary to list active escrows first."
+        )
+    try:
+        result = await _call_node_api(
+            "GET", f"/wallet/escrows/{escrow_id}",
+        )
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "escrow_id" not in result:
+        detail = result.get("detail", "unknown error")
+        if "404" in detail or "No escrow record" in detail:
+            return (
+                f"Escrow not found: {escrow_id}\n"
+                f"  Detail: {detail}"
+            )
+        return f"Escrow lookup failed.\n  Detail: {detail}"
+
+    lines = [
+        f"PRSM Escrow Detail",
+        f"  Escrow ID:        {result['escrow_id']}",
+        f"  Job ID:           {result.get('job_id', '?')}",
+        f"  Requester:        {result.get('requester_id', '?')}",
+        f"  Amount (FTNS):    {result.get('amount_ftns', 0):.6f}",
+        f"  Status:           {result.get('status', '?').upper()}",
+    ]
+    if result.get("provider_winner"):
+        lines.append(f"  Provider winner:  {result['provider_winner']}")
+    if result.get("tx_lock"):
+        lines.append(f"  Lock tx:          {result['tx_lock']}")
+    if result.get("tx_release"):
+        lines.append(f"  Release tx:       {result['tx_release']}")
+    if result.get("created_at"):
+        lines.append(f"  Created at:       {result['created_at']}")
+    if result.get("completed_at"):
+        lines.append(f"  Completed at:     {result['completed_at']}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_escrow_summary(arguments: Dict[str, Any]) -> str:
     """Handle prsm_escrow_summary tool call: enumerate operator's
     active escrows."""
@@ -2953,6 +3024,7 @@ TOOL_HANDLERS = {
     "prsm_cleanup_stale_escrows": handle_prsm_cleanup_stale_escrows,
     "prsm_node_health": handle_prsm_node_health,
     "prsm_spend_summary": handle_prsm_spend_summary,
+    "prsm_escrow_lookup": handle_prsm_escrow_lookup,
     "prsm_escrow_summary": handle_prsm_escrow_summary,
     "prsm_jobs_list": handle_prsm_jobs_list,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
