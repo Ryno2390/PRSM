@@ -1586,6 +1586,10 @@ class PRSMNode:
         # FTNS_WALLET_PRIVATE_KEY. Returns None gracefully when any required
         # piece is missing — the upload still succeeds locally.
         provenance_client = _build_provenance_client_or_none()
+        # Expose on self so /health/detailed can surface the
+        # provenance_registry subsystem + its canonical-match check
+        # against networks.py.
+        self._provenance_client = provenance_client
 
         # Native-storage migration PR 2c: content_publisher / content_retriever
         # are attached AFTER the BT layer is initialised below (~line 950).
