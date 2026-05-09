@@ -718,6 +718,46 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "escrows_count": count,
         }
 
+    @app.get("/wallet/escrows/{escrow_id}")
+    async def get_wallet_escrow_detail(escrow_id: str) -> Dict[str, Any]:
+        """Direct-lookup detail view of a single escrow by
+        escrow_id. Operators investigating a specific escrow
+        from logs / tx receipts use this rather than scanning
+        the list view.
+
+        Status:
+          503 — PaymentEscrow not wired
+          404 — escrow_id unknown
+          200 — full record (escrow_id, job_id, amount_ftns,
+                status, provider_winner, tx_lock, tx_release,
+                created_at, completed_at, metadata)
+        """
+        escrow_svc = getattr(node, "_payment_escrow", None)
+        if escrow_svc is None:
+            raise HTTPException(
+                status_code=503,
+                detail="PaymentEscrow not initialized on this node.",
+            )
+        entry = escrow_svc.get_by_escrow_id(escrow_id)
+        if entry is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No escrow record for escrow_id={escrow_id!r}",
+            )
+        return {
+            "escrow_id": entry.escrow_id,
+            "job_id": entry.job_id,
+            "requester_id": entry.requester_id,
+            "amount_ftns": entry.amount,
+            "status": entry.status.value,
+            "provider_winner": entry.provider_winner,
+            "tx_lock": entry.tx_lock,
+            "tx_release": entry.tx_release,
+            "created_at": entry.created_at,
+            "completed_at": entry.completed_at,
+            "metadata": dict(entry.metadata or {}),
+        }
+
     @app.get("/wallet/escrows")
     async def get_wallet_escrows(
         address: Optional[str] = None,

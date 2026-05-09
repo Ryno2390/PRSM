@@ -642,6 +642,15 @@ class PaymentEscrow:
                 return e
         return None
 
+    def get_by_escrow_id(self, escrow_id: str) -> Optional[EscrowEntry]:
+        """Direct lookup by escrow_id (the unique primary key).
+        Distinct from ``get_escrow(job_id)`` — multiple escrows
+        could in principle share a job_id (though current
+        operational practice gives each job exactly one). Useful
+        for operators investigating a specific escrow_id from
+        logs / tx receipts."""
+        return self._escrows.get(escrow_id)
+
     def get_stats(self) -> Dict[str, Any]:
         statuses = {}
         for e in self._escrows.values():
