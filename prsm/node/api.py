@@ -1456,6 +1456,39 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             logger.error(f"Forge pipeline error: {e}")
             raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
+    @app.post("/compute/cleanup-stale")
+    async def post_compute_cleanup_stale() -> Dict[str, Any]:
+        """Manually trigger PaymentEscrow.cleanup_expired_escrows.
+
+        Refunds any PENDING escrow whose age exceeds
+        ``default_timeout``. Returns ``{cleaned: N}``. Use when
+        operators need an immediate sweep without waiting for
+        the 10-min periodic loop (e.g., after lowering
+        PRSM_ESCROW_TIMEOUT_SEC, draining for maintenance).
+
+        Status:
+          503 — PaymentEscrow not wired
+          502 — cleanup_expired_escrows raised
+          200 — cleaned count returned
+        """
+        escrow_svc = getattr(node, "_payment_escrow", None)
+        if escrow_svc is None:
+            raise HTTPException(
+                status_code=503,
+                detail="PaymentEscrow not initialized on this node.",
+            )
+        try:
+            cleaned = await escrow_svc.cleanup_expired_escrows()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "cleanup_expired_escrows raised: %s", exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=str(exc),
+            )
+        return {"cleaned": cleaned}
+
     @app.get("/compute/jobs")
     async def compute_jobs_list(
         status: Optional[str] = None,

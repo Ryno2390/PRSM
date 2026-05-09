@@ -506,6 +506,21 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_cleanup_stale_escrows",
+        description=(
+            "Force-cleanup expired PENDING escrows (refund to "
+            "requester). Operators use this to immediately reclaim "
+            "FTNS from stuck escrows without waiting for the "
+            "10-min periodic cleanup loop. Backed by POST "
+            "/compute/cleanup-stale. Returns the number of escrows "
+            "refunded."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
         name="prsm_spend_summary",
         description=(
             "Sum operator's FTNS spend on completed compute jobs "
@@ -1955,6 +1970,32 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_cleanup_stale_escrows(
+    arguments: Dict[str, Any],
+) -> str:
+    """Handle prsm_cleanup_stale_escrows: force-cleanup expired
+    escrows + return refunded count."""
+    try:
+        result = await _call_node_api("POST", "/compute/cleanup-stale")
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    if "cleaned" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"Cleanup failed.\n  Detail: {detail}"
+
+    cleaned = result["cleaned"]
+    if cleaned == 0:
+        return "No stale escrows. Nothing to clean."
+    return (
+        f"Cleaned up {cleaned} stale escrow(s). "
+        f"FTNS refunded to requester(s)."
+    )
+
+
 async def handle_prsm_spend_summary(arguments: Dict[str, Any]) -> str:
     """Handle prsm_spend_summary tool call: aggregate operator's
     FTNS spend over the last N days from RELEASED escrows."""
@@ -2342,6 +2383,7 @@ TOOL_HANDLERS = {
     "prsm_inference": handle_prsm_inference,
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
+    "prsm_cleanup_stale_escrows": handle_prsm_cleanup_stale_escrows,
     "prsm_node_health": handle_prsm_node_health,
     "prsm_spend_summary": handle_prsm_spend_summary,
     "prsm_escrow_summary": handle_prsm_escrow_summary,
