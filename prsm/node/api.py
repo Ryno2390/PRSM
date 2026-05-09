@@ -3093,6 +3093,109 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """Simple health check."""
         return {"status": "ok", "node_id": node.identity.node_id if node.identity else "unknown"}
 
+    @app.get("/metrics")
+    async def get_metrics() -> Any:
+        """Prometheus text/plain exposition for ops dashboards.
+        Emits gauges from live node state without new tracking
+        infra. Fail-soft per-metric: a subsystem RPC error logs
+        + omits that gauge rather than 500-ing the endpoint."""
+        from fastapi.responses import PlainTextResponse
+
+        lines: list = []
+
+        # prsm_pending_escrow_count + prsm_total_locked_ftns
+        try:
+            esc = getattr(node, "_payment_escrow", None)
+            if esc is not None:
+                pending_count = 0
+                total_locked = 0.0
+                for e in esc._escrows.values():
+                    if e.status.value == "pending":
+                        pending_count += 1
+                        total_locked += e.amount
+                lines.append(
+                    "# HELP prsm_pending_escrow_count "
+                    "Pending escrow count"
+                )
+                lines.append(
+                    "# TYPE prsm_pending_escrow_count gauge"
+                )
+                lines.append(
+                    f"prsm_pending_escrow_count {pending_count}"
+                )
+                lines.append(
+                    "# HELP prsm_total_locked_ftns "
+                    "Sum of FTNS locked in PENDING escrows"
+                )
+                lines.append("# TYPE prsm_total_locked_ftns gauge")
+                lines.append(
+                    f"prsm_total_locked_ftns {total_locked}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("metrics escrow probe failed: %s", exc)
+
+        # prsm_job_history_size
+        try:
+            hist = getattr(node, "_job_history", None)
+            if hist is not None:
+                lines.append(
+                    "# HELP prsm_job_history_size "
+                    "Job history record count"
+                )
+                lines.append("# TYPE prsm_job_history_size gauge")
+                lines.append(
+                    f"prsm_job_history_size {hist.size()}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("metrics history probe failed: %s", exc)
+
+        # prsm_claimable_royalties_wei
+        try:
+            royalty = getattr(node, "_royalty_distributor_client", None)
+            if royalty is not None:
+                claimable = royalty.claimable()
+                lines.append(
+                    "# HELP prsm_claimable_royalties_wei "
+                    "Pull-payment balance in wei"
+                )
+                lines.append(
+                    "# TYPE prsm_claimable_royalties_wei gauge"
+                )
+                lines.append(
+                    f"prsm_claimable_royalties_wei {claimable}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("metrics royalty probe failed: %s", exc)
+
+        # prsm_arbitration_pending_count
+        try:
+            arb = getattr(node, "_arbitration_queue", None)
+            if arb is not None:
+                pending = await arb.list_pending()
+                lines.append(
+                    "# HELP prsm_arbitration_pending_count "
+                    "Pending content-attribution disputes"
+                )
+                lines.append(
+                    "# TYPE prsm_arbitration_pending_count gauge"
+                )
+                lines.append(
+                    f"prsm_arbitration_pending_count {len(pending)}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("metrics arbitration probe failed: %s", exc)
+
+        # Always emit at least one metric so probes have something
+        # to scrape. The "up" gauge is canonical for this.
+        lines.append("# HELP prsm_node_up Node-up indicator")
+        lines.append("# TYPE prsm_node_up gauge")
+        lines.append("prsm_node_up 1")
+
+        body = "\n".join(lines) + "\n"
+        return PlainTextResponse(
+            body, media_type="text/plain; version=0.0.4",
+        )
+
     @app.get("/health/detailed")
     async def health_detailed() -> Dict[str, Any]:
         """Structured per-subsystem readiness probe for ops

@@ -377,6 +377,30 @@ Edge cases:
 
 The `Idempotency-Key` cache hit short-circuits BEFORE the `agent_forge`-not-wired 503, so operators can recover prior job results even after a forge subsystem failure.
 
+### Prometheus metrics (`GET /metrics`, ships 2026-05-09)
+
+Standard Prometheus text/plain exposition format for ops dashboards (Grafana, alertmanager, VictoriaMetrics, etc.). No new tracking infra — gauges read live from existing node state.
+
+Emitted gauges:
+- `prsm_pending_escrow_count` — count of PENDING escrows
+- `prsm_total_locked_ftns` — sum of FTNS locked in PENDING escrows
+- `prsm_job_history_size` — JobHistoryStore record count
+- `prsm_claimable_royalties_wei` — pull-payment balance in wei
+- `prsm_arbitration_pending_count` — pending content-attribution disputes
+- `prsm_node_up` — always 1 (canonical "up" indicator for scrapers)
+
+Per-metric fail-soft: a subsystem RPC error (e.g., royalty client hits an unreachable Base RPC) logs at WARN and omits that gauge rather than 500-ing the endpoint. Scrapes always succeed.
+
+Sample scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: prsm
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['localhost:8000']
+```
+
 ### Health probes
 
 - `GET /health` — minimal load-balancer probe; returns `{status: "ok", node_id}` without subsystem checks. Stays bit-identical to v1 to avoid breaking external monitors.
