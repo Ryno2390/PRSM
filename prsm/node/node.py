@@ -537,11 +537,15 @@ def _build_heartbeat_scheduler_or_none(*, client):
 
     Activation env vars:
       PRSM_HEARTBEAT_SCHEDULER_ENABLED=1     (required to enable)
-      PRSM_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS=900   (optional; default 900)
+      PRSM_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS=<seconds>   (optional;
+        if set: explicit interval. If unset (default): the
+        HeartbeatScheduler auto-tunes from
+        client.heartbeat_grace_seconds() per its own internal
+        DEFAULT/AUTO_TUNE_DIVISOR/MIN_INTERVAL constants.)
 
-    Invalid interval (non-numeric / zero / negative) silently falls
-    back to default 900s rather than failing — the operator clearly
-    wants the scheduler to run.
+    Invalid interval (non-numeric / zero / negative) silently
+    falls back to auto-tune rather than failing — the operator
+    clearly wants the scheduler to run.
     """
     if client is None:
         return None
@@ -549,7 +553,9 @@ def _build_heartbeat_scheduler_or_none(*, client):
         "1", "true", "yes",
     ):
         return None
-    interval = 900.0
+    # Operator-explicit interval if env is set + valid; otherwise
+    # None (which triggers auto-tune in HeartbeatScheduler.__init__).
+    interval = None
     raw = os.getenv("PRSM_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS", "").strip()
     if raw:
         try:
@@ -557,14 +563,17 @@ def _build_heartbeat_scheduler_or_none(*, client):
             if parsed > 0:
                 interval = parsed
         except ValueError:
-            pass  # keep default
+            pass  # keep None → auto-tune
     try:
         from prsm.economy.web3.heartbeat_scheduler import HeartbeatScheduler
         scheduler = HeartbeatScheduler(
             client=client, interval_seconds=interval,
         )
+        # scheduler.interval_seconds is now resolved (either operator-
+        # explicit or auto-tuned).
         logger.info(
-            f"HeartbeatScheduler wired (interval={interval}s)"
+            f"HeartbeatScheduler wired (interval={scheduler.interval_seconds}s, "
+            f"auto-tuned={'no' if interval is not None else 'yes'})"
         )
         return scheduler
     except Exception as exc:  # noqa: BLE001

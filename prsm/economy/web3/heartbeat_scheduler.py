@@ -75,13 +75,40 @@ class HeartbeatScheduler:
     success_count + failure_count are exposed for operator telemetry.
     """
 
+    # Default fallback when auto-tune is unavailable. Matches the
+    # contract's MIN_HEARTBEAT_GRACE = 1 hour: 3600 / AUTO_TUNE_DIVISOR
+    # = 900s.
+    DEFAULT_INTERVAL_SECONDS = 900.0
+
+    # Auto-tune ratio: heartbeats per grace window. 4 = "miss up to
+    # 3 ticks before grace expires" — defense against transient RPC
+    # failures, container bounces, etc.
+    AUTO_TUNE_DIVISOR = 4
+
+    # Auto-tune floor: defends against runaway tight cadence if the
+    # operator misconfigured grace_seconds to a very small value.
+    # 60s is short enough to be useful + long enough to avoid
+    # hammering the chain.
+    AUTO_TUNE_MIN_INTERVAL_SECONDS = 60.0
+
     def __init__(
         self,
         client,
         *,
-        interval_seconds: float = 900.0,
+        interval_seconds: Optional[float] = None,
         on_success: Optional[SuccessCallback] = None,
     ) -> None:
+        # interval_seconds resolution:
+        #   None (default) → auto-tune from client.heartbeat_grace_seconds()
+        #     with floor at AUTO_TUNE_MIN_INTERVAL_SECONDS
+        #   numeric        → operator-supplied; use directly (must be > 0)
+        #
+        # Auto-tune fallback to DEFAULT_INTERVAL_SECONDS (900s) when:
+        #   - client lacks heartbeat_grace_seconds() method
+        #   - method raises (e.g., RPC down at construction)
+        #   - method returns non-positive (operator misconfig)
+        if interval_seconds is None:
+            interval_seconds = self._auto_tune_from_client(client)
         if interval_seconds <= 0:
             raise ValueError(
                 f"interval_seconds must be > 0, got {interval_seconds}"
@@ -92,6 +119,48 @@ class HeartbeatScheduler:
         self._stop_event = asyncio.Event()
         self.success_count = 0
         self.failure_count = 0
+
+    @classmethod
+    def _auto_tune_from_client(cls, client) -> float:
+        """Read client.heartbeat_grace_seconds() and compute the
+        proportional interval. Falls back to DEFAULT_INTERVAL_SECONDS
+        on any error path."""
+        if not hasattr(client, "heartbeat_grace_seconds"):
+            logger.warning(
+                "HeartbeatScheduler: client lacks heartbeat_grace_seconds() "
+                "method; auto-tune unavailable, using "
+                "fallback interval=%ss",
+                cls.DEFAULT_INTERVAL_SECONDS,
+            )
+            return cls.DEFAULT_INTERVAL_SECONDS
+        try:
+            grace = client.heartbeat_grace_seconds()
+        except Exception as exc:
+            logger.warning(
+                "HeartbeatScheduler: heartbeat_grace_seconds() raised "
+                "%s: %s; auto-tune fallback to interval=%ss",
+                type(exc).__name__, exc, cls.DEFAULT_INTERVAL_SECONDS,
+            )
+            return cls.DEFAULT_INTERVAL_SECONDS
+        if not isinstance(grace, (int, float)) or grace <= 0:
+            logger.warning(
+                "HeartbeatScheduler: heartbeat_grace_seconds() returned "
+                "non-positive value %r; treating as misconfig, "
+                "auto-tune fallback to interval=%ss",
+                grace, cls.DEFAULT_INTERVAL_SECONDS,
+            )
+            return cls.DEFAULT_INTERVAL_SECONDS
+        tuned = max(
+            grace / cls.AUTO_TUNE_DIVISOR,
+            cls.AUTO_TUNE_MIN_INTERVAL_SECONDS,
+        )
+        logger.info(
+            "HeartbeatScheduler: auto-tuned interval=%ss from grace=%ss "
+            "(ratio 1/%d, floor %ss)",
+            tuned, grace, cls.AUTO_TUNE_DIVISOR,
+            cls.AUTO_TUNE_MIN_INTERVAL_SECONDS,
+        )
+        return tuned
 
     @property
     def interval_seconds(self) -> float:

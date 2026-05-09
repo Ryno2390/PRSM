@@ -454,7 +454,7 @@ Storage providers MUST heartbeat regularly to avoid permissionless slashing via 
 | `PRSM_STORAGE_SLASHING_ADDRESS` | *unset* | StorageSlashing.sol address. Required to construct the client. |
 | `FTNS_WALLET_PRIVATE_KEY` | *unset* | Provider's signing key. Required for the heartbeat tx. |
 | `PRSM_HEARTBEAT_SCHEDULER_ENABLED` | `0` | Set to `1` to launch the daemon at node startup. |
-| `PRSM_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `900` | Cadence (15 min default; choose substantially shorter than the contract's heartbeat-grace window). |
+| `PRSM_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | *auto-tune* | Cadence override (seconds). When unset (default), the daemon **auto-tunes from `client.heartbeat_grace_seconds()`** at construction time — interval = `grace / 4` (4 heartbeats per grace window for missed-tick defense), floored at 60s. With grace=1h (contract minimum), auto-tune produces 900s (matches prior fixed default). With longer grace, the interval scales proportionally — no manual env-var tuning needed. Auto-tune falls back to fixed 900s when the client's RPC is unreachable at startup or returns invalid grace. |
 
 The daemon swallows all transient errors and stays alive across them. `success_count` and `failure_count` are exposed for operator telemetry.
 
