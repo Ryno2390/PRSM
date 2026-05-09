@@ -506,6 +506,39 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_escrow_summary",
+        description=(
+            "List active FTNS escrows for the operator's wallet "
+            "(or any address via override). Surfaces outstanding "
+            "compute-budget commitments — the FTNS amounts locked "
+            "in pending compute jobs awaiting settlement. Backed "
+            "by GET /wallet/escrows. Default returns PENDING only; "
+            "pass include_terminal=true for RELEASED + REFUNDED "
+            "audit view."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": (
+                        "Optional 0x-prefixed address override. "
+                        "Defaults to the node's connected wallet."
+                    ),
+                },
+                "include_terminal": {
+                    "type": "boolean",
+                    "description": (
+                        "When true, returns RELEASED + REFUNDED "
+                        "escrows in addition to PENDING. Default "
+                        "false (PENDING only)."
+                    ),
+                    "default": False,
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_jobs_list",
         description=(
             "List recent /compute/forge jobs from JobHistoryStore. "
@@ -1877,6 +1910,68 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_escrow_summary(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_escrow_summary tool call: enumerate operator's
+    active escrows."""
+    params = []
+    if "address" in arguments:
+        params.append(f"address={arguments['address']}")
+    if arguments.get("include_terminal"):
+        params.append("include_terminal=true")
+    path = "/wallet/escrows"
+    if params:
+        path += "?" + "&".join(params)
+
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    if "escrows" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in detail.lower():
+            return (
+                f"PaymentEscrow not configured on this node.\n"
+                f"  Detail: {detail}"
+            )
+        return f"prsm_escrow_summary failed.\n  Detail: {detail}"
+
+    escrows = result["escrows"]
+    total = result["total"]
+    locked = result["total_locked_ftns"]
+    addr = result.get("address", "")
+    short_addr = (
+        addr[:10] + "…" + addr[-4:] if len(addr) > 14 else addr
+    )
+
+    if not escrows:
+        return (
+            f"PRSM Escrow Summary\n"
+            f"  Address:  {short_addr}\n"
+            f"  No active escrows."
+        )
+
+    lines = [
+        f"PRSM Escrow Summary",
+        f"  Address:        {short_addr}",
+        f"  Active escrows: {total}",
+        f"  Locked (PENDING): {locked:.6f} FTNS",
+        f"",
+        f"  Job ID            Amount        Status",
+        f"  " + "-" * 50,
+    ]
+    for e in escrows:
+        lines.append(
+            f"  {e['job_id']:<16}  "
+            f"{e['amount_ftns']:>10.6f}  "
+            f"{e['status']}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_jobs_list(arguments: Dict[str, Any]) -> str:
     """Handle prsm_jobs_list tool call: enumerate /compute/forge
     jobs with optional filter + pagination."""
@@ -2116,6 +2211,7 @@ TOOL_HANDLERS = {
     "prsm_inference": handle_prsm_inference,
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
+    "prsm_escrow_summary": handle_prsm_escrow_summary,
     "prsm_jobs_list": handle_prsm_jobs_list,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,

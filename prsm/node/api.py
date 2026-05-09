@@ -549,6 +549,83 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         usd_amount: float
         bank_account_alias: str = "primary"
 
+    @app.get("/wallet/escrows")
+    async def get_wallet_escrows(
+        address: Optional[str] = None,
+        include_terminal: bool = False,
+    ) -> Dict[str, Any]:
+        """List active escrows for the operator's wallet (or any
+        address via override). Backs the ``prsm_escrow_summary``
+        MCP tool.
+
+        Returns 503 if PaymentEscrow or ftns_ledger isn't wired,
+        200 with `{escrows: [...], total: N, total_locked_ftns: X,
+        address: 0x...}`. Default `pending_only=true`; pass
+        `?include_terminal=true` for RELEASED + REFUNDED audit
+        view.
+        """
+        escrow_svc = getattr(node, "_payment_escrow", None)
+        ftns_ledger = getattr(node, "ftns_ledger", None)
+        if escrow_svc is None or ftns_ledger is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "PaymentEscrow or ftns_ledger not initialized "
+                    "on this node."
+                ),
+            )
+
+        target = address or getattr(
+            ftns_ledger, "_connected_address", None,
+        )
+        if not target:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "No connected address available; pass "
+                    "?address=0x... explicitly."
+                ),
+            )
+
+        try:
+            entries = escrow_svc.list_escrows_by_requester(
+                target, pending_only=not include_terminal,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "list_escrows_by_requester raised: %s", exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"escrow listing failed: {exc}",
+            )
+
+        from prsm.node.payment_escrow import EscrowStatus as _EscStatus
+        escrows_dicts = []
+        total_locked = 0.0
+        for e in entries:
+            escrows_dicts.append({
+                "escrow_id": e.escrow_id,
+                "job_id": e.job_id,
+                "amount_ftns": e.amount,
+                "status": e.status.value,
+                "provider_winner": e.provider_winner,
+                "tx_lock": e.tx_lock,
+                "tx_release": e.tx_release,
+                "created_at": e.created_at,
+                "completed_at": e.completed_at,
+            })
+            if e.status == _EscStatus.PENDING:
+                total_locked += e.amount
+
+        return {
+            "address": target,
+            "escrows": escrows_dicts,
+            "total": len(escrows_dicts),
+            "total_locked_ftns": total_locked,
+            "include_terminal": include_terminal,
+        }
+
     class _RoyaltyClaimRequest(BaseModel):
         dry_run: bool = True
 
