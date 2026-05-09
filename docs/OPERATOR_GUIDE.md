@@ -348,7 +348,13 @@ When QueryOrchestrator handles a job, payment escrow is released across all swar
 
 ### JobHistoryStore
 
-In-memory LRU-bounded store (default 1024 entries). Records `IN_PROGRESS` → `COMPLETED` / `FAILED` transitions for `/compute/forge` jobs. **Process restart clears history** — `escrow` tier of `/compute/status` survives the restart, but `history` does not. A filesystem-backed variant is on the deferred follow-on list; until then, do not page operators on transient `history: null` responses for jobs older than the most recent restart.
+In-memory LRU-bounded store (default 1024 entries). Records `IN_PROGRESS` → `COMPLETED` / `FAILED` transitions for `/compute/forge` jobs.
+
+**Filesystem persistence (v2, ships 2026-05-09):** Set `PRSM_JOB_HISTORY_DIR=/path/to/dir` to enable disk-backed history. Each `put()` writes through to a SHA-256-named JSON file under the directory; on node startup, the store scans the directory and rehydrates the in-memory LRU sorted by `started_at` (most-recently-started ends up LRU-newest). On `get()` miss in memory, the store falls back to disk — even LRU-evicted records remain retrievable until the operator manually cleans up the directory.
+
+Filename sanitization is hash-based (SHA-256 first 16 hex chars), so caller-supplied `job_id` cannot escape the persist directory regardless of content. Corrupt JSON files are logged + skipped (fail-soft) rather than crashing startup. Disk-write failures are logged at WARN; the in-memory record remains authoritative.
+
+When `PRSM_JOB_HISTORY_DIR` is unset, the v1 in-memory-only behavior is preserved bit-identically — process restart clears history (`escrow` tier of `/compute/status` survives, `history` does not).
 
 ---
 

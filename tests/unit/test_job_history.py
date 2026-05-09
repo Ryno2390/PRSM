@@ -222,3 +222,142 @@ class TestJobHistoryStore:
         # operator tuning; pin a load-bearing minimum.
         store = JobHistoryStore()
         assert store._max_entries >= 256
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Filesystem persistence (v2, ships 2026-05-09)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _record(job_id: str, *, started_at: float = None,
+            status: JobStatus = JobStatus.IN_PROGRESS,
+            response: str = None) -> JobHistoryRecord:
+    """Helper for terse test setup."""
+    return JobHistoryRecord(
+        job_id=job_id,
+        query=f"q-{job_id}",
+        status=status,
+        started_at=started_at if started_at is not None else time.time(),
+        response=response,
+    )
+
+
+class TestJobHistoryStorePersistence:
+    """v2 closes the B8 deferred sub-item: filesystem persistence
+    so node restart doesn't wipe job history. Pattern: put writes
+    through to disk; get falls back to disk on in-memory miss;
+    startup scan repopulates the in-memory LRU from disk.
+    persist_dir=None preserves v1 in-memory-only behavior.
+    """
+
+    def test_v1_behavior_when_persist_dir_none(self, tmp_path):
+        """Without persist_dir, store is in-memory only — no disk
+        writes, no disk reads."""
+        store = JobHistoryStore()
+        store.put(_record("forge-1"))
+        # No files anywhere; behavior identical to v1.
+        assert list(tmp_path.iterdir()) == []
+        assert store.get("forge-1") is not None
+
+    def test_put_writes_to_disk_when_persist_dir_set(self, tmp_path):
+        store = JobHistoryStore(persist_dir=tmp_path)
+        rec = _record("forge-1", response="42")
+        store.put(rec)
+        # File written under persist_dir.
+        files = list(tmp_path.glob("*.json"))
+        assert len(files) == 1
+        # Filename uses job_id (sanitized); contents round-trip.
+        import json
+        loaded = json.loads(files[0].read_text())
+        assert loaded["job_id"] == "forge-1"
+        assert loaded["response"] == "42"
+
+    def test_put_overwrites_existing_disk_record(self, tmp_path):
+        store = JobHistoryStore(persist_dir=tmp_path)
+        store.put(_record("forge-1", status=JobStatus.IN_PROGRESS))
+        store.put(_record(
+            "forge-1", status=JobStatus.COMPLETED, response="done",
+        ))
+        files = list(tmp_path.glob("*.json"))
+        assert len(files) == 1
+        import json
+        loaded = json.loads(files[0].read_text())
+        assert loaded["status"] == "completed"
+        assert loaded["response"] == "done"
+
+    def test_get_falls_back_to_disk_on_memory_miss(self, tmp_path):
+        """Job evicted from in-memory LRU still retrievable from
+        disk."""
+        # Tiny store to force eviction.
+        store = JobHistoryStore(max_entries=2, persist_dir=tmp_path)
+        store.put(_record("forge-1"))
+        store.put(_record("forge-2"))
+        store.put(_record("forge-3"))  # evicts forge-1 from memory
+        # In-memory size respects LRU bound.
+        assert store.size() == 2
+        # forge-1 evicted from memory but still on disk → get
+        # finds it via disk lookup.
+        rec = store.get("forge-1")
+        assert rec is not None
+        assert rec.job_id == "forge-1"
+
+    def test_startup_scan_loads_existing_disk_records(self, tmp_path):
+        """Constructor scans persist_dir on init and populates
+        in-memory LRU from disk so /compute/status finds prior-run
+        jobs immediately on node restart."""
+        # Pre-seed disk with two records (simulates prior node run).
+        store_a = JobHistoryStore(persist_dir=tmp_path)
+        store_a.put(_record("forge-1", started_at=100.0))
+        store_a.put(_record(
+            "forge-2", started_at=200.0,
+            status=JobStatus.COMPLETED, response="r",
+        ))
+        # Fresh store on the same dir — should pick up the records.
+        store_b = JobHistoryStore(persist_dir=tmp_path)
+        assert store_b.get("forge-1") is not None
+        assert store_b.get("forge-2") is not None
+        assert store_b.get("forge-2").response == "r"
+
+    def test_corrupt_disk_file_skipped_fail_soft(self, tmp_path, caplog):
+        """A corrupt JSON file under persist_dir must NOT crash
+        startup. Log + skip + continue with valid records."""
+        # Write a junk file directly to the persist_dir.
+        (tmp_path / "forge-bad.json").write_text("{not valid json")
+        # Also write a valid one to verify scan continues.
+        store_a = JobHistoryStore(persist_dir=tmp_path)
+        store_a.put(_record("forge-good"))
+
+        # Reload — must not raise.
+        store_b = JobHistoryStore(persist_dir=tmp_path)
+        # Valid record loaded.
+        assert store_b.get("forge-good") is not None
+        # Bad record absent (skipped, not crashed on).
+        assert store_b.get("forge-bad") is None
+
+    def test_persist_dir_created_if_missing(self, tmp_path):
+        """If persist_dir doesn't exist yet, the store creates it
+        — no operator pre-mkdir required."""
+        target = tmp_path / "subdir" / "jobs"
+        assert not target.exists()
+        store = JobHistoryStore(persist_dir=target)
+        assert target.exists() and target.is_dir()
+        store.put(_record("forge-1"))
+        assert list(target.glob("*.json"))
+
+    def test_persist_with_special_chars_in_job_id(self, tmp_path):
+        """job_id with characters that aren't filesystem-safe
+        (e.g., slashes from a foreign caller) should still persist
+        cleanly via filename sanitization."""
+        store = JobHistoryStore(persist_dir=tmp_path)
+        # Path-traversal-shaped job_id should NOT escape the
+        # persist_dir — it's a security boundary.
+        store.put(_record("../../etc/passwd"))
+        # Round-trip works regardless.
+        rec = store.get("../../etc/passwd")
+        assert rec is not None
+        # No file written outside persist_dir.
+        for child in tmp_path.parent.iterdir():
+            if child.is_file() and "passwd" in child.name:
+                pytest.fail(
+                    f"Filename traversal escaped persist_dir: {child}"
+                )

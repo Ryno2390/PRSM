@@ -11,17 +11,23 @@ response, aggregator, participants, timing, error if failed).
 data) and falls back to ``PaymentEscrow`` (escrow lifecycle
 only) when the job isn't in history.
 
-v1 is in-memory LRU-bounded — sufficient for the synchronous
-path that's currently the only path live. Filesystem persistence
-is the right v2 once jobs span beyond a single node-startup
-window.
+v2 (2026-05-09): optional filesystem persistence via
+``persist_dir`` — node restart no longer wipes job history;
+operators can retrospectively look up old jobs. v1 in-memory-only
+behavior preserved when ``persist_dir`` is None.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -104,6 +110,27 @@ class JobHistoryRecord:
             "error": self.error,
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "JobHistoryRecord":
+        """Round-trip JSON → record. Tolerates missing optional
+        keys (forward-compat with older persisted records)."""
+        return cls(
+            job_id=data["job_id"],
+            query=data["query"],
+            status=JobStatus(data["status"]),
+            started_at=data["started_at"],
+            completed_at=data.get("completed_at"),
+            route=data.get("route"),
+            response=data.get("response"),
+            aggregator_node_id=data.get("aggregator_node_id"),
+            contributing_shards=tuple(
+                data.get("contributing_shards") or ()
+            ),
+            participants=tuple(data.get("participants") or ()),
+            traces_collected=data.get("traces_collected", 0),
+            error=data.get("error"),
+        )
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Store
@@ -122,7 +149,12 @@ class JobHistoryStore:
     handles safely enough for v1.
     """
 
-    def __init__(self, max_entries: int = _DEFAULT_MAX_ENTRIES) -> None:
+    def __init__(
+        self,
+        max_entries: int = _DEFAULT_MAX_ENTRIES,
+        *,
+        persist_dir: Optional[Path] = None,
+    ) -> None:
         if not isinstance(max_entries, int) or max_entries <= 0:
             raise ValueError(
                 f"max_entries must be a positive integer, got {max_entries!r}"
@@ -132,25 +164,116 @@ class JobHistoryStore:
         # get() implements LRU semantics.
         self._records: "OrderedDict[str, JobHistoryRecord]" = OrderedDict()
 
+        # Filesystem persistence (optional). When set, put() writes
+        # through to disk + get() falls back to disk on memory miss.
+        self._persist_dir: Optional[Path] = (
+            Path(persist_dir) if persist_dir is not None else None
+        )
+        if self._persist_dir is not None:
+            self._persist_dir.mkdir(parents=True, exist_ok=True)
+            self._load_from_disk()
+
+    @staticmethod
+    def _safe_filename(job_id: str) -> str:
+        """Hash-based filename — guarantees filesystem-safe chars
+        AND prevents path traversal regardless of caller-supplied
+        job_id. Collision-resistant via SHA-256 first 16 hex chars
+        (64 bits). The original job_id is preserved inside the
+        record JSON for retrieval."""
+        h = hashlib.sha256(job_id.encode("utf-8")).hexdigest()
+        return f"{h[:16]}.json"
+
+    def _disk_path(self, job_id: str) -> Path:
+        assert self._persist_dir is not None
+        return self._persist_dir / self._safe_filename(job_id)
+
+    def _write_to_disk(self, record: JobHistoryRecord) -> None:
+        if self._persist_dir is None:
+            return
+        try:
+            path = self._disk_path(record.job_id)
+            path.write_text(json.dumps(record.to_dict()))
+        except Exception as e:
+            logger.warning(
+                "JobHistoryStore: disk write failed for job_id=%s "
+                "(fail-soft, in-memory record still authoritative): %s",
+                record.job_id, e,
+            )
+
+    def _load_from_disk(self) -> None:
+        """Scan persist_dir on init + populate in-memory LRU.
+        Records are inserted in started_at-ascending order so the
+        most-recently-started ends up LRU-newest. Corrupt files
+        are logged + skipped (fail-soft)."""
+        assert self._persist_dir is not None
+        loaded: list = []
+        for path in self._persist_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text())
+                rec = JobHistoryRecord.from_dict(data)
+                loaded.append(rec)
+            except Exception as e:
+                logger.warning(
+                    "JobHistoryStore: skipping corrupt file %s: %s",
+                    path, e,
+                )
+        loaded.sort(key=lambda r: r.started_at)
+        for rec in loaded:
+            self._records[rec.job_id] = rec
+        # Apply LRU bound (in case disk has more than max_entries).
+        while len(self._records) > self._max_entries:
+            self._records.popitem(last=False)
+
+    def _read_from_disk(self, job_id: str) -> Optional[JobHistoryRecord]:
+        if self._persist_dir is None:
+            return None
+        path = self._disk_path(job_id)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text())
+            return JobHistoryRecord.from_dict(data)
+        except Exception as e:
+            logger.warning(
+                "JobHistoryStore: disk read failed for job_id=%s: %s",
+                job_id, e,
+            )
+            return None
+
     def put(self, record: JobHistoryRecord) -> None:
         """Insert or update a record. Updates promote to most-
         recently-used; new inserts may trigger LRU eviction of the
-        oldest entry."""
+        oldest entry. When persist_dir is set, the record is also
+        written through to disk."""
         if record.job_id in self._records:
             # Overwrite + promote.
             self._records[record.job_id] = record
             self._records.move_to_end(record.job_id)
+            self._write_to_disk(record)
             return
         self._records[record.job_id] = record
         while len(self._records) > self._max_entries:
             self._records.popitem(last=False)  # evict oldest
+        self._write_to_disk(record)
 
     def get(self, job_id: str) -> Optional[JobHistoryRecord]:
-        """Look up a record. Promotes to most-recently-used."""
+        """Look up a record. Promotes to most-recently-used. When
+        persist_dir is set, falls back to disk on in-memory miss
+        (e.g., LRU-evicted records remain retrievable until manual
+        cleanup of persist_dir)."""
         rec = self._records.get(job_id)
+        if rec is not None:
+            self._records.move_to_end(job_id)
+            return rec
+        # In-memory miss; try disk if persistence is enabled.
+        rec = self._read_from_disk(job_id)
         if rec is None:
             return None
-        self._records.move_to_end(job_id)
+        # Re-populate the in-memory LRU (subject to eviction).
+        self._records[rec.job_id] = rec
+        self._records.move_to_end(rec.job_id)
+        while len(self._records) > self._max_entries:
+            self._records.popitem(last=False)
         return rec
 
     def size(self) -> int:

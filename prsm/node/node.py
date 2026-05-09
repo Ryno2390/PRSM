@@ -1765,14 +1765,23 @@ class PRSMNode:
         )
         # B8 async-dispatch follow-on: JobHistoryStore for
         # /compute/forge → /compute/status traceability. In-memory
-        # LRU-bounded; filesystem persistence deferred to when
-        # actual async dispatch lands. Best-effort wiring — failure
-        # to construct degrades to escrow-only /compute/status
-        # (legacy behavior).
+        # LRU-bounded with optional filesystem persistence (v2
+        # 2026-05-09): when PRSM_JOB_HISTORY_DIR is set, records
+        # survive node restart so /compute/status can serve
+        # late-arriving status queries from prior runs. Best-effort
+        # wiring — construction failure degrades to escrow-only
+        # /compute/status (legacy behavior).
         try:
+            import os as _os
+            from pathlib import Path as _Path
             from prsm.node.job_history import JobHistoryStore
-            self._job_history = JobHistoryStore()
-            logger.info("JobHistoryStore wired (in-memory, LRU 1024)")
+            persist_raw = _os.getenv("PRSM_JOB_HISTORY_DIR", "").strip()
+            persist_dir = _Path(persist_raw) if persist_raw else None
+            self._job_history = JobHistoryStore(persist_dir=persist_dir)
+            logger.info(
+                "JobHistoryStore wired (in-memory LRU 1024%s)",
+                f", persisted to {persist_dir}" if persist_dir else "",
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "JobHistoryStore construction failed: %s — "
