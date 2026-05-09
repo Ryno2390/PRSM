@@ -2887,6 +2887,133 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """Simple health check."""
         return {"status": "ok", "node_id": node.identity.node_id if node.identity else "unknown"}
 
+    @app.get("/health/detailed")
+    async def health_detailed() -> Dict[str, Any]:
+        """Structured per-subsystem readiness probe for ops
+        monitoring. Distinct from /health (which stays minimal
+        for load-balancer probes).
+
+        Top-level status:
+          - healthy: all wired subsystems operational
+          - degraded: optional subsystems unavailable but core
+            (FTNS ledger + payment escrow) works
+          - unhealthy: core subsystem missing or erroring
+
+        Per-subsystem fields: {available, status, ...details, error?}.
+        """
+        subsystems: Dict[str, Dict[str, Any]] = {}
+
+        # FTNS ledger (core).
+        ftns_ledger = getattr(node, "ftns_ledger", None)
+        if ftns_ledger is not None:
+            try:
+                addr = getattr(ftns_ledger, "_connected_address", None)
+                init = getattr(ftns_ledger, "_is_initialized", False)
+                subsystems["ftns_ledger"] = {
+                    "available": bool(init),
+                    "status": "ok" if init else "uninitialized",
+                    "connected_address": addr,
+                }
+            except Exception as exc:  # noqa: BLE001
+                subsystems["ftns_ledger"] = {
+                    "available": False, "status": "error",
+                    "error": str(exc),
+                }
+        else:
+            subsystems["ftns_ledger"] = {
+                "available": False, "status": "not_wired",
+            }
+
+        # Payment escrow (core).
+        escrow_svc = getattr(node, "_payment_escrow", None)
+        if escrow_svc is not None:
+            try:
+                pending_count = sum(
+                    1 for e in escrow_svc._escrows.values()
+                    if e.status.value == "pending"
+                )
+                subsystems["payment_escrow"] = {
+                    "available": True, "status": "ok",
+                    "pending_count": pending_count,
+                    "default_timeout_sec": getattr(
+                        escrow_svc, "default_timeout", None,
+                    ),
+                }
+            except Exception as exc:  # noqa: BLE001
+                subsystems["payment_escrow"] = {
+                    "available": False, "status": "error",
+                    "error": str(exc),
+                }
+        else:
+            subsystems["payment_escrow"] = {
+                "available": False, "status": "not_wired",
+            }
+
+        # Job history (optional).
+        history = getattr(node, "_job_history", None)
+        if history is not None:
+            try:
+                subsystems["job_history"] = {
+                    "available": True, "status": "ok",
+                    "count": history.size(),
+                    "max_entries": history._max_entries,
+                    "persisted": history._persist_dir is not None,
+                }
+            except Exception as exc:  # noqa: BLE001
+                subsystems["job_history"] = {
+                    "available": False, "status": "error",
+                    "error": str(exc),
+                }
+        else:
+            subsystems["job_history"] = {
+                "available": False, "status": "not_wired",
+            }
+
+        # Royalty distributor (optional).
+        royalty = getattr(node, "_royalty_distributor_client", None)
+        if royalty is not None:
+            try:
+                # Probe via claimable() — a read-only call that
+                # exercises RPC connectivity.
+                _claimable_wei = royalty.claimable()
+                subsystems["royalty_distributor"] = {
+                    "available": True, "status": "ok",
+                    "claimable_wei": _claimable_wei,
+                }
+            except Exception as exc:  # noqa: BLE001
+                subsystems["royalty_distributor"] = {
+                    "available": False, "status": "error",
+                    "error": str(exc),
+                }
+        else:
+            subsystems["royalty_distributor"] = {
+                "available": False, "status": "not_wired",
+            }
+
+        # Aggregate status.
+        core = ["ftns_ledger", "payment_escrow"]
+        optional = ["job_history", "royalty_distributor"]
+        core_ok = all(
+            subsystems[s]["available"] for s in core
+        )
+        all_optional_ok = all(
+            subsystems[s]["available"] for s in optional
+        )
+        if not core_ok:
+            top_status = "unhealthy"
+        elif not all_optional_ok:
+            top_status = "degraded"
+        else:
+            top_status = "healthy"
+
+        return {
+            "status": top_status,
+            "node_id": (
+                node.identity.node_id if node.identity else "unknown"
+            ),
+            "subsystems": subsystems,
+        }
+
     # ── Batch Settlement Endpoints ─────────────────────────────────
 
     @app.get("/settlement/stats")

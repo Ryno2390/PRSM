@@ -350,6 +350,16 @@ When QueryOrchestrator handles a job, payment escrow is released across all swar
 | `GET /compute/jobs` | Paginated operator-side job list. Query params: `status` (in_progress/completed/failed/cancelled), `limit` (1..100, default 50), `offset` (default 0). Returns `{jobs: [...], total: N, offset: X, limit: Y}` ordered most-recent-first by `started_at`. 503 if JobHistoryStore not wired; 422 on validation errors. Backs the `prsm_jobs_list` MCP tool. |
 | `GET /wallet/escrows` | Operator-side escrow summary. Query params: `address` (optional 0x override; defaults to node's connected wallet), `include_terminal` (default false; when true returns RELEASED + REFUNDED for audit). Returns `{address, escrows: [...], total: N, total_locked_ftns: X, include_terminal: bool}`. 503 if PaymentEscrow or ftns_ledger not wired. Backs the `prsm_escrow_summary` MCP tool. |
 
+### Health probes
+
+- `GET /health` — minimal load-balancer probe; returns `{status: "ok", node_id}` without subsystem checks. Stays bit-identical to v1 to avoid breaking external monitors.
+- `GET /health/detailed` (ships 2026-05-09) — structured per-subsystem readiness for ops monitoring. Returns `{status, node_id, subsystems: {...}}` where `status` is one of:
+  - `healthy` — all wired subsystems operational
+  - `degraded` — core (FTNS ledger + payment escrow) works but optional subsystems (job history / royalty distributor) unavailable or erroring
+  - `unhealthy` — core subsystem missing or erroring
+  
+  Each subsystem entry has `{available, status, ...details, error?}`. Subsystem probes are fail-soft — an exception in one subsystem's check (e.g., royalty RPC down) surfaces in that entry's `error` field rather than 500-ing the endpoint. Use this against your ops alerting (PagerDuty, Grafana, etc.) — alarm on `status != "healthy"` for paging, `status == "unhealthy"` for high-sev.
+
 ### PaymentEscrow timeouts (configurable, ships 2026-05-09)
 
 Two env vars tune the auto-refund behavior for stale escrows:
