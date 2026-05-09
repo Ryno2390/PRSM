@@ -501,6 +501,34 @@ By default, watchers reset their `last_processed_block` baseline to the chain ti
 
 When enabled, each watcher loads its persisted block on first tick and polls the downtime-window range — recovering events that landed during the restart. Failures (corrupt JSON / IOError) fall back to chain-tip baseline + log a WARNING; the next successful baseline advance re-persists.
 
+#### Watcher event filters (RPC-side narrowing, post-2026-05-09)
+
+By default, watchers fire callbacks for ALL events on the contract — fleet-wide. For operators monitoring only their own provider/recipient/publisher address (the common case), this produces unnecessary network bandwidth, callback invocations, and log noise.
+
+`KeyDistributionWatcher` and `StorageSlashingWatcher` accept an optional `event_filters` kwarg that propagates to web3.py's `event.get_logs(argument_filters=...)` for **RPC-side filtering**:
+
+```python
+from prsm.economy.web3.storage_slashing_watcher import StorageSlashingWatcher
+
+# A storage provider monitoring only their own slashing events:
+my_provider = "0x..."  # provider's own address
+watcher = StorageSlashingWatcher(
+    client=storage_slashing_client,
+    on_heartbeat_missing_slashed=alert_callback,
+    on_proof_failure_slashed=alert_callback,
+    event_filters={
+        "HeartbeatMissingSlashed": {"provider": my_provider},
+        "ProofFailureSlashed": {"provider": my_provider},
+    },
+)
+```
+
+Filter keys must match the watcher's `KNOWN_EVENT_NAMES` set (`KeyReleased` / `KeyDeposited` / `KeyDeauthorized` for KeyDistributionWatcher; `HeartbeatRecorded` / `ProofFailureSlashed` / `HeartbeatMissingSlashed` for StorageSlashingWatcher). Filter values can be a single address or a list (web3.py supports OR-style matching). Unknown event names raise `ValueError` at constructor time.
+
+`CompensationDistributorWatcher.Distributed` has NO indexed args — there's nothing to filter on at the RPC level — so the watcher does NOT accept an `event_filters` kwarg (passing it raises `TypeError`).
+
+This is a programmatic-only feature today (env-var activation would need a way to express address values in env, which is operator-specific). Operators wanting filters construct watchers programmatically instead of via env-var activation.
+
 ---
 
 ## Monitoring

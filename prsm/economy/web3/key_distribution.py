@@ -306,46 +306,62 @@ class KeyDistributionClient:
 
     def get_key_released_events(
         self, from_block: int, to_block: int,
+        *, argument_filters=None,
     ) -> "list[KeyReleasedEvent]":
         """Fetch KeyReleased events in [from_block, to_block].
 
         Caller chunks large ranges (RPCs typically cap get_logs at
         ~10k blocks).
+
+        argument_filters: optional dict mapping indexed-arg name to
+        value-or-list (web3.py shape). For KeyReleased the indexed
+        args are `contentHash` + `recipient`. RPC-side filtering
+        reduces bytes-on-wire vs callback-side filtering.
         """
         if from_block > to_block:
             return []
-        logs = self.contract.events.KeyReleased().get_logs(
-            from_block=from_block, to_block=to_block,
-        )
+        kwargs = {"from_block": from_block, "to_block": to_block}
+        if argument_filters is not None:
+            kwargs["argument_filters"] = argument_filters
+        logs = self.contract.events.KeyReleased().get_logs(**kwargs)
         return [KeyReleasedEvent.from_decoded_args(log["args"]) for log in logs]
 
     def get_key_deposited_events(
         self, from_block: int, to_block: int,
+        *, argument_filters=None,
     ):
         """Fetch KeyDeposited events. Returns list of
         KeyDepositedEvent (from key_distribution_watcher).
+
+        argument_filters: optional dict; indexed args are
+        `contentHash` + `publisher` + `royalty`.
         """
         if from_block > to_block:
             return []
         from prsm.economy.web3.key_distribution_watcher import (
             KeyDepositedEvent,
         )
-        logs = self.contract.events.KeyDeposited().get_logs(
-            from_block=from_block, to_block=to_block,
-        )
+        kwargs = {"from_block": from_block, "to_block": to_block}
+        if argument_filters is not None:
+            kwargs["argument_filters"] = argument_filters
+        logs = self.contract.events.KeyDeposited().get_logs(**kwargs)
         return [KeyDepositedEvent.from_decoded_args(log["args"]) for log in logs]
 
     def get_key_deauthorized_events(
         self, from_block: int, to_block: int,
+        *, argument_filters=None,
     ):
+        """argument_filters: optional dict; indexed args are
+        `contentHash` + `publisher`."""
         if from_block > to_block:
             return []
         from prsm.economy.web3.key_distribution_watcher import (
             KeyDeauthorizedEvent,
         )
-        logs = self.contract.events.KeyDeauthorized().get_logs(
-            from_block=from_block, to_block=to_block,
-        )
+        kwargs = {"from_block": from_block, "to_block": to_block}
+        if argument_filters is not None:
+            kwargs["argument_filters"] = argument_filters
+        logs = self.contract.events.KeyDeauthorized().get_logs(**kwargs)
         return [
             KeyDeauthorizedEvent.from_decoded_args(log["args"])
             for log in logs

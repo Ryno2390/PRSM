@@ -158,6 +158,13 @@ class KeyDistributionWatcher:
 
     WATCHER_KEY = "key_distribution"
 
+    # Valid event names for event_filters validation. If a future
+    # event is added to KeyDistribution.sol, extend this set + add
+    # a new callback parameter + a new poll-call branch in tick().
+    KNOWN_EVENT_NAMES = frozenset(
+        {"KeyReleased", "KeyDeposited", "KeyDeauthorized"},
+    )
+
     def __init__(
         self,
         client,
@@ -167,17 +174,32 @@ class KeyDistributionWatcher:
         on_key_deauthorized: Optional[KeyDeauthorizedCallback] = None,
         poll_interval_sec: float = 30.0,
         state_store=None,
+        event_filters: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> None:
         if poll_interval_sec <= 0:
             raise ValueError(
                 f"poll_interval_sec must be > 0, got {poll_interval_sec}"
             )
+        if event_filters is not None:
+            if not isinstance(event_filters, dict):
+                raise TypeError(
+                    f"event_filters must be a dict mapping event-name "
+                    f"to argument_filters dict, got "
+                    f"{type(event_filters).__name__}"
+                )
+            unknown = set(event_filters.keys()) - self.KNOWN_EVENT_NAMES
+            if unknown:
+                raise ValueError(
+                    f"event_filters contains unknown event name(s): "
+                    f"{unknown!r}. Valid names: {self.KNOWN_EVENT_NAMES!r}"
+                )
         self._client = client
         self._on_released = on_key_released
         self._on_deposited = on_key_deposited
         self._on_deauthorized = on_key_deauthorized
         self._poll_interval = float(poll_interval_sec)
         self._state_store = state_store
+        self._event_filters = event_filters or {}
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
 
@@ -251,6 +273,7 @@ class KeyDistributionWatcher:
             if not await self._poll_event_type(
                 "released", from_block, to_block,
                 self._client.get_key_released_events, self._on_released,
+                argument_filters=self._event_filters.get("KeyReleased"),
             ):
                 all_succeeded = False
 
@@ -258,6 +281,7 @@ class KeyDistributionWatcher:
             if not await self._poll_event_type(
                 "deposited", from_block, to_block,
                 self._client.get_key_deposited_events, self._on_deposited,
+                argument_filters=self._event_filters.get("KeyDeposited"),
             ):
                 all_succeeded = False
 
@@ -265,6 +289,7 @@ class KeyDistributionWatcher:
             if not await self._poll_event_type(
                 "deauthorized", from_block, to_block,
                 self._client.get_key_deauthorized_events, self._on_deauthorized,
+                argument_filters=self._event_filters.get("KeyDeauthorized"),
             ):
                 all_succeeded = False
 
@@ -291,9 +316,21 @@ class KeyDistributionWatcher:
 
     async def _poll_event_type(
         self, name: str, from_block: int, to_block: int, getter, callback,
+        *, argument_filters: Optional[Dict[str, Any]] = None,
     ) -> bool:
         try:
-            events = getter(from_block, to_block)
+            # Pass argument_filters through ONLY when set, preserving
+            # backward-compat with client/stub implementations that
+            # predate the argument_filters kwarg. When set, web3.py
+            # event.get_logs(argument_filters=...) does RPC-side
+            # filtering.
+            if argument_filters is not None:
+                events = getter(
+                    from_block, to_block,
+                    argument_filters=argument_filters,
+                )
+            else:
+                events = getter(from_block, to_block)
         except Exception:
             logger.exception(
                 "KeyDistributionWatcher: get_%s_events RPC failed", name,

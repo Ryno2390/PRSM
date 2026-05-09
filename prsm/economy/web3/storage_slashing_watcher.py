@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Awaitable, Callable, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
 from prsm.economy.web3.storage_slashing import (
     HeartbeatMissingSlashedEvent,
@@ -67,6 +67,12 @@ class StorageSlashingWatcher:
 
     WATCHER_KEY = "storage_slashing"
 
+    KNOWN_EVENT_NAMES = frozenset({
+        "HeartbeatRecorded",
+        "ProofFailureSlashed",
+        "HeartbeatMissingSlashed",
+    })
+
     def __init__(
         self,
         client,
@@ -78,17 +84,32 @@ class StorageSlashingWatcher:
         ] = None,
         poll_interval_sec: float = 30.0,
         state_store=None,
+        event_filters: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> None:
         if poll_interval_sec <= 0:
             raise ValueError(
                 f"poll_interval_sec must be > 0, got {poll_interval_sec}"
             )
+        if event_filters is not None:
+            if not isinstance(event_filters, dict):
+                raise TypeError(
+                    f"event_filters must be a dict mapping event-name "
+                    f"to argument_filters dict, got "
+                    f"{type(event_filters).__name__}"
+                )
+            unknown = set(event_filters.keys()) - self.KNOWN_EVENT_NAMES
+            if unknown:
+                raise ValueError(
+                    f"event_filters contains unknown event name(s): "
+                    f"{unknown!r}. Valid names: {self.KNOWN_EVENT_NAMES!r}"
+                )
         self._client = client
         self._on_recorded = on_heartbeat_recorded
         self._on_proof = on_proof_failure_slashed
         self._on_missing = on_heartbeat_missing_slashed
         self._poll_interval = float(poll_interval_sec)
         self._state_store = state_store
+        self._event_filters = event_filters or {}
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
 
@@ -148,6 +169,7 @@ class StorageSlashingWatcher:
             if not await self._poll_event_type(
                 "heartbeat_recorded", from_block, to_block,
                 self._client.get_heartbeat_recorded_events, self._on_recorded,
+                argument_filters=self._event_filters.get("HeartbeatRecorded"),
             ):
                 all_succeeded = False
 
@@ -155,6 +177,7 @@ class StorageSlashingWatcher:
             if not await self._poll_event_type(
                 "proof_failure_slashed", from_block, to_block,
                 self._client.get_proof_failure_slashed_events, self._on_proof,
+                argument_filters=self._event_filters.get("ProofFailureSlashed"),
             ):
                 all_succeeded = False
 
@@ -163,6 +186,7 @@ class StorageSlashingWatcher:
                 "heartbeat_missing_slashed", from_block, to_block,
                 self._client.get_heartbeat_missing_slashed_events,
                 self._on_missing,
+                argument_filters=self._event_filters.get("HeartbeatMissingSlashed"),
             ):
                 all_succeeded = False
 
@@ -186,9 +210,18 @@ class StorageSlashingWatcher:
 
     async def _poll_event_type(
         self, name: str, from_block: int, to_block: int, getter, callback,
+        *, argument_filters: Optional[Dict[str, Any]] = None,
     ) -> bool:
         try:
-            events = getter(from_block, to_block)
+            # Pass argument_filters ONLY when set, for backwards-compat
+            # with client/stub implementations that predate the kwarg.
+            if argument_filters is not None:
+                events = getter(
+                    from_block, to_block,
+                    argument_filters=argument_filters,
+                )
+            else:
+                events = getter(from_block, to_block)
         except Exception:
             logger.exception(
                 "StorageSlashingWatcher: get_%s_events RPC failed", name,

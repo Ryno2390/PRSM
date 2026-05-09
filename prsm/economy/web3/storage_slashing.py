@@ -450,12 +450,17 @@ class StorageSlashingClient:
 
     def get_heartbeat_recorded_events(
         self, from_block: int, to_block: int,
+        *, argument_filters=None,
     ) -> "list[HeartbeatRecordedEvent]":
+        """argument_filters: optional dict; indexed arg is
+        `provider`. RPC-side filtering reduces bytes-on-wire vs
+        callback-side filtering."""
         if from_block > to_block:
             return []
-        logs = self.contract.events.HeartbeatRecorded().get_logs(
-            from_block=from_block, to_block=to_block,
-        )
+        kwargs = {"from_block": from_block, "to_block": to_block}
+        if argument_filters is not None:
+            kwargs["argument_filters"] = argument_filters
+        logs = self.contract.events.HeartbeatRecorded().get_logs(**kwargs)
         return [
             HeartbeatRecordedEvent.from_decoded_args(log["args"])
             for log in logs
@@ -463,12 +468,16 @@ class StorageSlashingClient:
 
     def get_proof_failure_slashed_events(
         self, from_block: int, to_block: int,
+        *, argument_filters=None,
     ) -> "list[ProofFailureSlashedEvent]":
+        """argument_filters: optional dict; indexed args are
+        `provider` + `challenger` + `shardId`."""
         if from_block > to_block:
             return []
-        logs = self.contract.events.ProofFailureSlashed().get_logs(
-            from_block=from_block, to_block=to_block,
-        )
+        kwargs = {"from_block": from_block, "to_block": to_block}
+        if argument_filters is not None:
+            kwargs["argument_filters"] = argument_filters
+        logs = self.contract.events.ProofFailureSlashed().get_logs(**kwargs)
         return [
             ProofFailureSlashedEvent.from_decoded_args(log["args"])
             for log in logs
@@ -476,12 +485,16 @@ class StorageSlashingClient:
 
     def get_heartbeat_missing_slashed_events(
         self, from_block: int, to_block: int,
+        *, argument_filters=None,
     ) -> "list[HeartbeatMissingSlashedEvent]":
+        """argument_filters: optional dict; indexed args are
+        `provider` + `challenger`."""
         if from_block > to_block:
             return []
-        logs = self.contract.events.HeartbeatMissingSlashed().get_logs(
-            from_block=from_block, to_block=to_block,
-        )
+        kwargs = {"from_block": from_block, "to_block": to_block}
+        if argument_filters is not None:
+            kwargs["argument_filters"] = argument_filters
+        logs = self.contract.events.HeartbeatMissingSlashed().get_logs(**kwargs)
         return [
             HeartbeatMissingSlashedEvent.from_decoded_args(log["args"])
             for log in logs
