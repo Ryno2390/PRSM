@@ -590,6 +590,25 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_canonical_check",
+        description=(
+            "Verify operator's wired contract addresses match the "
+            "canonical pins in networks.py for the active "
+            "PRSM_NETWORK. Purpose-built for post-migration "
+            "verification: after a contract redeploy ceremony "
+            "(e.g., A-08 v2 RoyaltyDistributor 2026-05-09), "
+            "operators run this to confirm their node picked up "
+            "the new pins without manually inspecting each "
+            "subsystem. Renders PASS/FAIL summary + flags any "
+            "mismatch with the action hint. Backed by GET "
+            "/health/detailed (filters for canonical-match fields)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
         name="prsm_metrics_summary",
         description=(
             "Render the node's Prometheus /metrics exposition as "
@@ -2203,6 +2222,78 @@ async def handle_prsm_spend_summary(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_canonical_check(
+    arguments: Dict[str, Any],
+) -> str:
+    """Filter /health/detailed for canonical-match fields and
+    render a pass/fail summary. Designed for post-migration
+    verification (e.g., after A-08 v2 RoyaltyDistributor deploy)."""
+    try:
+        result = await _call_node_api("GET", "/health/detailed")
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    subsystems = result.get("subsystems", {})
+    if not subsystems:
+        return "Endpoint returned no subsystems; cannot verify canonical pins."
+
+    matched: list = []
+    mismatched: list = []
+    skipped: list = []
+    for name, info in subsystems.items():
+        if "canonical_match" not in info:
+            # Subsystem either has no on-chain contract or the
+            # canonical-match check isn't implemented for it.
+            if info.get("available", False):
+                skipped.append((name, "no canonical pin"))
+            continue
+        if info["canonical_match"]:
+            matched.append((name, info.get("wired_address", "")))
+        else:
+            mismatched.append((
+                name,
+                info.get("wired_address", ""),
+                info.get("canonical_address", ""),
+            ))
+
+    lines = ["PRSM Canonical-Pin Check"]
+    if not mismatched:
+        lines.append(f"  Result: ALL {len(matched)} PIN(S) MATCH")
+    else:
+        lines.append(
+            f"  Result: {len(mismatched)} MISMATCH(ES) "
+            f"({len(matched)} match)"
+        )
+    lines.append("")
+    if matched:
+        lines.append("  Matched:")
+        for name, addr in matched:
+            short = addr[:10] + "..." + addr[-4:] if len(addr) > 14 else addr
+            lines.append(f"    [ok]  {name:<22}  {short}")
+    if mismatched:
+        lines.append("")
+        lines.append("  Mismatched:")
+        for name, wired, canonical in mismatched:
+            lines.append(f"    [!]   {name}")
+            lines.append(f"            wired:     {wired}")
+            lines.append(f"            canonical: {canonical}")
+        lines.append("")
+        lines.append(
+            "  Operator action: update PRSM_*_ADDRESS env override "
+            "to canonical address(es), OR remove the env override "
+            "to fall through to networks.py defaults."
+        )
+    if skipped:
+        lines.append("")
+        lines.append("  Skipped (no canonical pin available):")
+        for name, reason in skipped:
+            lines.append(f"    [-]   {name:<22}  ({reason})")
+    return "\n".join(lines)
+
+
 async def handle_prsm_metrics_summary(
     arguments: Dict[str, Any],
 ) -> str:
@@ -2613,6 +2704,7 @@ TOOL_HANDLERS = {
     "prsm_balance_check": handle_prsm_balance_check,
     "prsm_arbitration_record_detail": handle_prsm_arbitration_record_detail,
     "prsm_arbitration_status": handle_prsm_arbitration_status,
+    "prsm_canonical_check": handle_prsm_canonical_check,
     "prsm_metrics_summary": handle_prsm_metrics_summary,
     "prsm_cleanup_stale_escrows": handle_prsm_cleanup_stale_escrows,
     "prsm_node_health": handle_prsm_node_health,
