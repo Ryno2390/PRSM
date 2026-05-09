@@ -156,6 +156,8 @@ class KeyDistributionWatcher:
         user-callback bugs.
     """
 
+    WATCHER_KEY = "key_distribution"
+
     def __init__(
         self,
         client,
@@ -164,6 +166,7 @@ class KeyDistributionWatcher:
         on_key_deposited: Optional[KeyDepositedCallback] = None,
         on_key_deauthorized: Optional[KeyDeauthorizedCallback] = None,
         poll_interval_sec: float = 30.0,
+        state_store=None,
     ) -> None:
         if poll_interval_sec <= 0:
             raise ValueError(
@@ -174,6 +177,7 @@ class KeyDistributionWatcher:
         self._on_deposited = on_key_deposited
         self._on_deauthorized = on_key_deauthorized
         self._poll_interval = float(poll_interval_sec)
+        self._state_store = state_store
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
 
@@ -206,11 +210,27 @@ class KeyDistributionWatcher:
             return
 
         if self.last_processed_block is None:
-            # First tick — set baseline at chain tip; do NOT replay
-            # history. Operators wanting backfill should call
-            # client.get_*_events directly.
-            self.last_processed_block = latest
-            return
+            # First tick — try state_store load first; if found, use
+            # the persisted baseline (restart-resilient: pick up
+            # where we left off). If not found, fall back to chain
+            # tip + persist.
+            persisted = None
+            if self._state_store is not None:
+                try:
+                    persisted = self._state_store.load(self.WATCHER_KEY)
+                except Exception:
+                    logger.exception(
+                        "KeyDistributionWatcher: state_store.load() "
+                        "raised; falling back to chain-tip baseline",
+                    )
+            if persisted is not None:
+                self.last_processed_block = persisted
+                # Fall through to normal polling — don't return; the
+                # downtime-window range gets polled below.
+            else:
+                self.last_processed_block = latest
+                self._persist_baseline()
+                return
 
         if latest <= self.last_processed_block:
             return  # no new blocks
@@ -250,6 +270,24 @@ class KeyDistributionWatcher:
 
         if all_succeeded:
             self.last_processed_block = to_block
+            self._persist_baseline()
+
+    def _persist_baseline(self) -> None:
+        """Save the current baseline to state_store (if wired).
+        Logs + continues on save failure; next successful tick
+        re-persists."""
+        if self._state_store is None or self.last_processed_block is None:
+            return
+        try:
+            self._state_store.save(
+                self.WATCHER_KEY, self.last_processed_block,
+            )
+        except Exception:
+            logger.exception(
+                "KeyDistributionWatcher: state_store.save() raised "
+                "for block=%d; will retry on next baseline advance",
+                self.last_processed_block,
+            )
 
     async def _poll_event_type(
         self, name: str, from_block: int, to_block: int, getter, callback,

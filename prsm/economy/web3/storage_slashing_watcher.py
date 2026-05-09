@@ -65,6 +65,8 @@ class StorageSlashingWatcher:
     exceptions swallowed.
     """
 
+    WATCHER_KEY = "storage_slashing"
+
     def __init__(
         self,
         client,
@@ -75,6 +77,7 @@ class StorageSlashingWatcher:
             HeartbeatMissingSlashedCallback
         ] = None,
         poll_interval_sec: float = 30.0,
+        state_store=None,
     ) -> None:
         if poll_interval_sec <= 0:
             raise ValueError(
@@ -85,6 +88,7 @@ class StorageSlashingWatcher:
         self._on_proof = on_proof_failure_slashed
         self._on_missing = on_heartbeat_missing_slashed
         self._poll_interval = float(poll_interval_sec)
+        self._state_store = state_store
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
 
@@ -116,8 +120,21 @@ class StorageSlashingWatcher:
             return
 
         if self.last_processed_block is None:
-            self.last_processed_block = latest
-            return
+            persisted = None
+            if self._state_store is not None:
+                try:
+                    persisted = self._state_store.load(self.WATCHER_KEY)
+                except Exception:
+                    logger.exception(
+                        "StorageSlashingWatcher: state_store.load() "
+                        "raised; falling back to chain-tip baseline",
+                    )
+            if persisted is not None:
+                self.last_processed_block = persisted
+            else:
+                self.last_processed_block = latest
+                self._persist_baseline()
+                return
 
         if latest <= self.last_processed_block:
             return
@@ -151,6 +168,21 @@ class StorageSlashingWatcher:
 
         if all_succeeded:
             self.last_processed_block = to_block
+            self._persist_baseline()
+
+    def _persist_baseline(self) -> None:
+        if self._state_store is None or self.last_processed_block is None:
+            return
+        try:
+            self._state_store.save(
+                self.WATCHER_KEY, self.last_processed_block,
+            )
+        except Exception:
+            logger.exception(
+                "StorageSlashingWatcher: state_store.save() raised "
+                "for block=%d; will retry on next baseline advance",
+                self.last_processed_block,
+            )
 
     async def _poll_event_type(
         self, name: str, from_block: int, to_block: int, getter, callback,

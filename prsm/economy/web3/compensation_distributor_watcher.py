@@ -52,12 +52,15 @@ class CompensationDistributorWatcher:
     does NOT advance on RPC error. Callback exceptions swallowed.
     """
 
+    WATCHER_KEY = "compensation_distributor"
+
     def __init__(
         self,
         client,
         *,
         on_distributed: Optional[DistributedCallback] = None,
         poll_interval_sec: float = 30.0,
+        state_store=None,
     ) -> None:
         if poll_interval_sec <= 0:
             raise ValueError(
@@ -66,6 +69,7 @@ class CompensationDistributorWatcher:
         self._client = client
         self._on_distributed = on_distributed
         self._poll_interval = float(poll_interval_sec)
+        self._state_store = state_store
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
 
@@ -97,8 +101,21 @@ class CompensationDistributorWatcher:
             return
 
         if self.last_processed_block is None:
-            self.last_processed_block = latest
-            return
+            persisted = None
+            if self._state_store is not None:
+                try:
+                    persisted = self._state_store.load(self.WATCHER_KEY)
+                except Exception:
+                    logger.exception(
+                        "CompensationDistributorWatcher: state_store."
+                        "load() raised; falling back to chain-tip baseline",
+                    )
+            if persisted is not None:
+                self.last_processed_block = persisted
+            else:
+                self.last_processed_block = latest
+                self._persist_baseline()
+                return
 
         if latest <= self.last_processed_block:
             return
@@ -107,6 +124,7 @@ class CompensationDistributorWatcher:
             # No subscriber — just advance baseline so we don't waste
             # RPC on subsequent ticks.
             self.last_processed_block = latest
+            self._persist_baseline()
             return
 
         from_block = self.last_processed_block + 1
@@ -124,6 +142,22 @@ class CompensationDistributorWatcher:
         for event in events:
             await self._invoke_cb(event)
         self.last_processed_block = to_block
+        self._persist_baseline()
+
+    def _persist_baseline(self) -> None:
+        if self._state_store is None or self.last_processed_block is None:
+            return
+        try:
+            self._state_store.save(
+                self.WATCHER_KEY, self.last_processed_block,
+            )
+        except Exception:
+            logger.exception(
+                "CompensationDistributorWatcher: state_store.save() "
+                "raised for block=%d; will retry on next baseline "
+                "advance",
+                self.last_processed_block,
+            )
 
     async def _invoke_cb(self, event) -> None:
         assert self._on_distributed is not None
