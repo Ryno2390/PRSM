@@ -565,6 +565,21 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_metrics_summary",
+        description=(
+            "Render the node's Prometheus /metrics exposition as "
+            "a human-readable summary for AI side-panel triage. "
+            "Distinct from prsm_node_health (subsystem readiness) "
+            "— this surfaces actual operational gauge values "
+            "(escrow counts, locked FTNS, history size, claimable "
+            "royalties, arbitration pending)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
         name="prsm_node_health",
         description=(
             "One-shot operator diagnostic surfacing per-subsystem "
@@ -802,8 +817,16 @@ async def _get_node_api_url() -> str:
     return os.environ.get("PRSM_NODE_URL", "http://localhost:8000")
 
 
-async def _call_node_api(method: str, path: str, data: Dict = None) -> Dict[str, Any]:
-    """Call the PRSM node API."""
+async def _call_node_api(
+    method: str, path: str, data: Dict = None,
+    *, raw_text: bool = False,
+):
+    """Call the PRSM node API.
+
+    By default returns the response as parsed JSON (Dict).
+    Pass ``raw_text=True`` for endpoints that emit text/plain
+    bodies (e.g., /metrics Prometheus exposition).
+    """
     import aiohttp
     url = await _get_node_api_url()
     api_key = os.environ.get("PRSM_NODE_API_KEY", "")
@@ -818,6 +841,8 @@ async def _call_node_api(method: str, path: str, data: Dict = None) -> Dict[str,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=120),
             ) as resp:
+                if raw_text:
+                    return await resp.text()
                 return await resp.json()
         else:
             async with session.post(
@@ -826,6 +851,8 @@ async def _call_node_api(method: str, path: str, data: Dict = None) -> Dict[str,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=120),
             ) as resp:
+                if raw_text:
+                    return await resp.text()
                 return await resp.json()
 
 
@@ -2091,6 +2118,45 @@ async def handle_prsm_spend_summary(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_metrics_summary(
+    arguments: Dict[str, Any],
+) -> str:
+    """Handle prsm_metrics_summary: parse /metrics text and
+    render gauges as a side-panel summary."""
+    try:
+        body = await _call_node_api("GET", "/metrics", raw_text=True)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    if not isinstance(body, str):
+        return f"Unexpected metrics response type: {type(body).__name__}"
+
+    gauges: list = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # "metric_name VALUE" — split on whitespace.
+        parts = line.split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        name, value = parts
+        gauges.append((name, value))
+
+    if not gauges:
+        return "Metrics endpoint returned no parseable gauges."
+
+    lines = ["PRSM Metrics Summary:"]
+    for name, value in gauges:
+        # Strip the "prsm_" prefix for readability.
+        label = name[5:] if name.startswith("prsm_") else name
+        lines.append(f"  {label:<32}  {value}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_node_health(arguments: Dict[str, Any]) -> str:
     """Handle prsm_node_health tool call: render structured
     per-subsystem readiness from /health/detailed."""
@@ -2440,6 +2506,7 @@ TOOL_HANDLERS = {
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
     "prsm_arbitration_status": handle_prsm_arbitration_status,
+    "prsm_metrics_summary": handle_prsm_metrics_summary,
     "prsm_cleanup_stale_escrows": handle_prsm_cleanup_stale_escrows,
     "prsm_node_health": handle_prsm_node_health,
     "prsm_spend_summary": handle_prsm_spend_summary,
