@@ -436,6 +436,30 @@ Behavior:
 
 This middleware applies to ALL endpoints (the security-hardening middleware shipped earlier sits behind it); CORS rejection happens before any other middleware runs.
 
+### `GET /info` — static node metadata (ships 2026-05-09)
+
+Single read-only endpoint surfacing version, active network, chain_id, node identity, and canonical contract addresses for the active `PRSM_NETWORK`. Useful for operator triage + integration code needing to know "what network is this node on" without parsing `/health/detailed`.
+
+Sample mainnet response:
+
+```json
+{
+  "node_id": "node-prod-east-1",
+  "api_version": "0.24.0",
+  "network": "mainnet",
+  "chain_id": 8453,
+  "canonical_addresses": {
+    "ftns_token": "0x5276a3756C85f2E9e46f6D34386167a209aa16e5",
+    "provenance_registry": "0xdF470BFa9eF310B196801D5105468515d0069915",
+    "provenance_registry_v2": "0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf",
+    "royalty_distributor": "0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e",
+    "foundation_safe": "0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791"
+  }
+}
+```
+
+Always returns 200 with at least `node_id` + `api_version`. Network + chain_id + canonical_addresses surfaced when the active PRSM_NETWORK has a known config; omitted on local / unknown networks rather than crashing.
+
 ### Health probes
 
 - `GET /health` — minimal load-balancer probe; returns `{status: "ok", node_id}` without subsystem checks. Stays bit-identical to v1 to avoid breaking external monitors.

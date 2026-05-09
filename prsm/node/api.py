@@ -3323,6 +3323,47 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "timestamp": tx.timestamp,
         }
 
+    @app.get("/info")
+    async def get_info() -> Dict[str, Any]:
+        """Static node metadata. Useful for operator triage +
+        integration code needing to know which network this node
+        is on without parsing /health/detailed.
+
+        Always returns 200 with node_id + api_version; network +
+        chain_id + canonical_addresses are surfaced when the
+        active PRSM_NETWORK has a known config, else omitted.
+        """
+        body: Dict[str, Any] = {
+            "node_id": (
+                node.identity.node_id if node.identity else "unknown"
+            ),
+            "api_version": app.version,
+        }
+        try:
+            from prsm.config.networks import (
+                get_network_config, _resolve_network_name,
+            )
+            network_name = _resolve_network_name()
+            cfg = get_network_config(network_name)
+            body["network"] = network_name
+            body["chain_id"] = cfg.chain_id
+            canonical: Dict[str, Optional[str]] = {}
+            for fld in (
+                "ftns_token", "provenance_registry",
+                "provenance_registry_v2", "royalty_distributor",
+                "foundation_safe",
+            ):
+                val = getattr(cfg, fld, None)
+                if val is not None:
+                    canonical[fld] = val
+            if canonical:
+                body["canonical_addresses"] = canonical
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "info: network config lookup skipped: %s", exc,
+            )
+        return body
+
     @app.get("/health")
     async def health() -> Dict[str, str]:
         """Simple health check."""
