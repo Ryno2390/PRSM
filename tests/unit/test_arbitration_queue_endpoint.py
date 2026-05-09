@@ -97,6 +97,60 @@ class TestArbitrationQueueHappyPath:
         assert entry["proposal_id"] == "prop-7"
 
 
+class TestArbitrationQueueDetail:
+    """GET /content/arbitration/queue/{record_id} — detail view
+    of a single record with its resolution state. Council members
+    use this to fetch full context before signing on-chain
+    governance proposals."""
+
+    def test_404_when_record_unknown(self):
+        queue = MagicMock()
+        queue.get = AsyncMock(return_value=None)
+        node = _node(arbitration_queue=queue)
+        resp = _client(node).get("/content/arbitration/queue/unknown-id")
+        assert resp.status_code == 404
+
+    def test_returns_record_with_pending_resolution(self):
+        rec = _record(new_cid="bafy-x", similarity=0.88)
+        queue = MagicMock()
+        queue.get = AsyncMock(return_value=rec)
+        queue.get_resolution = AsyncMock(return_value=None)
+        node = _node(arbitration_queue=queue)
+        resp = _client(node).get(
+            "/content/arbitration/queue/bafy-x-id"
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["record"]["new_cid"] == "bafy-x"
+        assert body["record"]["similarity"] == 0.88
+        assert body["resolution"] is None
+        assert body["status"] == "pending"
+
+    def test_returns_record_with_resolution_when_resolved(self):
+        rec = _record(new_cid="bafy-x", similarity=0.88)
+        queue = MagicMock()
+        queue.get = AsyncMock(return_value=rec)
+        queue.get_resolution = AsyncMock(return_value={
+            "decision": "upheld_parent",
+            "by_council": ["0xCouncil1", "0xCouncil2"],
+        })
+        node = _node(arbitration_queue=queue)
+        resp = _client(node).get(
+            "/content/arbitration/queue/bafy-x-id"
+        )
+        body = resp.json()
+        assert body["status"] == "resolved"
+        assert body["resolution"]["decision"] == "upheld_parent"
+        assert body["resolution"]["by_council"] == [
+            "0xCouncil1", "0xCouncil2",
+        ]
+
+    def test_503_when_queue_not_wired(self):
+        node = _node()
+        resp = _client(node).get("/content/arbitration/queue/some-id")
+        assert resp.status_code == 503
+
+
 class TestArbitrationQueueFailure:
     def test_502_when_list_pending_raises(self):
         queue = MagicMock()

@@ -1610,6 +1610,47 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             logger.error(f"Forge pipeline error: {e}")
             raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
+    @app.get("/content/arbitration/queue/{record_id}")
+    async def get_arbitration_record(record_id: str) -> Dict[str, Any]:
+        """Detail view of a single arbitration record + its
+        resolution state. Council members use this to fetch full
+        context before signing on-chain governance proposals.
+
+        Status:
+          503 — arbitration_queue not wired
+          404 — record_id unknown
+          502 — queue access raised
+          200 — {record, resolution, status}
+                where status is "resolved" if resolution present,
+                else "pending"
+        """
+        queue = getattr(node, "_arbitration_queue", None)
+        if queue is None:
+            raise HTTPException(
+                status_code=503,
+                detail="ArbitrationQueue not initialized on this node.",
+            )
+        try:
+            rec = await queue.get(record_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("arbitration get raised: %s", exc)
+            raise HTTPException(status_code=502, detail=str(exc))
+        if rec is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No arbitration record for id={record_id!r}",
+            )
+        try:
+            resolution = await queue.get_resolution(record_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("arbitration get_resolution raised: %s", exc)
+            resolution = None
+        return {
+            "record": rec.to_dict(),
+            "resolution": resolution,
+            "status": "resolved" if resolution is not None else "pending",
+        }
+
     @app.get("/content/arbitration/queue")
     async def get_arbitration_queue() -> Dict[str, Any]:
         """List pending content-attribution disputes awaiting

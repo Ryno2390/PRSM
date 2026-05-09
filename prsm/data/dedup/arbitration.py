@@ -195,6 +195,9 @@ class ArbitrationQueue(Protocol):
         decision: ArbitrationDecision,
         by_council: List[str],
     ) -> None: ...
+    async def get_resolution(
+        self, record_id: str,
+    ) -> Optional[Dict[str, Any]]: ...
     async def set_proposal_id(
         self, record_id: str, proposal_id: str,
     ) -> None: ...
@@ -268,6 +271,18 @@ class InMemoryArbitrationQueue:
             self._records[record_id] = dataclasses.replace(
                 self._records[record_id], proposal_id=proposal_id,
             )
+
+    async def get_resolution(
+        self, record_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        async with self._lock:
+            res = self._resolutions.get(record_id)
+            if res is None:
+                return None
+            return {
+                "decision": res.decision.value,
+                "by_council": list(res.by_council),
+            }
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -399,3 +414,15 @@ class FilesystemArbitrationQueue:
                 self._records[record_id], proposal_id=proposal_id,
             )
             self._write(record_id)
+
+    async def get_resolution(
+        self, record_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        async with self._lock:
+            res = self._resolutions.get(record_id)
+            if res is None:
+                return None
+            return {
+                "decision": res.decision.value,
+                "by_council": list(res.by_council),
+            }
