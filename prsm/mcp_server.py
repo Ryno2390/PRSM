@@ -640,7 +640,8 @@ TOOLS = [
             "ring buffer. Each entry: timestamp, method, path, "
             "requester, status_code, request_id. Useful for "
             "operator triage: 'what just happened on my node?' "
-            "Optionally paginate via limit/offset."
+            "Optionally paginate via limit/offset OR filter by "
+            "status code (exact like '404' or range like '4xx'/'5xx')."
         ),
         inputSchema={
             "type": "object",
@@ -657,6 +658,14 @@ TOOLS = [
                     "description": "Pagination offset. Default 0.",
                     "minimum": 0,
                     "default": 0,
+                },
+                "status": {
+                    "type": "string",
+                    "description": (
+                        "Optional status filter. Either exact code "
+                        "('404') or HTTP range ('2xx', '3xx', '4xx', "
+                        "'5xx'). Useful for drilling into errors."
+                    ),
                 },
             },
         },
@@ -2388,6 +2397,8 @@ async def handle_prsm_audit_recent(
     params.append(f"limit={limit}")
     if "offset" in arguments:
         params.append(f"offset={arguments['offset']}")
+    if "status" in arguments and arguments["status"]:
+        params.append(f"status={arguments['status']}")
     path = "/audit/recent?" + "&".join(params)
 
     try:
@@ -2404,14 +2415,29 @@ async def handle_prsm_audit_recent(
 
     entries = result["entries"]
     total = result["total"]
+    total_matched = result.get("total_matched")  # only present with filter
+    status_filter = result.get("status_filter")
     if not entries:
+        if status_filter:
+            return (
+                f"No state-changing requests matched status filter "
+                f"{status_filter!r} (buffer total: {total})."
+            )
         return (
             f"No state-changing requests recorded in audit ring "
             f"(buffer total: {total})."
         )
 
+    header_parts = [f"PRSM Audit Log (showing {len(entries)}"]
+    if total_matched is not None:
+        header_parts.append(
+            f" of {total_matched} matched, {total} total, "
+            f"filter={status_filter})"
+        )
+    else:
+        header_parts.append(f" of {total})")
     lines = [
-        f"PRSM Audit Log (showing {len(entries)} of {total}):",
+        "".join(header_parts) + ":",
         f"  Time  Method  Status  Path",
         f"  " + "-" * 70,
     ]

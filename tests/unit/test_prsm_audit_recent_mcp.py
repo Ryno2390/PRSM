@@ -90,6 +90,60 @@ class TestHandler:
         assert "offset=5" in captured["path"]
 
 
+class TestStatusFilterPassthrough:
+    @pytest.mark.asyncio
+    async def test_status_filter_propagates_to_endpoint(self):
+        captured = {}
+
+        async def fake_call_node_api(method, path, data=None):
+            captured["path"] = path
+            return {
+                "entries": [
+                    {
+                        "timestamp": 1700000000.0,
+                        "method": "POST",
+                        "path": "/x",
+                        "requester": "n1",
+                        "status_code": 404,
+                        "request_id": "r1",
+                    },
+                ],
+                "total": 5,
+                "total_matched": 1,
+                "status_filter": "4xx",
+                "offset": 0,
+                "limit": 20,
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_audit_recent({"status": "4xx"})
+        assert "status=4xx" in captured["path"]
+        # Header reflects filter context.
+        assert "matched" in result.lower()
+        assert "4xx" in result
+
+    @pytest.mark.asyncio
+    async def test_empty_filter_result_friendly_message(self):
+        async def fake_call_node_api(method, path, data=None):
+            return {
+                "entries": [],
+                "total": 5,
+                "total_matched": 0,
+                "status_filter": "5xx",
+                "offset": 0,
+                "limit": 20,
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_audit_recent({"status": "5xx"})
+        assert "5xx" in result
+        assert "no" in result.lower()  # friendly empty message
+
+
 class TestErrors:
     @pytest.mark.asyncio
     async def test_node_unreachable(self):
