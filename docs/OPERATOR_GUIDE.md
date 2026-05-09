@@ -353,6 +353,17 @@ When QueryOrchestrator handles a job, payment escrow is released across all swar
 | `POST /compute/cleanup-stale` | Manual trigger for `PaymentEscrow.cleanup_expired_escrows` — refunds PENDING escrows whose age exceeds `default_timeout`. Returns `{cleaned: N}`. Use after lowering `PRSM_ESCROW_TIMEOUT_SEC` for immediate effect, or to drain stuck escrows pre-maintenance. 503 if PaymentEscrow not wired; 502 if cleanup raises. Backs the `prsm_cleanup_stale_escrows` MCP tool. |
 | `GET /content/arbitration/queue` | List pending content-attribution disputes from FilesystemArbitrationQueue (PRSM-PROV-1 Item 6). Returns `{pending: [...], total}` with each record containing new_cid, candidate_parent_cid, similarity, fingerprint_kind, flagged_at, proposal_id. 503 if queue not wired; 502 if list_pending raises. Backs the `prsm_arbitration_status` MCP tool. |
 
+### Per-requester rate limit (`PRSM_FORGE_MAX_RPS_PER_REQUESTER`, ships 2026-05-09)
+
+DoS-protection feature: cap requests per second per requester via token-bucket. Default unset → no limiting (v1 behavior preserved).
+
+Behavior:
+- Set `PRSM_FORGE_MAX_RPS_PER_REQUESTER=N` (positive integer/float). Each requester's bucket starts with N tokens; refills at N tokens/sec; capped at N (no burst beyond steady-state).
+- Empty bucket → HTTP 429 with `Retry-After` header indicating seconds until next token.
+- Non-numeric / zero / negative env values silently disable rate limiting (log WARN).
+
+Use this when running a public node where a single misbehaving client could otherwise saturate the forge pipeline.
+
 ### Per-job FTNS cap (`PRSM_MAX_FTNS_PER_JOB`, ships 2026-05-09)
 
 Cost-control feature for operators worried about misbehaving AI agents draining their balance via a single oversized request. Set `PRSM_MAX_FTNS_PER_JOB=N` (any positive float) to enforce a per-job ceiling. Requests with `budget_ftns > N` return HTTP 422 with a clear message before any escrow is locked.
