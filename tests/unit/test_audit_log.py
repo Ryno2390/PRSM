@@ -155,3 +155,57 @@ class TestAuditEndpoint:
         node = _node()
         resp = _client(node).get("/audit/recent?limit=0")
         assert resp.status_code == 422
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Middleware auto-population
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestMiddlewareAutoPopulate:
+    """Non-GET requests auto-append to the audit log via middleware.
+    GET requests are NOT recorded to keep the buffer focused on
+    writes."""
+
+    def test_post_request_recorded(self):
+        node = _node()
+        # POST to a route that returns something deterministic.
+        # /info doesn't exist as POST so we'll get 405; that's
+        # still a state-change attempt worth logging.
+        client = _client(node)
+        client.post("/some/nonexistent/path", json={})
+        entries = node._audit_log.recent()
+        # At least one entry recorded — the POST attempt.
+        assert any(e.method == "POST" for e in entries)
+
+    def test_get_request_not_recorded(self):
+        """GET requests are read-only; don't pollute the audit
+        buffer with them."""
+        node = _node()
+        client = _client(node)
+        client.get("/health")
+        client.get("/info")
+        entries = node._audit_log.recent()
+        # No GET entries (the audit log is for state changes only).
+        assert all(e.method != "GET" for e in entries)
+
+    def test_self_referential_audit_get_not_recorded(self):
+        """GET /audit/recent itself shouldn't appear in the
+        results (it's a GET so already excluded; this confirms
+        the GET filter works on this self-call)."""
+        node = _node()
+        client = _client(node)
+        client.get("/audit/recent")
+        client.get("/audit/recent")
+        entries = node._audit_log.recent()
+        # No /audit/recent entries since they were GET.
+        assert all(e.path != "/audit/recent" for e in entries)
+
+    def test_status_code_recorded(self):
+        node = _node()
+        client = _client(node)
+        # POST to a path that returns 405 (no POST handler).
+        resp = client.post("/health", json={})
+        entries = node._audit_log.recent()
+        # Entry recorded with the actual response status code.
+        assert any(e.status_code == resp.status_code for e in entries)

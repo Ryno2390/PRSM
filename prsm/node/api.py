@@ -308,6 +308,38 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         openapi_url="/openapi.json",
     )
 
+    # Audit log middleware (ships 2026-05-09). Records every
+    # non-GET request to the in-process ring buffer for operator
+    # review via /audit/recent. GET excluded so the buffer stays
+    # focused on writes.
+    @app.middleware("http")
+    async def audit_log_middleware(request, call_next):
+        response = await call_next(request)
+        try:
+            method = request.method
+            if method != "GET" and method != "HEAD":
+                ring = getattr(node, "_audit_log", None)
+                if ring is not None:
+                    requester = (
+                        node.identity.node_id
+                        if node.identity else None
+                    )
+                    request_id = response.headers.get(
+                        "X-Request-ID", "-",
+                    )
+                    ring.append(
+                        method=method,
+                        path=request.url.path,
+                        requester=requester,
+                        status_code=response.status_code,
+                        request_id=request_id,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "audit log middleware failed: %s", exc,
+            )
+        return response
+
     # X-Request-ID correlation middleware (ships 2026-05-09).
     # Every response carries an X-Request-ID header for log
     # correlation across distributed systems. Client-supplied
