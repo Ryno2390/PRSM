@@ -353,6 +353,19 @@ When QueryOrchestrator handles a job, payment escrow is released across all swar
 | `POST /compute/cleanup-stale` | Manual trigger for `PaymentEscrow.cleanup_expired_escrows` — refunds PENDING escrows whose age exceeds `default_timeout`. Returns `{cleaned: N}`. Use after lowering `PRSM_ESCROW_TIMEOUT_SEC` for immediate effect, or to drain stuck escrows pre-maintenance. 503 if PaymentEscrow not wired; 502 if cleanup raises. Backs the `prsm_cleanup_stale_escrows` MCP tool. |
 | `GET /content/arbitration/queue` | List pending content-attribution disputes from FilesystemArbitrationQueue (PRSM-PROV-1 Item 6). Returns `{pending: [...], total}` with each record containing new_cid, candidate_parent_cid, similarity, fingerprint_kind, flagged_at, proposal_id. 503 if queue not wired; 502 if list_pending raises. Backs the `prsm_arbitration_status` MCP tool. |
 
+### Idempotency-Key on `/compute/forge` (ships 2026-05-09)
+
+Operators retrying a failed POST due to network blip can pass an `Idempotency-Key` HTTP header (any opaque string). On first request the key is registered against the resulting `job_id` in JobHistoryStore. Subsequent requests with the same key return the cached job's status (HTTP 200 with `status: "idempotent_replay"`) without locking a new escrow or re-running compute.
+
+The mapping persists across node restarts when `PRSM_JOB_HISTORY_DIR` is set — operators get retry-safety even through restarts. When the store isn't wired, idempotency is silently disabled (the request proceeds normally).
+
+Edge cases:
+- **Unknown key:** falls through to normal forge logic + registers the new mapping on completion.
+- **Lookup raises** (corrupt index): logged at WARN, request proceeds normally.
+- **Dangling index entry** (job evicted from LRU + not on disk): treated as cache miss, proceeds normally.
+
+The `Idempotency-Key` cache hit short-circuits BEFORE the `agent_forge`-not-wired 503, so operators can recover prior job results even after a forge subsystem failure.
+
 ### Health probes
 
 - `GET /health` — minimal load-balancer probe; returns `{status: "ok", node_id}` without subsystem checks. Stays bit-identical to v1 to avoid breaking external monitors.

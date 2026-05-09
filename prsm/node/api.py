@@ -20,7 +20,7 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -1160,7 +1160,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         }
 
     @app.post("/compute/forge")
-    async def compute_forge(body: Dict[str, Any] = {}) -> Dict[str, Any]:
+    async def compute_forge(
+        body: Dict[str, Any] = {},
+        idempotency_key: Optional[str] = Header(
+            default=None, alias="Idempotency-Key",
+        ),
+    ) -> Dict[str, Any]:
         """Submit a query through the full Ring 1-10 Agent Forge pipeline.
 
         This is the end-to-end sovereign-edge AI path:
@@ -1182,6 +1187,36 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "privacy_level": "standard"     // none, standard, high, maximum
         }
         """
+        # Idempotency-Key handling FIRST (before any other checks):
+        # if header present + we've seen this key, return the cached
+        # job's status directly without locking a new escrow /
+        # re-running compute. Retry-safe POST for clients that may
+        # double-fire on network blips. Cache hit doesn't require
+        # agent_forge to be wired.
+        if idempotency_key and getattr(node, "_job_history", None) is not None:
+            try:
+                prior_job_id = node._job_history.lookup_by_idempotency_key(
+                    idempotency_key,
+                )
+                if prior_job_id:
+                    prior_record = node._job_history.get(prior_job_id)
+                    if prior_record is not None:
+                        return {
+                            "status": "idempotent_replay",
+                            "job_id": prior_job_id,
+                            "history": prior_record.to_dict(),
+                            "note": (
+                                "Returning cached result from prior request "
+                                "with same Idempotency-Key. No new escrow "
+                                "locked; no compute re-run."
+                            ),
+                        }
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Idempotency lookup raised; proceeding with "
+                    "fresh forge: %s", exc,
+                )
+
         if not hasattr(node, 'agent_forge') or node.agent_forge is None:
             raise HTTPException(
                 status_code=503,
@@ -1221,6 +1256,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # JobHistoryStore so /compute/status/{job_id} can surface
         # richer state than the escrow lifecycle alone. Best-effort —
         # store may be None on operators that haven't wired it.
+        # When Idempotency-Key header is present, also register the
+        # key → job_id mapping so retries hit the cache path above.
         _job_started_at = _time_for_history.time()
         if hasattr(node, "_job_history") and node._job_history is not None:
             try:
@@ -1228,12 +1265,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     JobHistoryRecord as _JobRec,
                     JobStatus as _JobStat,
                 )
-                node._job_history.put(_JobRec(
+                _ip_record = _JobRec(
                     job_id=job_id,
                     query=query,
                     status=_JobStat.IN_PROGRESS,
                     started_at=_job_started_at,
-                ))
+                )
+                if idempotency_key:
+                    node._job_history.put_with_idempotency(
+                        _ip_record, idempotency_key=idempotency_key,
+                    )
+                else:
+                    node._job_history.put(_ip_record)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "JobHistoryStore put (IN_PROGRESS) failed for "

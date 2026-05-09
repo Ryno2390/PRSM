@@ -455,3 +455,55 @@ class TestJobHistoryStoreList:
         assert store.count(status_filter=JobStatus.COMPLETED) == 3
         assert store.count(status_filter=JobStatus.IN_PROGRESS) == 2
         assert store.count(status_filter=JobStatus.FAILED) == 0
+
+
+class TestJobHistoryStoreIdempotency:
+    """Idempotency-key index for retry-safe POST /compute/forge.
+
+    Operators retrying a failed POST due to network blip should
+    not double-charge their escrow. The store maintains a
+    secondary index {idempotency_key → job_id} so the forge
+    endpoint can detect replays and return the cached job.
+    """
+
+    def test_put_with_idempotency_records_mapping(self):
+        store = JobHistoryStore()
+        rec = _record("forge-abc")
+        store.put_with_idempotency(rec, idempotency_key="key-1")
+        # Record stored normally.
+        assert store.get("forge-abc") is not None
+        # Idempotency lookup returns the job_id.
+        assert store.lookup_by_idempotency_key("key-1") == "forge-abc"
+
+    def test_unknown_key_returns_none(self):
+        store = JobHistoryStore()
+        assert store.lookup_by_idempotency_key("never-seen") is None
+
+    def test_repeat_put_with_same_key_idempotent(self):
+        """Re-putting the same record with the same key is a no-op
+        (the existing record stays + the index stays mapped to
+        the same job_id). Caller gets bookkeeping safety."""
+        store = JobHistoryStore()
+        rec = _record("forge-abc")
+        store.put_with_idempotency(rec, idempotency_key="key-1")
+        store.put_with_idempotency(rec, idempotency_key="key-1")
+        assert store.lookup_by_idempotency_key("key-1") == "forge-abc"
+        assert store.size() == 1
+
+    def test_index_persisted_to_disk(self, tmp_path):
+        """Idempotency mapping must persist across node restarts —
+        otherwise a retry across restart double-charges the
+        escrow."""
+        store_a = JobHistoryStore(persist_dir=tmp_path)
+        rec = _record("forge-abc")
+        store_a.put_with_idempotency(rec, idempotency_key="key-1")
+        # Fresh store on same dir.
+        store_b = JobHistoryStore(persist_dir=tmp_path)
+        assert store_b.lookup_by_idempotency_key("key-1") == "forge-abc"
+
+    def test_put_without_idempotency_key_no_index_entry(self):
+        """Plain put() does not register an idempotency mapping —
+        only put_with_idempotency() does."""
+        store = JobHistoryStore()
+        store.put(_record("forge-abc"))
+        assert store.lookup_by_idempotency_key("forge-abc") is None

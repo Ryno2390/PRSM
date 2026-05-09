@@ -172,6 +172,9 @@ class JobHistoryStore:
         # OrderedDict preserves insertion order; move_to_end on
         # get() implements LRU semantics.
         self._records: "OrderedDict[str, JobHistoryRecord]" = OrderedDict()
+        # Idempotency-key → job_id index for retry-safe POSTs.
+        # Persisted alongside _records when persist_dir is set.
+        self._idempotency_index: Dict[str, str] = {}
 
         # Filesystem persistence (optional). When set, put() writes
         # through to disk + get() falls back to disk on memory miss.
@@ -213,10 +216,15 @@ class JobHistoryStore:
         """Scan persist_dir on init + populate in-memory LRU.
         Records are inserted in started_at-ascending order so the
         most-recently-started ends up LRU-newest. Corrupt files
-        are logged + skipped (fail-soft)."""
+        are logged + skipped (fail-soft). Idempotency index is
+        also rehydrated from _idempotency_index.json if present."""
         assert self._persist_dir is not None
         loaded: list = []
         for path in self._persist_dir.glob("*.json"):
+            # Skip the idempotency-index file — it has a different
+            # shape and is loaded separately below.
+            if path.name == "_idempotency_index.json":
+                continue
             try:
                 data = json.loads(path.read_text())
                 rec = JobHistoryRecord.from_dict(data)
@@ -232,6 +240,18 @@ class JobHistoryStore:
         # Apply LRU bound (in case disk has more than max_entries).
         while len(self._records) > self._max_entries:
             self._records.popitem(last=False)
+        # Rehydrate idempotency index.
+        idx_path = self._persist_dir / "_idempotency_index.json"
+        if idx_path.exists():
+            try:
+                disk = json.loads(idx_path.read_text())
+                if isinstance(disk, dict):
+                    self._idempotency_index.update(disk)
+            except Exception as e:
+                logger.warning(
+                    "JobHistoryStore: idempotency index rehydrate "
+                    "failed: %s", e,
+                )
 
     def _read_from_disk(self, job_id: str) -> Optional[JobHistoryRecord]:
         if self._persist_dir is None:
@@ -287,6 +307,59 @@ class JobHistoryStore:
 
     def size(self) -> int:
         return len(self._records)
+
+    def put_with_idempotency(
+        self,
+        record: JobHistoryRecord,
+        *,
+        idempotency_key: str,
+    ) -> None:
+        """Like ``put()`` but also registers the
+        idempotency_key → job_id mapping for retry-safe POST
+        flows. Repeat calls with same key + same record are a
+        no-op (existing mapping preserved)."""
+        if not idempotency_key:
+            raise ValueError("idempotency_key must be a non-empty string")
+        self.put(record)
+        self._idempotency_index[idempotency_key] = record.job_id
+        # Persist the index alongside records when configured.
+        if self._persist_dir is not None:
+            try:
+                idx_path = self._persist_dir / "_idempotency_index.json"
+                idx_path.write_text(json.dumps(self._idempotency_index))
+            except Exception as e:
+                logger.warning(
+                    "JobHistoryStore: idempotency index persist failed: %s",
+                    e,
+                )
+
+    def lookup_by_idempotency_key(self, key: str) -> Optional[str]:
+        """Return job_id mapped to ``key``, or None when unknown.
+
+        Falls back to disk if persist_dir is set + key not in
+        memory (e.g., after restart where _load_from_disk hasn't
+        rehydrated the index)."""
+        if not key:
+            return None
+        cached = self._idempotency_index.get(key)
+        if cached is not None:
+            return cached
+        if self._persist_dir is None:
+            return None
+        idx_path = self._persist_dir / "_idempotency_index.json"
+        if not idx_path.exists():
+            return None
+        try:
+            disk = json.loads(idx_path.read_text())
+            # Hydrate full index from disk to avoid repeated reads.
+            if isinstance(disk, dict):
+                self._idempotency_index.update(disk)
+                return self._idempotency_index.get(key)
+        except Exception as e:
+            logger.warning(
+                "JobHistoryStore: idempotency index read failed: %s", e,
+            )
+        return None
 
     def list(
         self,
