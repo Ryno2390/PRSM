@@ -75,6 +75,9 @@ def _node(*, escrows=0, history_size=0, claimable_wei=0,
         return_value=[MagicMock()] * arbitration_pending,
     )
     node._arbitration_queue = arb
+    # Default no cleanup task wired — tests that need one set
+    # _escrow_cleanup_task explicitly.
+    node._escrow_cleanup_task = None
     return node
 
 
@@ -140,6 +143,39 @@ class TestMetricsGauges:
 # ──────────────────────────────────────────────────────────────────────
 # Fail-soft: subsystem missing → metric absent or zero
 # ──────────────────────────────────────────────────────────────────────
+
+
+class TestCleanupTaskGauge:
+    """prsm_escrow_cleanup_task_running gauge — companion to the
+    cleanup_task_running field on /health/detailed. Lets operators
+    alert via Prometheus when the periodic_cleanup task crashes
+    silently."""
+
+    def test_gauge_emitted_when_task_running(self):
+        node = _node()
+        fake_task = MagicMock()
+        fake_task.done.return_value = False
+        node._escrow_cleanup_task = fake_task
+        body = _client(node).get("/metrics").text
+        assert "prsm_escrow_cleanup_task_running 1" in body
+
+    def test_gauge_emitted_zero_when_task_done(self):
+        """Done == crashed (the task is an infinite loop). Gauge
+        flips to 0 to alarm."""
+        node = _node()
+        fake_task = MagicMock()
+        fake_task.done.return_value = True
+        node._escrow_cleanup_task = fake_task
+        body = _client(node).get("/metrics").text
+        assert "prsm_escrow_cleanup_task_running 0" in body
+
+    def test_gauge_omitted_when_task_not_wired(self):
+        """No task attached → omit the gauge rather than emit
+        a misleading 0/1 value. Differentiates "we don't know"
+        from "definitely crashed"."""
+        node = _node()  # no _escrow_cleanup_task attr
+        body = _client(node).get("/metrics").text
+        assert "prsm_escrow_cleanup_task_running" not in body
 
 
 class TestMetricsFailSoft:

@@ -3533,6 +3533,27 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             logger.warning("metrics royalty probe failed: %s", exc)
 
+        # prsm_escrow_cleanup_task_running
+        cleanup_task = getattr(node, "_escrow_cleanup_task", None)
+        if cleanup_task is not None:
+            try:
+                running = 0 if cleanup_task.done() else 1
+                lines.append(
+                    "# HELP prsm_escrow_cleanup_task_running "
+                    "1 if escrow auto-refund cleanup task is alive, "
+                    "0 if crashed (alarm signal)"
+                )
+                lines.append(
+                    "# TYPE prsm_escrow_cleanup_task_running gauge"
+                )
+                lines.append(
+                    f"prsm_escrow_cleanup_task_running {running}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "metrics cleanup-task probe failed: %s", exc,
+                )
+
         # prsm_arbitration_pending_count
         try:
             arb = getattr(node, "_arbitration_queue", None)
