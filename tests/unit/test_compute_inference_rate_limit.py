@@ -28,8 +28,12 @@ def _client(node):
     return TestClient(create_api_app(node, enable_security=False))
 
 
-def setup_function():
-    """Reset all rate-limit buckets between tests."""
+@pytest.fixture(autouse=True)
+def _reset_buckets():
+    """Reset all rate-limit buckets between tests (pytest fixture
+    fires for both module-level tests AND class methods)."""
+    reset_global_bucket()
+    yield
     reset_global_bucket()
 
 
@@ -90,6 +94,55 @@ class TestInferenceRateLimit:
 # ──────────────────────────────────────────────────────────────────────
 # Independent buckets — forge vs inference
 # ──────────────────────────────────────────────────────────────────────
+
+
+class TestStreamSharesInferenceBucket:
+    """/compute/inference/stream uses the same "inference" bucket
+    as /compute/inference — single requester's combined RPS across
+    both endpoints is capped together."""
+
+    def test_stream_endpoint_429s_after_burst(self):
+        """cap=2/sec, burst=2: third stream request rejects."""
+        node = _node()
+        with patch.dict(os.environ, {
+            "PRSM_INFERENCE_MAX_RPS_PER_REQUESTER": "2",
+        }):
+            client = _client(node)
+            for _ in range(2):
+                resp = client.post(
+                    "/compute/inference/stream",
+                    json={"prompt": "x", "model_id": "m"},
+                )
+                assert resp.status_code == 503  # cap not exceeded
+            resp = client.post(
+                "/compute/inference/stream",
+                json={"prompt": "x", "model_id": "m"},
+            )
+            assert resp.status_code == 429
+            assert "/compute/inference/stream" in resp.json()["detail"]
+
+    def test_stream_drains_inference_bucket(self):
+        """Hitting /compute/inference 1× drains 1 token from the
+        inference bucket; subsequent /compute/inference/stream
+        request sees only burst-1 capacity available."""
+        node = _node()
+        with patch.dict(os.environ, {
+            "PRSM_INFERENCE_MAX_RPS_PER_REQUESTER": "2",
+        }):
+            client = _client(node)
+            # Drain 2 from inference (cap reached).
+            for _ in range(2):
+                resp = client.post(
+                    "/compute/inference",
+                    json={"prompt": "x", "model_id": "m"},
+                )
+                assert resp.status_code == 503
+            # Stream request now hits 429 (shared bucket exhausted).
+            resp = client.post(
+                "/compute/inference/stream",
+                json={"prompt": "x", "model_id": "m"},
+            )
+            assert resp.status_code == 429
 
 
 class TestSeparateBuckets:
