@@ -125,6 +125,56 @@ class TestStatusFilterPassthrough:
         assert "4xx" in result
 
     @pytest.mark.asyncio
+    async def test_requester_filter_propagates(self):
+        captured = {}
+
+        async def fake_call_node_api(method, path, data=None):
+            captured["path"] = path
+            return {
+                "entries": [],
+                "total": 5,
+                "total_matched": 0,
+                "requester_filter": "node-a",
+                "offset": 0,
+                "limit": 20,
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            await handle_prsm_audit_recent({"requester": "node-a"})
+        assert "requester=node-a" in captured["path"]
+
+    @pytest.mark.asyncio
+    async def test_combined_filter_propagates(self):
+        captured = {}
+
+        async def fake_call_node_api(method, path, data=None):
+            captured["path"] = path
+            return {
+                "entries": [],
+                "total": 5,
+                "total_matched": 0,
+                "status_filter": "4xx",
+                "requester_filter": "node-a",
+                "offset": 0,
+                "limit": 20,
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_audit_recent({
+                "status": "4xx",
+                "requester": "node-a",
+            })
+        assert "status=4xx" in captured["path"]
+        assert "requester=node-a" in captured["path"]
+        # Filter context surfaces both in render.
+        assert "status=4xx" in result
+        assert "requester=node-a" in result
+
+    @pytest.mark.asyncio
     async def test_empty_filter_result_friendly_message(self):
         async def fake_call_node_api(method, path, data=None):
             return {

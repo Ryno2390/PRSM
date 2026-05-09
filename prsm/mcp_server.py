@@ -667,6 +667,13 @@ TOOLS = [
                         "'5xx'). Useful for drilling into errors."
                     ),
                 },
+                "requester": {
+                    "type": "string",
+                    "description": (
+                        "Optional exact-match filter on requester "
+                        "node/identity. Composes with status filter."
+                    ),
+                },
             },
         },
     ),
@@ -2423,6 +2430,8 @@ async def handle_prsm_audit_recent(
         params.append(f"offset={arguments['offset']}")
     if "status" in arguments and arguments["status"]:
         params.append(f"status={arguments['status']}")
+    if "requester" in arguments and arguments["requester"]:
+        params.append(f"requester={arguments['requester']}")
     path = "/audit/recent?" + "&".join(params)
 
     try:
@@ -2441,11 +2450,18 @@ async def handle_prsm_audit_recent(
     total = result["total"]
     total_matched = result.get("total_matched")  # only present with filter
     status_filter = result.get("status_filter")
+    requester_filter = result.get("requester_filter")
+    filters_applied = []
+    if status_filter:
+        filters_applied.append(f"status={status_filter}")
+    if requester_filter:
+        filters_applied.append(f"requester={requester_filter}")
+    filter_str = ", ".join(filters_applied) if filters_applied else None
     if not entries:
-        if status_filter:
+        if filter_str:
             return (
-                f"No state-changing requests matched status filter "
-                f"{status_filter!r} (buffer total: {total})."
+                f"No state-changing requests matched filter "
+                f"({filter_str}) (buffer total: {total})."
             )
         return (
             f"No state-changing requests recorded in audit ring "
@@ -2455,9 +2471,11 @@ async def handle_prsm_audit_recent(
     header_parts = [f"PRSM Audit Log (showing {len(entries)}"]
     if total_matched is not None:
         header_parts.append(
-            f" of {total_matched} matched, {total} total, "
-            f"filter={status_filter})"
+            f" of {total_matched} matched, {total} total"
         )
+        if filter_str:
+            header_parts.append(f", filter={filter_str}")
+        header_parts.append(")")
     else:
         header_parts.append(f" of {total})")
     lines = [
