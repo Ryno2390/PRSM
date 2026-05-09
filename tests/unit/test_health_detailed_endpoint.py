@@ -326,6 +326,53 @@ class TestPaymentEscrowCleanupHealthProbe:
             escrow["cleanup_task_running"] is None
 
 
+class TestHeartbeatSchedulerSubsystem:
+    """heartbeat_scheduler subsystem entry on /health/detailed.
+    Similar lifecycle-watch pattern as the cleanup_task probe on
+    payment_escrow — operators detect silent crash of the
+    HeartbeatScheduler via task.done() check.
+    """
+
+    def test_subsystem_present_when_scheduler_wired(self):
+        node = _node_full()
+        scheduler = MagicMock()
+        scheduler.interval_seconds = 900
+        node._heartbeat_scheduler = scheduler
+        fake_task = MagicMock()
+        fake_task.done.return_value = False
+        node._heartbeat_scheduler_task = fake_task
+        resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        assert "heartbeat_scheduler" in body["subsystems"]
+        hb = body["subsystems"]["heartbeat_scheduler"]
+        assert hb["available"] is True
+        assert hb["task_running"] is True
+        assert hb["interval_seconds"] == 900
+
+    def test_subsystem_flags_silent_crash(self):
+        node = _node_full()
+        scheduler = MagicMock()
+        scheduler.interval_seconds = 900
+        node._heartbeat_scheduler = scheduler
+        fake_task = MagicMock()
+        fake_task.done.return_value = True
+        node._heartbeat_scheduler_task = fake_task
+        resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        hb = body["subsystems"]["heartbeat_scheduler"]
+        assert hb["task_running"] is False
+
+    def test_subsystem_not_wired_when_scheduler_absent(self):
+        node = _node_full()
+        node._heartbeat_scheduler = None
+        node._heartbeat_scheduler_task = None
+        resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        hb = body["subsystems"].get("heartbeat_scheduler")
+        if hb is not None:
+            assert hb["available"] is False
+
+
 class TestHealthDetailedFailSoft:
     def test_subsystem_check_raising_does_not_500(self):
         """If a subsystem health probe raises (e.g., RPC down),

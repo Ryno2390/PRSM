@@ -3783,6 +3783,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "available": False, "status": "not_wired",
             }
 
+        # HeartbeatScheduler (optional). Same task-liveness pattern
+        # as payment_escrow's cleanup_task — operators detect
+        # silent crash of the scheduler.
+        heartbeat = getattr(node, "_heartbeat_scheduler", None)
+        if heartbeat is not None:
+            entry = {"available": True, "status": "ok"}
+            entry["interval_seconds"] = getattr(
+                heartbeat, "interval_seconds", None,
+            )
+            hb_task = getattr(node, "_heartbeat_scheduler_task", None)
+            if hb_task is not None:
+                try:
+                    entry["task_running"] = not hb_task.done()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "heartbeat task probe raised: %s", exc,
+                    )
+            subsystems["heartbeat_scheduler"] = entry
+        elif hasattr(node, "_heartbeat_scheduler"):
+            # Explicitly None means "operator opted out / unwired"
+            subsystems["heartbeat_scheduler"] = {
+                "available": False, "status": "not_wired",
+            }
+
         # Aggregate status.
         core = ["ftns_ledger", "payment_escrow"]
         optional = ["job_history", "royalty_distributor"]
