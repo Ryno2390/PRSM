@@ -12,6 +12,7 @@ Security Features (Phase 4.2):
 - OpenAPI specification
 """
 
+import json
 import logging
 import os
 import time as _time_for_history
@@ -1294,6 +1295,176 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "metadata": dict(escrow.metadata or {}),
             }
         return body
+
+    @app.get("/compute/status/{job_id}/stream")
+    async def compute_status_stream(job_id: str):
+        """SSE-streaming sibling of /compute/status/{job_id}.
+
+        Closes the last B8 deferred sub-item: clients can render
+        IN_PROGRESS → COMPLETED transitions live without polling
+        the GET endpoint.
+
+        Polling-based v1: server polls JobHistoryStore +
+        PaymentEscrow at PRSM_STATUS_STREAM_POLL_SEC interval
+        (default 0.5s), emits an SSE event whenever the snapshot
+        changes (de-duplicated by JSON equality), and closes the
+        connection on terminal status (history COMPLETED/FAILED/
+        CANCELLED OR escrow RELEASED/REFUNDED) OR after
+        PRSM_STATUS_STREAM_TIMEOUT_SEC (default 1800s = 30min).
+
+        Wire format:
+            event: status
+            data: {"job_id": "...", "history": {...},
+                   "escrow": {...}}
+
+            event: terminal
+            data: {"job_id": "...", "reason": "completed"|
+                   "history_terminal"|"escrow_terminal"|"timeout"}
+
+        `event: terminal` is the only terminal event — the server
+        closes the connection after emitting it. Clients can
+        re-subscribe to keep watching past a timeout.
+        """
+        from prsm.node.job_history import JobStatus
+        from prsm.node.payment_escrow import EscrowStatus
+
+        history = getattr(node, "_job_history", None)
+        escrow_svc = getattr(node, "_payment_escrow", None)
+
+        if history is None and escrow_svc is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Neither JobHistoryStore nor PaymentEscrow "
+                    "is initialized on this node."
+                ),
+            )
+
+        # Initial existence check — 404 fast if neither has the job.
+        initial_history = history.get(job_id) if history else None
+        initial_escrow = (
+            escrow_svc.get_escrow(job_id) if escrow_svc else None
+        )
+        if initial_history is None and initial_escrow is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No history or escrow record for job_id={job_id!r}."
+                ),
+            )
+
+        poll_raw = os.getenv("PRSM_STATUS_STREAM_POLL_SEC", "0.5").strip()
+        try:
+            poll_sec = float(poll_raw) if poll_raw else 0.5
+            if poll_sec <= 0:
+                poll_sec = 0.5
+        except ValueError:
+            poll_sec = 0.5
+
+        timeout_raw = os.getenv(
+            "PRSM_STATUS_STREAM_TIMEOUT_SEC", "1800",
+        ).strip()
+        try:
+            timeout_sec = float(timeout_raw) if timeout_raw else 1800.0
+            if timeout_sec <= 0:
+                timeout_sec = 1800.0
+        except ValueError:
+            timeout_sec = 1800.0
+
+        TERMINAL_HISTORY = {
+            JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED,
+        }
+        TERMINAL_ESCROW = {
+            EscrowStatus.RELEASED, EscrowStatus.REFUNDED,
+        }
+
+        def _snapshot():
+            h = history.get(job_id) if history else None
+            e = escrow_svc.get_escrow(job_id) if escrow_svc else None
+            payload = {"job_id": job_id}
+            if h is not None:
+                payload["history"] = h.to_dict()
+            if e is not None:
+                payload["escrow"] = {
+                    "escrow_id": e.escrow_id,
+                    "status": e.status.value,
+                    "amount_ftns": e.amount,
+                    "completed_at": e.completed_at,
+                }
+            return payload, h, e
+
+        def _terminal_reason(h, e):
+            if h is not None and h.status in TERMINAL_HISTORY:
+                return (
+                    h.status.value if h.status == JobStatus.COMPLETED
+                    else "history_terminal"
+                )
+            if e is not None and e.status in TERMINAL_ESCROW:
+                return "escrow_terminal"
+            return None
+
+        # Pre-built initial payload from the existence-check reads
+        # so the first snapshot doesn't double-poll.
+        def _build_payload(h, e):
+            payload = {"job_id": job_id}
+            if h is not None:
+                payload["history"] = h.to_dict()
+            if e is not None:
+                payload["escrow"] = {
+                    "escrow_id": e.escrow_id,
+                    "status": e.status.value,
+                    "amount_ftns": e.amount,
+                    "completed_at": e.completed_at,
+                }
+            return payload
+
+        async def _generate():
+            import asyncio as _asyncio
+            last_payload_json = None
+            start = _time_for_history.time()
+            # Use the existence-check reads as the first snapshot
+            # to avoid a redundant get() on the loop's first pass.
+            h, e = initial_history, initial_escrow
+            first_pass = True
+            while True:
+                if not first_pass:
+                    try:
+                        _payload, h, e = _snapshot()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "compute_status_stream snapshot raised for "
+                            "job_id=%s: %s", job_id, exc,
+                        )
+                        yield (
+                            "event: error\n"
+                            f"data: {json.dumps({'error': str(exc)})}\n\n"
+                        )
+                        return
+                payload = _build_payload(h, e)
+                payload_json = json.dumps(payload, sort_keys=True)
+                if payload_json != last_payload_json:
+                    yield f"event: status\ndata: {payload_json}\n\n"
+                    last_payload_json = payload_json
+                reason = _terminal_reason(h, e)
+                if reason is not None:
+                    yield (
+                        "event: terminal\n"
+                        f"data: {json.dumps({'job_id': job_id, 'reason': reason})}\n\n"
+                    )
+                    return
+                if _time_for_history.time() - start >= timeout_sec:
+                    yield (
+                        "event: terminal\n"
+                        f"data: {json.dumps({'job_id': job_id, 'reason': 'timeout'})}\n\n"
+                    )
+                    return
+                first_pass = False
+                await _asyncio.sleep(poll_sec)
+
+        return StreamingResponse(
+            _generate(),
+            media_type="text/event-stream",
+        )
 
     @app.post("/compute/cancel/{job_id}")
     async def compute_cancel(job_id: str) -> Dict[str, Any]:
