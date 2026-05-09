@@ -3628,18 +3628,37 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     1 for e in escrow_svc._escrows.values()
                     if e.status.value == "pending"
                 )
-                subsystems["payment_escrow"] = {
+                entry = {
                     "available": True, "status": "ok",
                     "pending_count": pending_count,
                     "default_timeout_sec": getattr(
                         escrow_svc, "default_timeout", None,
                     ),
                 }
+                # Cleanup-task health probe: the periodic_cleanup
+                # task is an infinite asyncio loop; if .done() ever
+                # returns True it's because the task crashed
+                # (raised, was cancelled, or otherwise terminated).
+                # Operators see cleanup_task_running == False as
+                # the silent-failure signal.
+                cleanup_task = getattr(
+                    node, "_escrow_cleanup_task", None,
+                )
+                if cleanup_task is not None:
+                    try:
+                        entry["cleanup_task_running"] = (
+                            not cleanup_task.done()
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(
+                            "cleanup_task probe raised: %s", exc,
+                        )
             except Exception as exc:  # noqa: BLE001
-                subsystems["payment_escrow"] = {
+                entry = {
                     "available": False, "status": "error",
                     "error": str(exc),
                 }
+            subsystems["payment_escrow"] = entry
         else:
             subsystems["payment_escrow"] = {
                 "available": False, "status": "not_wired",

@@ -277,6 +277,55 @@ class TestHealthDetailedCanonicalMatch:
         assert resp.status_code == 200
 
 
+class TestPaymentEscrowCleanupHealthProbe:
+    """payment_escrow subsystem entry surfaces whether the
+    periodic_cleanup task is running. Catches the silent-crash
+    case where the cleanup loop dies + escrows stop auto-refunding.
+    """
+
+    def test_running_field_true_when_task_active(self):
+        """When _escrow_cleanup_task is set + not done, the subsystem
+        entry includes cleanup_task_running: True."""
+        node = _node_full()
+        # Simulate a running task.
+        fake_task = MagicMock()
+        fake_task.done.return_value = False
+        node._escrow_cleanup_task = fake_task
+        resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        escrow = body["subsystems"]["payment_escrow"]
+        assert escrow.get("cleanup_task_running") is True
+
+    def test_running_field_false_when_task_done(self):
+        """If the cleanup task has completed (likely crashed since
+        it's an infinite loop), surface cleanup_task_running: False
+        so operators see the silent failure."""
+        node = _node_full()
+        fake_task = MagicMock()
+        fake_task.done.return_value = True
+        node._escrow_cleanup_task = fake_task
+        resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        escrow = body["subsystems"]["payment_escrow"]
+        assert escrow.get("cleanup_task_running") is False
+
+    def test_running_field_absent_when_task_not_wired(self):
+        """If the node hasn't started its cleanup task yet
+        (e.g., test fixtures, single-shot scripts), the field is
+        absent or null rather than False — signals "we don't know"
+        rather than "definitely crashed"."""
+        node = _node_full()
+        # No _escrow_cleanup_task attr set.
+        if hasattr(node, "_escrow_cleanup_task"):
+            del node._escrow_cleanup_task
+        resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        escrow = body["subsystems"]["payment_escrow"]
+        # Either absent or null/None. Both acceptable.
+        assert "cleanup_task_running" not in escrow or \
+            escrow["cleanup_task_running"] is None
+
+
 class TestHealthDetailedFailSoft:
     def test_subsystem_check_raising_does_not_500(self):
         """If a subsystem health probe raises (e.g., RPC down),
