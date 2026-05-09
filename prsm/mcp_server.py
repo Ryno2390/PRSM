@@ -506,6 +506,49 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_arbitration_preview_resolution",
+        description=(
+            "Compose a dispute-resolution preview from the AI side "
+            "panel. Composer-only — DOES NOT call queue.resolve(). "
+            "Returns the would-be-applied resolution + conflict-"
+            "with-existing detection so council members can confirm "
+            "intent before signing on-chain governance proposals "
+            "separately. Local-resolve auth model is pending council "
+            "ratification; this composer is the safe surface until "
+            "that's settled."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "record_id": {
+                    "type": "string",
+                    "description": "Arbitration record ID.",
+                },
+                "decision": {
+                    "type": "string",
+                    "enum": [
+                        "upheld_parent",
+                        "rejected_parent",
+                        "insufficient",
+                    ],
+                    "description": (
+                        "Council decision on the disputed attribution."
+                    ),
+                },
+                "by_council": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Non-empty list of council member identifiers "
+                        "endorsing this decision."
+                    ),
+                    "minItems": 1,
+                },
+            },
+            "required": ["record_id", "decision", "by_council"],
+        },
+    ),
+    Tool(
         name="prsm_arbitration_record_detail",
         description=(
             "Fetch full context for a single content-attribution "
@@ -2056,6 +2099,91 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_arbitration_preview_resolution(
+    arguments: Dict[str, Any],
+) -> str:
+    """Handle prsm_arbitration_preview_resolution: composer-only
+    dry-run of a resolution proposal."""
+    record_id = arguments.get("record_id")
+    decision = arguments.get("decision")
+    by_council = arguments.get("by_council") or []
+    if not record_id or not decision or not by_council:
+        return (
+            "Missing required arguments. Need record_id, decision, "
+            "by_council. Use prsm_arbitration_status to list pending "
+            "records first."
+        )
+
+    body = {
+        "record_id": record_id,
+        "decision": decision,
+        "by_council": list(by_council),
+    }
+    try:
+        result = await _call_node_api(
+            "POST", "/content/arbitration/preview-resolution", body,
+        )
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    if "status" not in result:
+        detail = result.get("detail", "unknown error")
+        if "404" in detail or "No arbitration record" in detail:
+            return (
+                f"Record not found: {record_id}\n  Detail: {detail}"
+            )
+        return f"Preview composer failed.\n  Detail: {detail}"
+
+    record = result["record"]
+    proposed = result["proposed"]
+    current = result.get("current_resolution")
+    conflict = result.get("conflict_with_existing", False)
+
+    lines = [
+        f"PRSM Arbitration Resolution Preview (DRY_RUN)",
+        f"  Record ID:        {record_id}",
+        f"",
+        f"  Disputed CID:     {record.get('new_cid', '')}",
+        f"  Candidate parent: {record.get('candidate_parent_cid', '')}",
+        f"  Similarity:       {record.get('similarity', 0.0):.4f}",
+        f"  Fingerprint kind: {record.get('fingerprint_kind', '?')}",
+        f"",
+        f"  Proposed:",
+        f"    Decision:    {proposed['decision']}",
+        f"    By council:  {', '.join(proposed['by_council'])}",
+    ]
+    if current is not None:
+        lines.append("")
+        lines.append("  Current resolution (already on record):")
+        lines.append(f"    Decision:    {current.get('decision', '?')}")
+        cur_council = current.get("by_council", [])
+        lines.append(f"    By council:  {', '.join(cur_council) or '(none)'}")
+    if conflict:
+        lines.append("")
+        lines.append(
+            "  [!] CONFLICT: proposed decision differs from existing "
+            "resolution. Re-applying via queue.resolve() would be "
+            "rejected (the queue raises ValueError on conflicting "
+            "re-resolve). Reconcile with council before signing the "
+            "on-chain proposal."
+        )
+    elif current is not None:
+        lines.append("")
+        lines.append(
+            "  [-] No conflict (proposed matches existing resolution). "
+            "Re-applying via queue.resolve() would be a no-op."
+        )
+    lines.append("")
+    lines.append(
+        "  Note: composer-only artifact; does NOT call queue.resolve(). "
+        "Council member signs on-chain governance proposal separately."
+    )
+    return "\n".join(lines)
+
+
 async def handle_prsm_arbitration_record_detail(
     arguments: Dict[str, Any],
 ) -> str:
@@ -2702,6 +2830,7 @@ TOOL_HANDLERS = {
     "prsm_inference": handle_prsm_inference,
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
+    "prsm_arbitration_preview_resolution": handle_prsm_arbitration_preview_resolution,
     "prsm_arbitration_record_detail": handle_prsm_arbitration_record_detail,
     "prsm_arbitration_status": handle_prsm_arbitration_status,
     "prsm_canonical_check": handle_prsm_canonical_check,
