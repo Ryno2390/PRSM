@@ -287,3 +287,42 @@ class JobHistoryStore:
 
     def size(self) -> int:
         return len(self._records)
+
+    def list(
+        self,
+        *,
+        status_filter: Optional[JobStatus] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> list:
+        """Enumerate records most-recent-first (by started_at DESC),
+        with optional status filter + pagination. Used by
+        /compute/jobs to surface a paginated job list to operators
+        via the ``prsm_jobs_list`` MCP tool.
+
+        Sort by started_at (not LRU touch order) so a get() doesn't
+        re-order list output unexpectedly.
+        """
+        records = list(self._records.values())
+        if status_filter is not None:
+            records = [r for r in records if r.status == status_filter]
+        records.sort(key=lambda r: r.started_at, reverse=True)
+        if offset:
+            records = records[offset:]
+        if limit is not None:
+            records = records[:limit]
+        return records
+
+    def count(
+        self,
+        *,
+        status_filter: Optional[JobStatus] = None,
+    ) -> int:
+        """Total number of records matching the filter — for
+        pagination's `total` field. Cheaper than ``len(list(...))``
+        because it skips sort + slice."""
+        if status_filter is None:
+            return len(self._records)
+        return sum(
+            1 for r in self._records.values() if r.status == status_filter
+        )

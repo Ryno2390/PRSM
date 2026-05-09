@@ -1313,6 +1313,75 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             logger.error(f"Forge pipeline error: {e}")
             raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
+    @app.get("/compute/jobs")
+    async def compute_jobs_list(
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Paginated operator-side job list. Backs the
+        ``prsm_jobs_list`` MCP tool.
+
+        Query params:
+          - status: optional JobStatus filter (in_progress |
+            completed | failed | cancelled).
+          - limit: page size (1..100, default 50).
+          - offset: pagination offset, default 0.
+
+        Returns 503 if JobHistoryStore not wired, 422 on
+        validation errors. 200 returns
+        {jobs: [...], total: N, offset: X, limit: Y}.
+        """
+        from prsm.node.job_history import JobStatus
+
+        history = getattr(node, "_job_history", None)
+        if history is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "JobHistoryStore is not initialized on this "
+                    "node. Cannot list jobs."
+                ),
+            )
+
+        # Validate query params.
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0, got {offset}",
+            )
+        if limit <= 0 or limit > 100:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"limit must be in [1, 100], got {limit}. "
+                    f"Use offset to paginate further."
+                ),
+            )
+        status_filter = None
+        if status is not None:
+            try:
+                status_filter = JobStatus(status)
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"invalid status {status!r}. Allowed: "
+                        f"{[s.value for s in JobStatus]}"
+                    ),
+                )
+
+        records = history.list(
+            status_filter=status_filter, limit=limit, offset=offset,
+        )
+        total = history.count(status_filter=status_filter)
+        return {
+            "jobs": [r.to_dict() for r in records],
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+        }
+
     @app.get("/compute/status/{job_id}")
     async def compute_status(job_id: str) -> Dict[str, Any]:
         """Look up the status of a /compute/forge job by its job_id.

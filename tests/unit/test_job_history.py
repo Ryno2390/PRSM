@@ -361,3 +361,97 @@ class TestJobHistoryStorePersistence:
                 pytest.fail(
                     f"Filename traversal escaped persist_dir: {child}"
                 )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Enumeration / list surface (v2 — for /compute/jobs)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestJobHistoryStoreList:
+    """v2 enumeration surface: list() returns records most-recent-
+    first with optional status filter + pagination."""
+
+    def test_list_empty_returns_empty_list(self):
+        store = JobHistoryStore()
+        result = store.list()
+        assert result == []
+
+    def test_list_returns_most_recent_first(self):
+        store = JobHistoryStore()
+        # put in chronological order
+        store.put(_record("forge-1", started_at=100.0))
+        store.put(_record("forge-2", started_at=200.0))
+        store.put(_record("forge-3", started_at=300.0))
+        records = store.list()
+        assert [r.job_id for r in records] == [
+            "forge-3", "forge-2", "forge-1",
+        ]
+
+    def test_list_filter_by_status(self):
+        store = JobHistoryStore()
+        store.put(_record("forge-1", status=JobStatus.IN_PROGRESS))
+        store.put(_record("forge-2", status=JobStatus.COMPLETED))
+        store.put(_record("forge-3", status=JobStatus.FAILED))
+        store.put(_record("forge-4", status=JobStatus.IN_PROGRESS))
+        in_progress = store.list(status_filter=JobStatus.IN_PROGRESS)
+        assert {r.job_id for r in in_progress} == {"forge-1", "forge-4"}
+        completed = store.list(status_filter=JobStatus.COMPLETED)
+        assert [r.job_id for r in completed] == ["forge-2"]
+
+    def test_list_limit_caps_output_size(self):
+        store = JobHistoryStore()
+        for i in range(10):
+            store.put(_record(f"forge-{i}", started_at=float(i)))
+        result = store.list(limit=3)
+        assert len(result) == 3
+        # Most-recent-first: forge-9, forge-8, forge-7.
+        assert [r.job_id for r in result] == ["forge-9", "forge-8", "forge-7"]
+
+    def test_list_offset_skips_first_n(self):
+        store = JobHistoryStore()
+        for i in range(5):
+            store.put(_record(f"forge-{i}", started_at=float(i)))
+        # Skip first 2 → returns forge-2, forge-1, forge-0.
+        result = store.list(offset=2)
+        assert [r.job_id for r in result] == ["forge-2", "forge-1", "forge-0"]
+
+    def test_list_offset_and_limit_compose(self):
+        store = JobHistoryStore()
+        for i in range(10):
+            store.put(_record(f"forge-{i}", started_at=float(i)))
+        # offset=3, limit=2 → forge-6, forge-5.
+        result = store.list(offset=3, limit=2)
+        assert [r.job_id for r in result] == ["forge-6", "forge-5"]
+
+    def test_list_filter_combined_with_pagination(self):
+        store = JobHistoryStore()
+        for i in range(10):
+            status = (
+                JobStatus.COMPLETED if i % 2 == 0
+                else JobStatus.IN_PROGRESS
+            )
+            store.put(_record(
+                f"forge-{i}", status=status, started_at=float(i),
+            ))
+        # 5 IN_PROGRESS records (1, 3, 5, 7, 9). offset=1, limit=2.
+        result = store.list(
+            status_filter=JobStatus.IN_PROGRESS, offset=1, limit=2,
+        )
+        assert [r.job_id for r in result] == ["forge-7", "forge-5"]
+
+    def test_count_returns_total_matching_filter(self):
+        """count() returns the total number of records matching
+        the filter (for pagination total)."""
+        store = JobHistoryStore()
+        for i in range(5):
+            store.put(_record(
+                f"forge-{i}",
+                status=(
+                    JobStatus.COMPLETED if i < 3 else JobStatus.IN_PROGRESS
+                ),
+            ))
+        assert store.count() == 5
+        assert store.count(status_filter=JobStatus.COMPLETED) == 3
+        assert store.count(status_filter=JobStatus.IN_PROGRESS) == 2
+        assert store.count(status_filter=JobStatus.FAILED) == 0

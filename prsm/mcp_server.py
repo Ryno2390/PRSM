@@ -506,6 +506,42 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_jobs_list",
+        description=(
+            "List recent /compute/forge jobs from JobHistoryStore. "
+            "Backed by GET /compute/jobs. Most-recent-first by "
+            "started_at. Optional status filter (in_progress | "
+            "completed | failed | cancelled). Pagination via "
+            "offset + limit (max 100/page). Useful for operator "
+            "dashboards + 'find my last failed job' workflows."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "in_progress", "completed", "failed", "cancelled",
+                    ],
+                    "description": "Optional filter by job status.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Page size (1..100). Default 20.",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Pagination offset. Default 0.",
+                    "minimum": 0,
+                    "default": 0,
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_royalty_claim",
         description=(
             "Claim accumulated FTNS royalties from RoyaltyDistributor. "
@@ -1841,6 +1877,68 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_jobs_list(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_jobs_list tool call: enumerate /compute/forge
+    jobs with optional filter + pagination."""
+    params = []
+    if "status" in arguments:
+        params.append(f"status={arguments['status']}")
+    if "limit" in arguments:
+        params.append(f"limit={arguments['limit']}")
+    else:
+        params.append("limit=20")
+    if "offset" in arguments:
+        params.append(f"offset={arguments['offset']}")
+    path = "/compute/jobs"
+    if params:
+        path += "?" + "&".join(params)
+
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    if "jobs" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in detail.lower():
+            return (
+                f"JobHistoryStore not configured on this node.\n"
+                f"  Detail: {detail}"
+            )
+        return f"prsm_jobs_list failed.\n  Detail: {detail}"
+
+    jobs = result["jobs"]
+    total = result.get("total", 0)
+    offset = result.get("offset", 0)
+    limit = result.get("limit", 0)
+
+    if not jobs:
+        return f"No jobs match the filter (total={total})."
+
+    lines = [f"PRSM Jobs (showing {offset+1}–{offset+len(jobs)} of {total}):"]
+    for j in jobs:
+        ts = j.get("started_at")
+        ts_str = (
+            f"{int(ts) % 86400 // 3600:02d}:"
+            f"{int(ts) % 3600 // 60:02d}:{int(ts) % 60:02d}"
+            if isinstance(ts, (int, float)) else "????"
+        )
+        lines.append(
+            f"  {j['job_id']:<16}  "
+            f"{j['status']:<12}  "
+            f"started @ ~{ts_str}  "
+            f"{(j.get('query') or '')[:40]}"
+        )
+    if offset + len(jobs) < total:
+        lines.append(
+            f"  ... pass offset={offset+limit} to see next page"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_royalty_claim(arguments: Dict[str, Any]) -> str:
     """Handle prsm_royalty_claim tool call.
 
@@ -2018,6 +2116,7 @@ TOOL_HANDLERS = {
     "prsm_inference": handle_prsm_inference,
     "prsm_billing_status": handle_prsm_billing_status,
     "prsm_balance_check": handle_prsm_balance_check,
+    "prsm_jobs_list": handle_prsm_jobs_list,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
 }
