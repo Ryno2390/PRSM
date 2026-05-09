@@ -353,6 +353,17 @@ When QueryOrchestrator handles a job, payment escrow is released across all swar
 | `POST /compute/cleanup-stale` | Manual trigger for `PaymentEscrow.cleanup_expired_escrows` — refunds PENDING escrows whose age exceeds `default_timeout`. Returns `{cleaned: N}`. Use after lowering `PRSM_ESCROW_TIMEOUT_SEC` for immediate effect, or to drain stuck escrows pre-maintenance. 503 if PaymentEscrow not wired; 502 if cleanup raises. Backs the `prsm_cleanup_stale_escrows` MCP tool. |
 | `GET /content/arbitration/queue` | List pending content-attribution disputes from FilesystemArbitrationQueue (PRSM-PROV-1 Item 6). Returns `{pending: [...], total}` with each record containing new_cid, candidate_parent_cid, similarity, fingerprint_kind, flagged_at, proposal_id. 503 if queue not wired; 502 if list_pending raises. Backs the `prsm_arbitration_status` MCP tool. |
 
+### Per-job FTNS cap (`PRSM_MAX_FTNS_PER_JOB`, ships 2026-05-09)
+
+Cost-control feature for operators worried about misbehaving AI agents draining their balance via a single oversized request. Set `PRSM_MAX_FTNS_PER_JOB=N` (any positive float) to enforce a per-job ceiling. Requests with `budget_ftns > N` return HTTP 422 with a clear message before any escrow is locked.
+
+Behavior:
+- Unset (default) → no cap, v1 behavior preserved bit-identically.
+- Non-numeric / zero / negative values → cap silently disabled (log WARN).
+- Idempotent replays via `Idempotency-Key` bypass the cap (the cached job already settled).
+
+Tighten + restart to apply changes; existing IN_FLIGHT requests aren't re-checked.
+
 ### Idempotency-Key on `/compute/forge` (ships 2026-05-09)
 
 Operators retrying a failed POST due to network blip can pass an `Idempotency-Key` HTTP header (any opaque string). On first request the key is registered against the resulting `job_id` in JobHistoryStore. Subsequent requests with the same key return the cached job's status (HTTP 200 with `status: "idempotent_replay"`) without locking a new escrow or re-running compute.

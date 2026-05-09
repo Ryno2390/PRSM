@@ -1217,6 +1217,35 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "fresh forge: %s", exc,
                 )
 
+        # PRSM_MAX_FTNS_PER_JOB cap enforcement (cost-control).
+        # Default unlimited; non-numeric/zero/negative env values
+        # silently disable the cap (log WARN). Operators tune this
+        # when worried about misbehaving AI agents draining FTNS
+        # via single oversized requests. Fires BEFORE agent_forge
+        # availability check so an oversized request cleanly 422s
+        # even when the forge subsystem is down.
+        _cap_raw = os.getenv("PRSM_MAX_FTNS_PER_JOB", "").strip()
+        if _cap_raw:
+            try:
+                _cap = float(_cap_raw)
+                if _cap > 0:
+                    requested = float(body.get("budget_ftns", 10.0))
+                    if requested > _cap:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=(
+                                f"budget_ftns {requested} exceeds "
+                                f"PRSM_MAX_FTNS_PER_JOB cap of {_cap}. "
+                                f"Either lower the budget or have the "
+                                f"operator raise the cap."
+                            ),
+                        )
+            except ValueError:
+                logger.warning(
+                    "PRSM_MAX_FTNS_PER_JOB=%r not numeric; cap disabled",
+                    _cap_raw,
+                )
+
         if not hasattr(node, 'agent_forge') or node.agent_forge is None:
             raise HTTPException(
                 status_code=503,
