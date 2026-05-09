@@ -3490,6 +3490,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         limit: int = 50,
         offset: int = 0,
         status: Optional[str] = None,
+        requester: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Recent state-changing API requests for operator review.
 
@@ -3550,8 +3551,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 detail="Audit log not initialized on this node.",
             )
 
-        # Without a filter, return paginated as before.
-        if status_predicate is None:
+        # Compose filters: status_predicate AND requester_match
+        # both optional. When both absent, no filter — paginated
+        # ring directly.
+        any_filter = status_predicate is not None or requester is not None
+        if not any_filter:
             entries = ring.recent(limit=limit, offset=offset)
             return {
                 "entries": [e.to_dict() for e in entries],
@@ -3566,16 +3570,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # use cases on a 1024-entry ring.
         sweep_limit = min(1000, ring.max_entries())
         all_entries = ring.recent(limit=sweep_limit, offset=0)
-        matched = [e for e in all_entries if status_predicate(e.status_code)]
+
+        def _matches(e):
+            if status_predicate is not None and not status_predicate(
+                e.status_code
+            ):
+                return False
+            if requester is not None and e.requester != requester:
+                return False
+            return True
+
+        matched = [e for e in all_entries if _matches(e)]
         page = matched[offset:offset + limit]
-        return {
+        result = {
             "entries": [e.to_dict() for e in page],
             "total": ring.count(),
             "total_matched": len(matched),
             "offset": offset,
             "limit": limit,
-            "status_filter": status,
         }
+        if status is not None:
+            result["status_filter"] = status
+        if requester is not None:
+            result["requester_filter"] = requester
+        return result
 
     @app.get("/info")
     async def get_info() -> Dict[str, Any]:

@@ -213,6 +213,63 @@ class TestAuditEndpointStatusFilter:
         assert resp.status_code == 422
 
 
+class TestAuditEndpointRequesterFilter:
+    """?requester= filter narrows by exact requester match.
+    Operators investigating "what did this node/identity do" use it."""
+
+    def _seed(self, node):
+        node._audit_log.append(
+            method="POST", path="/x1", requester="node-a",
+            status_code=200, request_id="r1",
+        )
+        node._audit_log.append(
+            method="POST", path="/x2", requester="node-b",
+            status_code=200, request_id="r2",
+        )
+        node._audit_log.append(
+            method="POST", path="/x3", requester="node-a",
+            status_code=200, request_id="r3",
+        )
+        node._audit_log.append(
+            method="POST", path="/x4", requester=None,
+            status_code=200, request_id="r4",
+        )
+
+    def test_filter_by_requester_returns_only_matches(self):
+        node = _node()
+        self._seed(node)
+        resp = _client(node).get("/audit/recent?requester=node-a")
+        body = resp.json()
+        assert body["total_matched"] == 2
+        assert all(
+            e["requester"] == "node-a" for e in body["entries"]
+        )
+
+    def test_filter_combined_with_status(self):
+        node = _node()
+        self._seed(node)
+        # Add a 4xx for node-a so combined filter has a match.
+        node._audit_log.append(
+            method="POST", path="/x5", requester="node-a",
+            status_code=404, request_id="r5",
+        )
+        resp = _client(node).get(
+            "/audit/recent?requester=node-a&status=4xx"
+        )
+        body = resp.json()
+        assert body["total_matched"] == 1
+        assert body["entries"][0]["requester"] == "node-a"
+        assert body["entries"][0]["status_code"] == 404
+
+    def test_unknown_requester_returns_empty(self):
+        node = _node()
+        self._seed(node)
+        resp = _client(node).get("/audit/recent?requester=ghost")
+        body = resp.json()
+        assert body["total_matched"] == 0
+        assert body["entries"] == []
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Middleware auto-population
 # ──────────────────────────────────────────────────────────────────────
