@@ -17,10 +17,29 @@ Execute the full 4.1-4.8 mainnet ceremony sequence end-to-end on Base Sepolia. C
 
 **What you need:**
 
-1. Sepolia private key with ≥ 0.05 Sepolia ETH (testnet faucet: https://sepoliafaucet.com or Coinbase faucet at https://portal.cdp.coinbase.com/products/faucet)
-2. A second Sepolia address to act as the "Safe-equivalent" target for transferOwnership (can be a second hot key from MetaMask, or a real Safe deployed on Sepolia if you have one). Single-sig is fine for rehearsal.
-3. `BASESCAN_API_KEY` already in env (same key works for mainnet + Sepolia)
+1. Sepolia hot key `0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0` with 0.0248 Sepolia ETH (verified 2026-05-09; private key already in `contracts/.env` as `PRIVATE_KEY`)
+2. Sepolia Safe at `0xCb4Bfa18E5B166C2E13c18007b4F4E1b2CE8A889` — verified on-chain 2026-05-09 as Safe v1.4.1, threshold 1, sole owner `0xA3683EDDBed6622f132698D7DC36a7C2DAFe4Ed3` (Ledger). 1-of-1 is acceptable per ceremony plan §8 ("single-sig test wallet acting as Safe-equivalent"); rehearsal exercises Safe-UI compose + Ledger signing but not multi-sig threshold.
+3. `ETHERSCAN_API_KEY` already in `contracts/.env` (Hardhat reads it auto for the verify step; same key serves Basescan mainnet + Sepolia per the Etherscan multi-chain v2 API)
 4. Repo root checked out at the head commit
+5. Foundry installed (`cast --version` shows ≥ 1.7) — installer at https://foundry.paradigm.xyz if missing
+
+**Foundry / shell setup once at session start:**
+
+```bash
+# Foundry binaries live under ~/.foundry/bin; the installer added a
+# line to ~/.zshenv. Make sure the current shell has it:
+source ~/.zshenv
+
+# Source the .env once so PRIVATE_KEY + ETHERSCAN_API_KEY are present:
+cd /Users/ryneschultz/Documents/GitHub/PRSM/contracts
+set -a; . ./.env; set +a
+cd ..
+
+# Sanity:
+cast --version
+echo "PRIVATE_KEY len: ${#PRIVATE_KEY}"      # expect 66 (0x + 64 hex)
+echo "ETHERSCAN_API_KEY len: ${#ETHERSCAN_API_KEY}"
+```
 
 ---
 
@@ -47,63 +66,55 @@ If any of the above fail, STOP and investigate before running rehearsal.
 
 ## Step 1 — Set rehearsal env vars
 
-Open a fresh shell. Set these env vars:
+In the shell that already sourced `contracts/.env` (Step 0 setup), add:
 
 ```bash
-# Sepolia deployer hot key (testnet burner; never share)
-# Format check: must start with 0x and be 66 chars total
-export PRIVATE_KEY="0x<YOUR_SEPOLIA_HOT_KEY_PRIVATE_KEY>"
-
-# Sepolia constructor args
-# These are the test addresses from the May 5 deploy. If you'd rather
-# use fresh ones, deploy a new test FTNS + Registry first; otherwise
-# the existing instances work fine for rehearsal purposes.
+# Sepolia constructor args (existing test instances from May 5 deploy)
 export FTNS_TOKEN_ADDRESS="0xF8d0c1AE75441d3C3Dd2A2420C0789043916412a"
-export NETWORK_TREASURY="0x40C81867987e1e07E5C8c9B3395aBE38EE95C911"
+# IMPORTANT: NETWORK_TREASURY must be the Safe (so distributor's
+# 2% network-fee wei flows to the Safe — same pattern as mainnet
+# where treasury == owner). The Safe-equivalent doubles as the
+# treasury for rehearsal-fidelity purposes.
+export NETWORK_TREASURY="0xCb4Bfa18E5B166C2E13c18007b4F4E1b2CE8A889"
 
-# Reuse existing Sepolia ProvenanceRegistry — same as mainnet ROYALTY_ONLY pattern.
-# (For the rehearsal we don't need V2 — V1 registry is fine since the
-# RoyaltyDistributor only cares that registry is a contract with the
-# expected interface; canonical-pin check is mainnet-only.)
+# Reuse existing Sepolia ProvenanceRegistry. v1 vs v2 doesn't matter
+# for rehearsal — the RoyaltyDistributor only stores registry as an
+# address; canonical-pin check is mainnet-only.
 export ROYALTY_ONLY=1
 export EXISTING_PROVENANCE_REGISTRY="0x2911f9a0a02896486CdF59d6d369764841DC0eA4"
 export FORCE_NONCANONICAL_REGISTRY=1   # bypass mainnet-pin check (Sepolia)
 export FORCE_NONCANONICAL_FTNS=1       # bypass mainnet-pin check (Sepolia)
 export FORCE_NONCANONICAL_TREASURY=1   # bypass mainnet-pin check (Sepolia)
 
-# Auto-verify post-deploy
+# Auto-verify post-deploy via Hardhat
 export AUTO_VERIFY=1
 
 # RPC (default works; override only if rate limited)
 # export BASE_SEPOLIA_RPC_URL="https://your-rpc-provider..."
 
-# "Safe-equivalent" target for transferOwnership (Step 4.4)
-# Pick a different Sepolia address you control — second MetaMask
-# account, second hot key, or real Safe. Single-sig is fine.
-export REHEARSAL_SAFE_EQUIVALENT="0x<YOUR_SECOND_SEPOLIA_ADDRESS>"
+# Safe-equivalent target for transferOwnership (Step 4)
+export REHEARSAL_SAFE_EQUIVALENT="0xCb4Bfa18E5B166C2E13c18007b4F4E1b2CE8A889"
 
 # Sanity check
 echo "Deployer key set:    $([ -n "$PRIVATE_KEY" ] && echo yes || echo NO)"
+echo "Etherscan key set:   $([ -n "$ETHERSCAN_API_KEY" ] && echo yes || echo NO)"
 echo "FTNS:                $FTNS_TOKEN_ADDRESS"
 echo "Registry:            $EXISTING_PROVENANCE_REGISTRY"
 echo "Treasury:            $NETWORK_TREASURY"
 echo "Safe-equivalent:     $REHEARSAL_SAFE_EQUIVALENT"
 ```
 
-Verify the deployer EOA derived from PRIVATE_KEY has Sepolia ETH:
+Verify the deployer EOA matches the expected `0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0`:
 
 ```bash
-# Pull the EOA address from PRIVATE_KEY using `cast`
 cast wallet address --private-key $PRIVATE_KEY
-# Note this output — you'll need it later as DEPLOYER_HOT_KEY_ADDRESS
+# Expect: 0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0
 
-# Check Sepolia ETH balance (must be ≥ 0.005 ETH per plan §2.3)
+# Balance was 0.0248 Sepolia ETH at 2026-05-09 verification.
+# Plan §2.3 requires ≥ 0.005 — comfortable margin.
 cast balance --rpc-url https://sepolia.base.org \
-  $(cast wallet address --private-key $PRIVATE_KEY) | \
-  cast --from-wei
+  0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0 | cast --from-wei
 ```
-
-If balance is too low: get Sepolia ETH from a faucet, then continue.
 
 ---
 
@@ -187,22 +198,38 @@ If `pendingOwner()` ≠ Safe-equivalent or `owner()` ≠ deployer: STOP. Investi
 
 ---
 
-## Step 5 — acceptOwnership (Safe-equivalent → confirms transfer)
+## Step 5 — acceptOwnership via Safe UI (Safe → confirms transfer)
 
-If REHEARSAL_SAFE_EQUIVALENT is a single-sig hot key:
+This step is executed via Safe UI, not `cast send`. The Safe is the entity that needs to call `acceptOwnership()` on the v2 distributor.
 
-```bash
-# Switch to the Safe-equivalent's private key for this one tx
-# (or use --private-key directly if you have it in env)
-SAFE_EQ_PRIVATE_KEY="0x<PRIVATE_KEY_FOR_REHEARSAL_SAFE_EQUIVALENT>"
-
-cast send $NEW_DIST_ADDRESS \
-  "acceptOwnership()" \
-  --rpc-url https://sepolia.base.org \
-  --private-key $SAFE_EQ_PRIVATE_KEY
+**5.1.** Open Safe UI at:
 ```
+https://app.safe.global/transactions/queue?safe=basesep:0xCb4Bfa18E5B166C2E13c18007b4F4E1b2CE8A889
+```
+(Note `basesep:` prefix for Base Sepolia network.)
 
-If REHEARSAL_SAFE_EQUIVALENT is a real Safe on Sepolia: use Safe UI at https://app.safe.global to compose `acceptOwnership()` call from the Safe; signers cosign per Safe threshold.
+**5.2.** Click "New transaction" → "Transaction Builder" (or "Contract interaction" depending on UI version).
+
+**5.3.** Compose:
+- **Address (To):** `<NEW_DIST_ADDRESS>` (the v2 RoyaltyDistributor, from Step 2)
+- **ABI:** paste the function signature OR upload — easiest path:
+  ```
+  [{"inputs":[],"name":"acceptOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"}]
+  ```
+- **Method:** `acceptOwnership` (no args)
+- **Value:** `0`
+
+**5.4.** Click "Add transaction" → "Create Batch" → "Send Batch".
+
+**5.5.** Sign with Ledger:
+- Connect Ledger via WebUSB / Bluetooth
+- Open Ethereum app on Ledger
+- Safe UI prompts "Confirm Transaction" → click; Ledger displays tx details
+- Verify on Ledger screen: target = v2 distributor address, function selector = `0x79ba5097` (`acceptOwnership()`)
+- Approve on Ledger
+- Safe UI submits the on-chain tx (single signer, threshold 1 — no co-signing needed)
+
+**5.6.** Wait for tx confirmation. Note the tx hash from Safe UI or Basescan.
 
 **Verify final ownership:**
 
@@ -213,16 +240,21 @@ EXPECT_FINAL_OWNER=$REHEARSAL_SAFE_EQUIVALENT \
   --network base-sepolia
 ```
 
-**Expected:** all checks pass. `owner()` == Safe-equivalent; `pendingOwner()` == 0x0.
+**Expected:** all checks pass. `owner()` == Safe; `pendingOwner()` == 0x0.
+
+**If acceptOwnership tx reverts:** most likely cause is `transferOwnership` (Step 4) didn't actually fire OR fired with wrong target. Re-run cast call from Step 4 to confirm `pendingOwner() == Safe`.
 
 ---
 
-## Step 6 — Test recoverStranded end-to-end
+## Step 6 — Test recoverStranded end-to-end (Safe UI)
 
-This is the unique-to-v2 path. Send some FTNS test tokens directly to the v2 distributor (a "stranded donation"), confirm `totalClaimable()` is unchanged, then call `recoverStranded` from the new owner and verify the donation is swept.
+This is the unique-to-v2 path. The deployer hot key first sends test FTNS directly to the v2 distributor (a "stranded donation"); the Safe then calls `recoverStranded(<destination>)` to sweep it. Verifies the recovery surface end-to-end.
+
+**6.1.** Verified 2026-05-09: deployer holds 99,999,980 test FTNS — no minting needed, proceed directly to donation.
+
+**6.2.** Send 1 FTNS test token directly to the v2 distributor (stranded donation):
 
 ```bash
-# Transfer 1 FTNS test token directly to the distributor (stranded donation)
 cast send $FTNS_TOKEN_ADDRESS \
   "transfer(address,uint256)" \
   $NEW_DIST_ADDRESS \
@@ -230,7 +262,7 @@ cast send $FTNS_TOKEN_ADDRESS \
   --rpc-url https://sepolia.base.org \
   --private-key $PRIVATE_KEY
 
-# Confirm distributor balance went up
+# Confirm donation arrived
 cast call $FTNS_TOKEN_ADDRESS "balanceOf(address)(uint256)" \
   $NEW_DIST_ADDRESS \
   --rpc-url https://sepolia.base.org
@@ -239,30 +271,45 @@ cast call $FTNS_TOKEN_ADDRESS "balanceOf(address)(uint256)" \
 # Confirm totalClaimable() is still 0 (donation didn't credit anyone)
 cast call $NEW_DIST_ADDRESS "totalClaimable()(uint256)" \
   --rpc-url https://sepolia.base.org
-# Expect: 0
+# Expect: 0  ← this is the key invariant — recoverStranded
+#              math depends on (balanceOf(this) - totalClaimable)
+```
 
-# Recover the stranded donation to the deployer hot key (test recovery)
-DEPLOYER_ADDR=$(cast wallet address --private-key $PRIVATE_KEY)
-cast send $NEW_DIST_ADDRESS \
-  "recoverStranded(address)" \
-  $DEPLOYER_ADDR \
-  --rpc-url https://sepolia.base.org \
-  --private-key $SAFE_EQ_PRIVATE_KEY
+**6.3.** Call `recoverStranded` from the Safe via Safe UI:
 
-# Confirm distributor balance is now 0
+- Safe UI: `https://app.safe.global/transactions/queue?safe=basesep:0xCb4Bfa18E5B166C2E13c18007b4F4E1b2CE8A889`
+- New transaction → Transaction Builder
+- **Address (To):** `<NEW_DIST_ADDRESS>`
+- **ABI:**
+  ```
+  [{"inputs":[{"internalType":"address","name":"to","type":"address"}],"name":"recoverStranded","outputs":[],"stateMutability":"nonpayable","type":"function"}]
+  ```
+- **Method:** `recoverStranded`
+- **Argument `to`:** `0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0` (deployer EOA — sweep destination)
+- Submit → Ledger sign → broadcast.
+
+**6.4.** Verify the donation moved:
+
+```bash
+# Distributor should be 0 now
 cast call $FTNS_TOKEN_ADDRESS "balanceOf(address)(uint256)" \
   $NEW_DIST_ADDRESS \
   --rpc-url https://sepolia.base.org
 # Expect: 0
 
-# Confirm deployer received the recovered token
+# Deployer balance should have increased by exactly 1 FTNS
 cast call $FTNS_TOKEN_ADDRESS "balanceOf(address)(uint256)" \
-  $DEPLOYER_ADDR \
+  0xBbEB1cb42F1D5ad05B46eE023D6e4871D813C9a0 \
   --rpc-url https://sepolia.base.org
-# Expect: increased by 1 FTNS
+# Expect: previous balance + 1000000000000000000
 ```
 
-If `recoverStranded` reverts or the balances don't move as expected: STOP and investigate. This indicates a contract-level issue that would also affect mainnet.
+**Failure modes to watch for:**
+- `recoverStranded` reverts with `OnlyOwner` → Safe didn't actually accept ownership in Step 5 (re-check `owner()`)
+- `recoverStranded` reverts with `NoStranded` → totalClaimable accounting drift; donation must be > totalClaimable for any to be considered "stranded" (verify §7 of `A-08-recoverStranded-design.md`)
+- Distributor balance stays 1 FTNS → Safe tx failed to broadcast; check Safe UI tx history for revert reason
+
+If any failure mode triggers: STOP. The same failure would occur on mainnet.
 
 ---
 
