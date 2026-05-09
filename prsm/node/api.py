@@ -3413,6 +3413,46 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "timestamp": tx.timestamp,
         }
 
+    @app.get("/audit/recent")
+    async def get_audit_recent(
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Recent state-changing API requests for operator review.
+
+        Returns most-recent-first; bounded ring buffer (default
+        1024 entries). State-changing means non-GET; GET requests
+        are not recorded to keep the buffer focused on writes.
+
+        Status:
+          503 — _audit_log not wired on this node
+          422 — limit out of [1, 1000] OR offset < 0
+          200 — {entries: [...], total, offset, limit}
+        """
+        if limit <= 0 or limit > 1000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 1000], got {limit}",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0, got {offset}",
+            )
+        ring = getattr(node, "_audit_log", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Audit log not initialized on this node.",
+            )
+        entries = ring.recent(limit=limit, offset=offset)
+        return {
+            "entries": [e.to_dict() for e in entries],
+            "total": ring.count(),
+            "offset": offset,
+            "limit": limit,
+        }
+
     @app.get("/info")
     async def get_info() -> Dict[str, Any]:
         """Static node metadata. Useful for operator triage +

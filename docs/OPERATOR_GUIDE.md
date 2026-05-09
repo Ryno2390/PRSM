@@ -437,6 +437,27 @@ Behavior:
 
 This middleware applies to ALL endpoints (the security-hardening middleware shipped earlier sits behind it); CORS rejection happens before any other middleware runs.
 
+### `GET /audit/recent` — operator audit log (ships 2026-05-09)
+
+In-memory ring buffer of state-changing API requests (non-GET). Each entry: `{timestamp, method, path, requester, status_code, request_id}`. Default 1024-entry capacity (older entries auto-evicted). Returns most-recent-first; pagination via `?limit=50&offset=0`.
+
+```bash
+# 50 most recent state changes
+curl http://localhost:8000/audit/recent
+
+# Older entries (page 2)
+curl 'http://localhost:8000/audit/recent?limit=50&offset=50'
+```
+
+Use cases:
+- "Did some user just call /compute/cancel?" → grep recent for path=/compute/cancel
+- "What happened around the time the alert fired?" → grep request_id from logs
+- "Trace the full sequence of writes from a specific requester" → filter by requester
+
+503 if `_audit_log` not wired (test fixtures, single-shot scripts); 422 on invalid `limit` (must be 1..1000) / `offset` (must be ≥ 0).
+
+In-process buffer only; restart loses the buffer. Filesystem persistence (similar to JobHistoryStore's v2 disk-backed mode) is the natural extension if persistence becomes necessary.
+
 ### `GET /info` — static node metadata (ships 2026-05-09)
 
 Single read-only endpoint surfacing version, active network, chain_id, node identity, and canonical contract addresses for the active `PRSM_NETWORK`. Useful for operator triage + integration code needing to know "what network is this node on" without parsing `/health/detailed`.
