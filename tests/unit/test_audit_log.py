@@ -157,6 +157,62 @@ class TestAuditEndpoint:
         assert resp.status_code == 422
 
 
+class TestAuditEndpointStatusFilter:
+    """?status=N filter narrows results by HTTP status code.
+    ?status=4xx / ?status=5xx accept range shortcuts."""
+
+    def _seed(self, node):
+        for code in (200, 200, 404, 422, 500, 502):
+            node._audit_log.append(
+                method="POST", path=f"/x{code}", requester="n1",
+                status_code=code, request_id=f"r{code}",
+            )
+
+    def test_exact_status_filter(self):
+        node = _node()
+        self._seed(node)
+        resp = _client(node).get("/audit/recent?status=404")
+        body = resp.json()
+        assert body["total_matched"] == 1
+        assert all(
+            e["status_code"] == 404 for e in body["entries"]
+        )
+
+    def test_4xx_range_filter(self):
+        node = _node()
+        self._seed(node)
+        resp = _client(node).get("/audit/recent?status=4xx")
+        body = resp.json()
+        # 404 + 422 = 2 entries.
+        assert body["total_matched"] == 2
+        codes = {e["status_code"] for e in body["entries"]}
+        assert codes == {404, 422}
+
+    def test_5xx_range_filter(self):
+        node = _node()
+        self._seed(node)
+        resp = _client(node).get("/audit/recent?status=5xx")
+        body = resp.json()
+        # 500 + 502 = 2 entries.
+        assert body["total_matched"] == 2
+        codes = {e["status_code"] for e in body["entries"]}
+        assert codes == {500, 502}
+
+    def test_no_filter_returns_all(self):
+        node = _node()
+        self._seed(node)
+        resp = _client(node).get("/audit/recent")
+        body = resp.json()
+        # 6 entries seeded; no filter so total_matched omitted
+        # OR matches total. Either way, all 6 in entries.
+        assert len(body["entries"]) == 6
+
+    def test_invalid_status_filter_returns_422(self):
+        node = _node()
+        resp = _client(node).get("/audit/recent?status=foo")
+        assert resp.status_code == 422
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Middleware auto-population
 # ──────────────────────────────────────────────────────────────────────

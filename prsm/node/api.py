@@ -3449,6 +3449,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     async def get_audit_recent(
         limit: int = 50,
         offset: int = 0,
+        status: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Recent state-changing API requests for operator review.
 
@@ -3456,10 +3457,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         1024 entries). State-changing means non-GET; GET requests
         are not recorded to keep the buffer focused on writes.
 
+        Optional ?status=N filter for exact status code, or
+        ?status=4xx / ?status=5xx for HTTP range shortcuts.
+
         Status:
           503 — _audit_log not wired on this node
-          422 — limit out of [1, 1000] OR offset < 0
-          200 — {entries: [...], total, offset, limit}
+          422 — limit out of [1, 1000] OR offset < 0 OR invalid
+                status filter
+          200 — {entries, total, offset, limit, total_matched?}
         """
         if limit <= 0 or limit > 1000:
             raise HTTPException(
@@ -3471,18 +3476,65 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=422,
                 detail=f"offset must be >= 0, got {offset}",
             )
+
+        # Parse optional status filter.
+        status_predicate = None
+        if status is not None:
+            s = status.strip().lower()
+            if s == "4xx":
+                status_predicate = lambda c: 400 <= c < 500
+            elif s == "5xx":
+                status_predicate = lambda c: 500 <= c < 600
+            elif s == "2xx":
+                status_predicate = lambda c: 200 <= c < 300
+            elif s == "3xx":
+                status_predicate = lambda c: 300 <= c < 400
+            else:
+                try:
+                    target = int(s)
+                    status_predicate = lambda c, t=target: c == t
+                except ValueError:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"invalid status filter {status!r}; "
+                            f"expected exact code (e.g. '404') or "
+                            f"range '2xx'/'3xx'/'4xx'/'5xx'"
+                        ),
+                    )
+
         ring = getattr(node, "_audit_log", None)
         if ring is None:
             raise HTTPException(
                 status_code=503,
                 detail="Audit log not initialized on this node.",
             )
-        entries = ring.recent(limit=limit, offset=offset)
+
+        # Without a filter, return paginated as before.
+        if status_predicate is None:
+            entries = ring.recent(limit=limit, offset=offset)
+            return {
+                "entries": [e.to_dict() for e in entries],
+                "total": ring.count(),
+                "offset": offset,
+                "limit": limit,
+            }
+
+        # With filter: pull a generous window then filter,
+        # paginate the result. Cap sweep at 1000 (recent()'s
+        # validation ceiling); good enough for practical filter
+        # use cases on a 1024-entry ring.
+        sweep_limit = min(1000, ring.max_entries())
+        all_entries = ring.recent(limit=sweep_limit, offset=0)
+        matched = [e for e in all_entries if status_predicate(e.status_code)]
+        page = matched[offset:offset + limit]
         return {
-            "entries": [e.to_dict() for e in entries],
+            "entries": [e.to_dict() for e in page],
             "total": ring.count(),
+            "total_matched": len(matched),
             "offset": offset,
             "limit": limit,
+            "status_filter": status,
         }
 
     @app.get("/info")
