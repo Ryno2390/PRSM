@@ -104,9 +104,15 @@ The 4 immutable args from `RoyaltyDistributor.sol` constructor:
 # Run from repo root with deployer hot key in env
 export DEPLOYER_PRIVATE_KEY="0x..."
 export FTNS_TOKEN_ADDRESS="0x5276a3756C85f2E9e46f6D34386167a209aa16e5"
-export PROVENANCE_REGISTRY_ADDRESS="0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf"
 export NETWORK_TREASURY="0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791"
 # ROYALTY_DISTRIBUTOR_OWNER unset → defaults to deployer hot key
+
+# A-08-specific: redeploy ONLY the RoyaltyDistributor against the
+# existing canonical ProvenanceRegistry V2. Without these env vars,
+# the script also redeploys ProvenanceRegistry (which would cost
+# extra gas + invalidate the existing creator/content registrations).
+export ROYALTY_ONLY=1
+export EXISTING_PROVENANCE_REGISTRY="0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf"
 
 cd contracts
 npx hardhat run scripts/deploy-provenance.js --network base
@@ -117,9 +123,11 @@ Output: a deploy manifest at `contracts/deployments/provenance-base-<timestamp>.
 - Existing ProvenanceRegistry address (re-listed, not re-deployed)
 - Constructor args used
 - Initial owner = deployer hot key
-- Verification status (Basescan source-verify result)
+- `deployMode: "royalty_only_redeploy"` field (auditor-readable)
+- `reusedContracts: ["ProvenanceRegistry"]` + `freshlyDeployedContracts: ["RoyaltyDistributor"]` (auditor-readable)
+- Verification status (Basescan source-verify result; ProvenanceRegistry verify is skipped since it was source-verified during its own ceremony)
 
-**Note:** the existing `deploy-provenance.js` script also re-deploys ProvenanceRegistry by default. For an A-08-only redeploy, **modify the script invocation** (or add a `--skip-registry` flag — TBD at execution time) to deploy only the RoyaltyDistributor against the existing ProvenanceRegistry. If the script doesn't currently support skipping registry, the founder must edit the deploy-provenance.js invocation manually before run-time.
+**Note:** the `ROYALTY_ONLY=1` flag was added to `deploy-provenance.js` 2026-05-09 specifically for this ceremony. It also adds a canonical-pin check on the registry address (mainnet rejects EXISTING_PROVENANCE_REGISTRY values that don't match the canonical V2 unless `FORCE_NONCANONICAL_REGISTRY=1` is set — same protection model as the existing FTNS + treasury pins).
 
 ### Step 4.2 — Source-verify on Basescan
 
@@ -337,7 +345,7 @@ The CR will reference this plan by ID + commit hash.
 
 These are deliberately unresolved at planning time; founder will close them at execution time.
 
-- **Q1.** Does `deploy-provenance.js` support skipping registry redeploy via flag? If not, founder edits the script body for the A-08-only run. Manual edit of a deploy script under time pressure is a P-something risk; the better path is to add `--royalty-only` flag to the script ahead of ceremony day. **Action item: add the flag in a pre-ceremony PR.**
+- **Q1.** ✅ **RESOLVED 2026-05-09.** `ROYALTY_ONLY=1` env-var flag added to `deploy-provenance.js` per the A-08 pre-work sprint. When set with `EXISTING_PROVENANCE_REGISTRY=<addr>`, the script reuses the existing registry instead of redeploying. Includes mainnet-canonical-pin protection: `EXISTING_PROVENANCE_REGISTRY` must match the canonical V2 address `0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf` (or `FORCE_NONCANONICAL_REGISTRY=1` override). No manual script edit under time pressure required.
 - **Q2.** Should Foundation pre-fund the v2 distributor with a small FTNS amount to test `recoverStranded` immediately post-ceremony, or wait for an organic donation? Default proposal: **don't pre-fund** — natural rollout exercise the path organically.
 - **Q3.** Should the ceremony day include a Pausable integration check (HIGH-3), or strictly A-08-only? Default proposal: A-08-only this ceremony; HIGH-3 in a future v3 deploy.
 

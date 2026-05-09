@@ -14,9 +14,35 @@
  *                                required before the Safe can call
  *                                recoverStranded — A-08 fix).
  *
+ *   ROYALTY_ONLY              - if "1": skip ProvenanceRegistry deploy
+ *                                and reuse an existing registry. Used
+ *                                for the A-08 v2 RoyaltyDistributor
+ *                                redeploy ceremony per
+ *                                docs/governance/2026-05-09-A-08-v2-redeploy-ceremony-plan.md.
+ *                                Requires EXISTING_PROVENANCE_REGISTRY.
+ *
+ *   EXISTING_PROVENANCE_REGISTRY - existing ProvenanceRegistry address
+ *                                  to wire the new RoyaltyDistributor
+ *                                  against. Required when ROYALTY_ONLY=1.
+ *                                  On mainnet, must match the canonical
+ *                                  V2 address (or set FORCE_NONCANONICAL_REGISTRY=1
+ *                                  to override).
+ *
+ *   FORCE_NONCANONICAL_FTNS=1     - bypass FTNS canonical-pin check
+ *   FORCE_NONCANONICAL_TREASURY=1 - bypass treasury canonical-pin check
+ *   FORCE_NONCANONICAL_REGISTRY=1 - bypass registry canonical-pin check
+ *                                   (only relevant when ROYALTY_ONLY=1)
+ *
+ *   AUTO_VERIFY=1            - auto-run hardhat verify post-deploy
+ *
  * Usage:
+ *   # Full deploy (registry + distributor):
  *   npx hardhat run scripts/deploy-provenance.js --network base-sepolia
- *   npx hardhat run scripts/deploy-provenance.js --network base
+ *
+ *   # A-08 v2 redeploy (royalty-only, against existing registry):
+ *   ROYALTY_ONLY=1 \
+ *   EXISTING_PROVENANCE_REGISTRY=0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf \
+ *     npx hardhat run scripts/deploy-provenance.js --network base
  *
  * Local smoke test (uses dummy addresses, in-process Hardhat network):
  *   FTNS_TOKEN_ADDRESS=0x0000000000000000000000000000000000000001 \
@@ -42,6 +68,15 @@ const CANONICAL_FTNS_BASE_MAINNET = "0x5276a3756C85f2E9e46f6D34386167a209aa16e5"
 // RoyaltyDistributor. Belt-and-suspenders mirror of the FTNS pin
 // above. Foundation Safe deployed 2026-05-04 (Phase 1.3 Task 8).
 const CANONICAL_FOUNDATION_SAFE_BASE_MAINNET = "0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791";
+
+// A-08 v2 redeploy ceremony pin: the canonical Base mainnet
+// ProvenanceRegistry V2 address. RoyaltyDistributor.registry is
+// immutable — a typo to a different registry contract would
+// permanently route royalty lookups elsewhere. Belt-and-suspenders
+// mirror of the FTNS + Safe pins above. Deployed 2026-05-06
+// (PRSM-CR-2026-05-06-2). Operator can override via
+// FORCE_NONCANONICAL_REGISTRY=1 if/when V3 is deployed.
+const CANONICAL_PROVENANCE_REGISTRY_V2_BASE_MAINNET = "0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf";
 
 const BASE_MAINNET_CHAIN_ID = 8453n;
 
@@ -207,13 +242,76 @@ async function main() {
     }
   }
 
-  // 1. Registry
-  console.log("\nDeploying ProvenanceRegistry…");
-  const Registry = await hre.ethers.getContractFactory("ProvenanceRegistry");
-  const registry = await Registry.deploy();
-  await registry.waitForDeployment();
-  const registryAddress = await registry.getAddress();
-  console.log(`  ProvenanceRegistry: ${registryAddress}`);
+  // 1. Registry — either deploy fresh OR reuse existing.
+  // ROYALTY_ONLY=1 path is the A-08 v2 RoyaltyDistributor redeploy
+  // ceremony (per docs/governance/2026-05-09-A-08-v2-redeploy-ceremony-plan.md).
+  // The existing ProvenanceRegistry stays canonical; we ship a new
+  // RoyaltyDistributor wired against it.
+  const royaltyOnly = process.env.ROYALTY_ONLY === "1";
+  let registryAddress;
+  if (royaltyOnly) {
+    const existingRegistry = process.env.EXISTING_PROVENANCE_REGISTRY;
+    if (!existingRegistry) {
+      throw new Error(
+        "ROYALTY_ONLY=1 requires EXISTING_PROVENANCE_REGISTRY env var " +
+        "(the address of the registry to wire the new RoyaltyDistributor against)",
+      );
+    }
+    let registryChecksum;
+    try {
+      registryChecksum = hre.ethers.getAddress(existingRegistry);
+    } catch (e) {
+      throw new Error(
+        `EXISTING_PROVENANCE_REGISTRY checksum failure: ${e.message}`,
+      );
+    }
+    if (registryChecksum === hre.ethers.ZeroAddress) {
+      throw new Error("EXISTING_PROVENANCE_REGISTRY is zero");
+    }
+    // Confirm bytecode at the address — guards against reusing a
+    // self-destructed or never-deployed registry.
+    const registryCode = await hre.ethers.provider.getCode(registryChecksum);
+    if (registryCode === "0x" || registryCode === "0x0") {
+      throw new Error(
+        `EXISTING_PROVENANCE_REGISTRY ${registryChecksum} has no bytecode ` +
+        `on network ${network}. ABORT — cannot wire RoyaltyDistributor ` +
+        `against a non-existent registry.`,
+      );
+    }
+    // On mainnet: refuse non-canonical registry unless override set.
+    // Same pattern as the FTNS + treasury canonical-pin checks.
+    if (
+      isMainnet &&
+      registryChecksum.toLowerCase() !==
+      CANONICAL_PROVENANCE_REGISTRY_V2_BASE_MAINNET.toLowerCase()
+    ) {
+      if (process.env.FORCE_NONCANONICAL_REGISTRY !== "1") {
+        throw new Error(
+          `EXISTING_PROVENANCE_REGISTRY=${registryChecksum} does not match ` +
+          `the canonical Base mainnet ProvenanceRegistry V2 at ` +
+          `${CANONICAL_PROVENANCE_REGISTRY_V2_BASE_MAINNET}. If this is ` +
+          `intentional (V3 deploy), set FORCE_NONCANONICAL_REGISTRY=1 to ` +
+          `override. Otherwise, FIX THE TYPO before proceeding.`,
+        );
+      }
+      console.log(`  ⚠️  using non-canonical registry (FORCE_NONCANONICAL_REGISTRY=1 set)`);
+    }
+    console.log(
+      `\nReusing existing ProvenanceRegistry (ROYALTY_ONLY=1):`,
+    );
+    console.log(`  ProvenanceRegistry: ${registryChecksum}`);
+    console.log(
+      `  bytecode: ${(registryCode.length / 2 - 1)} bytes ✓`,
+    );
+    registryAddress = registryChecksum;
+  } else {
+    console.log("\nDeploying ProvenanceRegistry…");
+    const Registry = await hre.ethers.getContractFactory("ProvenanceRegistry");
+    const registry = await Registry.deploy();
+    await registry.waitForDeployment();
+    registryAddress = await registry.getAddress();
+    console.log(`  ProvenanceRegistry: ${registryAddress}`);
+  }
 
   // 2. Distributor (using checksummed addresses from preflight)
   // L4 self-audit A-08: 4-arg constructor — initial owner defaults to
@@ -243,6 +341,7 @@ async function main() {
     chainId: chainIdActual.toString(),
     timestamp: new Date().toISOString(),
     deployer: deployer.address,
+    deployMode: royaltyOnly ? "royalty_only_redeploy" : "full",
     contracts: {
       ProvenanceRegistry: registryAddress,
       RoyaltyDistributor: distributorAddress,
@@ -250,6 +349,13 @@ async function main() {
       NetworkTreasury: treasuryChecksum,
     },
   };
+  // For A-08-style ceremonies, mark explicitly that the registry was
+  // reused rather than newly deployed — auditors reading the manifest
+  // post-ceremony can tell at a glance which contract is fresh.
+  if (royaltyOnly) {
+    manifest.reusedContracts = ["ProvenanceRegistry"];
+    manifest.freshlyDeployedContracts = ["RoyaltyDistributor"];
+  }
 
   const outDir = path.join(__dirname, "..", "deployments");
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
@@ -258,18 +364,23 @@ async function main() {
   console.log(`\nManifest saved → ${outFile}`);
 
   // 4. Optional: auto-verify on Basescan (only on real Base networks).
+  // In ROYALTY_ONLY mode, skip the ProvenanceRegistry verify target
+  // (it was deployed in a prior ceremony and is already source-verified).
   const verifyEnabled = process.env.AUTO_VERIFY === "1";
   const isBase = network === "base" || network === "base-sepolia";
   if (verifyEnabled && isBase) {
     console.log("\nVerifying on Basescan…");
-    const verifyTargets = [
-      { name: "ProvenanceRegistry", address: registryAddress, args: [] },
-      {
-        name: "RoyaltyDistributor",
-        address: distributorAddress,
-        args: [ftnsChecksum, registryAddress, treasuryChecksum, initialOwner],
-      },
-    ];
+    const verifyTargets = [];
+    if (!royaltyOnly) {
+      verifyTargets.push({
+        name: "ProvenanceRegistry", address: registryAddress, args: [],
+      });
+    }
+    verifyTargets.push({
+      name: "RoyaltyDistributor",
+      address: distributorAddress,
+      args: [ftnsChecksum, registryAddress, treasuryChecksum, initialOwner],
+    });
     for (const t of verifyTargets) {
       try {
         await hre.run("verify:verify", {
