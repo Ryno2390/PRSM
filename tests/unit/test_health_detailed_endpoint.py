@@ -197,6 +197,37 @@ class TestHealthDetailedCanonicalMatch:
         assert royalty["canonical_address"].lower() == \
             "0xfea9aeb99e02fdb799e2df3c9195dc4e5323df7e"
 
+    def test_ftns_ledger_canonical_match_true(self):
+        """Same canonical-match pattern applied to ftns_ledger
+        (the FTNS token contract address pin)."""
+        node = _node_full()
+        node.ftns_ledger.contract_address = (
+            "0x5276a3756C85f2E9e46f6D34386167a209aa16e5"
+        )
+        with patch.dict(__import__("os").environ, {"PRSM_NETWORK": "mainnet"}):
+            resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        ftns = body["subsystems"]["ftns_ledger"]
+        assert ftns["wired_address"].lower() == \
+            "0x5276a3756c85f2e9e46f6d34386167a209aa16e5"
+        assert ftns["canonical_address"].lower() == \
+            "0x5276a3756c85f2e9e46f6d34386167a209aa16e5"
+        assert ftns["canonical_match"] is True
+
+    def test_ftns_ledger_canonical_match_false_on_wrong_token(self):
+        """Pinning to a non-canonical token address (e.g., a stale
+        testnet token in a mainnet config) surfaces canonical_match
+        False."""
+        node = _node_full()
+        node.ftns_ledger.contract_address = (
+            "0xDEADbeefDEADbeefDEADbeefDEADbeefDEADbeef"
+        )
+        with patch.dict(__import__("os").environ, {"PRSM_NETWORK": "mainnet"}):
+            resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        ftns = body["subsystems"]["ftns_ledger"]
+        assert ftns["canonical_match"] is False
+
     def test_canonical_check_handles_unknown_network_gracefully(self):
         """If PRSM_NETWORK is set to a value with no canonical
         addresses (e.g., 'local'), canonical_match should be

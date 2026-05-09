@@ -3257,16 +3257,37 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             try:
                 addr = getattr(ftns_ledger, "_connected_address", None)
                 init = getattr(ftns_ledger, "_is_initialized", False)
-                subsystems["ftns_ledger"] = {
+                entry = {
                     "available": bool(init),
                     "status": "ok" if init else "uninitialized",
                     "connected_address": addr,
                 }
             except Exception as exc:  # noqa: BLE001
-                subsystems["ftns_ledger"] = {
+                entry = {
                     "available": False, "status": "error",
                     "error": str(exc),
                 }
+            # Canonical-match check on the FTNS token address.
+            wired_token = getattr(ftns_ledger, "contract_address", None)
+            if wired_token is not None:
+                entry["wired_address"] = wired_token
+                try:
+                    from prsm.config.networks import (
+                        get_network_config, _resolve_network_name,
+                    )
+                    cfg = get_network_config(_resolve_network_name())
+                    canonical = cfg.ftns_token
+                    if canonical is not None:
+                        entry["canonical_address"] = canonical
+                        entry["canonical_match"] = (
+                            wired_token.lower() == canonical.lower()
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "canonical-match lookup failed for "
+                        "ftns_ledger: %s", exc,
+                    )
+            subsystems["ftns_ledger"] = entry
         else:
             subsystems["ftns_ledger"] = {
                 "available": False, "status": "not_wired",
