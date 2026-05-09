@@ -3783,6 +3783,48 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "available": False, "status": "not_wired",
             }
 
+        # DRY helper for the 5 daemon subsystems sharing the
+        # task-liveness pattern (heartbeat + compensation_scheduler
+        # + 3 event watchers). Each daemon has a (daemon_attr,
+        # task_attr) pair on Node; the helper renders a uniform
+        # subsystem entry from them.
+        def _daemon_subsystem(name: str, daemon_attr: str, task_attr: str):
+            daemon = getattr(node, daemon_attr, None)
+            if daemon is None:
+                if hasattr(node, daemon_attr):
+                    subsystems[name] = {
+                        "available": False, "status": "not_wired",
+                    }
+                return
+            entry = {"available": True, "status": "ok"}
+            task = getattr(node, task_attr, None)
+            if task is not None:
+                try:
+                    entry["task_running"] = not task.done()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "%s task probe raised: %s", name, exc,
+                    )
+            subsystems[name] = entry
+
+        _daemon_subsystem(
+            "compensation_scheduler",
+            "_compensation_scheduler", "_compensation_scheduler_task",
+        )
+        _daemon_subsystem(
+            "key_distribution_watcher",
+            "_key_distribution_watcher", "_key_distribution_watcher_task",
+        )
+        _daemon_subsystem(
+            "storage_slashing_watcher",
+            "_storage_slashing_watcher", "_storage_slashing_watcher_task",
+        )
+        _daemon_subsystem(
+            "compensation_distributor_watcher",
+            "_compensation_distributor_watcher",
+            "_compensation_distributor_watcher_task",
+        )
+
         # HeartbeatScheduler (optional). Same task-liveness pattern
         # as payment_escrow's cleanup_task — operators detect
         # silent crash of the scheduler.

@@ -373,6 +373,66 @@ class TestHeartbeatSchedulerSubsystem:
             assert hb["available"] is False
 
 
+class TestRemainingDaemonSubsystems:
+    """Same daemon-lifecycle pattern applied to the remaining 4
+    long-running tasks: compensation_scheduler + 3 event watchers
+    (key_distribution, storage_slashing, compensation_distributor).
+    Operators detect silent crash on any of them via task_running.
+    """
+
+    def _setup(self, node, attr_pair, running=True):
+        scheduler_attr, task_attr = attr_pair
+        setattr(node, scheduler_attr, MagicMock())
+        fake_task = MagicMock()
+        fake_task.done.return_value = not running
+        setattr(node, task_attr, fake_task)
+
+    def test_compensation_scheduler_subsystem(self):
+        node = _node_full()
+        self._setup(
+            node,
+            ("_compensation_scheduler", "_compensation_scheduler_task"),
+        )
+        resp = _client(node).get("/health/detailed")
+        cs = resp.json()["subsystems"]["compensation_scheduler"]
+        assert cs["available"] is True
+        assert cs["task_running"] is True
+
+    def test_key_distribution_watcher_subsystem(self):
+        node = _node_full()
+        self._setup(
+            node,
+            ("_key_distribution_watcher", "_key_distribution_watcher_task"),
+            running=False,
+        )
+        resp = _client(node).get("/health/detailed")
+        kd = resp.json()["subsystems"]["key_distribution_watcher"]
+        assert kd["task_running"] is False  # crash signal
+
+    def test_storage_slashing_watcher_subsystem(self):
+        node = _node_full()
+        self._setup(
+            node,
+            ("_storage_slashing_watcher", "_storage_slashing_watcher_task"),
+        )
+        resp = _client(node).get("/health/detailed")
+        ss = resp.json()["subsystems"]["storage_slashing_watcher"]
+        assert ss["available"] is True
+        assert ss["task_running"] is True
+
+    def test_compensation_distributor_watcher_subsystem(self):
+        node = _node_full()
+        self._setup(
+            node,
+            ("_compensation_distributor_watcher",
+             "_compensation_distributor_watcher_task"),
+        )
+        resp = _client(node).get("/health/detailed")
+        cd = resp.json()["subsystems"]["compensation_distributor_watcher"]
+        assert cd["available"] is True
+        assert cd["task_running"] is True
+
+
 class TestHealthDetailedFailSoft:
     def test_subsystem_check_raising_does_not_500(self):
         """If a subsystem health probe raises (e.g., RPC down),
