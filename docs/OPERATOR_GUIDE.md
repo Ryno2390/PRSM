@@ -368,6 +368,22 @@ The two buckets are **independent** — draining the forge bucket has no effect 
 
 Use these when running a public node where a single misbehaving client could otherwise saturate the compute pipeline.
 
+### Per-job duration cap (`PRSM_FORGE_MAX_DURATION_SEC`, ships 2026-05-09)
+
+Production-reliability feature: caps how long a single `/compute/forge` job can stay IN_PROGRESS before being reaped + its escrow refunded. Without this, a runaway compute job holds operator FTNS escrowed indefinitely until the periodic_cleanup_escrows task fires (which only checks escrow age, not job age).
+
+Implementation: separate background reaper (`JobReaper` async task) that scans `JobHistoryStore` every `PRSM_FORGE_REAPER_INTERVAL_SEC` (default 60s) for IN_PROGRESS records older than the cap. For each:
+1. Marks the history record FAILED with error="duration cap exceeded ({N}s)"
+2. Refunds the associated escrow (if PENDING)
+
+Decoupled from the `/compute/forge` body — handler keeps existing semantics, reaper provides timeout safety net independently. Reaper crash visibility comes from the daemon-task probe surface (`/health/detailed.heartbeat_scheduler` pattern; reaper subsystem entry shipped in a follow-on commit).
+
+Configuration:
+- `PRSM_FORGE_MAX_DURATION_SEC` — duration cap in seconds (positive float; unset → reaper disabled, v1 behavior preserved)
+- `PRSM_FORGE_REAPER_INTERVAL_SEC` — scan cadence (default 60s)
+
+Race-condition robustness: refund_escrow raising EscrowAlreadyFinalizedError (legitimate release happened concurrently) is treated as race-loss; the history record is still marked FAILED. Future `/compute/forge` callers seeing FAILED status see the duration-cap reason in `error`.
+
 ### Per-job FTNS cap (`PRSM_MAX_FTNS_PER_JOB`, ships 2026-05-09)
 
 Cost-control feature for operators worried about misbehaving AI agents draining their balance via a single oversized request. Set `PRSM_MAX_FTNS_PER_JOB=N` (any positive float) to enforce a per-job ceiling. Requests with `budget_ftns > N` return HTTP 422 with a clear message before any escrow is locked.
