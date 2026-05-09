@@ -161,3 +161,144 @@ class TestBalanceCheckHandlerErrors:
             or "not available" in result.lower()
             or "not configured" in result.lower()
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Aggregate-source rendering (v2 endpoint response shape)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _v2_response(
+    *,
+    balance_ftns: float = 10.0,
+    claimable_ftns: float = 0.0,
+    escrowed_ftns: float = 0.0,
+    claimable_available: bool = False,
+    escrowed_available: bool = False,
+    usd_rate: float = 1.0,
+):
+    """Build a v2-shape /balance/onchain response."""
+    total_ftns = balance_ftns + claimable_ftns + escrowed_ftns
+    return {
+        "address": "0x" + "11" * 20,
+        "balance_wei": int(balance_ftns * 10**18),
+        "balance_ftns": balance_ftns,
+        "usd_rate": usd_rate,
+        "usd_equivalent": balance_ftns * usd_rate,
+        "source": "onchain",
+        "claimable_royalties_ftns": claimable_ftns,
+        "escrowed_ftns": escrowed_ftns,
+        "total_ftns": total_ftns,
+        "total_usd_equivalent": total_ftns * usd_rate,
+        "sources": {
+            "onchain": {"available": True, "ftns": balance_ftns},
+            "claimable_royalties": {
+                "available": claimable_available,
+                "ftns": claimable_ftns,
+            },
+            "escrowed": {
+                "available": escrowed_available,
+                "ftns": escrowed_ftns,
+            },
+        },
+    }
+
+
+class TestAggregateRendering:
+    @pytest.mark.asyncio
+    async def test_renders_aggregate_when_extras_present(self):
+        """v2 response with claimable + escrowed wired → multi-line
+        breakdown format with per-source lines + total + aggregate
+        source label."""
+        response = _v2_response(
+            balance_ftns=10.0,
+            claimable_ftns=2.0,
+            escrowed_ftns=3.0,
+            claimable_available=True,
+            escrowed_available=True,
+            usd_rate=1.5,
+        )
+
+        async def fake_call_node_api(method, path, data=None):
+            return response
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_balance_check({})
+
+        # Aggregate header (distinct from legacy "PRSM Wallet Balance").
+        assert "PRSM Wallet Balance (aggregate)" in result
+        # Per-source lines.
+        assert "On-chain:" in result and "10.000000 FTNS" in result
+        assert "Claimable royalties:" in result and "2.000000 FTNS" in result
+        assert "Escrowed (pending):" in result and "3.000000 FTNS" in result
+        # Total = 15 FTNS; total USD = 15 * 1.5 = 22.50.
+        assert "15.000000 FTNS" in result
+        assert "$22.50" in result
+        # Aggregate source label (not "onchain").
+        assert "Source:" in result and "aggregate" in result
+
+    @pytest.mark.asyncio
+    async def test_aggregate_marks_sources_unavailable(self):
+        """When a source is wired but reports unavailable (e.g., RPC
+        flaked), render with `(unavailable)` marker instead of
+        treating zero as authoritative."""
+        response = _v2_response(
+            balance_ftns=10.0,
+            claimable_ftns=0.0,
+            escrowed_ftns=0.0,
+            claimable_available=False,
+            escrowed_available=False,
+        )
+        # Force aggregate path via non-zero contribution from one
+        # source — but then mark both as unavailable to verify the
+        # marker logic.
+        response["claimable_royalties_ftns"] = 5.0
+        response["sources"]["claimable_royalties"]["ftns"] = 5.0
+        response["total_ftns"] = 15.0
+
+        async def fake_call_node_api(method, path, data=None):
+            return response
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_balance_check({})
+
+        # claimable_royalties is unavailable → marker present on its line.
+        # escrowed is unavailable → marker present on its line.
+        assert "(unavailable)" in result
+        # Aggregate header still rendered (extras present via non-zero).
+        assert "(aggregate)" in result
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_legacy_when_no_extras(self):
+        """v2 response with all extras zero AND all unavailable →
+        render legacy single-line format (don't pollute the user
+        with empty source breakdowns)."""
+        response = _v2_response(
+            balance_ftns=42.5,
+            claimable_ftns=0.0,
+            escrowed_ftns=0.0,
+            claimable_available=False,
+            escrowed_available=False,
+        )
+
+        async def fake_call_node_api(method, path, data=None):
+            return response
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_balance_check({})
+
+        # Legacy format: header is "PRSM Wallet Balance" — no
+        # "(aggregate)" suffix.
+        assert "PRSM Wallet Balance" in result
+        assert "(aggregate)" not in result
+        # No multi-line per-source breakdown.
+        assert "Claimable royalties:" not in result
+        assert "Escrowed (pending):" not in result
+        # Legacy rendering still emits "Source: onchain".
+        assert "onchain" in result.lower()

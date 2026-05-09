@@ -490,6 +490,69 @@ def _build_key_distribution_client_or_none():
         return None
 
 
+def _build_royalty_distributor_client_or_none():
+    """Construct a RoyaltyDistributorClient if env-driven config is
+    complete.
+
+    Required env vars:
+      PRSM_ROYALTY_DISTRIBUTOR_ADDRESS=<0x...>
+      FTNS_TOKEN_ADDRESS=<0x...>  (or legacy FTNS_CONTRACT_ADDRESS)
+        — RoyaltyDistributorClient constructor needs this for
+        balanceOf reads of the distributor's own FTNS holdings
+        (per-claim accounting).
+
+    Optional env vars:
+      FTNS_WALLET_PRIVATE_KEY=<0x...>  (write paths require this;
+        read paths — claimable() — work without it)
+      PRSM_BASE_RPC_URL=<https://...>  (defaults to Base mainnet)
+
+    Read-only mode (no private key) is supported because the
+    aggregate-source quoting path in `prsm_balance_check` only
+    reads `claimable()`. Operators wanting to actually `claim()`
+    their royalties must also configure the private key.
+
+    Returns None when distributor address is unset or construction
+    fails (e.g., RPC unreachable). The endpoint falls back to
+    treating claimable_royalties as unavailable.
+    """
+    addr = os.getenv("PRSM_ROYALTY_DISTRIBUTOR_ADDRESS", "").strip()
+    if not addr:
+        return None
+    pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip() or None
+    # FTNS token address is required for the RoyaltyDistributor
+    # client's constructor. Fall back to the canonical Base mainnet
+    # FTNS address if the env var isn't set — operators running
+    # mainnet without override use the canonical pin.
+    ftns_token = (
+        os.getenv("FTNS_TOKEN_ADDRESS", "").strip()
+        or os.getenv("FTNS_CONTRACT_ADDRESS", "").strip()
+        or "0x5276a3756C85f2E9e46f6D34386167a209aa16e5"  # canonical Base mainnet
+    )
+    try:
+        from prsm.economy.web3.royalty_distributor import (
+            RoyaltyDistributorClient,
+        )
+        rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+        client = RoyaltyDistributorClient(
+            rpc_url=rpc_url,
+            distributor_address=addr,
+            ftns_token_address=ftns_token,
+            private_key=pk,
+        )
+        logger.info(
+            f"RoyaltyDistributorClient wired: {addr} via {rpc_url}"
+            f"{' (read-only)' if pk is None else ''}"
+        )
+        return client
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"RoyaltyDistributorClient construction failed: "
+            f"{type(exc).__name__}: {exc} — claimable-royalties surface "
+            f"unavailable for aggregate balance quoting."
+        )
+        return None
+
+
 def _build_storage_slashing_client_or_none():
     """Construct a StorageSlashingClient if env-driven config is
     complete.
@@ -1354,6 +1417,13 @@ class PRSMNode:
         # daemon (KeyDistribution is event-driven on the operator side,
         # not cadence-driven).
         self._key_distribution_client = _build_key_distribution_client_or_none()
+        # Aggregate-source quoting (audit-prep §7.23 honest-scope
+        # closure): RoyaltyDistributor read surface for
+        # `prsm_balance_check` to surface claimable royalties
+        # alongside on-chain FTNS balance.
+        self._royalty_distributor_client = (
+            _build_royalty_distributor_client_or_none()
+        )
         # Shared state store for the 3 watchers — single instance,
         # 3 watcher_key namespaces inside. None when persistence is
         # disabled (legacy chain-tip-baseline behavior preserved).

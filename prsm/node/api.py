@@ -473,13 +473,72 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         balance_wei = int(balance_ftns * (10 ** decimals))
         usd_equivalent = balance_ftns * usd_rate
 
+        # ── Aggregate-source quoting (audit-prep §7.23 honest-scope) ──
+        # Read claimable royalties (RoyaltyDistributor) + escrowed
+        # FTNS (PaymentEscrow). Each source independently fail-soft:
+        # if reading raises, log + continue + report the source as
+        # unavailable. Aggregate doesn't crash on partial sources.
+
+        # Source 2: claimable royalties.
+        claimable_ftns = 0.0
+        claimable_available = False
+        royalty_client = getattr(node, "_royalty_distributor_client", None)
+        if royalty_client is not None:
+            try:
+                claimable_wei = royalty_client.claimable(target)
+                claimable_ftns = float(claimable_wei) / (10 ** decimals)
+                claimable_available = True
+            except Exception as e:
+                logger.warning(
+                    "balance/onchain: claimable royalties read failed "
+                    "(%s); reporting source unavailable", e,
+                )
+
+        # Source 3: escrowed FTNS in pending compute jobs.
+        escrowed_ftns = 0.0
+        escrowed_available = False
+        payment_escrow = getattr(node, "_payment_escrow", None)
+        if payment_escrow is not None:
+            try:
+                pending = payment_escrow.list_escrows_by_requester(target)
+                escrowed_ftns = sum(e.amount for e in pending)
+                escrowed_available = True
+            except Exception as e:
+                logger.warning(
+                    "balance/onchain: escrow listing failed (%s); "
+                    "reporting source unavailable", e,
+                )
+
+        total_ftns = balance_ftns + claimable_ftns + escrowed_ftns
+        total_usd_equivalent = total_ftns * usd_rate
+
         return {
+            # ── v1 fields (preserved bit-identically) ──
             "address": target,
             "balance_wei": balance_wei,
             "balance_ftns": balance_ftns,
             "usd_rate": usd_rate,
             "usd_equivalent": usd_equivalent,
             "source": "onchain",
+            # ── v2 aggregate fields (additive) ──
+            "claimable_royalties_ftns": claimable_ftns,
+            "escrowed_ftns": escrowed_ftns,
+            "total_ftns": total_ftns,
+            "total_usd_equivalent": total_usd_equivalent,
+            "sources": {
+                "onchain": {
+                    "ftns": balance_ftns,
+                    "available": True,
+                },
+                "claimable_royalties": {
+                    "ftns": claimable_ftns,
+                    "available": claimable_available,
+                },
+                "escrowed": {
+                    "ftns": escrowed_ftns,
+                    "available": escrowed_available,
+                },
+            },
         }
 
     class _OfframpQuoteRequest(BaseModel):

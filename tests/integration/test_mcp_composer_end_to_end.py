@@ -46,6 +46,12 @@ def _node_with_ftns(*, balance_ftns: float = 100.0,
     ftns_ledger._decimals = 18
     ftns_ledger.get_balance = AsyncMock(return_value=balance_ftns)
     node.ftns_ledger = ftns_ledger
+    # Explicit None to suppress aggregate-source quoting paths that
+    # the endpoint adds in v2. Without these, MagicMock auto-attr
+    # generation returns truthy stubs that misrepresent "no source
+    # wired" as "available source returning Mock data."
+    node._royalty_distributor_client = None
+    node._payment_escrow = None
     return node
 
 

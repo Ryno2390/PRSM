@@ -512,6 +512,37 @@ class PaymentEscrow:
             task.cancel()
         self._tasks.clear()
 
+    def list_escrows_by_requester(
+        self,
+        requester_id: str,
+        *,
+        pending_only: bool = True,
+    ) -> List[EscrowEntry]:
+        """Return escrows owned by `requester_id`.
+
+        By default returns only PENDING escrows — funds actively
+        locked up + at risk + part of the requester's outstanding
+        liability. Released / refunded escrows are accounting
+        history, not current position; pass `pending_only=False`
+        to include them.
+
+        Address matching is case-insensitive (a wallet may be
+        stored as checksummed 0xAb… and queried as lowercased
+        0xab…; both must match).
+
+        Public surface used by aggregate-source quoting in
+        `prsm_balance_check` (audit-prep §7.23 honest-scope).
+        """
+        normalized = requester_id.lower()
+        result: List[EscrowEntry] = []
+        for e in self._escrows.values():
+            if e.requester_id.lower() != normalized:
+                continue
+            if pending_only and e.status != EscrowStatus.PENDING:
+                continue
+            result.append(e)
+        return result
+
     def get_escrow(self, job_id: str) -> Optional[EscrowEntry]:
         for e in self._escrows.values():
             if e.job_id == job_id:

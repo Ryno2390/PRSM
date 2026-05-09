@@ -411,6 +411,16 @@ A new tool `prsm_balance_check` ships in v1.7.0+ (Vision §13 Phase 5 stand-in c
 - Optional `address` arg overrides the node's connected wallet address.
 - Backed by the new `GET /balance/onchain` endpoint.
 
+**Aggregate-source quoting (v2, ships 2026-05-09):** When the node has the RoyaltyDistributor client + PaymentEscrow manager wired in addition to the FTNS ledger, `/balance/onchain` aggregates across three sources:
+
+- `balance_ftns` — on-chain FTNS (legacy v1 field, preserved bit-identically)
+- `claimable_royalties_ftns` — pending RoyaltyDistributor claimable amount for the address
+- `escrowed_ftns` — sum of FTNS held in PENDING escrows for in-flight compute jobs by this requester
+- `total_ftns` / `total_usd_equivalent` — aggregate sum across all three
+- `sources` — per-source breakdown with `available` flag (lets clients distinguish "0 because empty" from "0 because source unwired/RPC-flaked")
+
+Each source is fail-soft: if the underlying RPC or escrow store throws, the endpoint still returns 200 with that source marked `available: false` and contributing 0 to the aggregate. Clients reading only v1 fields keep working unchanged. The MCP `prsm_balance_check` handler renders a multi-line breakdown when extras are present, and falls back to the legacy single-line format when only on-chain is wired.
+
 A companion tool `coinbase_offramp_initiate` ships v1 alongside (Vision §13 Phase 5 step 2 — pre-flight composer):
 
 - Returns the transaction-summary artifact users see in their AI side-panel before authorizing a cash-out (FTNS → USDC via Aerodrome → USD via Coinbase CDP off-ramp).

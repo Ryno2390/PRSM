@@ -1756,6 +1756,52 @@ async def handle_prsm_balance_check(arguments: Dict[str, Any]) -> str:
     short_addr = (
         addr[:10] + "…" + addr[-4:] if len(addr) > 14 else addr
     )
+
+    # Aggregate-source breakdown (audit-prep §7.23 honest-scope
+    # closure): when v2 fields are present in the response, render
+    # the multi-source breakdown. Backwards-compat: if the endpoint
+    # returns a v1-only response (no `total_ftns`), fall through to
+    # the legacy single-line format.
+    if "total_ftns" in result:
+        claimable_ftns = result["claimable_royalties_ftns"]
+        escrowed_ftns = result["escrowed_ftns"]
+        total_ftns = result["total_ftns"]
+        total_usd = result["total_usd_equivalent"]
+        sources = result.get("sources", {})
+
+        # Show source breakdown only when at least one extra source
+        # has non-zero balance OR is wired (available=true). When
+        # all extras are zero+unwired, the breakdown is just noise;
+        # render legacy format.
+        has_extras = (
+            claimable_ftns > 0 or escrowed_ftns > 0
+            or sources.get("claimable_royalties", {}).get("available", False)
+            or sources.get("escrowed", {}).get("available", False)
+        )
+        if has_extras:
+            claimable_avail = sources.get(
+                "claimable_royalties", {},
+            ).get("available", False)
+            escrowed_avail = sources.get("escrowed", {}).get("available", False)
+            claimable_marker = "" if claimable_avail else " (unavailable)"
+            escrowed_marker = "" if escrowed_avail else " (unavailable)"
+            return (
+                f"PRSM Wallet Balance (aggregate)\n"
+                f"  Address:               {short_addr}\n"
+                f"  On-chain:              {balance_ftns:.6f} FTNS\n"
+                f"  Claimable royalties:   "
+                f"{claimable_ftns:.6f} FTNS{claimable_marker}\n"
+                f"  Escrowed (pending):    "
+                f"{escrowed_ftns:.6f} FTNS{escrowed_marker}\n"
+                f"  ─────────────────────\n"
+                f"  Total:                 {total_ftns:.6f} FTNS\n"
+                f"  USD (total):           ${total_usd:,.2f}  "
+                f"(@ {usd_rate} USD/FTNS)\n"
+                f"  Source:                aggregate"
+            )
+
+    # Legacy single-line format (v1 response shape OR v2 with no
+    # extra sources wired).
     return (
         f"PRSM Wallet Balance\n"
         f"  Address:  {short_addr}\n"
