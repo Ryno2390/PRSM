@@ -412,6 +412,27 @@ scrape_configs:
       - targets: ['localhost:8000']
 ```
 
+### CORS allowlist (`PRSM_ALLOWED_ORIGINS`, ships 2026-05-09)
+
+Production-hardening for nodes serving browser-based clients (operator dashboards, prsm-ui, etc.). Operator declares the explicit list of origins permitted to make cross-origin requests; everything else gets blocked at the CORS layer before reaching any endpoint.
+
+```bash
+# Single origin
+export PRSM_ALLOWED_ORIGINS="https://dash.example.com"
+
+# Multiple origins (comma-separated; whitespace trimmed)
+export PRSM_ALLOWED_ORIGINS="https://dash.example.com, https://ops.example.com"
+```
+
+Behavior:
+- **Env unset / whitespace-only:** permissive `*` allowlist — preserves v1 dev-friendly behavior bit-identically. Acceptable for local dev; **production deploys MUST set this explicitly to restrict**.
+- **Listed origin:** browser receives `Access-Control-Allow-Origin: <origin>` and the response is delivered to JS code.
+- **Unlisted origin:** server still responds 200 but omits the ACAO header. Browser blocks the response from reaching the requesting JS, satisfying the same-origin policy.
+- **Preflight (OPTIONS):** allowed origins receive 200 + ACAO + ACAM headers; unlisted origins receive 200 with no CORS headers.
+- **Credentials:** when an explicit allowlist is set, `Access-Control-Allow-Credentials: true` is also set (allows browser-side `credentials: 'include'`).
+
+This middleware applies to ALL endpoints (the security-hardening middleware shipped earlier sits behind it); CORS rejection happens before any other middleware runs.
+
 ### Health probes
 
 - `GET /health` — minimal load-balancer probe; returns `{status: "ok", node_id}` without subsystem checks. Stays bit-identical to v1 to avoid breaking external monitors.

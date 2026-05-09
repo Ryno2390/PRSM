@@ -308,6 +308,47 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         openapi_url="/openapi.json",
     )
 
+    # CORS allowlist (PRSM_ALLOWED_ORIGINS env var, ships 2026-05-09).
+    # Production-hardening for nodes serving browser-based clients.
+    # Operator declares the explicit list of origins permitted to make
+    # cross-origin requests; everything else gets blocked at the CORS
+    # layer before reaching any endpoint.
+    #
+    # Default behavior (env unset / whitespace-only): permissive `*`
+    # allowlist preserves v1 dev-friendly behavior bit-identically.
+    # Production deploys MUST set PRSM_ALLOWED_ORIGINS explicitly to
+    # restrict.
+    from fastapi.middleware.cors import CORSMiddleware
+    _origins_raw = os.getenv("PRSM_ALLOWED_ORIGINS", "").strip()
+    if _origins_raw:
+        _origins = [
+            o.strip() for o in _origins_raw.split(",") if o.strip()
+        ]
+        if _origins:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=_origins,
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+        else:
+            # All-whitespace CSV → fall back to permissive default.
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+    else:
+        # Env unset → permissive default for dev / local / unconfigured.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
     # Initialize security hardening
     api_hardening: Optional[APIHardening] = None
     status_websocket: Optional[StatusWebSocket] = None
