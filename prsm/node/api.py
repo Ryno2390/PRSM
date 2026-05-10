@@ -2985,6 +2985,34 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not node.content_uploader:
             raise HTTPException(status_code=503, detail="Content uploader not initialized")
 
+        # Cap upload size to prevent DoS via multi-GB payloads.
+        # Default 10MB covers typical research papers; operators
+        # tune for larger via PRSM_MAX_UPLOAD_BYTES.
+        _size_cap_raw = os.getenv("PRSM_MAX_UPLOAD_BYTES", "").strip()
+        try:
+            _size_cap = int(_size_cap_raw) if _size_cap_raw else 10 * 1024 * 1024
+            if _size_cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            logger.warning(
+                "PRSM_MAX_UPLOAD_BYTES=%r not a positive int; "
+                "using 10MB default",
+                _size_cap_raw,
+            )
+            _size_cap = 10 * 1024 * 1024
+        text_bytes = len(req.text.encode("utf-8"))
+        if text_bytes > _size_cap:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"text size {text_bytes} bytes exceeds "
+                    f"PRSM_MAX_UPLOAD_BYTES cap of {_size_cap}. "
+                    f"Either upload via /content/upload/shard "
+                    f"(supports sharding) or have the operator "
+                    f"raise the cap."
+                ),
+            )
+
         # Cap replicas to prevent DoS via excessive replication
         # requests. Default 100 covers any practical use; operators
         # tune via PRSM_MAX_REPLICAS env (typo / non-numeric falls
