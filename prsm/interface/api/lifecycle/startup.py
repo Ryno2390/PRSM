@@ -245,9 +245,15 @@ async def _init_observability() -> None:
         )
         from prsm.core.redis_client import redis_manager
 
+        # Sprint 151 — fallback to prsm.__version__ instead of stale
+        # literal. Pre-fix any settings-load failure tagged metrics
+        # with "0.24.0" forever after the v1.x ship.
+        import prsm as _prsm_pkg
         config = MetricsConfig(
             service_name="prsm-api",
-            service_version=getattr(settings, 'version', '0.24.0'),
+            service_version=getattr(
+                settings, 'version', _prsm_pkg.__version__,
+            ),
             environment=getattr(settings, 'environment', 'production'),
             collection_interval=30,
             enable_prometheus=True,
