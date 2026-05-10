@@ -122,10 +122,19 @@ class WebhookDeliverer:
         Default impl uses aiohttp.
         """
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
+        # Read package version dynamically so User-Agent stays in
+        # sync with pyproject.toml (parallel to the version-surface
+        # cluster: /api-info, /openapi.json, prsm_build_info,
+        # MCP Server.version, interface API spec).
+        try:
+            from importlib.metadata import version as _pkg_version
+            _ua_version = _pkg_version("prsm-network")
+        except Exception:  # noqa: BLE001
+            _ua_version = "unknown"
         headers = {
             "Content-Type": "application/json",
             "X-PRSM-Event": event,
-            "User-Agent": "prsm-node/0.24.0",
+            "User-Agent": f"prsm-node/{_ua_version}",
         }
         if secret:
             headers["X-PRSM-Signature"] = compute_signature(secret, body)
