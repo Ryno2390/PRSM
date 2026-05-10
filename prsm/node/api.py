@@ -3115,6 +3115,38 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             )
 
+        # Cap shard payload size. PRSM_MAX_SHARD_UPLOAD_BYTES
+        # (default 100MB) caps the decoded content. The shard
+        # endpoint allows much higher than the regular /upload
+        # endpoint because it natively chunks; but unbounded is
+        # still a DoS vector.
+        _shard_cap_raw = os.getenv(
+            "PRSM_MAX_SHARD_UPLOAD_BYTES", "",
+        ).strip()
+        try:
+            _shard_cap = (
+                int(_shard_cap_raw) if _shard_cap_raw
+                else 100 * 1024 * 1024
+            )
+            if _shard_cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            logger.warning(
+                "PRSM_MAX_SHARD_UPLOAD_BYTES=%r not a positive int; "
+                "using 100MB default", _shard_cap_raw,
+            )
+            _shard_cap = 100 * 1024 * 1024
+        if len(content) > _shard_cap:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"decoded content size {len(content)} bytes "
+                    f"exceeds PRSM_MAX_SHARD_UPLOAD_BYTES cap of "
+                    f"{_shard_cap}. Either split the upload or "
+                    f"have the operator raise the cap."
+                ),
+            )
+
         # ContentPublisher path requires a wired ContentUploader,
         # mirroring the regular /content/upload endpoint above.
         if not node.content_uploader:
