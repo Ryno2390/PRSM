@@ -1430,15 +1430,49 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     _cap_raw,
                 )
 
+        # Validate query BEFORE agent_forge availability so a
+        # malformed request gets the right 4xx error code
+        # regardless of whether the forge subsystem is wired.
+        query = body.get("query", "")
+        if not query or not query.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Missing 'query' field (or whitespace-only)",
+            )
+        # Cap query length to prevent prompt-injection DoS via
+        # multi-MB queries that amplify through the LLM token
+        # economy. Default 100KB covers any practical research
+        # question; operators tune via PRSM_MAX_QUERY_BYTES.
+        _query_cap_raw = os.getenv("PRSM_MAX_QUERY_BYTES", "").strip()
+        try:
+            _query_cap = (
+                int(_query_cap_raw) if _query_cap_raw else 100 * 1024
+            )
+            if _query_cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            logger.warning(
+                "PRSM_MAX_QUERY_BYTES=%r not a positive int; "
+                "using 100KB default", _query_cap_raw,
+            )
+            _query_cap = 100 * 1024
+        query_bytes = len(query.encode("utf-8"))
+        if query_bytes > _query_cap:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"query size {query_bytes} bytes exceeds "
+                    f"PRSM_MAX_QUERY_BYTES cap of {_query_cap}. "
+                    f"Trim the query or have the operator raise "
+                    f"the cap."
+                ),
+            )
+
         if not hasattr(node, 'agent_forge') or node.agent_forge is None:
             raise HTTPException(
                 status_code=503,
                 detail="Agent forge not initialized. Check LLM backend configuration."
             )
-
-        query = body.get("query", "")
-        if not query:
-            raise HTTPException(status_code=400, detail="Missing 'query' field")
 
         budget_ftns = float(body.get("budget_ftns", 10.0))
         shard_cids = body.get("shard_cids", None)
