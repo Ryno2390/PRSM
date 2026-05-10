@@ -1583,7 +1583,19 @@ class PRSMNode:
         from prsm.node.slash_event_log import SlashEventRing
         from prsm.node.heartbeat_log import HeartbeatRecordedRing
         from prsm.node.distribution_log import DistributedEventRing
-        self._slash_event_log = SlashEventRing()
+        # Slash event ring: opt-in filesystem persistence so slash
+        # history survives node restart. Authoritative on-chain;
+        # this is operator-dashboard convenience.
+        from pathlib import Path as _PathForSlash
+        _slash_dir_raw = os.environ.get(
+            "PRSM_SLASH_EVENT_LOG_DIR", "",
+        ).strip()
+        _slash_persist_dir = (
+            _PathForSlash(_slash_dir_raw) if _slash_dir_raw else None
+        )
+        self._slash_event_log = SlashEventRing(
+            persist_dir=_slash_persist_dir,
+        )
         self._heartbeat_log = HeartbeatRecordedRing()
         self._distribution_log = DistributedEventRing()
 
