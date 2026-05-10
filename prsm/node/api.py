@@ -2985,6 +2985,33 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not node.content_uploader:
             raise HTTPException(status_code=503, detail="Content uploader not initialized")
 
+        # Cap parent_cids list length. Each parent gets royalty
+        # per access — unbounded list = unbounded loop. Default
+        # 100 covers any practical citation chain.
+        _parents_cap_raw = os.getenv("PRSM_MAX_PARENT_CIDS", "").strip()
+        try:
+            _parents_cap = (
+                int(_parents_cap_raw) if _parents_cap_raw else 100
+            )
+            if _parents_cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            logger.warning(
+                "PRSM_MAX_PARENT_CIDS=%r not a positive int; using 100",
+                _parents_cap_raw,
+            )
+            _parents_cap = 100
+        if len(req.parent_cids) > _parents_cap:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"parent_cids count {len(req.parent_cids)} "
+                    f"exceeds PRSM_MAX_PARENT_CIDS cap of "
+                    f"{_parents_cap}. Trim citations or have the "
+                    f"operator raise the cap."
+                ),
+            )
+
         # Cap upload size to prevent DoS via multi-GB payloads.
         # Default 10MB covers typical research papers; operators
         # tune for larger via PRSM_MAX_UPLOAD_BYTES.
