@@ -89,3 +89,22 @@ class TestInferenceBodyValidation:
             "prompt": "hi", "model_id": "x", "budget_ftns": 1.0,
         })
         assert resp.status_code == 503
+
+    def test_bad_privacy_tier_returns_422(self):
+        """Sprint 156 — bad PrivacyLevel enum surfaces as 422 (was
+        leaking through to 503)."""
+        resp = _post(_node_no_executor(), {
+            "prompt": "hi", "model_id": "x", "budget_ftns": 1.0,
+            "privacy_tier": "INVALID",
+        })
+        assert resp.status_code == 422
+        assert "privacy_tier" in resp.json()["detail"].lower()
+
+    def test_bad_content_tier_returns_422(self):
+        """Sprint 156 — bad ContentTier enum surfaces as 422."""
+        resp = _post(_node_no_executor(), {
+            "prompt": "hi", "model_id": "x", "budget_ftns": 1.0,
+            "content_tier": "Z",
+        })
+        assert resp.status_code == 422
+        assert "content_tier" in resp.json()["detail"].lower()

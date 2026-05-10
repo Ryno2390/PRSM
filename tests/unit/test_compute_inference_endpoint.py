@@ -93,23 +93,25 @@ class TestInferenceValidation:
         })
         assert r.status_code == 422
 
-    def test_invalid_privacy_tier_returns_400(self, client):
+    def test_invalid_privacy_tier_returns_422(self, client):
+        """Sprint 156 — bad enum is semantic validation → 422 (was 400)."""
         r = client.post("/compute/inference", json={
             "prompt": "hello",
             "model_id": "mock-llama-3-8b",
             "budget_ftns": 1.0,
             "privacy_tier": "ultraviolet",
         })
-        assert r.status_code == 400
+        assert r.status_code == 422
 
-    def test_invalid_content_tier_returns_400(self, client):
+    def test_invalid_content_tier_returns_422(self, client):
+        """Sprint 156 — bad enum is semantic validation → 422 (was 400)."""
         r = client.post("/compute/inference", json={
             "prompt": "hello",
             "model_id": "mock-llama-3-8b",
             "budget_ftns": 1.0,
             "content_tier": "Z",
         })
-        assert r.status_code == 400
+        assert r.status_code == 422
 
 
 # ── Service-not-available path ──────────────────────────────────────────────

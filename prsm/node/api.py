@@ -2655,6 +2655,34 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         )
         from prsm.compute.tee.models import PrivacyLevel
 
+        # Sprint 156 — enum body fields validated upfront, BEFORE
+        # the executor 503 check. Pre-fix bad enum values leaked
+        # through to a 503 ("Inference executor not initialized").
+        _privacy_raw = body.get("privacy_tier", "standard")
+        try:
+            privacy_level = PrivacyLevel(_privacy_raw)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"privacy_tier must be one of "
+                    f"{[lvl.value for lvl in PrivacyLevel]}; "
+                    f"got {_privacy_raw!r}."
+                ),
+            )
+        _content_raw = body.get("content_tier", "A")
+        try:
+            content_tier = ContentTier(_content_raw)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"content_tier must be one of "
+                    f"{[t.value for t in ContentTier]}; "
+                    f"got {_content_raw!r}."
+                ),
+            )
+
         if not hasattr(node, 'inference_executor') or node.inference_executor is None:
             raise HTTPException(
                 status_code=503,
@@ -2664,14 +2692,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             )
 
-        # Build the request — coerce enum fields, surface bad values as 400s.
+        # Build the request — enums already validated above (sprint 156).
         try:
             request = InferenceRequest(
                 prompt=prompt,
                 model_id=model_id,
                 budget_ftns=Decimal(str(budget_ftns)),
-                privacy_tier=PrivacyLevel(body.get("privacy_tier", "standard")),
-                content_tier=ContentTier(body.get("content_tier", "A")),
+                privacy_tier=privacy_level,
+                content_tier=content_tier,
                 max_tokens=body.get("max_tokens"),
                 temperature=body.get("temperature"),
                 requester_node_id=node.identity.node_id if node.identity else None,
@@ -2947,6 +2975,33 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         from prsm.compute.inference.models import InferenceResult
         from prsm.compute.tee.models import PrivacyLevel
 
+        # Sprint 156 — enum body fields validated upfront, BEFORE
+        # the executor 503 check.
+        _privacy_raw = body.get("privacy_tier", "standard")
+        try:
+            privacy_level = PrivacyLevel(_privacy_raw)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"privacy_tier must be one of "
+                    f"{[lvl.value for lvl in PrivacyLevel]}; "
+                    f"got {_privacy_raw!r}."
+                ),
+            )
+        _content_raw = body.get("content_tier", "A")
+        try:
+            content_tier = ContentTier(_content_raw)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"content_tier must be one of "
+                    f"{[t.value for t in ContentTier]}; "
+                    f"got {_content_raw!r}."
+                ),
+            )
+
         if not hasattr(node, 'inference_executor') or node.inference_executor is None:
             raise HTTPException(
                 status_code=503,
@@ -2973,8 +3028,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 prompt=prompt,
                 model_id=model_id,
                 budget_ftns=Decimal(str(budget_ftns)),
-                privacy_tier=PrivacyLevel(body.get("privacy_tier", "standard")),
-                content_tier=ContentTier(body.get("content_tier", "A")),
+                privacy_tier=privacy_level,
+                content_tier=content_tier,
                 max_tokens=body.get("max_tokens"),
                 temperature=body.get("temperature"),
                 requester_node_id=node.identity.node_id if node.identity else None,
