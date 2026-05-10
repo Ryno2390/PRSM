@@ -1491,8 +1491,14 @@ def node_earnings(api_port: int, output_format: str):
 def _node_admin_history(
     *, api_port: int, path: str, label: str,
     output_format: str, limit: int = 20,
+    row_renderer=None,
 ):
-    """Shared helper for the 3 admin-history CLI commands."""
+    """Shared helper for the 4 admin-history CLI commands.
+
+    `row_renderer` is a callable(entry: dict) -> str that
+    each command supplies for typed rendering. Without it the
+    raw entry dict is printed (debug fallback).
+    """
     import json
     import datetime
     import httpx
@@ -1545,9 +1551,57 @@ def _node_admin_history(
             )
         except Exception:
             t = "????"
-        # Each command renders distinct fields — caller hooks
-        # in via this helper but currently we render generic.
-        console.print(f"  {t}  {e}")
+        if row_renderer is not None:
+            console.print(f"  {t}  {row_renderer(e)}")
+        else:
+            console.print(f"  {t}  {e}")
+
+
+def _short_addr(addr: str, *, head: int = 8, tail: int = 6) -> str:
+    """Truncate 0x... addresses for column display."""
+    if not addr or len(addr) <= head + tail + 2:
+        return addr or "?"
+    return f"{addr[:head]}..{addr[-tail:]}"
+
+
+def _render_webhook_row(e: dict) -> str:
+    success = e.get("success")
+    marker = "[ok]" if success else "[!]"
+    code = e.get("status_code", "?")
+    detail = (
+        "delivered" if success
+        else (e.get("error") or "no error msg")
+    )
+    return (
+        f"{marker} {e.get('event', '?'):<28}  "
+        f"status={code:<5} {detail}"
+    )
+
+
+def _render_slash_row(e: dict) -> str:
+    return (
+        f"{e.get('kind', '?'):<28}  "
+        f"provider={_short_addr(e.get('provider', '?'))}  "
+        f"slash_id={e.get('slash_id', '?')[:14]}..."
+    )
+
+
+def _render_heartbeat_row(e: dict) -> str:
+    on_ts = e.get("onchain_timestamp", 0)
+    return (
+        f"provider={_short_addr(e.get('provider', '?'))}  "
+        f"onchain_ts={on_ts}"
+    )
+
+
+def _render_distribution_row(e: dict) -> str:
+    creator = e.get("to_creator", 0) / 1e18
+    operator = e.get("to_operator", 0) / 1e18
+    grant = e.get("to_grant", 0) / 1e18
+    return (
+        f"creator={creator:.4f} operator={operator:.4f} "
+        f"grant={grant:.4f} FTNS"
+    )
 
 
 @node.command("slash-history")
@@ -1565,6 +1619,7 @@ def node_slash_history(api_port, output_format, limit):
         label="Slash Events",
         output_format=output_format,
         limit=limit,
+        row_renderer=_render_slash_row,
     )
 
 
@@ -1583,6 +1638,7 @@ def node_heartbeats(api_port, output_format, limit):
         label="Heartbeats",
         output_format=output_format,
         limit=limit,
+        row_renderer=_render_heartbeat_row,
     )
 
 
@@ -1601,6 +1657,7 @@ def node_distributions(api_port, output_format, limit):
         label="Distributions",
         output_format=output_format,
         limit=limit,
+        row_renderer=_render_distribution_row,
     )
 
 
@@ -1619,6 +1676,7 @@ def node_webhooks(api_port, output_format, limit):
         label="Webhooks",
         output_format=output_format,
         limit=limit,
+        row_renderer=_render_webhook_row,
     )
 
 
