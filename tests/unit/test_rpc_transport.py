@@ -1,4 +1,10 @@
-"""Unit tests for prsm.node.rpc_transport — R9 Phase 6.2 Task 4."""
+"""Unit tests for prsm.node.rpc_transport — R9 Phase 6.2 Task 4.
+
+Tests requiring SOCKS proxy support are skipped when PySocks is
+not installed. Operators using SOCKS (Tor) deployments install
+via `pip install 'requests[socks]'`; default deployments don't
+need it. CI envs without PySocks shouldn't fail these tests.
+"""
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -16,6 +22,20 @@ from prsm.node.transport_adapter import (
 )
 
 
+# Skip the entire SOCKS-touching test classes when PySocks is
+# unavailable. Tests that only exercise DirectAdapter remain.
+try:
+    import socks  # noqa: F401  (PySocks)
+    _HAS_PYSOCKS = True
+except ImportError:
+    _HAS_PYSOCKS = False
+
+requires_pysocks = pytest.mark.skipif(
+    not _HAS_PYSOCKS,
+    reason="PySocks not installed (pip install 'requests[socks]')",
+)
+
+
 class TestMakeRequestsSession:
     def test_direct_adapter_no_proxies(self):
         adapter = DirectAdapter()
@@ -26,6 +46,7 @@ class TestMakeRequestsSession:
         assert session._prsm_transport_adapter == "direct"
         assert session._prsm_proxy_url is None
 
+    @requires_pysocks
     def test_socks_adapter_configures_socks5h_proxy(self):
         adapter = SocksAdapter("127.0.0.1", 9050)
         session = make_requests_session_for_adapter(adapter)
@@ -35,6 +56,7 @@ class TestMakeRequestsSession:
         assert session._prsm_transport_adapter == "socks5"
         assert session._prsm_proxy_url == "socks5h://127.0.0.1:9050"
 
+    @requires_pysocks
     def test_socks_adapter_with_credentials(self):
         adapter = SocksAdapter(
             "proxy.example.com",
@@ -47,12 +69,14 @@ class TestMakeRequestsSession:
         assert session.proxies["http"] == expected
         assert session.proxies["https"] == expected
 
+    @requires_pysocks
     def test_socks4_adapter(self):
         adapter = SocksAdapter("127.0.0.1", 1080, version=4)
         session = make_requests_session_for_adapter(adapter)
         # SOCKS4 doesn't get the -h suffix (remote DNS is SOCKS5-only).
         assert session.proxies["https"] == "socks4://127.0.0.1:1080"
 
+    @requires_pysocks
     def test_socks_adapter_rdns_false_uses_socks5_not_h(self):
         """rdns=False on the adapter should produce socks5:// not socks5h://.
         The local-DNS variant leaks the target hostname to the ISP's
@@ -81,6 +105,7 @@ class TestMakeWeb3HttpProvider:
         )
         assert not session.proxies.get("https")
 
+    @requires_pysocks
     def test_socks_adapter_provider_session_has_proxy(self):
         adapter = SocksAdapter("127.0.0.1", 9050)
         provider = make_web3_http_provider(
@@ -141,6 +166,7 @@ class TestDropInReplacement:
         assert hasattr(web3, "eth")
         assert hasattr(web3.eth, "get_block")
 
+    @requires_pysocks
     def test_web3_instantiation_with_socks_provider(self):
         from web3 import Web3
 
@@ -157,6 +183,7 @@ class TestDropInReplacement:
         )
         assert session.proxies.get("https") == "socks5h://127.0.0.1:9050"
 
+    @requires_pysocks
     def test_proxy_url_not_leaked_to_direct_sessions(self):
         """Two providers constructed with different adapters must not
         share proxy config — isolation check."""

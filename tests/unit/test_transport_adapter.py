@@ -1,4 +1,9 @@
-"""Unit tests for prsm.node.transport_adapter — R9 Phase 6.2 Tasks 1-2."""
+"""Unit tests for prsm.node.transport_adapter — R9 Phase 6.2 Tasks 1-2.
+
+Tests requiring python-socks (the asyncio SOCKS client) are
+skipped when not installed. SOCKS deployments install via
+`pip install 'python-socks[asyncio]'`.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -6,6 +11,18 @@ import socket
 from unittest.mock import patch
 
 import pytest
+
+
+try:
+    import python_socks  # noqa: F401
+    _HAS_PYTHON_SOCKS = True
+except ImportError:
+    _HAS_PYTHON_SOCKS = False
+
+requires_python_socks = pytest.mark.skipif(
+    not _HAS_PYTHON_SOCKS,
+    reason="python-socks not installed (pip install 'python-socks[asyncio]')",
+)
 
 from prsm.node.transport_adapter import (
     DirectAdapter,
@@ -148,12 +165,14 @@ class TestSocksAdapter:
             SocksAdapter("127.0.0.1", 0)
 
     @pytest.mark.asyncio
+    @requires_python_socks
     async def test_rejects_empty_target_host(self):
         adapter = SocksAdapter("127.0.0.1", 9050)
         with pytest.raises(TransportConfigError):
             await adapter.open_connection("", 9001)
 
     @pytest.mark.asyncio
+    @requires_python_socks
     async def test_rejects_bad_target_port(self):
         adapter = SocksAdapter("127.0.0.1", 9050)
         with pytest.raises(TransportConfigError):
@@ -162,6 +181,7 @@ class TestSocksAdapter:
             await adapter.open_connection("example.com", 99999)
 
     @pytest.mark.asyncio
+    @requires_python_socks
     async def test_reports_connect_error_when_proxy_unreachable(self):
         """If the configured SOCKS proxy isn't running, we get a
         TransportConnectError with context rather than a raw python-socks
