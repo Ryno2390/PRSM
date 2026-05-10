@@ -1471,6 +1471,22 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "numeric; rate limiting disabled", _rps_raw,
                 )
 
+        # Sprint 157 — privacy_level enum validated upfront. Pre-fix
+        # the endpoint accepted any string via epsilon_map.get(...,
+        # 8.0) — bad values silently fell back to "standard" epsilon
+        # which is BOTH wrong-by-construction (operator asked for a
+        # tier that doesn't exist) and quietly downgrades privacy.
+        _ALLOWED_PRIVACY = ("none", "standard", "high", "maximum")
+        _privacy_raw = body.get("privacy_level", "standard")
+        if _privacy_raw not in _ALLOWED_PRIVACY:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"privacy_level must be one of "
+                    f"{list(_ALLOWED_PRIVACY)}; got {_privacy_raw!r}."
+                ),
+            )
+
         # Sprint 153 — validate budget_ftns FIELD upfront so a
         # malformed body returns 422 even when agent_forge is down.
         # Pre-fix the body's budget_ftns was only float()'d inside

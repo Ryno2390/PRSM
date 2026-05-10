@@ -93,3 +93,15 @@ class TestBudgetFieldValidation:
         503 (validation passes, default applied internally)."""
         resp = _post(_node_no_forge(), {"query": "hi"})
         assert resp.status_code == 503
+
+    def test_bad_privacy_level_returns_422(self):
+        """Sprint 157 — bad privacy_level → 422. Pre-fix the
+        endpoint silently fell back to the 'standard' epsilon
+        for any unknown value, accepting invalid input as if
+        well-formed."""
+        resp = _post(_node_no_forge(), {
+            "query": "hi", "budget_ftns": 1.0,
+            "privacy_level": "INVALID",
+        })
+        assert resp.status_code == 422
+        assert "privacy_level" in resp.json()["detail"].lower()
