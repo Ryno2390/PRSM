@@ -1007,7 +1007,10 @@ def _build_storage_slashing_watcher_or_none(
         return None
 
 
-def _build_compensation_distributor_watcher_or_none(*, client, state_store=None):
+def _build_compensation_distributor_watcher_or_none(
+    *, client, state_store=None, webhook_deliverer=None,
+    webhook_url=None, webhook_secret=None,
+):
     """Construct a CompensationDistributorWatcher if operator opted in
     AND underlying client is non-None.
 
@@ -1032,12 +1035,31 @@ def _build_compensation_distributor_watcher_or_none(*, client, state_store=None)
             CompensationDistributorWatcher,
         )
 
-        def _on_distributed(event):
+        async def _on_distributed(event):
             logger.info(
                 "CompensationDistributorWatcher: Distributed "
                 "to_creator=%d to_operator=%d to_grant=%d",
                 event.to_creator, event.to_operator, event.to_grant,
             )
+            if webhook_deliverer is not None and webhook_url:
+                try:
+                    payload = {
+                        "event": "distribution.distributed",
+                        "to_creator": event.to_creator,
+                        "to_operator": event.to_operator,
+                        "to_grant": event.to_grant,
+                    }
+                    await webhook_deliverer.deliver(
+                        url=webhook_url,
+                        event="distribution.distributed",
+                        payload=payload,
+                        secret=webhook_secret,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "distribution.distributed webhook dispatch "
+                        "raised: %s", exc,
+                    )
 
         watcher = CompensationDistributorWatcher(
             client=client,
@@ -1584,6 +1606,9 @@ class PRSMNode:
             _build_compensation_distributor_watcher_or_none(
                 client=self._compensation_distributor_client,
                 state_store=self._watcher_state_store,
+                webhook_deliverer=self._webhook_deliverer,
+                webhook_url=_early_webhook_url,
+                webhook_secret=_early_webhook_secret,
             )
         )
         # Operator on-chain address for /admin/earnings-summary
