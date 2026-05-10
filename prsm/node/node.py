@@ -2142,6 +2142,35 @@ class PRSMNode:
                                 result["provenance_registry"] = (
                                     wired, canonical,
                                 )
+                        # Phase 7-storage + Phase 8 contract pins.
+                        # Each client exposes `.address`; mismatch
+                        # fires canonical.drifted same as the 3 above.
+                        for attr_name, networks_field, label in (
+                            (
+                                "_storage_slashing_client",
+                                "storage_slashing",
+                                "storage_slashing",
+                            ),
+                            (
+                                "_compensation_distributor_client",
+                                "compensation_distributor",
+                                "compensation_distributor",
+                            ),
+                            (
+                                "_key_distribution_client",
+                                "key_distribution",
+                                "key_distribution",
+                            ),
+                        ):
+                            client = getattr(self, attr_name, None)
+                            if client is None:
+                                continue
+                            wired = getattr(client, "address", None)
+                            canonical = getattr(
+                                cfg, networks_field, None,
+                            )
+                            if wired and canonical:
+                                result[label] = (wired, canonical)
                         return result
                     wd_kwargs["check_canonical_pins"] = True
                     wd_kwargs["canonical_check_fn"] = _canonical_check_fn
