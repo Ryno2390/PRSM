@@ -1837,6 +1837,75 @@ def node_trigger_distribution(api_port, yes):
     )
 
 
+@node.command("claim-royalty")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--execute", is_flag=True,
+    help="Execute the claim on-chain (default: dry-run only)",
+)
+def node_claim_royalty(api_port, execute):
+    """Claim accumulated royalties from RoyaltyDistributor.
+
+    Default: dry-run that shows claimable amount without
+    on-chain action. Pass --execute to send the tx.
+    """
+    import json
+    import httpx
+
+    url = f"http://127.0.0.1:{api_port}/wallet/royalty/claim"
+    payload = {"dry_run": not execute}
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(url, json=payload)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+
+    if resp.status_code == 503:
+        detail = resp.json().get("detail", "not wired")
+        console.print(
+            f"[yellow]RoyaltyDistributor not wired.[/yellow]\n"
+            f"[dim]{detail}[/dim]"
+        )
+        sys.exit(1)
+
+    if resp.status_code != 200:
+        console.print(
+            f"[red]/wallet/royalty/claim returned "
+            f"{resp.status_code}[/red]: {resp.text}"
+        )
+        sys.exit(1)
+
+    body = resp.json()
+    status = body.get("status", "?")
+    if status == "DRY_RUN":
+        wei = body.get("claimable_wei", 0)
+        ftns = wei / 1e18
+        console.print(
+            f"[bold]Dry run — no on-chain action[/bold]\n"
+            f"  Claimable: {ftns:.6f} FTNS ({wei} wei)\n"
+            f"  Re-run with --execute to claim on-chain."
+        )
+    elif status == "SKIPPED_ZERO":
+        console.print(
+            "[yellow]Nothing to claim — claimable balance is 0.[/yellow]"
+        )
+    elif status == "EXECUTED":
+        tx_hash = body.get("tx_hash", "?")
+        wei = body.get("amount_claimed_wei", 0)
+        ftns = wei / 1e18
+        console.print(
+            f"[green]Royalty claim submitted on-chain.[/green]\n"
+            f"  Amount:  {ftns:.6f} FTNS\n"
+            f"  tx_hash: {tx_hash}"
+        )
+    else:
+        console.print(json.dumps(body, indent=2))
+
+
 @node.command("install")
 @click.option("--dry-run", is_flag=True, help="Print service file without installing")
 @click.option("--host", default="127.0.0.1", help="Host to bind to")
