@@ -179,6 +179,69 @@ async def test_stop_cancels_poll_task():
 
 
 @pytest.mark.asyncio
+async def test_stop_disconnects_bootstrap_client():
+    """Sprint 166 — stop() must call client.disconnect() so the
+    bootstrap-server WebSocket closes cleanly. Pre-fix the
+    poll task was cancelled but the WebSocket leaked."""
+    disconnect_calls = {"n": 0}
+
+    class _TrackingClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def connect(self):
+            return []
+
+        async def start_heartbeat(self):
+            pass
+
+        async def get_peers(self):
+            return []
+
+        async def disconnect(self):
+            disconnect_calls["n"] += 1
+
+    d = _make_discovery()
+    with patch("prsm.bootstrap.client.BootstrapClient", _TrackingClient):
+        await d.bootstrap()
+    await d.stop()
+    assert disconnect_calls["n"] == 1
+    assert d._bootstrap_client is None
+
+
+@pytest.mark.asyncio
+async def test_stop_tolerates_disconnect_raise():
+    """Sprint 166 — disconnect() raising shouldn't break shutdown
+    or leak the poll task."""
+
+    class _BrokenDisconnectClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def connect(self):
+            return []
+
+        async def start_heartbeat(self):
+            pass
+
+        async def get_peers(self):
+            return []
+
+        async def disconnect(self):
+            raise RuntimeError("simulated socket already closed")
+
+    d = _make_discovery()
+    with patch("prsm.bootstrap.client.BootstrapClient",
+               _BrokenDisconnectClient):
+        await d.bootstrap()
+    task = d._bootstrap_poll_task
+    # Should NOT propagate the RuntimeError.
+    await d.stop()
+    assert task.done()
+    assert d._bootstrap_client is None
+
+
+@pytest.mark.asyncio
 async def test_no_poll_task_when_fallback_skipped():
     """Sprint 165 — when libp2p path succeeds, no fallback fires
     and no poll task is created."""

@@ -88,7 +88,8 @@ class Libp2pDiscovery:
         )
 
     async def stop(self) -> None:
-        """Cancel the bootstrap poll task (sprint 165) and let the
+        """Cancel the bootstrap poll task (sprint 165), disconnect
+        the BootstrapClient WebSocket (sprint 166), and let the
         transport handle the rest of teardown."""
         task = getattr(self, "_bootstrap_poll_task", None)
         if task is not None and not task.done():
@@ -97,6 +98,21 @@ class Libp2pDiscovery:
                 await task
             except asyncio.CancelledError:
                 pass
+
+        # Sprint 166 — close the bootstrap WebSocket cleanly so the
+        # server sees a graceful unregister + we don't leak open
+        # sockets across shutdown. Failures here are non-fatal —
+        # we're tearing down anyway.
+        client = getattr(self, "_bootstrap_client", None)
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "Libp2pDiscovery: bootstrap client disconnect "
+                    "raised: %s", exc,
+                )
+            self._bootstrap_client = None
 
     # ── Bootstrap ────────────────────────────────────────────────
 
