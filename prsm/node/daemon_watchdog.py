@@ -79,6 +79,10 @@ class DaemonWatchdog:
         self._webhook_secret = webhook_secret
         self._interval_seconds = interval_seconds
         self._running = False
+        # asyncio.Event for interruptible sleep — set by stop()
+        # to wake the watch loop immediately. Constructed lazily
+        # in watch() so it binds to the right event loop.
+        self._stop_event: Optional[asyncio.Event] = None
         # Track last-seen "alive" state per daemon. None means
         # we haven't observed a wired daemon yet (first poll
         # establishes baseline).
@@ -261,10 +265,28 @@ class DaemonWatchdog:
     async def watch(self) -> None:
         """Long-running poll loop. Same lifecycle as the other
         daemons (so it can itself be monitored via task_running
-        probe)."""
+        probe).
+
+        Uses an asyncio.Event for interruptible sleep so stop()
+        actually wakes the loop within milliseconds rather than
+        waiting up to interval_seconds (which previously caused
+        the 5s shutdown timeout in node.stop()).
+        """
         self._running = True
+        if self._stop_event is None:
+            self._stop_event = asyncio.Event()
+        self._stop_event.clear()
         while self._running:
-            await asyncio.sleep(self._interval_seconds)
+            try:
+                await asyncio.wait_for(
+                    self._stop_event.wait(),
+                    timeout=self._interval_seconds,
+                )
+                # stop_event fired — exit cleanly without one
+                # last check_once() (caller wants out NOW).
+                break
+            except asyncio.TimeoutError:
+                pass  # interval elapsed, run a sweep
             try:
                 await self.check_once()
             except Exception as exc:  # noqa: BLE001
@@ -272,3 +294,5 @@ class DaemonWatchdog:
 
     async def stop(self) -> None:
         self._running = False
+        if self._stop_event is not None:
+            self._stop_event.set()
