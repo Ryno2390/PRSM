@@ -266,6 +266,13 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         "/auth/login",
         "/auth/register",
         "/auth/refresh",
+        # /ws/status is the dashboard's status push channel.
+        # The handler itself doesn't check auth (status info is
+        # already exposed via /status which is public). The
+        # middleware was inadvertently 403'ing the WS upgrade
+        # request because /ws/status wasn't in this list. Sprint
+        # 137 fix — found via dashboard dogfood.
+        "/ws/status",
     }
     
     # Endpoints that allow optional authentication

@@ -6209,22 +6209,34 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     async def websocket_status(websocket: WebSocket):
         """
         WebSocket endpoint for real-time status updates.
-        
+
         Connect to receive live updates about:
         - Node status changes
         - Peer connections/disconnections
         - Job status updates
         - Transaction notifications
-        
+
         Send JSON messages with type field to interact:
         - {"type": "heartbeat"} - Receive heartbeat acknowledgment
         - {"type": "get_status"} - Request current status
         """
-        if not app.state.status_websocket:
+        # Read api_hardening.status_websocket LIVE (not from
+        # app.state.status_websocket snapshot). The earlier path
+        # captured None because api_hardening.initialize() runs
+        # via asyncio.create_task and hadn't completed when
+        # app.state.status_websocket was set. Sprint 137 fix.
+        status_ws = None
+        api_hardening = getattr(app.state, "api_hardening", None)
+        if api_hardening is not None:
+            status_ws = api_hardening.get_status_websocket()
+        if status_ws is None:
+            # Fallback to legacy state attr for tests that wire it
+            status_ws = getattr(
+                app.state, "status_websocket", None,
+            )
+        if not status_ws:
             await websocket.close(code=1011, reason="WebSocket not initialized")
             return
-        
-        status_ws = app.state.status_websocket
         
         try:
             await status_ws.connect(websocket)
@@ -6362,7 +6374,17 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         except RuntimeError:
             # No event loop, create one
             asyncio.run(api_hardening.initialize())
-        
+
+        # Re-store status_websocket in app.state AFTER init.
+        # initialize() sets api_hardening.status_websocket but the
+        # earlier assignment at app.state.status_websocket happened
+        # BEFORE init ran (see line ~449), capturing None. The /ws/
+        # status WebSocket handler reads app.state.status_websocket
+        # and was getting None forever — pre-fix every WebSocket
+        # handshake to /ws/status returned 403 because the handler
+        # called close() before accept. Sprint 137 fix.
+        app.state.status_websocket = api_hardening.get_status_websocket()
+
         # Apply middleware
         api_hardening.apply_middleware()
 
