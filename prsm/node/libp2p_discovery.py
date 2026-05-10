@@ -16,7 +16,9 @@ Bootstrap uses ``transport.connect_to_peer()`` for each configured
 bootstrap address; if zero succeed the status is set to degraded.
 """
 
+import asyncio
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -86,7 +88,15 @@ class Libp2pDiscovery:
         )
 
     async def stop(self) -> None:
-        """No-op — transport handles teardown."""
+        """Cancel the bootstrap poll task (sprint 165) and let the
+        transport handle the rest of teardown."""
+        task = getattr(self, "_bootstrap_poll_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     # ── Bootstrap ────────────────────────────────────────────────
 
@@ -192,22 +202,17 @@ class Libp2pDiscovery:
                 peers = await client.connect()
                 await client.start_heartbeat()
                 self._bootstrap_client = client
-                # Feed any discovered peers into capability index.
-                for bp in peers:
-                    if (
-                        bp.peer_id
-                        and bp.peer_id != self.transport.identity.node_id
-                    ):
-                        self._capability_index[bp.peer_id] = PeerInfo(
-                            node_id=bp.peer_id,
-                            address=f"{bp.address}:{bp.port}",
-                            last_seen=time.time(),
-                            last_capability_update=time.time(),
-                        )
+                self._hydrate_peers_from_bootstrap(peers)
                 logger.info(
                     "Libp2pDiscovery: BootstrapClient connected via "
                     "%s — %d peer(s) discovered",
                     addr, len(peers),
+                )
+                # Sprint 165 — periodic peer-list polling so this
+                # node sees newly-registered operators after its
+                # own registration tick.
+                self._bootstrap_poll_task = asyncio.create_task(
+                    self._bootstrap_poll_loop(),
                 )
                 return True
             except Exception as exc:  # noqa: BLE001
@@ -217,6 +222,55 @@ class Libp2pDiscovery:
                 )
                 continue
         return False
+
+    def _hydrate_peers_from_bootstrap(self, peers: List[Any]) -> None:
+        """Sprint 165 — populate _capability_index from bootstrap-
+        server peer payloads. Skips self (avoids self-edges in the
+        capability graph)."""
+        own_id = self.transport.identity.node_id
+        for bp in peers:
+            pid = getattr(bp, "peer_id", None)
+            if not pid or pid == own_id:
+                continue
+            self._capability_index[pid] = PeerInfo(
+                node_id=pid,
+                address=f"{getattr(bp, 'address', '')}:"
+                        f"{getattr(bp, 'port', 0)}",
+                last_seen=time.time(),
+                last_capability_update=time.time(),
+            )
+
+    async def _bootstrap_poll_loop(self) -> None:
+        """Sprint 165 — periodic poll of bootstrap server for new
+        peer registrations.
+
+        Cadence is tuned via PRSM_BOOTSTRAP_POLL_SECONDS env (default
+        60s). Polling runs until the task is cancelled (typically by
+        node stop()). Per-tick failures are logged at debug and DO
+        NOT terminate the loop — transient WebSocket dropouts get
+        retried automatically.
+        """
+        try:
+            interval = float(
+                os.getenv("PRSM_BOOTSTRAP_POLL_SECONDS", "60"),
+            )
+            if interval <= 0:
+                interval = 60.0
+        except (TypeError, ValueError):
+            interval = 60.0
+        client = getattr(self, "_bootstrap_client", None)
+        while client is not None:
+            try:
+                await asyncio.sleep(interval)
+                peers = await client.get_peers()
+                self._hydrate_peers_from_bootstrap(peers)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "Libp2pDiscovery: bootstrap poll tick raised: %s",
+                    exc,
+                )
 
     # ── Peer query helpers (mirrors PeerDiscovery) ───────────────
 
