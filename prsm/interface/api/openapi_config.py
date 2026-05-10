@@ -239,9 +239,16 @@ def custom_openapi_schema(app: FastAPI) -> Dict[str, Any]:
     if app.openapi_schema:
         return app.openapi_schema
 
+    # Read canonical version from package metadata so the
+    # OpenAPI spec stays in sync with pyproject.toml.
+    try:
+        from importlib.metadata import version as _pkg_version
+        _spec_version = _pkg_version("prsm-network")
+    except Exception:  # noqa: BLE001
+        _spec_version = "unknown"
     openapi_schema = get_openapi(
         title="PRSM API",
-        version="0.2.0",
+        version=_spec_version,
         description="""
 # Protocol for Research, Storage, and Modeling (PRSM) API
 

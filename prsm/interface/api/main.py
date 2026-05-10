@@ -43,11 +43,19 @@ app = create_app()
 
 # Re-export WebSocket manager for backward compatibility
 
-# Log application creation
+# Log application creation. Version reads from installed
+# package metadata so it stays in sync with pyproject.toml
+# across releases (parallel to /api-info, /openapi.json,
+# prsm_build_info, MCP Server.version).
+try:
+    from importlib.metadata import version as _pkg_version
+    _api_version = _pkg_version("prsm-network")
+except Exception:  # noqa: BLE001
+    _api_version = "unknown"
 logger.info(
     "PRSM API application initialized",
     environment=settings.environment.value if settings else "unknown",
-    version="0.2.0"
+    version=_api_version,
 )
 
 
