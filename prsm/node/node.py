@@ -1511,10 +1511,13 @@ class PRSMNode:
             )
         )
         # Operator on-chain address for /admin/earnings-summary
-        # heartbeat-status lookup. Optional; when unset, the
-        # heartbeat stream of earnings-summary reports
-        # available=False.
-        self._operator_address = os.environ.get("PRSM_OPERATOR_ADDRESS")
+        # heartbeat-status lookup. Resolution order:
+        # PRSM_OPERATOR_ADDRESS explicit > FTNS_WALLET_PRIVATE_KEY
+        # derived > None. Auto-derivation eliminates the
+        # double-config error of setting PK but forgetting
+        # PRSM_OPERATOR_ADDRESS.
+        from prsm.node.operator_address import resolve_operator_address
+        self._operator_address = resolve_operator_address()
         # Tasks created on start() — None until then.
         self._compensation_scheduler_task = None
         self._heartbeat_scheduler_task = None
