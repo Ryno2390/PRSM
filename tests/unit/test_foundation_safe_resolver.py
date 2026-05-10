@@ -28,6 +28,18 @@ class TestDefaults:
         assert DEFAULT_MAINNET_FOUNDATION_SAFE_ADDRESS.startswith("0x")
         assert len(DEFAULT_MAINNET_FOUNDATION_SAFE_ADDRESS) == 42
 
+    def test_default_matches_canonical_networks_py_address(self):
+        """The default MUST equal the Base mainnet Foundation Safe
+        address pinned in networks.py — there is exactly one real
+        mainnet Safe, and forking the default to a placeholder
+        zero-padded version (0x91b0...0000...5791) silently
+        misroutes A6 beacon binding to a non-existent address."""
+        from prsm.config.networks import MAINNET
+        assert (
+            DEFAULT_MAINNET_FOUNDATION_SAFE_ADDRESS.lower()
+            == MAINNET.foundation_safe.lower()
+        )
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Env override

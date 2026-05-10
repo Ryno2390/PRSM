@@ -40,8 +40,11 @@ from typing import Optional
 # Base mainnet Foundation Safe — 2-of-3 hardware multisig deployed
 # per project_phase1_3_task8_deploy_complete_2026_05_04.md memory.
 # This is the default when PRSM_FOUNDATION_SAFE_ADDRESS is unset.
+# Source-of-truth pin: prsm/config/networks.py MAINNET.foundation_safe.
+# A regression test (test_default_matches_canonical_networks_py_address)
+# enforces the equivalence so a divergence breaks CI immediately.
 DEFAULT_MAINNET_FOUNDATION_SAFE_ADDRESS: str = (
-    "0x91b0000000000000000000000000000000005791"
+    "0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791"
 )
 
 
