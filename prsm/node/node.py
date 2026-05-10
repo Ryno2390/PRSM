@@ -846,7 +846,8 @@ def _build_key_distribution_watcher_or_none(*, client, state_store=None):
 
 def _build_storage_slashing_watcher_or_none(
     *, client, state_store=None, slash_event_log=None,
-    heartbeat_log=None,
+    heartbeat_log=None, webhook_deliverer=None,
+    webhook_url=None, webhook_secret=None,
 ):
     """Construct a StorageSlashingWatcher if operator opted in AND
     underlying client is non-None.
@@ -890,7 +891,7 @@ def _build_storage_slashing_watcher_or_none(
                         "heartbeat_log.append raised: %s", exc,
                     )
 
-        def _on_proof(event):
+        async def _on_proof(event):
             logger.warning(
                 "StorageSlashingWatcher: ProofFailureSlashed "
                 "provider=%s challenger=%s shard_id=0x%s slash_id=0x%s",
@@ -916,8 +917,31 @@ def _build_storage_slashing_watcher_or_none(
                         "slash_event_log.append (proof) raised: %s",
                         exc,
                     )
+            if webhook_deliverer is not None and webhook_url:
+                try:
+                    payload = {
+                        "event": "slash.proof_failure_slashed",
+                        "provider": event.provider,
+                        "challenger": event.challenger,
+                        "shard_id": "0x" + event.shard_id.hex(),
+                        "evidence_hash": (
+                            "0x" + event.evidence_hash.hex()
+                        ),
+                        "slash_id": "0x" + event.slash_id.hex(),
+                    }
+                    await webhook_deliverer.deliver(
+                        url=webhook_url,
+                        event="slash.proof_failure_slashed",
+                        payload=payload,
+                        secret=webhook_secret,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "slash.proof_failure webhook dispatch raised: %s",
+                        exc,
+                    )
 
-        def _on_missing(event):
+        async def _on_missing(event):
             logger.warning(
                 "StorageSlashingWatcher: HeartbeatMissingSlashed "
                 "provider=%s challenger=%s last_heartbeat_at=%d "
@@ -940,6 +964,26 @@ def _build_storage_slashing_watcher_or_none(
                     logger.debug(
                         "slash_event_log.append (missing) raised: %s",
                         exc,
+                    )
+            if webhook_deliverer is not None and webhook_url:
+                try:
+                    payload = {
+                        "event": "slash.heartbeat_missing_slashed",
+                        "provider": event.provider,
+                        "challenger": event.challenger,
+                        "last_heartbeat_at": event.last_heartbeat_at,
+                        "slash_id": "0x" + event.slash_id.hex(),
+                    }
+                    await webhook_deliverer.deliver(
+                        url=webhook_url,
+                        event="slash.heartbeat_missing_slashed",
+                        payload=payload,
+                        secret=webhook_secret,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "slash.heartbeat_missing webhook dispatch raised: "
+                        "%s", exc,
                     )
 
         watcher = StorageSlashingWatcher(
@@ -1486,6 +1530,35 @@ class PRSMNode:
         self._slash_event_log = SlashEventRing()
         self._heartbeat_log = HeartbeatRecordedRing()
 
+        # Pre-construct webhook deliverer + log + URL + secret so
+        # the StorageSlashingWatcher built below can fire
+        # slash.proof_failure_slashed / slash.heartbeat_missing_slashed
+        # webhooks. The DaemonWatchdog initialization further down
+        # reuses the same _webhook_deliverer + _webhook_log when
+        # PRSM_WEBHOOK_URL is set; otherwise these stay None.
+        self._webhook_deliverer = None
+        self._webhook_log = None
+        _early_webhook_url = os.environ.get(
+            "PRSM_WEBHOOK_URL", "",
+        ).strip() or None
+        _early_webhook_secret = (
+            os.environ.get("PRSM_WEBHOOK_SECRET", "").strip() or None
+        )
+        if _early_webhook_url:
+            try:
+                from prsm.node.webhook_delivery import WebhookDeliverer
+                from prsm.node.webhook_log import WebhookLogRing
+                self._webhook_log = WebhookLogRing()
+                self._webhook_deliverer = WebhookDeliverer(
+                    log_ring=self._webhook_log,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Webhook deliverer construction failed: %s — "
+                    "slash + daemon webhooks disabled",
+                    exc,
+                )
+
         # Shared state store for the 3 watchers — single instance,
         # 3 watcher_key namespaces inside. None when persistence is
         # disabled (legacy chain-tip-baseline behavior preserved).
@@ -1502,6 +1575,9 @@ class PRSMNode:
                 state_store=self._watcher_state_store,
                 slash_event_log=self._slash_event_log,
                 heartbeat_log=self._heartbeat_log,
+                webhook_deliverer=self._webhook_deliverer,
+                webhook_url=_early_webhook_url,
+                webhook_secret=_early_webhook_secret,
             )
         )
         self._compensation_distributor_watcher = (
@@ -1976,17 +2052,23 @@ class PRSMNode:
             import os as _os
             webhook_url = _os.getenv("PRSM_WEBHOOK_URL", "").strip()
             if webhook_url:
-                from prsm.node.webhook_delivery import WebhookDeliverer
-                from prsm.node.webhook_log import WebhookLogRing
                 from prsm.node.daemon_watchdog import DaemonWatchdog
                 webhook_secret = _os.getenv(
                     "PRSM_WEBHOOK_SECRET", "",
                 ).strip() or None
-                self._webhook_log = WebhookLogRing()
-                deliverer = WebhookDeliverer(
-                    log_ring=self._webhook_log,
-                )
-                self._webhook_deliverer = deliverer
+                # Reuse early-constructed deliverer + log (built
+                # before the StorageSlashingWatcher so slash events
+                # could fire webhooks). Re-construct here only if
+                # early init failed (env was set during run rather
+                # than startup, or import error skipped early init).
+                if self._webhook_deliverer is None:
+                    from prsm.node.webhook_delivery import WebhookDeliverer
+                    from prsm.node.webhook_log import WebhookLogRing
+                    self._webhook_log = WebhookLogRing()
+                    self._webhook_deliverer = WebhookDeliverer(
+                        log_ring=self._webhook_log,
+                    )
+                deliverer = self._webhook_deliverer
                 interval_raw = _os.getenv(
                     "PRSM_DAEMON_WATCHDOG_INTERVAL_SEC", "",
                 ).strip()

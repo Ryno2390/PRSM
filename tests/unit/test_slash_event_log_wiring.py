@@ -46,7 +46,8 @@ def test_proof_failure_slash_recorded_in_ring(mock_client, opted_in_env):
         evidence_hash=b"\x22" * 32,
         slash_id=b"\x33" * 32,
     )
-    watcher._on_proof(event)
+    import asyncio
+    asyncio.run(watcher._invoke_cb(watcher._on_proof, event))
 
     entries = ring.recent()
     assert len(entries) == 1
@@ -70,7 +71,8 @@ def test_heartbeat_missing_slash_recorded_in_ring(
         last_heartbeat_at=1700000000,
         slash_id=b"\x44" * 32,
     )
-    watcher._on_missing(event)
+    import asyncio
+    asyncio.run(watcher._invoke_cb(watcher._on_missing, event))
 
     entries = ring.recent()
     assert len(entries) == 1
@@ -89,7 +91,8 @@ def test_no_ring_argument_does_not_crash(mock_client, opted_in_env):
         last_heartbeat_at=0, slash_id=b"\x55" * 32,
     )
     # Should NOT raise
-    watcher._on_missing(event)
+    import asyncio
+    asyncio.run(watcher._invoke_cb(watcher._on_missing, event))
 
 
 def test_ring_failure_does_not_break_watcher_callback(
@@ -108,4 +111,5 @@ def test_ring_failure_does_not_break_watcher_callback(
         last_heartbeat_at=0, slash_id=b"\x66" * 32,
     )
     # Should NOT propagate
-    watcher._on_missing(event)
+    import asyncio
+    asyncio.run(watcher._invoke_cb(watcher._on_missing, event))
