@@ -1935,6 +1935,65 @@ class PRSMNode:
                             "not numeric; using default",
                             interval_raw,
                         )
+                # Optional canonical-pin drift detection.
+                # PRSM_WEBHOOK_WATCH_CANONICAL=1 enables per-sweep
+                # check; transitions from match to drift fire
+                # canonical.drifted webhook events.
+                if _os.getenv(
+                    "PRSM_WEBHOOK_WATCH_CANONICAL", "",
+                ).strip() == "1":
+                    def _canonical_check_fn():
+                        from prsm.config.networks import (
+                            get_network_config, _resolve_network_name,
+                        )
+                        try:
+                            cfg = get_network_config(
+                                _resolve_network_name(),
+                            )
+                        except Exception:
+                            return {}
+                        result = {}
+                        # ftns_ledger
+                        ftns = getattr(self, "ftns_ledger", None)
+                        if ftns is not None:
+                            wired = getattr(
+                                ftns, "contract_address", None,
+                            )
+                            canonical = cfg.ftns_token
+                            if wired and canonical:
+                                result["ftns_ledger"] = (wired, canonical)
+                        # royalty_distributor
+                        royalty = getattr(
+                            self, "_royalty_distributor_client", None,
+                        )
+                        if royalty is not None:
+                            wired = getattr(
+                                royalty, "distributor_address", None,
+                            )
+                            canonical = cfg.royalty_distributor
+                            if wired and canonical:
+                                result["royalty_distributor"] = (
+                                    wired, canonical,
+                                )
+                        # provenance_registry (V2 canonical)
+                        provenance = getattr(
+                            self, "_provenance_client", None,
+                        )
+                        if provenance is not None:
+                            wired = getattr(
+                                provenance, "contract_address", None,
+                            )
+                            canonical = cfg.provenance_registry_v2
+                            if wired and canonical:
+                                result["provenance_registry"] = (
+                                    wired, canonical,
+                                )
+                        return result
+                    wd_kwargs["check_canonical_pins"] = True
+                    wd_kwargs["canonical_check_fn"] = _canonical_check_fn
+                    logger.info(
+                        "DaemonWatchdog: canonical-pin drift detection enabled",
+                    )
                 self._daemon_watchdog = DaemonWatchdog(**wd_kwargs)
                 logger.info(
                     "DaemonWatchdog wired (url=%s%s)",
