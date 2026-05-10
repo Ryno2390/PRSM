@@ -3820,11 +3820,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     @app.get("/transactions")
     async def get_transactions(limit: int = 50) -> Dict[str, Any]:
         """Get transaction history."""
+        # Sprint 172 — validate `limit` bounds. Pre-fix the handler
+        # passed `min(limit, 200)` through, so a negative value
+        # (e.g. limit=-1) became -1 and downstream interpreted it
+        # as "unlimited", returning every transaction in history.
+        # Real DoS vector for operators with deep transaction logs.
+        if limit < 1 or limit > 200:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 200], got {limit}",
+            )
         if not node.ledger or not node.identity:
             raise HTTPException(status_code=503, detail="Node not initialized")
 
         history = await node.ledger.get_transaction_history(
-            node.identity.node_id, limit=min(limit, 200)
+            node.identity.node_id, limit=limit,
         )
         return {
             "transactions": [
