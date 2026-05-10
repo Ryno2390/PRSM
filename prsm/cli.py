@@ -1627,7 +1627,8 @@ def _short_addr(addr: str, *, head: int = 8, tail: int = 6) -> str:
 
 def _render_webhook_row(e: dict) -> str:
     success = e.get("success")
-    marker = "[ok]" if success else "[!]"
+    # Escape brackets so rich doesn't interpret as markup tags
+    marker = r"\[ok]" if success else r"\[!]"
     code = e.get("status_code", "?")
     detail = (
         "delivered" if success
@@ -5643,6 +5644,90 @@ def _wallet_read_balance_wei(rpc_url: str, ftns_token: str, address: str) -> int
         address=Web3.to_checksum_address(ftns_token), abi=erc20_abi)
     return int(contract.functions.balanceOf(
         Web3.to_checksum_address(address)).call())
+
+
+@main.group()
+def content():
+    """Content publishing — view uploads, royalties accrued."""
+    pass
+
+
+@content.command("mine")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+)
+@click.option("--limit", default=20, type=int)
+def content_mine(api_port, output_format, limit):
+    """List content this node has uploaded.
+
+    Each entry shows filename, size, royalty rate, access count,
+    accumulated FTNS royalties, and on-chain provenance status.
+    """
+    import json
+    import httpx
+
+    url = f"http://127.0.0.1:{api_port}/content/mine?limit={limit}"
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(url)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+
+    if resp.status_code == 503:
+        console.print(
+            f"[yellow]ContentUploader not configured.[/yellow]\n"
+            f"[dim]{resp.json().get('detail', 'unknown')}[/dim]"
+        )
+        sys.exit(0)
+    if resp.status_code != 200:
+        console.print(
+            f"[red]/content/mine returned "
+            f"{resp.status_code}[/red]: {resp.text}"
+        )
+        sys.exit(1)
+
+    body = resp.json()
+    if output_format == "json":
+        console.print(json.dumps(body, indent=2))
+        return
+
+    entries = body.get("entries", [])
+    total = body.get("total", 0)
+    console.print(
+        f"[bold]My Uploaded Content[/bold] "
+        f"(showing {len(entries)} of {total}):"
+    )
+    if not entries:
+        console.print(
+            f"  [dim]No uploads yet. POST to /content/upload "
+            f"or /content/upload/shard.[/dim]"
+        )
+        return
+    for e in entries:
+        cid = e.get("content_id", "?")
+        if len(cid) > 22:
+            cid = cid[:14] + ".." + cid[-6:]
+        fn = e.get("filename", "?")
+        if len(fn) > 18:
+            fn = fn[:15] + "..."
+        royalties = e.get("total_royalties", 0.0)
+        hits = e.get("access_count", 0)
+        size = e.get("size_bytes", 0)
+        # Escape brackets so rich doesn't interpret as markup tags
+        prov = (
+            r"\[chain]" if e.get("provenance_tx_hash")
+            else r"\[off]"
+        )
+        console.print(
+            f"  {cid:<22}  {fn:<18}  {size:>8}b  "
+            f"{royalties:>9.6f} FTNS  hits={hits:<4}  {prov}"
+        )
 
 
 @main.group()
