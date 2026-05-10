@@ -73,3 +73,25 @@ class TestPreservesOtherChecks:
         # Original "Content uploader not initialized" message
         # (NOT the new libtorrent message)
         assert "uploader" in resp.json()["detail"].lower()
+
+
+class TestShardEndpoint:
+    """/content/upload/shard has the same pre-flight publisher check."""
+
+    def test_shard_503_when_publisher_unwired(self):
+        import base64
+        node = _node(publisher_wired=False)
+        resp = _client(node).post(
+            "/content/upload/shard",
+            json={
+                "dataset_id": "test",
+                "content_b64": base64.b64encode(b"hello").decode(
+                    "ascii",
+                ),
+                "shard_count": 1,
+            },
+        )
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert "libtorrent" in detail.lower()
+        assert "shard" in detail.lower()

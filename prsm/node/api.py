@@ -3316,6 +3316,24 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=503, detail="Content uploader not initialized",
             )
 
+        # Pre-flight check on content_publisher (BitTorrent layer)
+        # — same diagnostic as /content/upload (sprint 124). Without
+        # this, libtorrent-missing produced a downstream None-return
+        # path with no clear remediation hint.
+        if getattr(
+            node.content_uploader, "content_publisher", None,
+        ) is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "ContentPublisher (BitTorrent layer) not wired — "
+                    "shard uploads cannot proceed. Most common cause: "
+                    "libtorrent not installed on this Python. Install "
+                    "with `pip install libtorrent>=2.0.9` (macOS may "
+                    "need `brew install libtorrent-rasterbar` first)."
+                ),
+            )
+
         # Slice content into shards + publish each through the real
         # BitTorrent layer. Each upload() call returns an UploadedContent
         # with a network-discoverable CID + provenance record.
