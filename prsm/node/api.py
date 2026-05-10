@@ -948,8 +948,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=503,
                 detail=(
                     "RoyaltyDistributor client not wired on this "
-                    "node. Set PRSM_ROYALTY_DISTRIBUTOR_ADDRESS + "
-                    "FTNS_TOKEN_ADDRESS to enable."
+                    "node. Either set PRSM_ROYALTY_DISTRIBUTOR_ADDRESS "
+                    "explicitly, OR set PRSM_NETWORK=mainnet for "
+                    "canonical-fallback wiring (sprint 144). "
+                    "Note: testnet has no canonical RoyaltyDistributor "
+                    "deployment."
                 ),
             )
 
@@ -4249,9 +4252,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "CompensationDistributorClient not wired. Set "
-                    "PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS + "
-                    "FTNS_WALLET_PRIVATE_KEY."
+                    "CompensationDistributorClient not wired. "
+                    "FTNS_WALLET_PRIVATE_KEY is required for the write "
+                    "client; address resolves from "
+                    "PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS or, if "
+                    "PRSM_NETWORK is set, the canonical-fallback "
+                    "address from networks.py (sprint 144)."
                 ),
             )
         try:
@@ -4287,9 +4293,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "StorageSlashingClient not wired. Set "
-                    "PRSM_STORAGE_SLASHING_ADDRESS + "
-                    "FTNS_WALLET_PRIVATE_KEY."
+                    "StorageSlashingClient not wired. "
+                    "FTNS_WALLET_PRIVATE_KEY is required for the write "
+                    "client; address resolves from "
+                    "PRSM_STORAGE_SLASHING_ADDRESS or, if "
+                    "PRSM_NETWORK is set, the canonical-fallback "
+                    "address from networks.py (sprint 144)."
                 ),
             )
         try:
