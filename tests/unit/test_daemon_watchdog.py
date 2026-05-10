@@ -152,6 +152,74 @@ class TestCheckOnce:
         assert kwargs["secret"] == "ops-shared-secret"
 
     @pytest.mark.asyncio
+    async def test_done_to_running_emits_recovery(self):
+        """Inverse transition: was crashed last sweep, now alive
+        again → emit daemon.recovered. Tells operators "you can
+        stop paging on this one."""
+        node = _node_with_tasks(_heartbeat_scheduler_task=False)
+        deliverer = _stub_deliverer()
+        watchdog = DaemonWatchdog(
+            node=node,
+            webhook_deliverer=deliverer,
+            webhook_url="https://hook.example.com",
+        )
+        # First sweep: baseline (was done; no fire).
+        await watchdog.check_once()
+        assert deliverer.deliver.await_count == 0
+        # Now task comes back alive (operator restarted it).
+        node._heartbeat_scheduler_task.done.return_value = False
+        emitted = await watchdog.check_once()
+        assert "heartbeat_scheduler" in emitted
+        deliverer.deliver.assert_awaited_once()
+        # Verify recovery event name.
+        kwargs = deliverer.deliver.await_args.kwargs
+        assert kwargs["event"] == "daemon.recovered"
+        assert kwargs["payload"]["event"] == "daemon.recovered"
+        assert kwargs["payload"]["daemon"] == "heartbeat_scheduler"
+
+    @pytest.mark.asyncio
+    async def test_first_sweep_running_does_not_emit_recovery(self):
+        """First sweep can't emit recovery either — same baseline
+        rule that prevents false-crash emit applies symmetrically."""
+        node = _node_with_tasks(_heartbeat_scheduler_task=True)
+        deliverer = _stub_deliverer()
+        watchdog = DaemonWatchdog(
+            node=node,
+            webhook_deliverer=deliverer,
+            webhook_url="https://hook.example.com",
+        )
+        emitted = await watchdog.check_once()
+        assert emitted == []
+        deliverer.deliver.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_crash_then_recovery_emits_both(self):
+        """Full incident cycle: alive → crashed → alive emits
+        crash + recovery in sequence."""
+        node = _node_with_tasks(_heartbeat_scheduler_task=True)
+        deliverer = _stub_deliverer()
+        watchdog = DaemonWatchdog(
+            node=node,
+            webhook_deliverer=deliverer,
+            webhook_url="https://hook.example.com",
+        )
+        # Baseline: alive
+        await watchdog.check_once()
+        # Crash
+        node._heartbeat_scheduler_task.done.return_value = True
+        await watchdog.check_once()
+        # Recovery
+        node._heartbeat_scheduler_task.done.return_value = False
+        await watchdog.check_once()
+        # Two events: one crash + one recovery
+        assert deliverer.deliver.await_count == 2
+        events = [
+            call.kwargs["event"]
+            for call in deliverer.deliver.await_args_list
+        ]
+        assert events == ["daemon.crashed", "daemon.recovered"]
+
+    @pytest.mark.asyncio
     async def test_multiple_simultaneous_crashes(self):
         node = _node_with_tasks(
             _heartbeat_scheduler_task=True,

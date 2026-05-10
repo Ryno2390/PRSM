@@ -105,31 +105,41 @@ class DaemonWatchdog:
 
     async def check_once(self) -> List[str]:
         """One sweep. Returns list of daemon names that
-        transitioned from alive to crashed since last sweep
-        (i.e., events emitted)."""
+        transitioned (either alive→crashed OR crashed→alive)
+        since last sweep — both transitions emit events.
+
+        First sweep (prior is None) doesn't fire either way —
+        could be inherited from before watchdog started.
+        """
         emitted: List[str] = []
         for name, task_attr in _DAEMON_REGISTRY:
             alive = self._is_task_alive(task_attr)
             prior = self._last_alive[name]
             self._last_alive[name] = alive
-            # Detect transition: was alive last sweep, now done.
-            # First sweep (prior is None) doesn't fire even if
-            # task is .done() — could be inherited from before
-            # watchdog started.
             if prior is True and alive is False:
+                # Crash transition.
                 logger.warning(
                     "DaemonWatchdog: %s transitioned to .done() — "
-                    "dispatching webhook event",
-                    name,
+                    "dispatching daemon.crashed", name,
                 )
-                await self._dispatch(name)
+                await self._dispatch(name, "daemon.crashed")
+                emitted.append(name)
+            elif prior is False and alive is True:
+                # Recovery transition — was crashed, now alive
+                # again. Tells operators "you can stop paging."
+                logger.info(
+                    "DaemonWatchdog: %s recovered (alive again) — "
+                    "dispatching daemon.recovered", name,
+                )
+                await self._dispatch(name, "daemon.recovered")
                 emitted.append(name)
         return emitted
 
-    async def _dispatch(self, daemon_name: str) -> None:
-        """POST a daemon.crashed event to the webhook URL."""
+    async def _dispatch(self, daemon_name: str, event: str) -> None:
+        """POST the event to the webhook URL. Used for both
+        daemon.crashed and daemon.recovered."""
         payload = {
-            "event": "daemon.crashed",
+            "event": event,
             "node_id": getattr(
                 getattr(self._node, "identity", None),
                 "node_id",
@@ -141,20 +151,20 @@ class DaemonWatchdog:
         try:
             result = await self._deliverer.deliver(
                 url=self._webhook_url,
-                event="daemon.crashed",
+                event=event,
                 payload=payload,
                 secret=self._webhook_secret,
             )
             if not result.success:
                 logger.warning(
                     "DaemonWatchdog: webhook delivery failed for "
-                    "%s after %d attempts: %s",
-                    daemon_name, result.attempts, result.error,
+                    "%s (%s) after %d attempts: %s",
+                    daemon_name, event, result.attempts, result.error,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.error(
-                "DaemonWatchdog: webhook dispatch raised for %s: %s",
-                daemon_name, exc,
+                "DaemonWatchdog: webhook dispatch raised for "
+                "%s (%s): %s", daemon_name, event, exc,
             )
 
     async def watch(self) -> None:
