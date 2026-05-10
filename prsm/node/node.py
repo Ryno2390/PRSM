@@ -155,6 +155,14 @@ def _build_provenance_client_or_none():
         return None
     addr = os.getenv("PRSM_PROVENANCE_REGISTRY_ADDRESS", "").strip()
     pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip()
+    if not addr and os.getenv("PRSM_NETWORK", "").strip():
+        # Sprint 146 — canonical fallback when PRSM_NETWORK declared.
+        try:
+            addr = (
+                _resolve_endpoints().provenance_registry or ""
+            ).strip()
+        except Exception:  # noqa: BLE001
+            addr = ""
     if not addr or not pk:
         if not addr:
             logger.info(
@@ -373,6 +381,14 @@ def _build_publisher_key_anchor_client_or_none():
     PRSM_FTNS_WALLET_PRIVATE_KEY).
     """
     addr = os.getenv("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "").strip()
+    if not addr and os.getenv("PRSM_NETWORK", "").strip():
+        # Sprint 146 — canonical fallback when PRSM_NETWORK declared.
+        try:
+            addr = (
+                _resolve_endpoints().publisher_key_anchor or ""
+            ).strip()
+        except Exception:  # noqa: BLE001
+            addr = ""
     if not addr:
         logger.debug(
             "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS not set — DHT manifest "
