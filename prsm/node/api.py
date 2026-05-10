@@ -1468,6 +1468,40 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             )
 
+        # Cap shard_cids list length. Each shard touches the
+        # swarm dispatcher per the QueryOrchestrator canonical
+        # workflow — unbounded list = unbounded dispatch.
+        # Default 100 covers any practical query. Validation
+        # before agent_forge check so 4xx is clean regardless
+        # of forge state.
+        _early_shard_cids = body.get("shard_cids", None)
+        if _early_shard_cids is not None:
+            _shard_cap_raw = os.getenv(
+                "PRSM_MAX_FORGE_SHARDS", "",
+            ).strip()
+            try:
+                _shard_cap = (
+                    int(_shard_cap_raw) if _shard_cap_raw else 100
+                )
+                if _shard_cap <= 0:
+                    raise ValueError("non-positive")
+            except (ValueError, TypeError):
+                logger.warning(
+                    "PRSM_MAX_FORGE_SHARDS=%r not a positive int; "
+                    "using 100 default", _shard_cap_raw,
+                )
+                _shard_cap = 100
+            if len(_early_shard_cids) > _shard_cap:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"shard_cids count {len(_early_shard_cids)} "
+                        f"exceeds PRSM_MAX_FORGE_SHARDS cap of "
+                        f"{_shard_cap}. Trim the shard list or "
+                        f"have the operator raise the cap."
+                    ),
+                )
+
         if not hasattr(node, 'agent_forge') or node.agent_forge is None:
             raise HTTPException(
                 status_code=503,
