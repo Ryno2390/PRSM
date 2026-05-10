@@ -687,6 +687,22 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_webhook_test",
+        description=(
+            "Smoke-test the operator's configured webhook URL. "
+            "Synthesizes a webhook.test event + dispatches via "
+            "the same deliverer the DaemonWatchdog uses; returns "
+            "delivery success/failure with attempts + error fields. "
+            "Use after configuring PRSM_WEBHOOK_URL to verify "
+            "without waiting for a real daemon crash. Backed by "
+            "POST /admin/webhook-test."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
         name="prsm_canonical_check",
         description=(
             "Verify operator's wired contract addresses match the "
@@ -2514,6 +2530,53 @@ async def handle_prsm_audit_recent(
     return "\n".join(lines)
 
 
+async def handle_prsm_webhook_test(
+    arguments: Dict[str, Any],
+) -> str:
+    """Handle prsm_webhook_test: smoke-test the configured
+    webhook URL via POST /admin/webhook-test."""
+    try:
+        result = await _call_node_api("POST", "/admin/webhook-test")
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+
+    if "success" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not configured" in detail.lower():
+            return (
+                f"Webhook not configured on this node.\n"
+                f"  Detail: {detail}\n"
+                f"  Set PRSM_WEBHOOK_URL env var to enable."
+            )
+        return f"Webhook test failed.\n  Detail: {detail}"
+
+    success = result.get("success", False)
+    status_code = result.get("status_code")
+    attempts = result.get("attempts", 0)
+    error = result.get("error")
+
+    if success:
+        return (
+            f"PRSM Webhook Test\n"
+            f"  Result:       PASS\n"
+            f"  Status code:  {status_code}\n"
+            f"  Attempts:     {attempts}\n"
+            f"  webhook.test event delivered successfully."
+        )
+    return (
+        f"PRSM Webhook Test\n"
+        f"  Result:       FAIL\n"
+        f"  Status code:  {status_code}\n"
+        f"  Attempts:     {attempts}\n"
+        f"  Error:        {error}\n"
+        f"  Operator action: verify webhook URL reachable + "
+        f"accepts POST + returns 2xx."
+    )
+
+
 async def handle_prsm_canonical_check(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3052,6 +3115,7 @@ TOOL_HANDLERS = {
     "prsm_arbitration_status": handle_prsm_arbitration_status,
     "prsm_audit_recent": handle_prsm_audit_recent,
     "prsm_canonical_check": handle_prsm_canonical_check,
+    "prsm_webhook_test": handle_prsm_webhook_test,
     "prsm_metrics_summary": handle_prsm_metrics_summary,
     "prsm_cleanup_stale_escrows": handle_prsm_cleanup_stale_escrows,
     "prsm_node_health": handle_prsm_node_health,
