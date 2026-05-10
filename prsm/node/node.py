@@ -426,6 +426,14 @@ def _build_compensation_distributor_client_or_none():
     """
     addr = os.getenv("PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS", "").strip()
     pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip()
+    if not addr and os.getenv("PRSM_NETWORK", "").strip():
+        # Sprint 144 — canonical fallback when network resolved.
+        try:
+            addr = (
+                _resolve_endpoints().compensation_distributor or ""
+            ).strip()
+        except Exception:  # noqa: BLE001
+            addr = ""
     if not addr or not pk:
         return None
     try:
@@ -466,6 +474,14 @@ def _build_key_distribution_client_or_none():
     the KeyDistributionWatcher cannot launch.
     """
     addr = os.getenv("PRSM_KEY_DISTRIBUTION_ADDRESS", "").strip()
+    if not addr and os.getenv("PRSM_NETWORK", "").strip():
+        # Sprint 144 — canonical fallback when network resolved.
+        try:
+            addr = (
+                _resolve_endpoints().key_distribution or ""
+            ).strip()
+        except Exception:  # noqa: BLE001
+            addr = ""
     if not addr:
         return None
     pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip() or None
@@ -517,7 +533,18 @@ def _build_royalty_distributor_client_or_none():
     """
     addr = os.getenv("PRSM_ROYALTY_DISTRIBUTOR_ADDRESS", "").strip()
     if not addr:
-        return None
+        # Sprint 144 — fall back to canonical for explicitly-resolved
+        # network. Operators who set PRSM_NETWORK shouldn't ALSO have
+        # to paste each per-contract address into env vars.
+        if os.getenv("PRSM_NETWORK", "").strip():
+            try:
+                addr = (
+                    _resolve_endpoints().royalty_distributor or ""
+                ).strip()
+            except Exception:  # noqa: BLE001
+                addr = ""
+        if not addr:
+            return None
     pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip() or None
     # FTNS token address is required for the RoyaltyDistributor
     # client's constructor. Fall back to the canonical Base mainnet
@@ -570,6 +597,14 @@ def _build_storage_slashing_client_or_none():
     """
     addr = os.getenv("PRSM_STORAGE_SLASHING_ADDRESS", "").strip()
     pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip()
+    if not addr and os.getenv("PRSM_NETWORK", "").strip():
+        # Sprint 144 — canonical fallback when network resolved.
+        try:
+            addr = (
+                _resolve_endpoints().storage_slashing or ""
+            ).strip()
+        except Exception:  # noqa: BLE001
+            addr = ""
     if not addr or not pk:
         return None
     try:

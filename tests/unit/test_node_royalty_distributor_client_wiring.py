@@ -23,6 +23,41 @@ class TestBuildRoyaltyDistributorClient:
     def test_returns_none_when_address_unset(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("PRSM_ROYALTY_DISTRIBUTOR_ADDRESS", None)
+            os.environ.pop("PRSM_NETWORK", None)
+            assert _build_royalty_distributor_client_or_none() is None
+
+    def test_falls_back_to_canonical_when_network_set(self):
+        """Sprint 144 — operator who declared `PRSM_NETWORK=mainnet`
+        shouldn't ALSO have to paste the canonical RoyaltyDistributor
+        address into a second env var. networks.py is canonical
+        source of truth; the builder should consult resolve_endpoints()
+        before giving up.
+        """
+        canonical = "0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e"  # v2 mainnet
+        with patch(
+            "prsm.economy.web3.royalty_distributor.RoyaltyDistributorClient"
+        ) as MockClient, patch.dict(os.environ, {
+            "PRSM_NETWORK": "mainnet",
+        }, clear=False):
+            os.environ.pop("PRSM_ROYALTY_DISTRIBUTOR_ADDRESS", None)
+            MockClient.return_value = MagicMock()
+            client = _build_royalty_distributor_client_or_none()
+            assert client is not None
+            kwargs = MockClient.call_args.kwargs
+            assert kwargs["distributor_address"] == canonical
+
+    def test_returns_none_when_network_set_but_canonical_missing(self):
+        """Network resolves but the canonical addr field is None
+        (e.g., a future testnet that hasn't been deployed yet).
+        Builder still returns None rather than crashing.
+        """
+        with patch(
+            "prsm.node.node._resolve_endpoints"
+        ) as MockResolve, patch.dict(os.environ, {
+            "PRSM_NETWORK": "mainnet",
+        }, clear=False):
+            os.environ.pop("PRSM_ROYALTY_DISTRIBUTOR_ADDRESS", None)
+            MockResolve.return_value = MagicMock(royalty_distributor=None)
             assert _build_royalty_distributor_client_or_none() is None
 
     def test_returns_none_when_private_key_unset(self):

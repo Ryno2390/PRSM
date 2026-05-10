@@ -34,6 +34,7 @@ from prsm.node.node import (
     _build_compensation_distributor_client_or_none,
     _build_compensation_scheduler_or_none,
     _build_heartbeat_scheduler_or_none,
+    _build_key_distribution_client_or_none,
     _build_storage_slashing_client_or_none,
 )
 
@@ -47,7 +48,24 @@ class TestBuildCompensationDistributorClient:
     def test_returns_none_when_address_unset(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS", None)
+            os.environ.pop("PRSM_NETWORK", None)
             assert _build_compensation_distributor_client_or_none() is None
+
+    def test_falls_back_to_canonical_when_network_set(self):
+        """Sprint 144 — canonical fallback when PRSM_NETWORK declared."""
+        canonical = "0xa9551F5a3AeAB39cc8315AcD8caC2886Bd04f244"  # mainnet
+        with patch(
+            "prsm.economy.web3.compensation_distributor."
+            "CompensationDistributorClient"
+        ) as MockClient, patch.dict(os.environ, {
+            "PRSM_NETWORK": "mainnet",
+            "FTNS_WALLET_PRIVATE_KEY": "0x" + "01" * 32,
+        }, clear=False):
+            os.environ.pop("PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS", None)
+            MockClient.return_value = MagicMock()
+            client = _build_compensation_distributor_client_or_none()
+            assert client is not None
+            assert MockClient.call_args.kwargs["contract_address"] == canonical
 
     def test_returns_none_when_private_key_unset(self):
         with patch.dict(os.environ, {
@@ -92,7 +110,23 @@ class TestBuildStorageSlashingClient:
     def test_returns_none_when_address_unset(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("PRSM_STORAGE_SLASHING_ADDRESS", None)
+            os.environ.pop("PRSM_NETWORK", None)
             assert _build_storage_slashing_client_or_none() is None
+
+    def test_falls_back_to_canonical_when_network_set(self):
+        """Sprint 144 — canonical fallback when PRSM_NETWORK declared."""
+        canonical = "0x0e9cAfadCCCe0987C773B5FdFF295c2Aa6F03337"  # mainnet
+        with patch(
+            "prsm.economy.web3.storage_slashing.StorageSlashingClient"
+        ) as MockClient, patch.dict(os.environ, {
+            "PRSM_NETWORK": "mainnet",
+            "FTNS_WALLET_PRIVATE_KEY": "0x" + "01" * 32,
+        }, clear=False):
+            os.environ.pop("PRSM_STORAGE_SLASHING_ADDRESS", None)
+            MockClient.return_value = MagicMock()
+            client = _build_storage_slashing_client_or_none()
+            assert client is not None
+            assert MockClient.call_args.kwargs["contract_address"] == canonical
 
     def test_returns_none_when_private_key_unset(self):
         with patch.dict(os.environ, {
@@ -238,3 +272,30 @@ class TestBuildCompensationScheduler:
             # behavior, since the operator clearly *wants* the scheduler.
             assert scheduler is not None
             assert scheduler.interval_seconds == 86400.0
+
+
+# ──────────────────────────────────────────────────────────────────────
+# KeyDistributionClient builder — sprint 144 canonical fallback
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestBuildKeyDistributionClient:
+    def test_returns_none_when_address_unset(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PRSM_KEY_DISTRIBUTION_ADDRESS", None)
+            os.environ.pop("PRSM_NETWORK", None)
+            assert _build_key_distribution_client_or_none() is None
+
+    def test_falls_back_to_canonical_when_network_set(self):
+        """Sprint 144 — canonical fallback when PRSM_NETWORK declared."""
+        canonical = "0x51AF73Aa098E3b12Da78167c25c3d1D98059c8Ff"  # mainnet
+        with patch(
+            "prsm.economy.web3.key_distribution.KeyDistributionClient"
+        ) as MockClient, patch.dict(os.environ, {
+            "PRSM_NETWORK": "mainnet",
+        }, clear=False):
+            os.environ.pop("PRSM_KEY_DISTRIBUTION_ADDRESS", None)
+            MockClient.return_value = MagicMock()
+            client = _build_key_distribution_client_or_none()
+            assert client is not None
+            assert MockClient.call_args.kwargs["contract_address"] == canonical
