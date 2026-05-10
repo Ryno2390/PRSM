@@ -4464,10 +4464,25 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             body["network"] = network_name
             body["chain_id"] = cfg.chain_id
             canonical: Dict[str, Optional[str]] = {}
+            # Sprint 143 — surface ALL mainnet canonical pins,
+            # not just the FTNS-cluster five. Operators use
+            # /info to cross-check what their node's wired
+            # clients should match. Missing entries here
+            # silently skipped operators' validation.
             for fld in (
+                # FTNS-cluster (pre-existing 5)
                 "ftns_token", "provenance_registry",
                 "provenance_registry_v2", "royalty_distributor",
                 "foundation_safe",
+                # Phase 7-storage + Phase 8 (sprint 142 set —
+                # the contracts whose canonical-match check we
+                # JUST fixed)
+                "storage_slashing", "compensation_distributor",
+                "key_distribution",
+                # Audit-bundle + emission infrastructure
+                "emission_controller", "escrow_pool",
+                "stake_bond", "settlement_registry",
+                "signature_verifier", "publisher_key_anchor",
             ):
                 val = getattr(cfg, fld, None)
                 if val is not None:
