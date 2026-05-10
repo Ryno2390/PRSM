@@ -2604,6 +2604,44 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "numeric; rate limiting disabled", _rps_raw,
                 )
 
+        # Sprint 154 — body validation BEFORE executor availability
+        # check, mirroring sprint 153 /compute/forge fix. Pre-fix
+        # all validation errors leaked through to 503 (executor
+        # unwired) because the 503 fired first.
+
+        prompt = body.get("prompt", "")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Missing 'prompt' field")
+
+        model_id = body.get("model_id", "")
+        if not model_id:
+            raise HTTPException(status_code=400, detail="Missing 'model_id' field")
+
+        # Validate budget_ftns FIELD type/value upfront (422 for
+        # well-formed body that fails semantic validation).
+        if "budget_ftns" in body:
+            _raw_b = body["budget_ftns"]
+            try:
+                budget_ftns = float(_raw_b)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"budget_ftns must be a positive number; "
+                        f"got {_raw_b!r}."
+                    ),
+                )
+        else:
+            budget_ftns = 1.0
+        if budget_ftns <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"budget_ftns must be > 0; got {budget_ftns}. "
+                    f"Use the prsm_quote MCP tool to estimate cost first."
+                ),
+            )
+
         # Lazy imports keep the inference module's dependencies (and any
         # future heavy ones like wasmtime/torch) out of the API import graph
         # for nodes that don't run inference.
@@ -2623,25 +2661,6 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 detail=(
                     "Inference executor not initialized. "
                     "This node does not currently serve inference requests."
-                ),
-            )
-
-        prompt = body.get("prompt", "")
-        if not prompt:
-            raise HTTPException(status_code=400, detail="Missing 'prompt' field")
-
-        model_id = body.get("model_id", "")
-        if not model_id:
-            raise HTTPException(status_code=400, detail="Missing 'model_id' field")
-
-        budget_ftns = float(body.get("budget_ftns", 1.0))
-        if budget_ftns <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "FTNS budget required for inference. "
-                    "Set budget_ftns to at least 0.01 FTNS. "
-                    "Use the prsm_quote MCP tool to estimate cost first."
                 ),
             )
 

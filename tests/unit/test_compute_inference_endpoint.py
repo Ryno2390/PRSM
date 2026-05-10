@@ -78,18 +78,20 @@ class TestInferenceValidation:
         assert r.status_code == 400
         assert "model_id" in r.json()["detail"].lower()
 
-    def test_zero_budget_returns_400(self, client):
+    def test_zero_budget_returns_422(self, client):
+        """Sprint 154 — semantic validation failure → 422 (was 400)."""
         r = client.post("/compute/inference", json={
             "prompt": "hello", "model_id": "mock-llama-3-8b", "budget_ftns": 0,
         })
-        assert r.status_code == 400
+        assert r.status_code == 422
         assert "budget" in r.json()["detail"].lower()
 
-    def test_negative_budget_returns_400(self, client):
+    def test_negative_budget_returns_422(self, client):
+        """Sprint 154 — semantic validation failure → 422 (was 400)."""
         r = client.post("/compute/inference", json={
             "prompt": "hello", "model_id": "mock-llama-3-8b", "budget_ftns": -1,
         })
-        assert r.status_code == 400
+        assert r.status_code == 422
 
     def test_invalid_privacy_tier_returns_400(self, client):
         r = client.post("/compute/inference", json={
