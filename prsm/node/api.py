@@ -4643,11 +4643,26 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         try:
             from prsm.config.networks import (
                 get_network_config, _resolve_network_name,
+                resolve_endpoints,
             )
             network_name = _resolve_network_name()
             cfg = get_network_config(network_name)
             body["network"] = network_name
             body["chain_id"] = cfg.chain_id
+            # Sprint 170 — surface the RPC HOST (not full URL) so
+            # operators can verify they're pointed at the right
+            # endpoint without leaking Alchemy/Infura API keys that
+            # live in the URL path.
+            try:
+                from urllib.parse import urlparse
+                endpoints = resolve_endpoints(network_name)
+                parsed = urlparse(endpoints.rpc_url)
+                if parsed.hostname:
+                    body["rpc_host"] = parsed.hostname
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "info: rpc_url host extraction skipped: %s", exc,
+                )
             canonical: Dict[str, Optional[str]] = {}
             # Sprint 143 — surface ALL mainnet canonical pins,
             # not just the FTNS-cluster five. Operators use
