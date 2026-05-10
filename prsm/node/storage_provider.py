@@ -239,7 +239,14 @@ class StorageProvider:
             from prsm.storage import get_content_store, init_content_store
             store = get_content_store()
             if store is None:
-                store = init_content_store()
+                # Sprint 168 — thread node_id so manifests carry
+                # correct owner attribution. Pre-fix the fallback
+                # init defaulted node_id="" (empty string), breaking
+                # downstream royalty + provenance attribution.
+                store = init_content_store(
+                    node_id=self.identity.node_id
+                    if self.identity else "",
+                )
             return store is not None
         except Exception:
             return False

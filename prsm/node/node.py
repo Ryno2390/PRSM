@@ -2810,11 +2810,20 @@ class PRSMNode:
         # asyncio loop thread. Idempotent + non-fatal on failure.
         self._start_dht_components_if_present()
 
-        # Initialize native content storage
+        # Initialize native content storage.
+        # Sprint 168 — thread self.identity.node_id so manifests
+        # carry correct owner attribution. Pre-fix init was called
+        # with no args, defaulting node_id="" — every manifest
+        # claimed ownership by empty string.
         try:
             from prsm.storage import init_content_store
-            init_content_store()
-            logger.info("ContentStore initialized")
+            init_content_store(
+                node_id=self.identity.node_id if self.identity else "",
+            )
+            logger.info(
+                "ContentStore initialized (node_id=%s)",
+                self.identity.node_id if self.identity else "<unset>",
+            )
         except Exception as exc:
             logger.warning("ContentStore initialization failed: %s", exc)
 
