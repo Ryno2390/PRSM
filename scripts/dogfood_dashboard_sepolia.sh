@@ -65,7 +65,10 @@ export PRSM_DISTRIBUTION_LOG_DIR=~/.prsm/dogfood/distribution
 
 # ── Echo config (mask private key) ────────────────────────────────
 echo "─── Dogfood config ──────────────────────────────────"
-echo "  Network:        $PRSM_NETWORK ($PRSM_BASE_RPC_URL)"
+# Sprint 171 — redact RPC URL in echo so Alchemy keys don't end
+# up in operator terminal scrollback / log captures.
+_RPC_HOST=$(python3 -c "from urllib.parse import urlparse; p=urlparse('$PRSM_BASE_RPC_URL'); print(f'{p.scheme}://{p.hostname}' + (f':{p.port}' if p.port else ''))" 2>/dev/null || echo "$PRSM_BASE_RPC_URL")
+echo "  Network:        $PRSM_NETWORK ($_RPC_HOST)"
 echo "  Wallet:         ${FTNS_WALLET_PRIVATE_KEY:0:6}…${FTNS_WALLET_PRIVATE_KEY: -4}"
 echo "  Slashing:       ${PRSM_STORAGE_SLASHING_ADDRESS:-(canonical fallback)}"
 echo "  Compensation:   ${PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS:-(canonical fallback)}"

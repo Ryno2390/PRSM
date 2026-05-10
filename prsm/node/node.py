@@ -95,6 +95,38 @@ def _is_valid_eth_address(addr: Optional[str]) -> bool:
     return all(c in "0123456789abcdefABCDEF" for c in addr[2:])
 
 
+def _redact_rpc_url(url: str) -> str:
+    """Sprint 171 — redact RPC URLs for logging.
+
+    Returns the URL with the path/query stripped so logs never
+    carry Alchemy / Infura / Quicknode API keys (which live in
+    the URL path). Falls back to ``"<rpc>"`` for unparseable
+    input rather than echoing potentially-sensitive material.
+
+    Examples
+    --------
+    >>> _redact_rpc_url("https://base-mainnet.g.alchemy.com/v2/SECRET")
+    'https://base-mainnet.g.alchemy.com'
+    >>> _redact_rpc_url("https://mainnet.base.org")
+    'https://mainnet.base.org'
+    >>> _redact_rpc_url("")
+    '<rpc>'
+    """
+    if not url:
+        return "<rpc>"
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(url)
+        if p.scheme and p.hostname:
+            host = p.hostname
+            if p.port:
+                host = f"{host}:{p.port}"
+            return f"{p.scheme}://{host}"
+        return "<rpc>"
+    except Exception:  # noqa: BLE001
+        return "<rpc>"
+
+
 def _derive_creator_address(ftns_ledger: Optional[Any]) -> Optional[str]:
     """Resolve the on-chain creator 0x address for this node.
 
@@ -184,7 +216,7 @@ def _build_provenance_client_or_none():
             private_key=pk,
         )
         logger.info(
-            f"on-chain ProvenanceRegistry wired: {addr} via {rpc_url}"
+            f"on-chain ProvenanceRegistry wired: {addr} via {_redact_rpc_url(rpc_url)}"
         )
         return client
     except Exception as exc:
@@ -405,7 +437,7 @@ def _build_publisher_key_anchor_client_or_none():
             rpc_url=rpc_url,
         )
         logger.info(
-            f"PublisherKeyAnchorClient wired: {addr} via {rpc_url}"
+            f"PublisherKeyAnchorClient wired: {addr} via {_redact_rpc_url(rpc_url)}"
         )
         return client
     except Exception as exc:  # noqa: BLE001
@@ -463,7 +495,7 @@ def _build_compensation_distributor_client_or_none():
             private_key=pk,
         )
         logger.info(
-            f"CompensationDistributorClient wired: {addr} via {rpc_url}"
+            f"CompensationDistributorClient wired: {addr} via {_redact_rpc_url(rpc_url)}"
         )
         return client
     except Exception as exc:  # noqa: BLE001
@@ -510,7 +542,7 @@ def _build_key_distribution_client_or_none():
             private_key=pk,
         )
         logger.info(
-            f"KeyDistributionClient wired: {addr} via {rpc_url}"
+            f"KeyDistributionClient wired: {addr} via {_redact_rpc_url(rpc_url)}"
             f"{' (read-only)' if pk is None else ''}"
         )
         return client
@@ -583,7 +615,7 @@ def _build_royalty_distributor_client_or_none():
             private_key=pk,
         )
         logger.info(
-            f"RoyaltyDistributorClient wired: {addr} via {rpc_url}"
+            f"RoyaltyDistributorClient wired: {addr} via {_redact_rpc_url(rpc_url)}"
             f"{' (read-only)' if pk is None else ''}"
         )
         return client
@@ -634,7 +666,7 @@ def _build_storage_slashing_client_or_none():
             private_key=pk,
         )
         logger.info(
-            f"StorageSlashingClient wired: {addr} via {rpc_url}"
+            f"StorageSlashingClient wired: {addr} via {_redact_rpc_url(rpc_url)}"
         )
         return client
     except Exception as exc:  # noqa: BLE001
