@@ -3,7 +3,7 @@
 Production deployments need the Foundation Safe address that's
 load-bearing for the A6 beacon binding (per the threat model
 §"Open governance questions" item 4). The mainnet Safe is at
-`0x91b0000000000000000000000000000000005791` per memory entry
+`0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` per memory entry
 `project_phase1_3_task8_deploy_complete_2026_05_04.md`.
 
 Testnet operators + alternative-network operators need a way to

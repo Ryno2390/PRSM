@@ -20,8 +20,9 @@ from prsm.compute.query_orchestrator.foundation_beacon_provider import (
 
 
 # Mainnet Foundation Safe address (per memory entry
-# project_phase1_3_task8_deploy_complete_2026_05_04.md).
-_MAINNET_SAFE = "0x91b0000000000000000000000000000000005791"
+# project_phase1_3_task8_deploy_complete_2026_05_04.md and
+# prsm/config/networks.py MAINNET.foundation_safe).
+_MAINNET_SAFE = "0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791"
 _OTHER_SAFE = "0xff00000000000000000000000000000000000000"
 
 

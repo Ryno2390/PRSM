@@ -53,7 +53,7 @@ class FoundationBeaconProvider:
     ----------
     foundation_safe_address:
         The Foundation Safe's deployment address (e.g., Base mainnet
-        `0x91b0000000000000000000000000000000005791`). Bound into the
+        `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791`). Bound into the
         beacon material so a network operating under a different Safe
         gets a different beacon series — forensic anchor for A6.
     time_source:
