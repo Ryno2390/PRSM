@@ -782,6 +782,26 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_content_info",
+        description=(
+            "Look up a specific content record by CID. Returns "
+            "filename, size, content_hash, creator_id, providers, "
+            "royalty_rate, parent_cids. Use to verify on-chain "
+            "registration + see provider list. Backed by GET "
+            "/content/{cid}."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "cid": {
+                    "type": "string",
+                    "description": "Content ID (CID).",
+                },
+            },
+            "required": ["cid"],
+        },
+    ),
+    Tool(
         name="prsm_my_content",
         description=(
             "Paginated list of content uploaded by this node. "
@@ -2888,6 +2908,46 @@ async def handle_prsm_forge_submit(
     )
 
 
+async def handle_prsm_content_info(
+    arguments: Dict[str, Any],
+) -> str:
+    """Render content record by CID."""
+    cid = arguments.get("cid", "").strip()
+    if not cid:
+        return "Missing required 'cid'."
+    try:
+        result = await _call_node_api("GET", f"/content/{cid}")
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "cid" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not found" in detail.lower():
+            return f"Content not found: {cid}"
+        if "not initialized" in detail.lower():
+            return f"Content index not configured.\n  Detail: {detail}"
+        return f"Content lookup failed.\n  Detail: {detail}"
+
+    providers = result.get("providers", [])
+    parent_cids = result.get("parent_cids", [])
+    lines = [
+        f"PRSM Content: {result['cid']}",
+        f"  Filename:     {result.get('filename', '?')}",
+        f"  Size:         {result.get('size_bytes', 0)} bytes",
+        f"  Hash:         {result.get('content_hash', '?')}",
+        f"  Creator:      {result.get('creator_id', '?')}",
+        f"  Royalty:      {result.get('royalty_rate', 0):.4f}",
+        f"  Providers:    {len(providers)}"
+        + (f" ({', '.join(providers[:3])}...)" if len(providers) > 3
+           else f" ({', '.join(providers)})" if providers else ""),
+    ]
+    if parent_cids:
+        lines.append(f"  Parents:      {len(parent_cids)} citation(s)")
+    return "\n".join(lines)
+
+
 async def handle_prsm_my_content(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3916,6 +3976,7 @@ TOOL_HANDLERS = {
     "prsm_audit_summary": handle_prsm_audit_summary,
     "prsm_canonical_check": handle_prsm_canonical_check,
     "prsm_forge_submit": handle_prsm_forge_submit,
+    "prsm_content_info": handle_prsm_content_info,
     "prsm_my_content": handle_prsm_my_content,
     "prsm_distribution_trigger": handle_prsm_distribution_trigger,
     "prsm_heartbeat_trigger": handle_prsm_heartbeat_trigger,
