@@ -4524,6 +4524,26 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "1 if DaemonWatchdog crash-webhook task is alive, 0 if crashed",
         )
 
+        # prsm_build_info — version label gauge, standard
+        # Prometheus build-info pattern. Operators correlate
+        # alerts to release boundaries.
+        try:
+            from importlib.metadata import version as _pkg_version
+            try:
+                pkg_version = _pkg_version("prsm-network")
+            except Exception:  # noqa: BLE001
+                pkg_version = "unknown"
+            lines.append(
+                "# HELP prsm_build_info "
+                "Build info (always 1; version label)"
+            )
+            lines.append("# TYPE prsm_build_info gauge")
+            lines.append(
+                f'prsm_build_info{{version="{pkg_version}"}} 1'
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("metrics build_info probe failed: %s", exc)
+
         # In-memory ring buffer counts. 4 dashboard rings —
         # operators alert on growth/stagnation patterns. Each
         # gauge emitted only when the ring is wired (None when
