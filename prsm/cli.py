@@ -1361,6 +1361,113 @@ def node_logs(lines: int, follow: bool):
     _logs(lines=lines, follow=follow)
 
 
+@node.command("earnings")
+@click.option(
+    "--api-port", default=8000, type=int,
+    help="Local API port (default 8000)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_earnings(api_port: int, output_format: str):
+    """Show this node's earnings dashboard.
+
+    Aggregates 3 streams: royalty (claimable_wei) + heartbeat
+    status + distribution timing. Backed by GET
+    /admin/earnings-summary on the running node daemon.
+    """
+    import json
+    import httpx
+
+    url = f"http://127.0.0.1:{api_port}/admin/earnings-summary"
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(url)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Start with: prsm node start[/dim]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+
+    if resp.status_code != 200:
+        console.print(
+            f"[red]/admin/earnings-summary returned "
+            f"{resp.status_code}[/red]: {resp.text}"
+        )
+        sys.exit(1)
+
+    body = resp.json()
+
+    if output_format == "json":
+        console.print(json.dumps(body, indent=2))
+        return
+
+    op = body.get("operator_address") or "(PRSM_OPERATOR_ADDRESS unset)"
+    console.print(f"[bold]PRSM Operator Earnings[/bold]")
+    console.print(f"  Operator: {op}")
+    console.print()
+
+    royalty = body.get("royalty", {})
+    if royalty.get("available"):
+        wei = royalty.get("claimable_wei", 0)
+        ftns = wei / 1e18
+        console.print(
+            f"  [green]Royalty:[/green]      {ftns:.6f} FTNS claimable"
+        )
+    else:
+        err = royalty.get("error")
+        suffix = f" — error: {err}" if err else ""
+        console.print(f"  [yellow]Royalty:[/yellow]      not wired{suffix}")
+
+    hb = body.get("heartbeat", {})
+    if hb.get("available"):
+        if hb.get("never_recorded"):
+            console.print(
+                f"  [red]Heartbeat:[/red]    never recorded — "
+                f"slashing imminent"
+            )
+        elif hb.get("expired"):
+            console.print(
+                f"  [red]Heartbeat:[/red]    EXPIRED — slashing window open"
+            )
+        elif hb.get("at_risk"):
+            console.print(
+                f"  [yellow]Heartbeat:[/yellow]    at-risk — "
+                f"{hb['grace_remaining']}s grace remaining"
+            )
+        else:
+            console.print(
+                f"  [green]Heartbeat:[/green]    ok — "
+                f"{hb['grace_remaining']}s grace "
+                f"(of {hb['grace_seconds']}s)"
+            )
+    else:
+        err = hb.get("error")
+        suffix = f" — error: {err}" if err else ""
+        console.print(f"  [yellow]Heartbeat:[/yellow]    not wired{suffix}")
+
+    dist = body.get("distribution", {})
+    if dist.get("available"):
+        if dist.get("never_distributed"):
+            console.print(f"  [yellow]Distribution:[/yellow] never run yet")
+        else:
+            secs = dist.get("seconds_since", 0)
+            hrs = secs // 3600
+            console.print(
+                f"  [green]Distribution:[/green] last run {hrs}h ago"
+            )
+    else:
+        err = dist.get("error")
+        suffix = f" — error: {err}" if err else ""
+        console.print(
+            f"  [yellow]Distribution:[/yellow] not wired{suffix}"
+        )
+
+
 @node.command("install")
 @click.option("--dry-run", is_flag=True, help="Print service file without installing")
 @click.option("--host", default="127.0.0.1", help="Host to bind to")
