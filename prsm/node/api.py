@@ -5087,14 +5087,24 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             }
 
         # Aggregate status.
+        # Sprint 147 — `not_wired` / `disabled` is operator opt-out,
+        # not a degradation. Only count an optional subsystem as
+        # degraded if it's wired but reporting unavailable for a
+        # genuine reason (status=error/crashed/uninitialized).
         core = ["ftns_ledger", "payment_escrow"]
         optional = ["job_history", "royalty_distributor"]
+        _OPT_OUT_STATUSES = ("not_wired", "disabled")
         core_ok = all(
             subsystems[s]["available"] for s in core
         )
-        all_optional_ok = all(
-            subsystems[s]["available"] for s in optional
-        )
+
+        def _optional_ok(name: str) -> bool:
+            sub = subsystems[name]
+            if sub.get("available"):
+                return True
+            return sub.get("status") in _OPT_OUT_STATUSES
+
+        all_optional_ok = all(_optional_ok(s) for s in optional)
         if not core_ok:
             top_status = "unhealthy"
         elif not all_optional_ok:

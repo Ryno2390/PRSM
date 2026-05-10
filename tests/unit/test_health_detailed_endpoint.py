@@ -98,15 +98,36 @@ class TestHealthDetailedStatus:
         body = resp.json()
         assert body["status"] == "healthy"
 
-    def test_degraded_when_optional_missing(self):
-        """FTNS + escrow wired (core); royalty client missing
-        (optional) → degraded, not unhealthy."""
+    def test_healthy_when_optional_not_wired(self):
+        """Sprint 147 — operator opt-out (status=not_wired) is not a
+        degradation. Core wired + optional unwired = healthy.
+
+        Pre-sprint-147 behavior was to mark this `degraded`, which
+        produced false alarms on every Sepolia node (where the
+        canonical RoyaltyDistributor is None). Real degradation is
+        when an optional subsystem is wired but failing.
+        """
         node = _node_full()
         node._royalty_distributor_client = None
         node._job_history = None
         resp = _client(node).get("/health/detailed")
         body = resp.json()
+        assert body["status"] == "healthy"
+
+    def test_degraded_when_optional_wired_but_failing(self):
+        """Sprint 147 — wired optional subsystem that errors at
+        probe time IS a real degradation."""
+        node = _node_full()
+        # Royalty client wired but `claimable()` raises.
+        node._royalty_distributor_client.claimable = MagicMock(
+            side_effect=RuntimeError("RPC dropped"),
+        )
+        resp = _client(node).get("/health/detailed")
+        body = resp.json()
         assert body["status"] == "degraded"
+        sub = body["subsystems"]["royalty_distributor"]
+        assert sub["status"] == "error"
+        assert sub["available"] is False
 
 
 # ──────────────────────────────────────────────────────────────────────
