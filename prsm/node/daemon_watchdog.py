@@ -63,6 +63,8 @@ class DaemonWatchdog:
         webhook_url: str,
         webhook_secret: Optional[str] = None,
         interval_seconds: float = _DEFAULT_INTERVAL_SECONDS,
+        check_canonical_pins: bool = False,
+        canonical_check_fn=None,
     ) -> None:
         if not webhook_url:
             raise ValueError("webhook_url must be non-empty")
@@ -83,6 +85,14 @@ class DaemonWatchdog:
         self._last_alive: Dict[str, Optional[bool]] = {
             name: None for name, _ in _DAEMON_REGISTRY
         }
+        # Canonical-pin drift detection (optional).
+        # canonical_check_fn returns dict[subsystem_name →
+        # (wired_addr, canonical_addr)]. Watchdog detects
+        # match-flips and fires canonical.drifted events.
+        self._check_canonical_pins = check_canonical_pins
+        self._canonical_check_fn = canonical_check_fn
+        # Per-subsystem last-seen match state.
+        self._last_canonical_match: Dict[str, Optional[bool]] = {}
 
     @property
     def interval_seconds(self) -> float:
@@ -133,7 +143,77 @@ class DaemonWatchdog:
                 )
                 await self._dispatch(name, "daemon.recovered")
                 emitted.append(name)
+        # Canonical-pin drift sweep (optional).
+        if self._check_canonical_pins and self._canonical_check_fn:
+            try:
+                pins = self._canonical_check_fn() or {}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "DaemonWatchdog canonical_check_fn raised: %s",
+                    exc,
+                )
+                pins = {}
+            for subsys, (wired, canonical) in pins.items():
+                match = (
+                    wired is not None
+                    and canonical is not None
+                    and wired.lower() == canonical.lower()
+                )
+                prior_match = self._last_canonical_match.get(subsys)
+                self._last_canonical_match[subsys] = match
+                # Fire only on True → False transition (drift onset).
+                # Steady-state drift doesn't re-fire; recovery
+                # back to match also doesn't fire (operator already
+                # restored, no need to page again).
+                if prior_match is True and match is False:
+                    logger.warning(
+                        "DaemonWatchdog: %s canonical pin drifted "
+                        "(wired=%s, canonical=%s) — dispatching "
+                        "canonical.drifted",
+                        subsys, wired, canonical,
+                    )
+                    await self._dispatch_canonical(
+                        subsys, wired, canonical,
+                    )
+                    emitted.append(f"canonical:{subsys}")
         return emitted
+
+    async def _dispatch_canonical(
+        self,
+        subsystem: str,
+        wired: Optional[str],
+        canonical: Optional[str],
+    ) -> None:
+        payload = {
+            "event": "canonical.drifted",
+            "node_id": getattr(
+                getattr(self._node, "identity", None),
+                "node_id",
+                "unknown",
+            ),
+            "subsystem": subsystem,
+            "wired": wired,
+            "canonical": canonical,
+            "timestamp": time.time(),
+        }
+        try:
+            result = await self._deliverer.deliver(
+                url=self._webhook_url,
+                event="canonical.drifted",
+                payload=payload,
+                secret=self._webhook_secret,
+            )
+            if not result.success:
+                logger.warning(
+                    "DaemonWatchdog: canonical.drifted delivery "
+                    "failed for %s after %d attempts: %s",
+                    subsystem, result.attempts, result.error,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "DaemonWatchdog: canonical.drifted dispatch raised "
+                "for %s: %s", subsystem, exc,
+            )
 
     async def _dispatch(self, daemon_name: str, event: str) -> None:
         """POST the event to the webhook URL. Used for both

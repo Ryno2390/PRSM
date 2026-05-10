@@ -242,6 +242,105 @@ class TestCheckOnce:
         assert deliverer.deliver.await_count == 2
 
 
+class TestCanonicalDrift:
+    """DaemonWatchdog also detects canonical-pin drift events
+    (when wired with check_canonical_pins=True). Operators get
+    paged when their wired addresses fall out of sync with
+    networks.py canonical pins."""
+
+    @pytest.mark.asyncio
+    async def test_drift_detection_fires_event(self):
+        """Operator pinned via env override; networks.py canonical
+        is different. Watchdog fires canonical.drifted event."""
+        node = MagicMock()
+        node.identity.node_id = "test-node"
+        # FTNS ledger wired to v1 mainnet token, but canonical
+        # in networks.py is v2 (post-A-08).
+        ftns = MagicMock()
+        ftns.contract_address = "0xWRONGFTNS"
+        node.ftns_ledger = ftns
+        # Other tasks all None (don't fire daemon events).
+        for attr in (
+            "_escrow_cleanup_task", "_heartbeat_scheduler_task",
+            "_compensation_scheduler_task",
+            "_key_distribution_watcher_task",
+            "_storage_slashing_watcher_task",
+            "_compensation_distributor_watcher_task",
+            "_job_reaper_task",
+        ):
+            setattr(node, attr, None)
+
+        deliverer = _stub_deliverer()
+        watchdog = DaemonWatchdog(
+            node=node,
+            webhook_deliverer=deliverer,
+            webhook_url="https://hook.example.com",
+            check_canonical_pins=True,
+            canonical_check_fn=lambda: {
+                "ftns_ledger": ("0xWRONGFTNS", "0xCORRECTFTNS"),
+            },
+        )
+        # First sweep: baseline (drift exists but skip on first
+        # observation per the same rule as daemon checks).
+        await watchdog.check_once()
+        deliverer.deliver.assert_not_called()
+
+        # Second sweep: drift persists; we DON'T re-emit because
+        # state hasn't transitioned. Operator already paged.
+        await watchdog.check_once()
+        deliverer.deliver.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_drift_transition_fires_once(self):
+        """When match flips from True (correct) to False
+        (drifted) → fire once. Doesn't re-fire on persistent
+        drift across sweeps."""
+        node = MagicMock()
+        node.identity.node_id = "test-node"
+        for attr in (
+            "_escrow_cleanup_task", "_heartbeat_scheduler_task",
+            "_compensation_scheduler_task",
+            "_key_distribution_watcher_task",
+            "_storage_slashing_watcher_task",
+            "_compensation_distributor_watcher_task",
+            "_job_reaper_task",
+        ):
+            setattr(node, attr, None)
+
+        # Track current state via mutable closure.
+        current_match = {"ftns_ledger": True}
+
+        def check_fn():
+            if current_match["ftns_ledger"]:
+                return {
+                    "ftns_ledger": ("0xCORRECT", "0xCORRECT"),
+                }
+            return {
+                "ftns_ledger": ("0xWRONG", "0xCORRECT"),
+            }
+
+        deliverer = _stub_deliverer()
+        watchdog = DaemonWatchdog(
+            node=node,
+            webhook_deliverer=deliverer,
+            webhook_url="https://hook.example.com",
+            check_canonical_pins=True,
+            canonical_check_fn=check_fn,
+        )
+        # First sweep: baseline (match=True).
+        await watchdog.check_once()
+        # Drift happens.
+        current_match["ftns_ledger"] = False
+        # Second sweep: detect transition + fire.
+        await watchdog.check_once()
+        assert deliverer.deliver.await_count == 1
+        kwargs = deliverer.deliver.await_args.kwargs
+        assert kwargs["event"] == "canonical.drifted"
+        # Third sweep: drift persists, no re-fire.
+        await watchdog.check_once()
+        assert deliverer.deliver.await_count == 1
+
+
 class TestLifecycle:
     @pytest.mark.asyncio
     async def test_watch_can_be_stopped(self):
