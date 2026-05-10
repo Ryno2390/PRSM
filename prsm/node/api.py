@@ -6162,17 +6162,27 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     # ── Bridge Endpoints ─────────────────────────────────────────
 
+    # Sprint 161 — Pydantic chain_id constraints. Pre-fix any int
+    # passed validation including 0, negative, and absurdly-large
+    # values that would have produced opaque downstream errors on
+    # a wired bridge.
     class BridgeDepositRequest(BaseModel):
         """Request body for bridge deposit operation."""
         amount: float = Field(..., gt=0, description="Amount of FTNS to deposit (in token units)")
-        chain_address: str = Field(..., description="Destination on-chain address")
-        destination_chain: int = Field(default=137, description="Destination chain ID (default: Polygon mainnet)")
+        chain_address: str = Field(..., min_length=1, description="Destination on-chain address")
+        destination_chain: int = Field(
+            default=137, ge=1, le=2147483647,
+            description="Destination chain ID (default: Polygon mainnet)",
+        )
 
     class BridgeWithdrawRequest(BaseModel):
         """Request body for bridge withdraw operation."""
         amount: float = Field(..., gt=0, description="Amount of FTNS to withdraw (in token units)")
-        chain_address: str = Field(..., description="Source on-chain address")
-        source_chain: int = Field(default=137, description="Source chain ID (default: Polygon mainnet)")
+        chain_address: str = Field(..., min_length=1, description="Source on-chain address")
+        source_chain: int = Field(
+            default=137, ge=1, le=2147483647,
+            description="Source chain ID (default: Polygon mainnet)",
+        )
 
     class BridgeTransactionResponse(BaseModel):
         """Response model for bridge transactions."""
