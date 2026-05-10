@@ -37,6 +37,14 @@ from .ui import (
 )
 from .config_schema import PRSMConfig, NodeRole
 
+# Sprint 148 — canonical bootstrap source-of-truth lives in
+# prsm.node.config. Re-export so tests can pin equivalence and
+# other consumers can import from either place without drift.
+from prsm.node.config import (
+    DEFAULT_BOOTSTRAP_NODES as _NODE_DEFAULT_BOOTSTRAP_NODES,
+)
+DEFAULT_BOOTSTRAP_NODES = list(_NODE_DEFAULT_BOOTSTRAP_NODES)
+
 
 # ── System Detection Helpers ─────────────────────────────────────────
 
@@ -430,10 +438,12 @@ def _step_network(config: PRSMConfig, minimal: bool):
     """Step 4: Network Configuration."""
     step_header(4, 7, "Network Configuration")
 
-    default_bootstrap = [
-        "/dns4/bootstrap1.prsm.network/tcp/9001/p2p/QmPRSM1",
-        "/dns4/bootstrap2.prsm.network/tcp/9001/p2p/QmPRSM2",
-    ]
+    # Sprint 148 — read from canonical source instead of hardcoding.
+    # Pre-fix the wizard pinned `bootstrap1.prsm.network` (wrong domain)
+    # in `/dns4/.../p2p/QmPRSM1` multiaddr (wrong format + placeholder
+    # PeerID). DEFAULT_BOOTSTRAP_NODES is the real `wss://...com:8765`
+    # URL the bootstrap server actually serves on.
+    default_bootstrap = list(DEFAULT_BOOTSTRAP_NODES)
 
     if minimal:
         config.p2p_port = 9001
