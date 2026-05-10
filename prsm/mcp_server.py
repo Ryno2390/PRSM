@@ -741,6 +741,37 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_heartbeat_history",
+        description=(
+            "Recent on-chain HeartbeatRecorded events observed by "
+            "the StorageSlashingWatcher. Operators verify their "
+            "scheduler is landing transactions on-chain. Optional "
+            "`provider` filter narrows to a single address. Backed "
+            "by GET /admin/heartbeat-history."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Page size (1..1000). Default 20.",
+                    "minimum": 1, "maximum": 1000, "default": 20,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Pagination offset. Default 0.",
+                    "minimum": 0, "default": 0,
+                },
+                "provider": {
+                    "type": "string",
+                    "description": (
+                        "Optional address filter."
+                    ),
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_slash_history",
         description=(
             "Recent on-chain slash events observed by the "
@@ -2695,6 +2726,72 @@ async def handle_prsm_audit_recent(
     return "\n".join(lines)
 
 
+async def handle_prsm_heartbeat_history(
+    arguments: Dict[str, Any],
+) -> str:
+    """Render recent on-chain HeartbeatRecorded events."""
+    params = []
+    limit = arguments.get("limit", 20)
+    params.append(f"limit={limit}")
+    if "offset" in arguments:
+        params.append(f"offset={arguments['offset']}")
+    if "provider" in arguments and arguments["provider"]:
+        params.append(f"provider={arguments['provider']}")
+    path = "/admin/heartbeat-history?" + "&".join(params)
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "entries" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in detail.lower():
+            return (
+                f"Heartbeat log not configured.\n"
+                f"  Detail: {detail}\n"
+                f"  Set PRSM_STORAGE_SLASHING_WATCHER_ENABLED=1 "
+                f"to enable."
+            )
+        return f"Heartbeat history fetch failed.\n  Detail: {detail}"
+
+    entries = result["entries"]
+    total = result["total"]
+    if not entries:
+        return (
+            f"No heartbeats recorded "
+            f"(buffer total: {total}). "
+            f"Either the watcher hasn't started or no heartbeats "
+            f"have landed yet."
+        )
+
+    import datetime
+    lines = [
+        f"PRSM Heartbeats (showing {len(entries)} of {total}):",
+        f"  Observed     On-chain TS    Provider",
+        "  " + "-" * 60,
+    ]
+    for e in entries:
+        ts = e.get("timestamp", 0)
+        try:
+            obs = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+        except Exception:
+            obs = "????"
+        ots = e.get("onchain_timestamp", 0)
+        try:
+            on = datetime.datetime.fromtimestamp(ots).strftime("%H:%M:%S")
+        except Exception:
+            on = "????"
+        provider = e.get("provider", "?")
+        if len(provider) > 26:
+            provider = provider[:8] + ".." + provider[-14:]
+        lines.append(
+            f"  {obs}     {on}      {provider}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_slash_history(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3483,6 +3580,7 @@ TOOL_HANDLERS = {
     "prsm_audit_recent": handle_prsm_audit_recent,
     "prsm_audit_summary": handle_prsm_audit_summary,
     "prsm_canonical_check": handle_prsm_canonical_check,
+    "prsm_heartbeat_history": handle_prsm_heartbeat_history,
     "prsm_slash_history": handle_prsm_slash_history,
     "prsm_earnings_summary": handle_prsm_earnings_summary,
     "prsm_webhook_history": handle_prsm_webhook_history,

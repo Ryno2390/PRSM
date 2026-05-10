@@ -846,6 +846,7 @@ def _build_key_distribution_watcher_or_none(*, client, state_store=None):
 
 def _build_storage_slashing_watcher_or_none(
     *, client, state_store=None, slash_event_log=None,
+    heartbeat_log=None,
 ):
     """Construct a StorageSlashingWatcher if operator opted in AND
     underlying client is non-None.
@@ -878,6 +879,16 @@ def _build_storage_slashing_watcher_or_none(
                 "provider=%s timestamp=%d",
                 event.provider, event.timestamp,
             )
+            if heartbeat_log is not None:
+                try:
+                    heartbeat_log.append(
+                        provider=event.provider,
+                        onchain_timestamp=event.timestamp,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "heartbeat_log.append raised: %s", exc,
+                    )
 
         def _on_proof(event):
             logger.warning(
@@ -1471,7 +1482,9 @@ class PRSMNode:
         # (authoritative on-chain) — this is a fast operator
         # dashboard view.
         from prsm.node.slash_event_log import SlashEventRing
+        from prsm.node.heartbeat_log import HeartbeatRecordedRing
         self._slash_event_log = SlashEventRing()
+        self._heartbeat_log = HeartbeatRecordedRing()
 
         # Shared state store for the 3 watchers — single instance,
         # 3 watcher_key namespaces inside. None when persistence is
@@ -1488,6 +1501,7 @@ class PRSMNode:
                 client=self._storage_slashing_client,
                 state_store=self._watcher_state_store,
                 slash_event_log=self._slash_event_log,
+                heartbeat_log=self._heartbeat_log,
             )
         )
         self._compensation_distributor_watcher = (

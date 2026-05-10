@@ -3703,6 +3703,51 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "limit": limit,
         }
 
+    @app.get("/admin/heartbeat-history")
+    async def get_heartbeat_history(
+        limit: int = 50,
+        offset: int = 0,
+        provider: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Recent on-chain HeartbeatRecorded events observed by the
+        StorageSlashingWatcher. Each entry: timestamp, provider,
+        onchain_timestamp. Operators verify their heartbeat
+        scheduler is actually landing transactions on-chain.
+
+        Status:
+          503 — heartbeat log not wired
+          422 — limit out of [1, 1000] OR offset < 0
+          200 — {entries, total, offset, limit}
+        """
+        if limit <= 0 or limit > 1000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 1000], got {limit}",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0, got {offset}",
+            )
+        ring = getattr(node, "_heartbeat_log", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Heartbeat log not initialized "
+                    "(requires StorageSlashing watcher wiring)."
+                ),
+            )
+        entries = ring.recent(
+            limit=limit, offset=offset, provider=provider,
+        )
+        return {
+            "entries": [e.to_dict() for e in entries],
+            "total": ring.count(),
+            "offset": offset,
+            "limit": limit,
+        }
+
     @app.get("/admin/slash-history")
     async def get_slash_history(
         limit: int = 50,
