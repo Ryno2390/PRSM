@@ -88,6 +88,8 @@ class WebhookDeliverer:
         base_backoff_seconds: float = _DEFAULT_BASE_BACKOFF_SECONDS,
         # Override for tests — sleep-stub.
         sleep_fn=None,
+        # Optional log ring — every dispatch attempt records here.
+        log_ring=None,
     ) -> None:
         if max_attempts <= 0:
             raise ValueError(
@@ -101,6 +103,7 @@ class WebhookDeliverer:
         self._timeout_seconds = timeout_seconds
         self._base_backoff_seconds = base_backoff_seconds
         self._sleep = sleep_fn or asyncio.sleep
+        self._log_ring = log_ring
 
     async def deliver(
         self,
@@ -140,14 +143,15 @@ class WebhookDeliverer:
                 )
                 last_status = status
                 if 200 <= status < 300:
-                    return DeliveryResult(
+                    success_result = DeliveryResult(
                         success=True,
                         status_code=status,
                         attempts=attempt,
                     )
+                    self._record(event, url, success_result)
+                    return success_result
                 if not _is_retryable_status(status):
-                    # Non-retryable — give up immediately.
-                    return DeliveryResult(
+                    nonretry = DeliveryResult(
                         success=False,
                         status_code=status,
                         attempts=attempt,
@@ -156,6 +160,8 @@ class WebhookDeliverer:
                             f"(operator misconfiguration?)"
                         ),
                     )
+                    self._record(event, url, nonretry)
+                    return nonretry
                 last_error = f"retryable status {status}"
             except asyncio.TimeoutError:
                 last_error = (
@@ -169,12 +175,35 @@ class WebhookDeliverer:
                 backoff = self._base_backoff_seconds * (2 ** (attempt - 1))
                 await self._sleep(backoff)
 
-        return DeliveryResult(
+        result = DeliveryResult(
             success=False,
             status_code=last_status,
             attempts=self._max_attempts,
             error=last_error,
         )
+        self._record(event, url, result)
+        return result
+
+    def _record(
+        self, event: str, url: str, result: DeliveryResult,
+    ) -> None:
+        """Append the dispatch outcome to the log ring if wired."""
+        if self._log_ring is None:
+            return
+        try:
+            self._log_ring.append(
+                event=event,
+                url=url,
+                success=result.success,
+                attempts=result.attempts,
+                status_code=result.status_code,
+                error=result.error,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "WebhookDeliverer: log ring append raised: %s",
+                exc,
+            )
 
     async def _aiohttp_post(
         self, url: str, body: bytes, headers: Dict[str, str],

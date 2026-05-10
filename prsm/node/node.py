@@ -1909,11 +1909,15 @@ class PRSMNode:
             webhook_url = _os.getenv("PRSM_WEBHOOK_URL", "").strip()
             if webhook_url:
                 from prsm.node.webhook_delivery import WebhookDeliverer
+                from prsm.node.webhook_log import WebhookLogRing
                 from prsm.node.daemon_watchdog import DaemonWatchdog
                 webhook_secret = _os.getenv(
                     "PRSM_WEBHOOK_SECRET", "",
                 ).strip() or None
-                deliverer = WebhookDeliverer()
+                self._webhook_log = WebhookLogRing()
+                deliverer = WebhookDeliverer(
+                    log_ring=self._webhook_log,
+                )
                 self._webhook_deliverer = deliverer
                 interval_raw = _os.getenv(
                     "PRSM_DAEMON_WATCHDOG_INTERVAL_SEC", "",
