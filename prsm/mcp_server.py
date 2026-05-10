@@ -741,6 +741,42 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_slash_history",
+        description=(
+            "Recent on-chain slash events observed by the "
+            "StorageSlashingWatcher. Two kinds: "
+            "proof_failure_slashed (verification failed) and "
+            "heartbeat_missing_slashed (operator missed window). "
+            "Optional `provider` filter narrows to a single "
+            "address. Backed by GET /admin/slash-history."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Page size (1..1000). Default 20.",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 20,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Pagination offset. Default 0.",
+                    "minimum": 0,
+                    "default": 0,
+                },
+                "provider": {
+                    "type": "string",
+                    "description": (
+                        "Optional address filter. Omit to see "
+                        "fleet-wide events."
+                    ),
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_earnings_summary",
         description=(
             "Operator earnings dashboard. Aggregates 3 streams: "
@@ -2659,6 +2695,69 @@ async def handle_prsm_audit_recent(
     return "\n".join(lines)
 
 
+async def handle_prsm_slash_history(
+    arguments: Dict[str, Any],
+) -> str:
+    """Render recent on-chain slash events."""
+    params = []
+    limit = arguments.get("limit", 20)
+    params.append(f"limit={limit}")
+    if "offset" in arguments:
+        params.append(f"offset={arguments['offset']}")
+    if "provider" in arguments and arguments["provider"]:
+        params.append(f"provider={arguments['provider']}")
+    path = "/admin/slash-history?" + "&".join(params)
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "entries" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in detail.lower():
+            return (
+                f"Slash event log not configured.\n"
+                f"  Detail: {detail}\n"
+                f"  Set PRSM_STORAGE_SLASHING_WATCHER_ENABLED=1 "
+                f"+ slashing client env to enable."
+            )
+        return f"Slash history fetch failed.\n  Detail: {detail}"
+
+    entries = result["entries"]
+    total = result["total"]
+    if not entries:
+        return (
+            f"No slash events recorded "
+            f"(buffer total: {total})."
+        )
+
+    import datetime
+    lines = [
+        f"PRSM Slash Events (showing {len(entries)} of {total}):",
+        f"  Time      Kind                          Provider           Slash ID",
+        "  " + "-" * 80,
+    ]
+    for e in entries:
+        ts = e.get("timestamp", 0)
+        try:
+            t = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+        except Exception:
+            t = "????"
+        provider = e.get("provider", "?")
+        if len(provider) > 18:
+            provider = provider[:8] + ".." + provider[-6:]
+        slash_id = e.get("slash_id", "?")
+        if len(slash_id) > 18:
+            slash_id = slash_id[:10] + "..."
+        lines.append(
+            f"  {t}  {e.get('kind', '?'):<28}  "
+            f"{provider:<18}  {slash_id}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_earnings_summary(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3384,6 +3483,7 @@ TOOL_HANDLERS = {
     "prsm_audit_recent": handle_prsm_audit_recent,
     "prsm_audit_summary": handle_prsm_audit_summary,
     "prsm_canonical_check": handle_prsm_canonical_check,
+    "prsm_slash_history": handle_prsm_slash_history,
     "prsm_earnings_summary": handle_prsm_earnings_summary,
     "prsm_webhook_history": handle_prsm_webhook_history,
     "prsm_webhook_test": handle_prsm_webhook_test,

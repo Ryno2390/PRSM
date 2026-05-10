@@ -3703,6 +3703,53 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "limit": limit,
         }
 
+    @app.get("/admin/slash-history")
+    async def get_slash_history(
+        limit: int = 50,
+        offset: int = 0,
+        provider: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Recent on-chain slash events observed by the
+        StorageSlashingWatcher. Each entry: timestamp, kind
+        (proof_failure_slashed | heartbeat_missing_slashed),
+        provider, slash_id, amount, block_number, tx_hash.
+
+        Optional `provider` filter narrows to a single address.
+
+        Status:
+          503 — slash event log not wired
+          422 — limit out of [1, 1000] OR offset < 0
+          200 — {entries, total, offset, limit}
+        """
+        if limit <= 0 or limit > 1000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 1000], got {limit}",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0, got {offset}",
+            )
+        ring = getattr(node, "_slash_event_log", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Slash event log not initialized "
+                    "(requires StorageSlashing watcher wiring)."
+                ),
+            )
+        entries = ring.recent(
+            limit=limit, offset=offset, provider=provider,
+        )
+        return {
+            "entries": [e.to_dict() for e in entries],
+            "total": ring.count(),
+            "offset": offset,
+            "limit": limit,
+        }
+
     @app.get("/admin/earnings-summary")
     async def get_earnings_summary() -> Dict[str, Any]:
         """Aggregate operator earnings view.

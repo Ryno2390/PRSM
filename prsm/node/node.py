@@ -844,7 +844,9 @@ def _build_key_distribution_watcher_or_none(*, client, state_store=None):
         return None
 
 
-def _build_storage_slashing_watcher_or_none(*, client, state_store=None):
+def _build_storage_slashing_watcher_or_none(
+    *, client, state_store=None, slash_event_log=None,
+):
     """Construct a StorageSlashingWatcher if operator opted in AND
     underlying client is non-None.
 
@@ -884,6 +886,25 @@ def _build_storage_slashing_watcher_or_none(*, client, state_store=None):
                 event.provider, event.challenger,
                 event.shard_id.hex(), event.slash_id.hex(),
             )
+            if slash_event_log is not None:
+                try:
+                    slash_event_log.append(
+                        kind="proof_failure_slashed",
+                        provider=event.provider,
+                        challenger=event.challenger,
+                        slash_id=event.slash_id,
+                        extras={
+                            "shard_id": "0x" + event.shard_id.hex(),
+                            "evidence_hash": (
+                                "0x" + event.evidence_hash.hex()
+                            ),
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "slash_event_log.append (proof) raised: %s",
+                        exc,
+                    )
 
         def _on_missing(event):
             logger.warning(
@@ -893,6 +914,22 @@ def _build_storage_slashing_watcher_or_none(*, client, state_store=None):
                 event.provider, event.challenger,
                 event.last_heartbeat_at, event.slash_id.hex(),
             )
+            if slash_event_log is not None:
+                try:
+                    slash_event_log.append(
+                        kind="heartbeat_missing_slashed",
+                        provider=event.provider,
+                        challenger=event.challenger,
+                        slash_id=event.slash_id,
+                        extras={
+                            "last_heartbeat_at": event.last_heartbeat_at,
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "slash_event_log.append (missing) raised: %s",
+                        exc,
+                    )
 
         watcher = StorageSlashingWatcher(
             client=client,
@@ -1428,6 +1465,14 @@ class PRSMNode:
         self._royalty_distributor_client = (
             _build_royalty_distributor_client_or_none()
         )
+        # In-memory ring buffer of on-chain slash events. Wired to
+        # StorageSlashingWatcher callbacks below; visible at
+        # GET /admin/slash-history. Distinct from contract event log
+        # (authoritative on-chain) — this is a fast operator
+        # dashboard view.
+        from prsm.node.slash_event_log import SlashEventRing
+        self._slash_event_log = SlashEventRing()
+
         # Shared state store for the 3 watchers — single instance,
         # 3 watcher_key namespaces inside. None when persistence is
         # disabled (legacy chain-tip-baseline behavior preserved).
@@ -1442,6 +1487,7 @@ class PRSMNode:
             _build_storage_slashing_watcher_or_none(
                 client=self._storage_slashing_client,
                 state_store=self._watcher_state_store,
+                slash_event_log=self._slash_event_log,
             )
         )
         self._compensation_distributor_watcher = (
