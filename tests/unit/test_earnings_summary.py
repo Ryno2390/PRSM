@@ -81,6 +81,32 @@ class TestEarningsSummary:
         assert body["heartbeat"]["available"] is False
         assert body["distribution"]["available"] is False
 
+    def test_unwired_streams_carry_reason(self):
+        """Sprint 152 — operators reading available=false need to
+        know WHY (client not wired vs operator addr missing vs RPC
+        error). Pre-fix the not-wired branch returned a flat
+        {available: False} with no debug info."""
+        node = _node()
+        resp = _client(node).get("/admin/earnings-summary")
+        body = resp.json()
+        assert body["royalty"]["reason"] == "client_not_wired"
+        assert body["heartbeat"]["reason"] == "client_not_wired"
+        assert body["distribution"]["reason"] == "client_not_wired"
+
+    def test_heartbeat_reason_when_operator_addr_missing(self):
+        """Sprint 152 — slash client wired but no operator address
+        configured → reason='operator_address_missing'.
+        Distinguishable from 'client_not_wired' so the operator
+        knows to set the right env var."""
+        from unittest.mock import MagicMock as _MM
+        node = _node()
+        node._storage_slashing_client = _MM()
+        node._operator_address = None
+        resp = _client(node).get("/admin/earnings-summary")
+        body = resp.json()
+        assert body["heartbeat"]["available"] is False
+        assert body["heartbeat"]["reason"] == "operator_address_missing"
+
     def test_royalty_only_wired(self):
         node = _node(royalty_claimable=12345)
         resp = _client(node).get("/admin/earnings-summary")

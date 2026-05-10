@@ -4314,7 +4314,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         royalty_client = getattr(node, "_royalty_distributor_client", None)
         if royalty_client is None:
-            out["royalty"] = {"available": False}
+            # Sprint 152 — operators need to know WHY available=false.
+            # client_not_wired → no PRSM_ROYALTY_DISTRIBUTOR_ADDRESS
+            #   env AND no canonical addr in networks.py for this network.
+            out["royalty"] = {
+                "available": False,
+                "reason": "client_not_wired",
+            }
         else:
             try:
                 claimable = royalty_client.claimable()
@@ -4331,8 +4337,19 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         slash_client = getattr(node, "_storage_slashing_client", None)
         operator_addr = getattr(node, "_operator_address", None)
-        if slash_client is None or not operator_addr:
-            out["heartbeat"] = {"available": False}
+        if slash_client is None:
+            out["heartbeat"] = {
+                "available": False,
+                "reason": "client_not_wired",
+            }
+        elif not operator_addr:
+            # Sprint 152 — slash client wired but no operator addr.
+            # Distinct from client_not_wired so the operator knows to
+            # set FTNS_WALLET_PRIVATE_KEY (or PRSM_OPERATOR_ADDRESS).
+            out["heartbeat"] = {
+                "available": False,
+                "reason": "operator_address_missing",
+            }
         else:
             try:
                 last_hb = int(slash_client.last_heartbeat(operator_addr))
@@ -4363,7 +4380,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         comp_client = getattr(node, "_compensation_distributor_client", None)
         if comp_client is None:
-            out["distribution"] = {"available": False}
+            out["distribution"] = {
+                "available": False,
+                "reason": "client_not_wired",
+            }
         else:
             try:
                 last_dist = int(comp_client.last_distribution_timestamp())
