@@ -66,12 +66,20 @@ class TestMultiaddrTranslation:
         assert result == "/ip4/1.2.3.4/udp/9001/quic-v1"
 
     def test_multiaddr_translation_ws(self):
+        # Hostnames now use /dns4/ per libp2p multiaddr spec
+        # (sprint 120 fix). /ip4/ requires dotted-quad literal.
         result = Libp2pTransport._to_multiaddr("wss://host:8765")
-        assert result == "/ip4/host/tcp/8765/ws"
+        assert result == "/dns4/host/tcp/8765/ws"
 
     def test_multiaddr_translation_ws_plain(self):
+        # Same — hostname → /dns4/
         result = Libp2pTransport._to_multiaddr("ws://myhost:4000")
-        assert result == "/ip4/myhost/tcp/4000/ws"
+        assert result == "/dns4/myhost/tcp/4000/ws"
+
+    def test_multiaddr_translation_ws_ipv4(self):
+        # IPv4 literal → /ip4/ (sprint 120 distinction)
+        result = Libp2pTransport._to_multiaddr("wss://1.2.3.4:8765")
+        assert result == "/ip4/1.2.3.4/tcp/8765/ws"
 
     def test_multiaddr_passthrough(self):
         addr = "/ip4/10.0.0.1/tcp/4001/p2p/QmPeer"
