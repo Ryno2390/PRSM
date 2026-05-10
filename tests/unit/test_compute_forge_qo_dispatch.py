@@ -234,13 +234,16 @@ class TestRequestValidation:
         resp = client.post("/compute/forge", json={"budget_ftns": 1.0})
         assert resp.status_code == 400
 
-    def test_zero_budget_400(self):
+    def test_zero_budget_422(self):
+        """Sprint 153 — zero budget is a validation error (well-formed
+        body, semantically rejected). HTTP 422 is the correct status
+        per RFC 4918 §11.2; pre-153 returned 400."""
         forge = _StubQueryOrchestrator()
         client = _client(_make_node(forge))
         resp = client.post("/compute/forge", json={
             "query": "q", "budget_ftns": 0.0,
         })
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
     def test_no_agent_forge_503(self):
         node = MagicMock()

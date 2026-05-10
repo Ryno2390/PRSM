@@ -1471,6 +1471,32 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "numeric; rate limiting disabled", _rps_raw,
                 )
 
+        # Sprint 153 — validate budget_ftns FIELD upfront so a
+        # malformed body returns 422 even when agent_forge is down.
+        # Pre-fix the body's budget_ftns was only float()'d inside
+        # the cap try/except, masking type errors as cap-disable
+        # warnings and leaking through to a misleading 503.
+        if "budget_ftns" in body:
+            _raw = body["budget_ftns"]
+            try:
+                _budget_validated = float(_raw)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"budget_ftns must be a positive number; "
+                        f"got {_raw!r}."
+                    ),
+                )
+            if _budget_validated <= 0:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"budget_ftns must be > 0; got "
+                        f"{_budget_validated}."
+                    ),
+                )
+
         # PRSM_MAX_FTNS_PER_JOB cap enforcement (cost-control).
         # Default unlimited; non-numeric/zero/negative env values
         # silently disable the cap (log WARN). Operators tune this
