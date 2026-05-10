@@ -285,13 +285,35 @@ class DashboardServer:
             if self.node.agent_registry:
                 roles.append("agent")
             
+            # Read package version dynamically (sister to sprints
+            # 110-114, 130-131 stale-version family).
+            try:
+                from importlib.metadata import version as _pkg_version
+                _ver = _pkg_version("prsm-network")
+            except Exception:  # noqa: BLE001
+                _ver = "unknown"
+            # transport doesn't expose `.address`; use peer_addresses[0]
+            # of LISTENING addrs which the libp2p host emits at startup.
+            transport_addr = "unknown"
+            if self.node.transport is not None:
+                addrs = getattr(
+                    self.node.transport, "peer_addresses", [],
+                )
+                if addrs:
+                    transport_addr = addrs[0]
+            # peer_count is kernel-truth (sprint 135); .peers dict
+            # only counts outbound.
+            peer_count = (
+                self.node.transport.peer_count
+                if self.node.transport is not None else 0
+            )
             return {
                 "node_id": self.node.identity.node_id if self.node.identity else "unknown",
                 "status": "online",
-                "version": "1.0.0",
+                "version": _ver,
                 "roles": roles or ["researcher"],
-                "address": str(self.node.transport.address) if self.node.transport else "unknown",
-                "peers_count": len(self.node.transport.peers) if self.node.transport else 0,
+                "address": transport_addr,
+                "peers_count": peer_count,
                 "uptime_seconds": (datetime.now(timezone.utc) - self.start_time).total_seconds() if self.start_time else 0,
             }
         
@@ -423,7 +445,20 @@ class DashboardServer:
                     "to": tx.to_wallet,
                     "amount": tx.amount,
                     "description": tx.description,
-                    "timestamp": tx.timestamp.isoformat() if tx.timestamp else None,
+                    "timestamp": (
+                        # tx.timestamp may be a float (Unix epoch)
+                        # or a datetime depending on storage backend.
+                        # Handle both. Sprint 136 fix.
+                        tx.timestamp.isoformat()
+                        if hasattr(tx.timestamp, "isoformat")
+                        else (
+                            datetime.fromtimestamp(
+                                float(tx.timestamp),
+                                tz=timezone.utc,
+                            ).isoformat()
+                            if tx.timestamp else None
+                        )
+                    ),
                 }
                 for tx in history
             ]

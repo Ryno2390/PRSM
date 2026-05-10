@@ -6332,11 +6332,17 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             return _FileResponse(str(html_file))
         return {"message": "Dashboard assets not found. Run from PRSM source tree."}
 
-    # Mount the dashboard's API routes at /api/ (all dashboard.js calls use this prefix)
+    # Mount the dashboard's API routes. The dashboard sub-app
+    # defines its routes WITH `/api/` prefix already (see
+    # prsm/dashboard/app.py:173+). Mount at root so the prefix
+    # isn't doubled — pre-fix this was mounted at "/api" which
+    # made every dashboard route 404 with /api/api/<path>.
+    # Dogfood (sprint 136) caught it: the entire dashboard
+    # rendered blank because every JS request 404'd.
     try:
         from prsm.dashboard.app import create_dashboard_app as _create_dash_app
         _dash_app = _create_dash_app(node=node)
-        app.mount("/api", _dash_app, name="dashboard-api")
+        app.mount("", _dash_app, name="dashboard-api")
         logger.info("Web dashboard mounted at /")
     except Exception as e:
         logger.warning(f"Dashboard not available: {e}")
