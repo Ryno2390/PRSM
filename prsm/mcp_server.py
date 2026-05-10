@@ -713,6 +713,34 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_webhook_history",
+        description=(
+            "Recent webhook dispatch attempts (success or failure). "
+            "Useful for verifying webhook integration is firing as "
+            "expected — operators see event names + URLs + success/"
+            "failure + status_code + error. Backed by GET "
+            "/admin/webhook-history."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Page size (1..1000). Default 20.",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 20,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Pagination offset. Default 0.",
+                    "minimum": 0,
+                    "default": 0,
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_webhook_test",
         description=(
             "Smoke-test the operator's configured webhook URL. "
@@ -2614,6 +2642,64 @@ async def handle_prsm_audit_recent(
     return "\n".join(lines)
 
 
+async def handle_prsm_webhook_history(
+    arguments: Dict[str, Any],
+) -> str:
+    """Render recent webhook dispatch attempts."""
+    params = []
+    limit = arguments.get("limit", 20)
+    params.append(f"limit={limit}")
+    if "offset" in arguments:
+        params.append(f"offset={arguments['offset']}")
+    path = "/admin/webhook-history?" + "&".join(params)
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "entries" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in detail.lower():
+            return (
+                f"Webhook log not configured on this node.\n"
+                f"  Detail: {detail}\n"
+                f"  Set PRSM_WEBHOOK_URL env var to enable."
+            )
+        return f"Webhook history fetch failed.\n  Detail: {detail}"
+
+    entries = result["entries"]
+    total = result["total"]
+    if not entries:
+        return (
+            f"No webhook dispatches recorded "
+            f"(buffer total: {total})."
+        )
+
+    lines = [
+        f"PRSM Webhook History (showing {len(entries)} of {total}):",
+        f"  Time      Event                  Status  Result",
+        f"  " + "-" * 60,
+    ]
+    import datetime
+    for e in entries:
+        ts = e.get("timestamp", 0)
+        try:
+            t = datetime.datetime.fromtimestamp(
+                ts,
+            ).strftime("%H:%M:%S")
+        except Exception:
+            t = "????"
+        result_marker = "[ok]" if e.get("success") else "[!]"
+        lines.append(
+            f"  {t}  {e.get('event', '?'):<22}  "
+            f"{e.get('status_code', '?'):<5}  "
+            f"{result_marker} {e.get('error', '') if not e.get('success') else 'delivered'}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_webhook_test(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3200,6 +3286,7 @@ TOOL_HANDLERS = {
     "prsm_audit_recent": handle_prsm_audit_recent,
     "prsm_audit_summary": handle_prsm_audit_summary,
     "prsm_canonical_check": handle_prsm_canonical_check,
+    "prsm_webhook_history": handle_prsm_webhook_history,
     "prsm_webhook_test": handle_prsm_webhook_test,
     "prsm_metrics_summary": handle_prsm_metrics_summary,
     "prsm_cleanup_stale_escrows": handle_prsm_cleanup_stale_escrows,
