@@ -394,6 +394,67 @@ def _node_preflight_diagnostics(config: "NodeConfig") -> List[PreflightCheckResu
         )
     )
 
+    # Wallet config diagnostic. Operators see derived on-chain
+    # address pre-startup so they can confirm they're running with
+    # the wallet they expect. Catches stale env / wrong-key
+    # misconfigurations before any on-chain action.
+    pk = os.environ.get("FTNS_WALLET_PRIVATE_KEY", "").strip()
+    if not pk:
+        checks.append(
+            PreflightCheckResult(
+                name="Wallet config (optional)",
+                status=PREFLIGHT_WARN,
+                required=False,
+                details="FTNS_WALLET_PRIVATE_KEY not set",
+                remediation=(
+                    "Set FTNS_WALLET_PRIVATE_KEY for on-chain "
+                    "operations (royalty claim, heartbeat trigger, "
+                    "distribution trigger). Read-only paths work "
+                    "without it."
+                ),
+            )
+        )
+    else:
+        try:
+            from prsm.node.operator_address import (
+                resolve_operator_address,
+            )
+            addr = resolve_operator_address()
+            if addr:
+                checks.append(
+                    PreflightCheckResult(
+                        name="Wallet config (optional)",
+                        status=PREFLIGHT_PASS,
+                        required=False,
+                        details=f"Operator address: {addr[:8]}...{addr[-6:]}",
+                        remediation="None",
+                    )
+                )
+            else:
+                checks.append(
+                    PreflightCheckResult(
+                        name="Wallet config (optional)",
+                        status=PREFLIGHT_WARN,
+                        required=False,
+                        details="FTNS_WALLET_PRIVATE_KEY set but malformed",
+                        remediation=(
+                            "Verify private key is 0x-prefixed 32 bytes "
+                            "of hex. Bad key won't crash startup but "
+                            "all on-chain operations will fail."
+                        ),
+                    )
+                )
+        except Exception as exc:
+            checks.append(
+                PreflightCheckResult(
+                    name="Wallet config (optional)",
+                    status=PREFLIGHT_WARN,
+                    required=False,
+                    details=f"Address derivation failed: {exc}",
+                    remediation="Check FTNS_WALLET_PRIVATE_KEY format.",
+                )
+            )
+
     return checks
 
 
