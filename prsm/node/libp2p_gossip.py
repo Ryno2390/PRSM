@@ -56,6 +56,9 @@ class Libp2pGossip:
 
         # Subtypes for which PrsmSubscribe has already been called
         self._subscribed_topics: set = set()
+        # Topics queued during __init__-time subscribes (before
+        # transport.start()). Flushed on first start().
+        self._pending_topics: set = set()
 
         # Additive telemetry counters (never change gossip behaviour)
         self._telemetry: Dict[str, int] = {
@@ -67,8 +70,29 @@ class Libp2pGossip:
     # ── Lifecycle ────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Register handler for inbound gossip messages from the transport."""
+        """Register handler for inbound gossip messages from the transport.
+
+        Flushes pending subscriptions queued during __init__ paths
+        that ran before the libp2p host was ready.
+        """
         self.transport.on_message(MSG_GOSSIP, self._handle_gossip)
+        # Flush deferred subscriptions now that the host is up
+        if self._pending_topics:
+            for topic in list(self._pending_topics):
+                if self.transport._handle < 0:
+                    break  # transport still not ready (shouldn't happen)
+                try:
+                    self.transport._lib.PrsmSubscribe(
+                        self.transport._handle,
+                        topic.encode("utf-8"),
+                    )
+                    self._subscribed_topics.add(topic)
+                except Exception as exc:
+                    logger.warning(
+                        "PrsmSubscribe failed for topic %s during "
+                        "start() flush: %s", topic, exc,
+                    )
+                self._pending_topics.discard(topic)
         logger.info("Libp2pGossip started")
 
     async def stop(self) -> None:
@@ -80,21 +104,44 @@ class Libp2pGossip:
         """Register a callback for *subtype*.
 
         Lazily calls ``PrsmSubscribe`` the first time a subtype is registered.
+
+        Guards against subscribing before the libp2p host has
+        started (handle < 0). When called pre-start, the topic
+        is recorded but the C-side subscription is deferred —
+        callers register subscriptions during __init__ paths
+        that run before transport.start(). Without the guard,
+        the C bridge logs a noisy `handle -1 not found` and
+        the topic gets recorded as "subscribed" anyway,
+        leaving the GossipSub layer permanently desynced.
         """
         topic = self._topic_name(subtype)
 
-        # Lazy subscription: only call PrsmSubscribe once per topic
+        # Always register the Python-side callback so messages
+        # are dispatched correctly once the topic IS subscribed.
+        self._callbacks.setdefault(subtype, []).append(callback)
+
+        # Defer the C-bridge call when handle isn't ready yet.
+        # Track as pending so transport.start() can flush.
+        if self.transport._handle < 0:
+            if topic not in self._subscribed_topics:
+                self._pending_topics.add(topic)
+            return
+
+        # Handle is ready — proceed with subscription
         if topic not in self._subscribed_topics:
             try:
                 self.transport._lib.PrsmSubscribe(
                     self.transport._handle,
                     topic.encode("utf-8"),
                 )
+                self._subscribed_topics.add(topic)
             except Exception as exc:
-                logger.warning("PrsmSubscribe failed for topic %s: %s", topic, exc)
-            self._subscribed_topics.add(topic)
-
-        self._callbacks.setdefault(subtype, []).append(callback)
+                logger.warning(
+                    "PrsmSubscribe failed for topic %s: %s",
+                    topic, exc,
+                )
+                # NOT adding to _subscribed_topics — let next
+                # call retry rather than silently dropping
 
     async def publish(
         self,
