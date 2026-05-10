@@ -307,6 +307,66 @@ class TestAuditEndpointPathFilter:
         # /wallet/royalty/claim + /wallet/escrows/esc-1
         assert body["total_matched"] == 2
 
+    def test_summary_returns_status_buckets(self):
+        node = _node()
+        for code in (200, 200, 201, 404, 422, 500, 502, 502):
+            node._audit_log.append(
+                method="POST", path=f"/x{code}", requester="n1",
+                status_code=code, request_id=f"r{code}",
+            )
+        resp = _client(node).get("/audit/summary")
+        assert resp.status_code == 200
+        body = resp.json()
+        # Expected buckets:
+        #   2xx: 3 (200, 200, 201)
+        #   4xx: 2 (404, 422)
+        #   5xx: 3 (500, 502, 502)
+        assert body["status_buckets"]["2xx"] == 3
+        assert body["status_buckets"]["4xx"] == 2
+        assert body["status_buckets"]["5xx"] == 3
+
+    def test_summary_returns_method_buckets(self):
+        node = _node()
+        for method in ("POST", "POST", "PATCH", "DELETE"):
+            node._audit_log.append(
+                method=method, path="/x", requester="n1",
+                status_code=200, request_id="r",
+            )
+        resp = _client(node).get("/audit/summary")
+        body = resp.json()
+        assert body["method_buckets"]["POST"] == 2
+        assert body["method_buckets"]["PATCH"] == 1
+        assert body["method_buckets"]["DELETE"] == 1
+
+    def test_summary_returns_top_paths(self):
+        node = _node()
+        for _ in range(5):
+            node._audit_log.append(
+                method="POST", path="/compute/forge", requester="n1",
+                status_code=200, request_id="r",
+            )
+        for _ in range(2):
+            node._audit_log.append(
+                method="POST", path="/wallet/royalty/claim",
+                requester="n1", status_code=200, request_id="r",
+            )
+        resp = _client(node).get("/audit/summary?top_paths=5")
+        body = resp.json()
+        # Most-frequent path first.
+        assert body["top_paths"][0]["path"] == "/compute/forge"
+        assert body["top_paths"][0]["count"] == 5
+        assert body["top_paths"][1]["path"] == "/wallet/royalty/claim"
+        assert body["top_paths"][1]["count"] == 2
+
+    def test_summary_empty_buffer(self):
+        node = _node()
+        resp = _client(node).get("/audit/summary")
+        body = resp.json()
+        assert body["total"] == 0
+        assert body["status_buckets"] == {}
+        assert body["method_buckets"] == {}
+        assert body["top_paths"] == []
+
     def test_path_prefix_combined_with_status(self):
         node = _node()
         node._audit_log.append(

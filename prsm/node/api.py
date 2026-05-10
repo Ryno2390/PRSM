@@ -3485,6 +3485,63 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "timestamp": tx.timestamp,
         }
 
+    @app.get("/audit/summary")
+    async def get_audit_summary(top_paths: int = 10) -> Dict[str, Any]:
+        """Aggregated buckets over the audit ring buffer for ops
+        dashboards. Bucketed by status range (2xx/3xx/4xx/5xx),
+        by method, and the top-N most-frequent paths.
+
+        Status:
+          503 — _audit_log not wired
+          422 — top_paths out of [1, 100]
+          200 — {total, status_buckets, method_buckets, top_paths}
+        """
+        if top_paths <= 0 or top_paths > 100:
+            raise HTTPException(
+                status_code=422,
+                detail=f"top_paths must be in [1, 100], got {top_paths}",
+            )
+        ring = getattr(node, "_audit_log", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Audit log not initialized on this node.",
+            )
+        sweep_limit = min(1000, ring.max_entries())
+        all_entries = ring.recent(limit=sweep_limit, offset=0)
+
+        status_buckets: Dict[str, int] = {}
+        method_buckets: Dict[str, int] = {}
+        path_counts: Dict[str, int] = {}
+        for e in all_entries:
+            code = e.status_code
+            if 200 <= code < 300:
+                bucket = "2xx"
+            elif 300 <= code < 400:
+                bucket = "3xx"
+            elif 400 <= code < 500:
+                bucket = "4xx"
+            elif 500 <= code < 600:
+                bucket = "5xx"
+            else:
+                bucket = "other"
+            status_buckets[bucket] = status_buckets.get(bucket, 0) + 1
+            method_buckets[e.method] = method_buckets.get(e.method, 0) + 1
+            path_counts[e.path] = path_counts.get(e.path, 0) + 1
+
+        # Sort paths by count descending; cap at top_paths.
+        top = sorted(
+            path_counts.items(), key=lambda kv: kv[1], reverse=True,
+        )[:top_paths]
+        return {
+            "total": ring.count(),
+            "status_buckets": status_buckets,
+            "method_buckets": method_buckets,
+            "top_paths": [
+                {"path": p, "count": c} for p, c in top
+            ],
+        }
+
     @app.get("/audit/recent")
     async def get_audit_recent(
         limit: int = 50,
