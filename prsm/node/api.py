@@ -3175,6 +3175,69 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=503, detail="Content index not initialized")
         return node.content_index.get_stats()
 
+    @app.get("/content/mine")
+    async def get_my_content(
+        limit: int = 50, offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Paginated list of content uploaded by this node.
+
+        Surfaces ContentUploader.uploaded_content as a publisher-
+        facing dashboard. Each entry: content_id, filename,
+        size_bytes, content_hash, creator_id, royalty_rate,
+        access_count, total_royalties, provenance_tx_hash,
+        created_at.
+
+        Status:
+          503 — ContentUploader not initialized
+          422 — limit out of [1, 1000] OR offset < 0
+          200 — {entries, total, offset, limit}
+        """
+        if limit <= 0 or limit > 1000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 1000], got {limit}",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0, got {offset}",
+            )
+        uploader = getattr(node, "content_uploader", None)
+        if uploader is None:
+            raise HTTPException(
+                status_code=503,
+                detail="ContentUploader not initialized.",
+            )
+        store = getattr(uploader, "uploaded_content", None) or {}
+        # Sort most-recent-first by created_at
+        sorted_records = sorted(
+            store.values(),
+            key=lambda r: getattr(r, "created_at", 0),
+            reverse=True,
+        )
+        page = sorted_records[offset:offset + limit]
+        entries = []
+        for r in page:
+            entries.append({
+                "content_id": r.content_id,
+                "filename": r.filename,
+                "size_bytes": r.size_bytes,
+                "content_hash": r.content_hash,
+                "creator_id": r.creator_id,
+                "royalty_rate": r.royalty_rate,
+                "access_count": r.access_count,
+                "total_royalties": r.total_royalties,
+                "provenance_tx_hash": getattr(r, "provenance_tx_hash", None),
+                "created_at": r.created_at,
+                "is_sharded": getattr(r, "is_sharded", False),
+            })
+        return {
+            "entries": entries,
+            "total": len(store),
+            "offset": offset,
+            "limit": limit,
+        }
+
     @app.get("/content/{cid}")
     async def get_content_record(cid: str) -> Dict[str, Any]:
         """Look up a specific content record by CID."""

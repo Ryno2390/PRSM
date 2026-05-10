@@ -741,6 +741,29 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_my_content",
+        description=(
+            "Paginated list of content uploaded by this node. "
+            "Each entry: content_id, filename, size, royalty_rate, "
+            "access_count, total_royalties, provenance_tx_hash. "
+            "Use to verify on-chain provenance registration + "
+            "track royalty accruals. Backed by GET /content/mine."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1, "maximum": 1000, "default": 20,
+                },
+                "offset": {
+                    "type": "integer",
+                    "minimum": 0, "default": 0,
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_heartbeat_trigger",
         description=(
             "Manually record an on-chain heartbeat. Use when the "
@@ -2740,6 +2763,64 @@ async def handle_prsm_audit_recent(
     return "\n".join(lines)
 
 
+async def handle_prsm_my_content(
+    arguments: Dict[str, Any],
+) -> str:
+    """Render content uploaded by this node."""
+    params = []
+    limit = arguments.get("limit", 20)
+    params.append(f"limit={limit}")
+    if "offset" in arguments:
+        params.append(f"offset={arguments['offset']}")
+    path = "/content/mine?" + "&".join(params)
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "entries" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in detail.lower():
+            return (
+                f"ContentUploader not configured.\n"
+                f"  Detail: {detail}"
+            )
+        return f"My-content fetch failed.\n  Detail: {detail}"
+
+    entries = result["entries"]
+    total = result["total"]
+    if not entries:
+        return (
+            f"No uploaded content (total: {total}). "
+            f"Upload via /content/upload or /content/upload/shard."
+        )
+
+    lines = [
+        f"PRSM My Content (showing {len(entries)} of {total}):",
+        f"  Content ID                   File           Royalties  Hits",
+        "  " + "-" * 70,
+    ]
+    for e in entries:
+        cid = e.get("content_id", "?")
+        if len(cid) > 28:
+            cid = cid[:14] + ".." + cid[-12:]
+        fn = e.get("filename", "?")
+        if len(fn) > 14:
+            fn = fn[:11] + ".."
+        royalties = e.get("total_royalties", 0.0)
+        hits = e.get("access_count", 0)
+        prov_marker = (
+            "[chain]" if e.get("provenance_tx_hash") else "[off]"
+        )
+        lines.append(
+            f"  {cid:<28}  {fn:<14}  {royalties:>9.6f}  "
+            f"{hits:>4}  {prov_marker}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_heartbeat_trigger(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3622,6 +3703,7 @@ TOOL_HANDLERS = {
     "prsm_audit_recent": handle_prsm_audit_recent,
     "prsm_audit_summary": handle_prsm_audit_summary,
     "prsm_canonical_check": handle_prsm_canonical_check,
+    "prsm_my_content": handle_prsm_my_content,
     "prsm_heartbeat_trigger": handle_prsm_heartbeat_trigger,
     "prsm_heartbeat_history": handle_prsm_heartbeat_history,
     "prsm_slash_history": handle_prsm_slash_history,
