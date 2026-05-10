@@ -505,11 +505,20 @@ class Libp2pTransport:
         """Translate common address formats to libp2p multiaddr strings.
 
         Supported inputs:
-        - ``wss://host:port`` or ``ws://host:port`` → ``/ip4/host/tcp/port/ws``
-        - ``host:port``                              → ``/ip4/host/udp/port/quic-v1``
-        - ``/ip4/...``                               → passthrough
+        - ``wss://host:port`` or ``ws://host:port``
+            → ``/{ip4|dns4}/host/tcp/port/ws`` based on whether
+              host is an IPv4 literal or a DNS hostname
+        - ``host:port`` → ``/{ip4|dns4}/host/udp/port/quic-v1``
+        - ``/ip4/...``, ``/ip6/...``, ``/dns/...``, ``/dns4/...``,
+          ``/dns6/...`` → passthrough
         """
-        if address.startswith("/ip4/") or address.startswith("/ip6/"):
+        if (
+            address.startswith("/ip4/")
+            or address.startswith("/ip6/")
+            or address.startswith("/dns/")
+            or address.startswith("/dns4/")
+            or address.startswith("/dns6/")
+        ):
             return address
 
         if address.startswith("wss://") or address.startswith("ws://"):
@@ -519,12 +528,30 @@ class Libp2pTransport:
             if not host:
                 host = without_scheme
                 port = "443" if address.startswith("wss") else "80"
-            return f"/ip4/{host}/tcp/{port}/ws"
+            return f"/{Libp2pTransport._addr_proto(host)}/{host}/tcp/{port}/ws"
 
         # Plain host:port → QUIC
         if ":" in address:
             host, port = address.rsplit(":", 1)
-            return f"/ip4/{host}/udp/{port}/quic-v1"
+            return (
+                f"/{Libp2pTransport._addr_proto(host)}/{host}"
+                f"/udp/{port}/quic-v1"
+            )
 
         # Fallback — treat as hostname only
-        return f"/ip4/{address}/udp/9001/quic-v1"
+        return (
+            f"/{Libp2pTransport._addr_proto(address)}/{address}"
+            f"/udp/9001/quic-v1"
+        )
+
+    @staticmethod
+    def _addr_proto(host: str) -> str:
+        """Pick `ip4` or `dns4` based on whether host is an IPv4
+        literal. libp2p's `/ip4/` requires a dotted-quad; DNS
+        hostnames need `/dns4/`."""
+        import ipaddress
+        try:
+            ipaddress.IPv4Address(host)
+            return "ip4"
+        except (ipaddress.AddressValueError, ValueError):
+            return "dns4"
