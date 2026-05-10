@@ -2255,7 +2255,18 @@ class PRSMNode:
                             client = getattr(self, attr_name, None)
                             if client is None:
                                 continue
-                            wired = getattr(client, "address", None)
+                            # Sprint 142 — read CONTRACT address,
+                            # not signer. `.address` returns the
+                            # operator wallet on phase 7-storage /
+                            # phase 8 clients. Sprint 86 used the
+                            # wrong attribute, producing false
+                            # canonical.drifted webhooks at every
+                            # sweep. Mirror the /health/detailed
+                            # fix.
+                            wired = (
+                                getattr(client, "contract_address", None)
+                                or getattr(client, "address", None)
+                            )
                             canonical = getattr(
                                 cfg, networks_field, None,
                             )
@@ -3400,9 +3411,27 @@ class PRSMNode:
             "api_address": f"http://127.0.0.1:{self.config.api_port}",
             "peers": {
                 "connected": self.transport.peer_count if self.transport else 0,
-                "known": len(self.discovery.known_peers) if self.discovery else 0,
-                "bootstrap": self.discovery.get_bootstrap_status() if self.discovery else {},
-                "bootstrap_telemetry": self.discovery.get_bootstrap_telemetry() if self.discovery else {},
+                # Use get_known_peers() (the documented API on both
+                # legacy Discovery + new Libp2pDiscovery) instead
+                # of the .known_peers attribute (legacy-only). The
+                # attribute path crashed get_status() when running
+                # with libp2p discovery.
+                "known": (
+                    len(self.discovery.get_known_peers())
+                    if self.discovery else 0
+                ),
+                "bootstrap": (
+                    self.discovery.get_bootstrap_status()
+                    if self.discovery
+                    and hasattr(self.discovery, "get_bootstrap_status")
+                    else {}
+                ),
+                "bootstrap_telemetry": (
+                    self.discovery.get_bootstrap_telemetry()
+                    if self.discovery
+                    and hasattr(self.discovery, "get_bootstrap_telemetry")
+                    else {}
+                ),
             },
             "ftns_balance": balance,
             "dag_stats": {

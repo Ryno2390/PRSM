@@ -4946,7 +4946,19 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     }
                 return
             entry = {"available": True, "status": "ok"}
-            wired = getattr(client, "address", None)
+            # Sprint 142 fix: read CONTRACT address, not signer
+            # address. `.address` on StorageSlashingClient /
+            # CompensationDistributorClient returns the signing
+            # account (operator wallet), not the contract.
+            # Sprint 83 used the wrong attribute and produced
+            # garbage canonical-match output (every node showed
+            # MISMATCH because operator wallet != contract addr).
+            # Try .contract_address first (matches FTNS ledger
+            # convention); fall back to .address only if absent.
+            wired = (
+                getattr(client, "contract_address", None)
+                or getattr(client, "address", None)
+            )
             if wired is not None:
                 entry["wired_address"] = wired
                 try:

@@ -69,7 +69,11 @@ def _build_canonical_check_fn(node):
             client = getattr(node, attr_name, None)
             if client is None:
                 continue
-            wired = getattr(client, "address", None)
+            # Sprint 142 mirror: read CONTRACT address, not signer.
+            wired = (
+                getattr(client, "contract_address", None)
+                or getattr(client, "address", None)
+            )
             canonical = getattr(cfg, networks_field, None)
             if wired and canonical:
                 result[label] = (wired, canonical)
@@ -80,8 +84,9 @@ def _build_canonical_check_fn(node):
 
 def test_storage_slashing_canonical_pin_surfaced(fake_node):
     canonical = "0x0e9cAfadCCCe0987C773B5FdFF295c2Aa6F03337"
-    fake_client = MagicMock()
-    fake_client.address = canonical  # match
+    fake_client = MagicMock(spec=["contract_address", "address"])
+    fake_client.contract_address = canonical  # match
+    fake_client.address = "0xSIGNER"
     fake_node._storage_slashing_client = fake_client
     with patch.dict(os.environ, {"PRSM_NETWORK": "mainnet"}):
         fn = _build_canonical_check_fn(fake_node)
@@ -93,8 +98,9 @@ def test_storage_slashing_canonical_pin_surfaced(fake_node):
 
 
 def test_compensation_distributor_canonical_pin_surfaced(fake_node):
-    fake_client = MagicMock()
-    fake_client.address = "0xWRONG"
+    fake_client = MagicMock(spec=["contract_address", "address"])
+    fake_client.contract_address = "0xWRONG"
+    fake_client.address = "0xSIGNER"
     fake_node._compensation_distributor_client = fake_client
     with patch.dict(os.environ, {"PRSM_NETWORK": "mainnet"}):
         fn = _build_canonical_check_fn(fake_node)
@@ -107,8 +113,9 @@ def test_compensation_distributor_canonical_pin_surfaced(fake_node):
 
 
 def test_key_distribution_canonical_pin_surfaced(fake_node):
-    fake_client = MagicMock()
-    fake_client.address = "0xCAFE"
+    fake_client = MagicMock(spec=["contract_address", "address"])
+    fake_client.contract_address = "0xCAFE"
+    fake_client.address = "0xSIGNER"
     fake_node._key_distribution_client = fake_client
     with patch.dict(os.environ, {"PRSM_NETWORK": "mainnet"}):
         fn = _build_canonical_check_fn(fake_node)

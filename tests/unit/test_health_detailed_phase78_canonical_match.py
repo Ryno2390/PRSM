@@ -42,8 +42,12 @@ def _client(node):
 
 
 def _mock_client(addr):
-    c = MagicMock()
-    c.address = addr
+    c = MagicMock(spec=["contract_address", "address"])
+    # Sprint 142: canonical-match check reads CONTRACT address.
+    # `.address` returns the SIGNER on real clients; the canonical
+    # check correctly prefers `.contract_address`.
+    c.contract_address = addr
+    c.address = "0xWALLET"  # signer; not what canonical check uses
     return c
 
 
