@@ -195,11 +195,34 @@ class Libp2pTransport:
     # ── Peer operations ─────────────────────────────────────────
 
     async def connect_to_peer(self, address: str) -> Optional[PeerConnection]:
-        """Connect to a peer by address (host:port, ws(s)://…, or /ip4/…)."""
+        """Connect to a peer by address (host:port, ws(s)://…, or /ip4/…).
+
+        Multiaddr MUST include a `/p2p/<peerID>` suffix for libp2p
+        to identify the remote. Operators using the canonical
+        bootstrap registry get this automatically; raw URLs from
+        config (e.g. `wss://bootstrap1.prsm-network.com:8765`)
+        without the suffix fail at the C-bridge layer with a
+        cryptic "invalid p2p multiaddr" message.
+
+        We detect the missing suffix here and log a clear,
+        actionable warning instead of the raw error.
+        """
         if self._handle < 0:
             return None
 
         maddr = self._to_multiaddr(address)
+        if "/p2p/" not in maddr:
+            logger.warning(
+                "Libp2pTransport: bootstrap multiaddr %r is missing "
+                "/p2p/<peerID> suffix — libp2p connect requires it. "
+                "Use the bootstrap registry (signed bootstrap.json) "
+                "to resolve full multiaddrs, or append /p2p/<id> "
+                "manually if the peer ID is known.",
+                maddr,
+            )
+            self._telemetry["error_count"] += 1
+            return None
+
         ptr = self._lib.PrsmConnect(self._handle, maddr.encode("utf-8"))
         peer_id_str = self._read_and_free(ptr)
         if not peer_id_str:
