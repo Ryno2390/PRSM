@@ -3703,6 +3703,44 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "limit": limit,
         }
 
+    @app.post("/admin/heartbeat/trigger")
+    async def admin_heartbeat_trigger() -> Dict[str, Any]:
+        """Manually record a heartbeat on-chain.
+
+        Operator action endpoint. Use when the
+        HeartbeatScheduler has crashed / paused / been
+        disabled and the operator wants to record a manual
+        heartbeat to avoid the slashing window opening. The
+        contract has no per-caller access control; the call
+        succeeds even from non-providers (no-op on chain).
+
+        Status:
+          503 — StorageSlashingClient not wired
+          502 — chain call raised (RPC unreachable / revert)
+          200 — {tx_hash, status: TransferStatus name}
+        """
+        client = getattr(node, "_storage_slashing_client", None)
+        if client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "StorageSlashingClient not wired. Set "
+                    "PRSM_STORAGE_SLASHING_ADDRESS + "
+                    "FTNS_WALLET_PRIVATE_KEY."
+                ),
+            )
+        try:
+            tx_hash, status = client.record_heartbeat()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502,
+                detail=f"record_heartbeat raised: {exc}",
+            )
+        return {
+            "tx_hash": tx_hash,
+            "status": status.name if hasattr(status, "name") else str(status),
+        }
+
     @app.get("/admin/heartbeat-history")
     async def get_heartbeat_history(
         limit: int = 50,

@@ -741,6 +741,20 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_heartbeat_trigger",
+        description=(
+            "Manually record an on-chain heartbeat. Use when the "
+            "HeartbeatScheduler has crashed / paused / been "
+            "disabled and the operator wants to avoid the slashing "
+            "window opening. Returns tx_hash + status. Backed by "
+            "POST /admin/heartbeat/trigger."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
         name="prsm_heartbeat_history",
         description=(
             "Recent on-chain HeartbeatRecorded events observed by "
@@ -2726,6 +2740,34 @@ async def handle_prsm_audit_recent(
     return "\n".join(lines)
 
 
+async def handle_prsm_heartbeat_trigger(
+    arguments: Dict[str, Any],
+) -> str:
+    """Manually trigger an on-chain heartbeat record."""
+    try:
+        result = await _call_node_api(
+            "POST", "/admin/heartbeat/trigger",
+        )
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "tx_hash" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not wired" in detail.lower():
+            return (
+                f"StorageSlashingClient not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"Heartbeat trigger failed.\n  Detail: {detail}"
+    return (
+        f"Heartbeat recorded on-chain.\n"
+        f"  tx_hash: {result['tx_hash']}\n"
+        f"  status:  {result.get('status', '?')}"
+    )
+
+
 async def handle_prsm_heartbeat_history(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3580,6 +3622,7 @@ TOOL_HANDLERS = {
     "prsm_audit_recent": handle_prsm_audit_recent,
     "prsm_audit_summary": handle_prsm_audit_summary,
     "prsm_canonical_check": handle_prsm_canonical_check,
+    "prsm_heartbeat_trigger": handle_prsm_heartbeat_trigger,
     "prsm_heartbeat_history": handle_prsm_heartbeat_history,
     "prsm_slash_history": handle_prsm_slash_history,
     "prsm_earnings_summary": handle_prsm_earnings_summary,
