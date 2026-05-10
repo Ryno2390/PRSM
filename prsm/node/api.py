@@ -4530,6 +4530,35 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "available": False, "status": "not_wired",
             }
 
+        # In-memory ring buffer counts. Surfaces the 4 dashboard
+        # rings (webhook + slash + heartbeat + distribution) so
+        # operators can see at a glance whether buffers are
+        # populated + whether persistence is enabled. None when
+        # the corresponding feature isn't wired.
+        for ring_name, attr in (
+            ("webhook_log", "_webhook_log"),
+            ("slash_event_log", "_slash_event_log"),
+            ("heartbeat_log", "_heartbeat_log"),
+            ("distribution_log", "_distribution_log"),
+        ):
+            ring = getattr(node, attr, None)
+            if ring is None:
+                if hasattr(node, attr):
+                    subsystems[ring_name] = {
+                        "available": False, "status": "not_wired",
+                    }
+                continue
+            entry: Dict[str, Any] = {
+                "available": True, "status": "ok",
+            }
+            try:
+                entry["count"] = ring.count()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("%s.count() raised: %s", ring_name, exc)
+            persist_dir = getattr(ring, "_persist_dir", None)
+            entry["persisted"] = persist_dir is not None
+            subsystems[ring_name] = entry
+
         # Phase 7-storage + Phase 8 client canonical-match probes.
         # Each underlying client (StorageSlashing / Compensation
         # Distributor / KeyDistribution) exposes a `.address`
