@@ -3074,6 +3074,22 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not node.content_uploader:
             raise HTTPException(status_code=503, detail="Content uploader not initialized")
 
+        # Pre-flight check: content_publisher (BitTorrent layer)
+        # must be wired or upload will produce a generic 502 from
+        # the None-return path. Return a 503 with actionable hint
+        # instead. Most common cause: libtorrent not installed.
+        if getattr(node.content_uploader, "content_publisher", None) is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "ContentPublisher (BitTorrent layer) not wired — "
+                    "uploads cannot proceed. Most common cause: "
+                    "libtorrent not installed on this Python. Install "
+                    "with `pip install libtorrent>=2.0.9` (macOS may "
+                    "need `brew install libtorrent-rasterbar` first)."
+                ),
+            )
+
         # Cap parent_cids list length. Each parent gets royalty
         # per access — unbounded list = unbounded loop. Default
         # 100 covers any practical citation chain.
