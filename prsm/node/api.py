@@ -299,10 +299,19 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         FastAPI application with security hardening applied
     """
 
+    # Read canonical version from package metadata so OpenAPI
+    # spec stays in sync with pyproject.toml across releases.
+    # Fallback to "unknown" when running without editable install.
+    try:
+        from importlib.metadata import version as _pkg_version
+        _api_version = _pkg_version("prsm-network")
+    except Exception:  # noqa: BLE001
+        _api_version = "unknown"
+
     app = FastAPI(
         title="PRSM Node API",
         description="Management API for a PRSM network node",
-        version="0.24.0",
+        version=_api_version,
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
