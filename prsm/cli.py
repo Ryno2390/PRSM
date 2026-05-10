@@ -1602,6 +1602,102 @@ def node_webhooks(api_port, output_format, limit):
     )
 
 
+def _node_admin_trigger(*, api_port: int, path: str, label: str):
+    """Shared helper for action triggers — POSTs to admin
+    endpoints, renders tx_hash + status."""
+    import httpx
+
+    url = f"http://127.0.0.1:{api_port}{path}"
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(url)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+
+    if resp.status_code == 503:
+        detail = resp.json().get("detail", "not wired")
+        console.print(
+            f"[yellow]{label} unavailable.[/yellow]\n"
+            f"[dim]{detail}[/dim]"
+        )
+        sys.exit(1)
+    if resp.status_code == 502:
+        detail = resp.json().get("detail", "chain error")
+        console.print(
+            f"[red]{label} failed on-chain.[/red]\n"
+            f"[dim]{detail}[/dim]"
+        )
+        sys.exit(1)
+    if resp.status_code != 200:
+        console.print(
+            f"[red]{path} returned {resp.status_code}[/red]: "
+            f"{resp.text}"
+        )
+        sys.exit(1)
+
+    body = resp.json()
+    tx_hash = body.get("tx_hash", "?")
+    status = body.get("status", "?")
+    console.print(
+        f"[green]{label} submitted on-chain.[/green]\n"
+        f"  tx_hash: {tx_hash}\n"
+        f"  status:  {status}"
+    )
+
+
+@node.command("trigger-heartbeat")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--yes", "-y", is_flag=True,
+    help="Skip confirmation prompt",
+)
+def node_trigger_heartbeat(api_port, yes):
+    """Manually record a heartbeat on-chain.
+
+    Use when the HeartbeatScheduler crashed/paused and you
+    want to avoid the slashing window opening. Caller pays gas.
+    """
+    if not yes:
+        click.confirm(
+            "This will submit an on-chain transaction. Continue?",
+            abort=True,
+        )
+    _node_admin_trigger(
+        api_port=api_port,
+        path="/admin/heartbeat/trigger",
+        label="Heartbeat",
+    )
+
+
+@node.command("trigger-distribution")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--yes", "-y", is_flag=True,
+    help="Skip confirmation prompt",
+)
+def node_trigger_distribution(api_port, yes):
+    """Manually invoke pull_and_distribute on-chain.
+
+    Use when the PullAndDistributeScheduler crashed/paused or
+    to force an emission round before the next cadence tick.
+    Caller pays gas.
+    """
+    if not yes:
+        click.confirm(
+            "This will submit an on-chain transaction. Continue?",
+            abort=True,
+        )
+    _node_admin_trigger(
+        api_port=api_port,
+        path="/admin/distribution/trigger",
+        label="Distribution",
+    )
+
+
 @node.command("install")
 @click.option("--dry-run", is_flag=True, help="Print service file without installing")
 @click.option("--host", default="127.0.0.1", help="Host to bind to")
