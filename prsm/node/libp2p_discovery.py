@@ -64,11 +64,15 @@ class Libp2pDiscovery:
         self._local_gpu_available: bool = False
         self._startup_timestamp: float = time.time()
 
-        # Bootstrap status tracking
+        # Bootstrap status tracking. `discovered_peer_count` (sprint
+        # 167) is the last-poll snapshot of how many peers the
+        # bootstrap server surfaced; distinct from
+        # _capability_index size (which monotonically grows).
         self._bootstrap_status: Dict[str, Any] = {
             "attempted": 0,
             "connected": 0,
             "degraded": False,
+            "discovered_peer_count": 0,
         }
 
     # ── Lifecycle ────────────────────────────────────────────────
@@ -242,8 +246,15 @@ class Libp2pDiscovery:
     def _hydrate_peers_from_bootstrap(self, peers: List[Any]) -> None:
         """Sprint 165 — populate _capability_index from bootstrap-
         server peer payloads. Skips self (avoids self-edges in the
-        capability graph)."""
+        capability graph).
+
+        Sprint 167 — also tracks the last-poll discovered-peer
+        count on _bootstrap_status so /status surfaces the live
+        bootstrap-server view of the network (separate from
+        `known` which conflates bootstrap + gossip sources).
+        """
         own_id = self.transport.identity.node_id
+        hydrated = 0
         for bp in peers:
             pid = getattr(bp, "peer_id", None)
             if not pid or pid == own_id:
@@ -255,6 +266,11 @@ class Libp2pDiscovery:
                 last_seen=time.time(),
                 last_capability_update=time.time(),
             )
+            hydrated += 1
+        # Sprint 167 — track how many peers the bootstrap server
+        # surfaced on the most recent poll. Distinct from
+        # _capability_index size, which monotonically grows.
+        self._bootstrap_status["discovered_peer_count"] = hydrated
 
     async def _bootstrap_poll_loop(self) -> None:
         """Sprint 165 — periodic poll of bootstrap server for new
@@ -476,6 +492,11 @@ class Libp2pDiscovery:
             "connected": self._bootstrap_status["connected"],
             "degraded": self._bootstrap_status["degraded"],
             "bootstrap_nodes": list(self.bootstrap_nodes),
+            # Sprint 167 — last-poll snapshot of peers the bootstrap
+            # server knows about (excluding self).
+            "discovered_peer_count": self._bootstrap_status.get(
+                "discovered_peer_count", 0,
+            ),
         }
 
     def get_bootstrap_telemetry(self) -> Dict[str, Any]:

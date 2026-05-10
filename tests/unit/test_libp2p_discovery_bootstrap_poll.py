@@ -93,6 +93,30 @@ def test_hydrate_skips_empty_peer_id():
     assert "real-peer" in peer_ids
 
 
+def test_hydrate_tracks_discovered_peer_count():
+    """Sprint 167 — _bootstrap_status.discovered_peer_count
+    reflects the count from the most recent poll, excluding self."""
+    d = _make_discovery(self_node_id="self-node")
+    d._hydrate_peers_from_bootstrap([
+        _bp("peer-A"),
+        _bp("peer-B"),
+        _bp("self-node"),  # excluded
+    ])
+    assert d._bootstrap_status["discovered_peer_count"] == 2
+    status = d.get_bootstrap_status()
+    assert status["discovered_peer_count"] == 2
+
+    # Second poll with fewer peers — count drops.
+    d._hydrate_peers_from_bootstrap([_bp("peer-A")])
+    assert d.get_bootstrap_status()["discovered_peer_count"] == 1
+
+
+def test_initial_discovered_peer_count_zero():
+    """Before any poll, the count is 0."""
+    d = _make_discovery()
+    assert d.get_bootstrap_status()["discovered_peer_count"] == 0
+
+
 def test_hydrate_repeated_call_updates_existing_entry():
     """Sprint 165 — re-hydrating the same peer refreshes its
     last_seen timestamp (so liveness tracking works)."""
