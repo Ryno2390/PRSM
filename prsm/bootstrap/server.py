@@ -818,7 +818,12 @@ class BootstrapServer:
             logger.warning("FastAPI not available, skipping API server")
             return
         
-        app = FastAPI(title="PRSM Bootstrap Server", version="1.0.0")
+        try:
+            from importlib.metadata import version as _pkg_version
+            _v = _pkg_version("prsm-network")
+        except Exception:  # noqa: BLE001
+            _v = "unknown"
+        app = FastAPI(title="PRSM Bootstrap Server", version=_v)
         
         @app.get("/health")
         async def health():

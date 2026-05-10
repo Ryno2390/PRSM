@@ -58,7 +58,14 @@ class HealthChecker:
     
     def __init__(self):
         self.start_time = time.time()
-        self.version = "1.0.0"  # This should come from package version
+        # Sprint 140 — closes the explicit TODO that was here.
+        # Source-of-truth pin: pyproject.toml. Sister to the
+        # version-cluster sprints 110-114, 130-131.
+        try:
+            from importlib.metadata import version as _pkg_version
+            self.version = _pkg_version("prsm-network")
+        except Exception:  # noqa: BLE001
+            self.version = "unknown"
         
     async def check_database(self) -> ComponentHealth:
         """Check PostgreSQL database health"""
