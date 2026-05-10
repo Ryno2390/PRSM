@@ -1596,8 +1596,22 @@ class PRSMNode:
         self._slash_event_log = SlashEventRing(
             persist_dir=_slash_persist_dir,
         )
-        self._heartbeat_log = HeartbeatRecordedRing()
-        self._distribution_log = DistributedEventRing()
+        _hb_dir_raw = os.environ.get(
+            "PRSM_HEARTBEAT_LOG_DIR", "",
+        ).strip()
+        _dist_dir_raw = os.environ.get(
+            "PRSM_DISTRIBUTION_LOG_DIR", "",
+        ).strip()
+        self._heartbeat_log = HeartbeatRecordedRing(
+            persist_dir=(
+                _PathForSlash(_hb_dir_raw) if _hb_dir_raw else None
+            ),
+        )
+        self._distribution_log = DistributedEventRing(
+            persist_dir=(
+                _PathForSlash(_dist_dir_raw) if _dist_dir_raw else None
+            ),
+        )
 
         # Pre-construct webhook deliverer + log + URL + secret so
         # the StorageSlashingWatcher built below can fire
