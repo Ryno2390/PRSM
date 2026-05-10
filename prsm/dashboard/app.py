@@ -296,15 +296,18 @@ class DashboardServer:
                 _ver = _pkg_version("prsm-network")
             except Exception:  # noqa: BLE001
                 _ver = "unknown"
-            # transport doesn't expose `.address`; use peer_addresses[0]
-            # of LISTENING addrs which the libp2p host emits at startup.
+            # Sprint 159 — derive listening address from node.config,
+            # NOT transport.peer_addresses. The latter is the list of
+            # remote inbound-peer addresses connected to us — using
+            # `[0]` was either wrong-by-construction (returns a peer's
+            # address, not ours) or empty (no peers → "unknown").
             transport_addr = "unknown"
-            if self.node.transport is not None:
-                addrs = getattr(
-                    self.node.transport, "peer_addresses", [],
-                )
-                if addrs:
-                    transport_addr = addrs[0]
+            cfg = getattr(self.node, "config", None)
+            if cfg is not None:
+                listen_host = getattr(cfg, "listen_host", None)
+                p2p_port = getattr(cfg, "p2p_port", None)
+                if listen_host and p2p_port:
+                    transport_addr = f"ws://{listen_host}:{p2p_port}"
             # peer_count is kernel-truth (sprint 135); .peers dict
             # only counts outbound.
             peer_count = (
