@@ -331,6 +331,17 @@ class NodeConfig:
             if field_name in raw:
                 ncfg[field_name] = raw[field_name]
 
+        # Sprint 149 — silent migration of pre-148 wizard's broken
+        # bootstrap defaults. Only an EXACT match of the legacy list
+        # is migrated; anything else is operator-customized and
+        # preserved as-is.
+        _LEGACY_BROKEN_BOOTSTRAP = [
+            "/dns4/bootstrap1.prsm.network/tcp/9001/p2p/QmPRSM1",
+            "/dns4/bootstrap2.prsm.network/tcp/9001/p2p/QmPRSM2",
+        ]
+        if ncfg.get("bootstrap_nodes") == _LEGACY_BROKEN_BOOTSTRAP:
+            ncfg["bootstrap_nodes"] = list(DEFAULT_BOOTSTRAP_NODES)
+
         if "node_role" in raw:
             try:
                 ncfg["roles"] = [NodeRole(raw["node_role"])]
