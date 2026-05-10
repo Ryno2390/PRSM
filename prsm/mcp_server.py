@@ -741,6 +741,47 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_forge_submit",
+        description=(
+            "Submit a query through the full Ring 1-10 Agent Forge "
+            "pipeline. End-to-end sovereign-edge AI: AgentForge "
+            "decomposes the query, finds shards, quotes via "
+            "PricingEngine, routes (DIRECT_LLM / SINGLE_AGENT / "
+            "SWARM), aggregates, settles FTNS. Returns job_id + "
+            "initial status. Use prsm_quote first to estimate cost. "
+            "Backed by POST /compute/forge."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The query to submit.",
+                },
+                "budget_ftns": {
+                    "type": "number",
+                    "description": "Max FTNS to spend (default 10.0).",
+                    "default": 10.0,
+                },
+                "shard_cids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional list of content CIDs to ground "
+                        "the query in. Empty = LLM-only response."
+                    ),
+                },
+                "privacy_level": {
+                    "type": "string",
+                    "enum": ["none", "standard", "high", "maximum"],
+                    "description": "Privacy budget tier.",
+                    "default": "standard",
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
         name="prsm_my_content",
         description=(
             "Paginated list of content uploaded by this node. "
@@ -2763,6 +2804,51 @@ async def handle_prsm_audit_recent(
     return "\n".join(lines)
 
 
+async def handle_prsm_forge_submit(
+    arguments: Dict[str, Any],
+) -> str:
+    """Submit a query through /compute/forge."""
+    body: Dict[str, Any] = {"query": arguments["query"]}
+    if "budget_ftns" in arguments:
+        body["budget_ftns"] = arguments["budget_ftns"]
+    if "shard_cids" in arguments:
+        body["shard_cids"] = arguments["shard_cids"]
+    if "privacy_level" in arguments:
+        body["privacy_level"] = arguments["privacy_level"]
+    try:
+        result = await _call_node_api(
+            "POST", "/compute/forge", data=body,
+        )
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "detail" in result and "job_id" not in result:
+        detail = result["detail"]
+        if "agent_forge" in detail.lower() or "not available" in detail.lower():
+            return (
+                f"Agent Forge not enabled on this node.\n"
+                f"  Detail: {detail}\n"
+                f"  Operator must set "
+                f"PRSM_QUERY_ORCHESTRATOR_ENABLED=1 to enable."
+            )
+        return f"Forge submit failed.\n  Detail: {detail}"
+    if result.get("status") == "idempotent_replay":
+        return (
+            f"Idempotent replay (cached result).\n"
+            f"  job_id: {result.get('job_id', '?')}\n"
+            f"  Use prsm_jobs_list / prsm_status_stream to "
+            f"observe progress."
+        )
+    return (
+        f"Query submitted to Agent Forge.\n"
+        f"  job_id: {result.get('job_id', '?')}\n"
+        f"  status: {result.get('status', '?')}\n"
+        f"  Use prsm_jobs_list to track progress."
+    )
+
+
 async def handle_prsm_my_content(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3703,6 +3789,7 @@ TOOL_HANDLERS = {
     "prsm_audit_recent": handle_prsm_audit_recent,
     "prsm_audit_summary": handle_prsm_audit_summary,
     "prsm_canonical_check": handle_prsm_canonical_check,
+    "prsm_forge_submit": handle_prsm_forge_submit,
     "prsm_my_content": handle_prsm_my_content,
     "prsm_heartbeat_trigger": handle_prsm_heartbeat_trigger,
     "prsm_heartbeat_history": handle_prsm_heartbeat_history,
