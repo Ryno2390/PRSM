@@ -23,11 +23,30 @@ PUBLIC_ENDPOINTS: Set[str] = {
     "/peers", "/node/info",
 }
 
-# Endpoints that require auth
+# Endpoints that require auth (when PRSM_NODE_API_KEY is set).
 PROTECTED_PREFIXES = [
     "/settler/",
     "/content/upload",
     "/compute/forge",
+    # Sprint 138 (dogfood). /admin/* surfaces include both
+    # READ (history endpoints) and WRITE (heartbeat trigger,
+    # distribution trigger) actions. The trigger endpoints
+    # submit on-chain transactions — leaving them unprotected
+    # when an operator HAS configured PRSM_NODE_API_KEY meant
+    # any network-adjacent attacker could spend the operator's
+    # gas. Now matches the operator's auth-required intent.
+    "/admin/",
+    # /wallet/* includes royalty claim (POST /wallet/royalty/
+    # claim) which transfers FTNS on-chain. Same threat model
+    # as /admin/*/trigger. Read-side wallet endpoints (balance,
+    # spend) are also sensitive (financial PII).
+    "/wallet/",
+    # /content/arbitration/preview-resolution writes governance
+    # decisions. Even though the disputed-band resolution is
+    # gated on council ratification (council-commitment-only
+    # rule), the preview endpoint touches arbitration state and
+    # should respect operator-set auth.
+    "/content/arbitration/",
 ]
 
 
