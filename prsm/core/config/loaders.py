@@ -114,25 +114,61 @@ class EnvironmentConfigLoader(ConfigLoader):
         }
     
     def load(self, prefix: str = "PRSM_", **kwargs) -> Dict[str, Any]:
-        """Load configuration from environment variables"""
-        
+        """Load configuration from environment variables.
+
+        Filters env vars to only those whose top-level segment
+        matches a known PRSMConfig field. Operational env vars
+        consumed directly by code (e.g. PRSM_STORAGE_SLASHING_*,
+        PRSM_WEBHOOK_URL, PRSM_NETWORK) are NOT pydantic-schema
+        config — including them caused noisy validation errors
+        during config auto-init pre-fix. Filter prevents the
+        cascade without suppressing genuine schema feedback.
+        """
+
+        # Lazy-import to avoid circular dependency at module load
+        try:
+            from prsm.core.config.schemas import PRSMConfig
+            schema_fields = set(PRSMConfig.model_fields.keys())
+        except Exception:
+            schema_fields = None
+
         config = {}
-        
+
         # Get all environment variables with the specified prefix
         for key, value in os.environ.items():
             if key.startswith(prefix):
                 # Remove prefix and convert to lowercase
                 config_key = key[len(prefix):].lower()
-                
+
                 # Convert nested keys (e.g., PRSM_NWTN_MAX_QUERIES -> nwtn.max_queries)
                 nested_keys = config_key.split('_')
-                
+
+                # Filter: only nest if the env-var maps to a known
+                # PRSMConfig field. Two acceptance patterns:
+                #   (1) Full lowercased key is a scalar field
+                #       (e.g. PRSM_APP_NAME -> app_name field)
+                #   (2) First segment is a nested-config field
+                #       (e.g. PRSM_NWTN_X -> nwtn.x sub-config)
+                # Operational env vars (PRSM_STORAGE_SLASHING_*, etc.)
+                # are consumed directly by code, not schema fields,
+                # and silently ignored here.
+                if schema_fields is not None:
+                    if (
+                        config_key not in schema_fields
+                        and nested_keys[0] not in schema_fields
+                    ):
+                        continue
+                    # If full key is a scalar field, set without nesting
+                    if config_key in schema_fields:
+                        config[config_key] = self._convert_value(value)
+                        continue
+
                 # Convert value to appropriate type
                 converted_value = self._convert_value(value)
-                
+
                 # Set nested configuration
                 self._set_nested_config(config, nested_keys, converted_value)
-        
+
         return config
     
     def _set_nested_config(self, config: Dict[str, Any], keys: list, value: Any):
