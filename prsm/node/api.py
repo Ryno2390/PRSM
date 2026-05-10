@@ -4630,6 +4630,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             ),
             "api_version": app.version,
         }
+        # Sprint 169 — surface the derived on-chain operator_address
+        # (`_derive_creator_address` priority: ftns_ledger's
+        # _connected_address from FTNS_WALLET_PRIVATE_KEY → fallback
+        # to PRSM_CREATOR_ADDRESS env). Operators need a quick way
+        # to confirm the running node knows its on-chain identity
+        # without hitting /admin/earnings-summary (which requires
+        # auth in production).
+        op_addr = getattr(node, "_operator_address", None)
+        if op_addr:
+            body["operator_address"] = op_addr
         try:
             from prsm.config.networks import (
                 get_network_config, _resolve_network_name,
