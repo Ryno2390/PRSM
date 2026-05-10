@@ -3703,6 +3703,100 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "limit": limit,
         }
 
+    @app.get("/admin/earnings-summary")
+    async def get_earnings_summary() -> Dict[str, Any]:
+        """Aggregate operator earnings view.
+
+        Composes per-stream signals operators need to answer
+        "is my node earning?":
+          * royalty.claimable_wei (from RoyaltyDistributor)
+          * heartbeat.last_heartbeat + grace_remaining
+              (from StorageSlashing)
+          * distribution.last_distribution + seconds_since
+              (from CompensationDistributor)
+
+        Each stream is per-stream-isolated: an RPC failure on one
+        won't take down the others. Streams unwired return
+        available=False so operators see which streams need env config.
+        """
+        import time as _time
+        now = int(_time.time())
+        out: Dict[str, Any] = {
+            "operator_address": getattr(node, "_operator_address", None),
+        }
+
+        royalty_client = getattr(node, "_royalty_distributor_client", None)
+        if royalty_client is None:
+            out["royalty"] = {"available": False}
+        else:
+            try:
+                claimable = royalty_client.claimable()
+                out["royalty"] = {
+                    "available": True,
+                    "claimable_wei": int(claimable),
+                    "address": getattr(royalty_client, "address", None),
+                }
+            except Exception as e:
+                out["royalty"] = {
+                    "available": False,
+                    "error": str(e),
+                }
+
+        slash_client = getattr(node, "_storage_slashing_client", None)
+        operator_addr = getattr(node, "_operator_address", None)
+        if slash_client is None or not operator_addr:
+            out["heartbeat"] = {"available": False}
+        else:
+            try:
+                last_hb = int(slash_client.last_heartbeat(operator_addr))
+                grace = int(slash_client.heartbeat_grace_seconds())
+                hb: Dict[str, Any] = {
+                    "available": True,
+                    "last_heartbeat": last_hb,
+                    "grace_seconds": grace,
+                }
+                if last_hb == 0:
+                    hb["never_recorded"] = True
+                    hb["grace_remaining"] = 0
+                    hb["expired"] = True
+                    hb["at_risk"] = True
+                else:
+                    elapsed = now - last_hb
+                    remaining = max(0, grace - elapsed)
+                    hb["grace_remaining"] = remaining
+                    hb["expired"] = remaining == 0
+                    # at-risk if <10% of grace window left
+                    hb["at_risk"] = remaining < (grace * 0.1)
+                out["heartbeat"] = hb
+            except Exception as e:
+                out["heartbeat"] = {
+                    "available": False,
+                    "error": str(e),
+                }
+
+        comp_client = getattr(node, "_compensation_distributor_client", None)
+        if comp_client is None:
+            out["distribution"] = {"available": False}
+        else:
+            try:
+                last_dist = int(comp_client.last_distribution_timestamp())
+                dist: Dict[str, Any] = {
+                    "available": True,
+                    "last_distribution": last_dist,
+                }
+                if last_dist == 0:
+                    dist["never_distributed"] = True
+                else:
+                    dist["seconds_since"] = now - last_dist
+                out["distribution"] = dist
+            except Exception as e:
+                out["distribution"] = {
+                    "available": False,
+                    "error": str(e),
+                }
+
+        return out
+
     @app.post("/admin/webhook-test")
     async def post_webhook_test() -> Dict[str, Any]:
         """Smoke-test the configured webhook URL. Synthesizes a

@@ -1450,6 +1450,11 @@ class PRSMNode:
                 state_store=self._watcher_state_store,
             )
         )
+        # Operator on-chain address for /admin/earnings-summary
+        # heartbeat-status lookup. Optional; when unset, the
+        # heartbeat stream of earnings-summary reports
+        # available=False.
+        self._operator_address = os.environ.get("PRSM_OPERATOR_ADDRESS")
         # Tasks created on start() — None until then.
         self._compensation_scheduler_task = None
         self._heartbeat_scheduler_task = None

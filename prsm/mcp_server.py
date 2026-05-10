@@ -741,6 +741,23 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_earnings_summary",
+        description=(
+            "Operator earnings dashboard. Aggregates 3 streams: "
+            "(1) royalty.claimable_wei (RoyaltyDistributor), "
+            "(2) heartbeat.last_heartbeat + grace_remaining + "
+            "at_risk flag (StorageSlashing), (3) distribution."
+            "last_distribution + seconds_since "
+            "(CompensationDistributor). Each stream isolated — "
+            "RPC failure on one doesn't take down others. "
+            "Backed by GET /admin/earnings-summary."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
         name="prsm_webhook_test",
         description=(
             "Smoke-test the operator's configured webhook URL. "
@@ -2642,6 +2659,87 @@ async def handle_prsm_audit_recent(
     return "\n".join(lines)
 
 
+async def handle_prsm_earnings_summary(
+    arguments: Dict[str, Any],
+) -> str:
+    """Render aggregated operator earnings dashboard."""
+    try:
+        result = await _call_node_api("GET", "/admin/earnings-summary")
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    lines = ["PRSM Operator Earnings Summary"]
+    op_addr = result.get("operator_address")
+    lines.append(f"  Operator: {op_addr or '(PRSM_OPERATOR_ADDRESS unset)'}")
+    lines.append("")
+
+    royalty = result.get("royalty", {})
+    if royalty.get("available"):
+        wei = royalty.get("claimable_wei", 0)
+        ftns = wei / 1e18
+        lines.append(f"  Royalty:      {ftns:.6f} FTNS claimable")
+    else:
+        err = royalty.get("error")
+        if err:
+            lines.append(f"  Royalty:      [!] error: {err}")
+        else:
+            lines.append(f"  Royalty:      not wired")
+
+    hb = result.get("heartbeat", {})
+    if hb.get("available"):
+        if hb.get("never_recorded"):
+            lines.append(
+                f"  Heartbeat:    [!] never recorded — "
+                f"node will be slashed at next epoch"
+            )
+        elif hb.get("expired"):
+            lines.append(
+                f"  Heartbeat:    [!] EXPIRED — last at "
+                f"{hb['last_heartbeat']}, slashing window open"
+            )
+        elif hb.get("at_risk"):
+            lines.append(
+                f"  Heartbeat:    [!] at-risk — only "
+                f"{hb['grace_remaining']}s grace remaining"
+            )
+        else:
+            lines.append(
+                f"  Heartbeat:    ok — {hb['grace_remaining']}s "
+                f"grace remaining (of {hb['grace_seconds']}s)"
+            )
+    else:
+        err = hb.get("error")
+        if err:
+            lines.append(f"  Heartbeat:    [!] error: {err}")
+        else:
+            lines.append(
+                f"  Heartbeat:    not wired (set "
+                f"PRSM_OPERATOR_ADDRESS + StorageSlashing env)"
+            )
+
+    dist = result.get("distribution", {})
+    if dist.get("available"):
+        if dist.get("never_distributed"):
+            lines.append(f"  Distribution: never run yet")
+        else:
+            secs = dist.get("seconds_since", 0)
+            hours = secs // 3600
+            lines.append(
+                f"  Distribution: last run {hours}h ago "
+                f"(timestamp {dist['last_distribution']})"
+            )
+    else:
+        err = dist.get("error")
+        if err:
+            lines.append(f"  Distribution: [!] error: {err}")
+        else:
+            lines.append(f"  Distribution: not wired")
+
+    return "\n".join(lines)
+
+
 async def handle_prsm_webhook_history(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3286,6 +3384,7 @@ TOOL_HANDLERS = {
     "prsm_audit_recent": handle_prsm_audit_recent,
     "prsm_audit_summary": handle_prsm_audit_summary,
     "prsm_canonical_check": handle_prsm_canonical_check,
+    "prsm_earnings_summary": handle_prsm_earnings_summary,
     "prsm_webhook_history": handle_prsm_webhook_history,
     "prsm_webhook_test": handle_prsm_webhook_test,
     "prsm_metrics_summary": handle_prsm_metrics_summary,
