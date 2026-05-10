@@ -253,14 +253,91 @@ class NodeConfig:
 
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "NodeConfig":
-        """Load config from disk, falling back to defaults."""
-        if path is None:
-            path = Path.home() / ".prsm" / "node_config.json"
-        if not path.exists():
-            return cls()
+        """Load config from disk, falling back to defaults.
+
+        Resolution order:
+          1. Explicit path argument (test-friendly injection)
+          2. ~/.prsm/node_config.json (legacy; backwards-compat)
+          3. ~/.prsm/config.yaml (new PRSMConfig format —
+             post-migration users land here)
+          4. Defaults
+
+        Pre-fix dueling-config bug: NodeConfig only checked (2),
+        but cli_modules/migration.py renames node_config.json →
+        .bak after writing config.yaml. Wizard-configured ports +
+        bootstrap settings were silently ignored at runtime.
+        Sprint 134 closes that loop.
+        """
+        if path is not None:
+            if not path.exists():
+                return cls()
+            return cls._load_from_json_path(path)
+
+        legacy_path = Path.home() / ".prsm" / "node_config.json"
+        if legacy_path.exists():
+            return cls._load_from_json_path(legacy_path)
+
+        yaml_path = Path.home() / ".prsm" / "config.yaml"
+        if yaml_path.exists():
+            return cls._load_from_yaml_path(yaml_path)
+
+        return cls()
+
+    @classmethod
+    def _load_from_json_path(cls, path: Path) -> "NodeConfig":
         data = json.loads(path.read_text())
         roles = [NodeRole(r) for r in data.pop("roles", ["full"])]
         return cls(roles=roles, **data)
+
+    @classmethod
+    def _load_from_yaml_path(cls, path: Path) -> "NodeConfig":
+        """Load + map PRSMConfig (config.yaml) → NodeConfig fields.
+
+        Field-name renames:
+          cpu_pct       -> cpu_allocation_pct
+          memory_pct    -> memory_allocation_pct
+          gpu_pct       -> gpu_allocation_pct
+          node_role     -> roles (single str -> [NodeRole])
+
+        Direct passthroughs (same name on both):
+          display_name, p2p_port, api_port, bootstrap_nodes,
+          storage_gb, max_concurrent_jobs, upload_mbps_limit,
+          active_hours_start, active_hours_end, active_days
+
+        PRSMConfig-only fields (has_openai_key, wallet_address,
+        mcp_server_*, setup_*, etc.) are silently dropped.
+        """
+        import yaml
+
+        with open(path) as f:
+            raw = yaml.safe_load(f) or {}
+
+        ncfg: dict = {}
+        _renames = {
+            "cpu_pct": "cpu_allocation_pct",
+            "memory_pct": "memory_allocation_pct",
+            "gpu_pct": "gpu_allocation_pct",
+        }
+        for src, dst in _renames.items():
+            if src in raw:
+                ncfg[dst] = raw[src]
+
+        for field_name in (
+            "display_name", "p2p_port", "api_port",
+            "bootstrap_nodes", "storage_gb",
+            "max_concurrent_jobs", "upload_mbps_limit",
+            "active_hours_start", "active_hours_end", "active_days",
+        ):
+            if field_name in raw:
+                ncfg[field_name] = raw[field_name]
+
+        if "node_role" in raw:
+            try:
+                ncfg["roles"] = [NodeRole(raw["node_role"])]
+            except (ValueError, KeyError):
+                pass
+
+        return cls(**ncfg)
 
 
 def is_active_now(config: NodeConfig) -> bool:
