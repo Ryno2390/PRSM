@@ -447,10 +447,22 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     @app.get("/api-info", tags=["status"])
     async def api_info() -> Dict[str, Any]:
-        """API information endpoint (dashboard served at root)."""
+        """API information endpoint (dashboard served at root).
+
+        Version is read from installed package metadata
+        (importlib.metadata) so it stays in sync with
+        pyproject.toml across releases. Falls back to "unknown"
+        if the package isn't installed (running from source
+        without editable install).
+        """
+        try:
+            from importlib.metadata import version as _pkg_version
+            pkg_version = _pkg_version("prsm-network")
+        except Exception:  # noqa: BLE001
+            pkg_version = "unknown"
         return {
             "name": "PRSM Node API",
-            "version": "0.2.0",
+            "version": pkg_version,
             "docs": "/docs",
             "openapi": "/openapi.json",
             "websocket": "/ws/status",
