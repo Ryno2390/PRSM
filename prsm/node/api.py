@@ -4389,6 +4389,60 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "available": False, "status": "not_wired",
             }
 
+        # Phase 7-storage + Phase 8 client canonical-match probes.
+        # Each underlying client (StorageSlashing / Compensation
+        # Distributor / KeyDistribution) exposes a `.address`
+        # property; we surface wired_address + canonical_address +
+        # canonical_match as a config-correctness signal for
+        # operators on multi-network deployments.
+        def _client_canonical_subsystem(
+            name: str, client_attr: str, networks_field: str,
+        ):
+            client = getattr(node, client_attr, None)
+            if client is None:
+                if hasattr(node, client_attr):
+                    subsystems[name] = {
+                        "available": False, "status": "not_wired",
+                    }
+                return
+            entry = {"available": True, "status": "ok"}
+            wired = getattr(client, "address", None)
+            if wired is not None:
+                entry["wired_address"] = wired
+                try:
+                    from prsm.config.networks import (
+                        get_network_config, _resolve_network_name,
+                    )
+                    cfg = get_network_config(_resolve_network_name())
+                    canonical = getattr(cfg, networks_field, None)
+                    if canonical is not None:
+                        entry["canonical_address"] = canonical
+                        entry["canonical_match"] = (
+                            wired.lower() == canonical.lower()
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "canonical-match lookup failed for %s: %s",
+                        name, exc,
+                    )
+            subsystems[name] = entry
+
+        _client_canonical_subsystem(
+            "storage_slashing",
+            "_storage_slashing_client",
+            "storage_slashing",
+        )
+        _client_canonical_subsystem(
+            "compensation_distributor",
+            "_compensation_distributor_client",
+            "compensation_distributor",
+        )
+        _client_canonical_subsystem(
+            "key_distribution",
+            "_key_distribution_client",
+            "key_distribution",
+        )
+
         # DRY helper for the 5 daemon subsystems sharing the
         # task-liveness pattern (heartbeat + compensation_scheduler
         # + 3 event watchers). Each daemon has a (daemon_attr,
