@@ -93,6 +93,20 @@ class Libp2pDiscovery:
     async def bootstrap(self) -> int:
         """Connect to each configured bootstrap node.
 
+        Sprint 164 — two-stage strategy:
+          1. Primary: ``transport.connect_to_peer(addr)`` for full
+             libp2p P2P handshake. Works for multiaddr-style
+             addresses (``/dns4/.../tcp/.../p2p/...``).
+          2. Fallback: when primary returns 0 connected AND any
+             configured address is a ``ws://`` or ``wss://`` URL,
+             use the simpler BootstrapClient register/heartbeat
+             protocol that the canonical PRSM bootstrap server
+             actually serves on. The legacy ``PeerDiscovery`` had
+             this fallback; ``Libp2pDiscovery`` was missing it,
+             which left every operator using the canonical
+             ``wss://bootstrap1.prsm-network.com:8765`` default
+             stuck in degraded mode forever.
+
         Returns:
             Number of successfully connected nodes.
         """
@@ -110,6 +124,18 @@ class Libp2pDiscovery:
             except Exception as exc:
                 logger.debug("Bootstrap error for %s: %s", addr, exc)
 
+        # Sprint 164 — BootstrapClient fallback for ws:// / wss://
+        # URLs when primary libp2p path returned zero.
+        if connected == 0:
+            wsocket_addrs = [
+                a for a in self.bootstrap_nodes
+                if a.startswith(("ws://", "wss://"))
+            ]
+            if wsocket_addrs and await self._try_bootstrap_client(
+                wsocket_addrs,
+            ):
+                connected = 1
+
         self._bootstrap_status["connected"] = connected
 
         if connected == 0 and self.bootstrap_nodes:
@@ -121,6 +147,76 @@ class Libp2pDiscovery:
             )
 
         return connected
+
+    async def _try_bootstrap_client(self, addrs: List[str]) -> bool:
+        """Sprint 164 — BootstrapClient register/heartbeat fallback.
+
+        The PRSM bootstrap server doesn't speak full libp2p — it
+        runs a simpler register/heartbeat WebSocket protocol on
+        ``wss://...:8765``. This method registers + starts heartbeat
+        for the first reachable wss:// address.
+
+        Mirrors the legacy ``PeerDiscovery._try_bootstrap_client``
+        from prsm/node/discovery.py, which was the only place this
+        fallback existed pre-sprint-164.
+
+        Returns True on first successful registration, False
+        otherwise. Does not raise — registration failures are
+        logged at debug level and the next address is tried.
+        """
+        try:
+            from prsm.bootstrap.client import BootstrapClient
+        except ImportError:
+            logger.debug(
+                "BootstrapClient import failed; skipping fallback",
+            )
+            return False
+        try:
+            import prsm as _prsm_pkg
+            _ver = _prsm_pkg.__version__
+        except Exception:  # noqa: BLE001
+            _ver = "unknown"
+        for addr in addrs:
+            try:
+                logger.info(
+                    "Libp2pDiscovery: BootstrapClient fallback "
+                    "attempting %s", addr,
+                )
+                client = BootstrapClient(
+                    bootstrap_url=addr,
+                    node_id=self.transport.identity.node_id,
+                    port=getattr(self.transport, "port", 9001),
+                    capabilities=self._local_capabilities,
+                    version=_ver,
+                )
+                peers = await client.connect()
+                await client.start_heartbeat()
+                self._bootstrap_client = client
+                # Feed any discovered peers into capability index.
+                for bp in peers:
+                    if (
+                        bp.peer_id
+                        and bp.peer_id != self.transport.identity.node_id
+                    ):
+                        self._capability_index[bp.peer_id] = PeerInfo(
+                            node_id=bp.peer_id,
+                            address=f"{bp.address}:{bp.port}",
+                            last_seen=time.time(),
+                            last_capability_update=time.time(),
+                        )
+                logger.info(
+                    "Libp2pDiscovery: BootstrapClient connected via "
+                    "%s — %d peer(s) discovered",
+                    addr, len(peers),
+                )
+                return True
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "Libp2pDiscovery: BootstrapClient fallback "
+                    "failed for %s: %s", addr, exc,
+                )
+                continue
+        return False
 
     # ── Peer query helpers (mirrors PeerDiscovery) ───────────────
 
