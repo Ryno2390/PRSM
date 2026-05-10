@@ -220,12 +220,16 @@ class PeerDiscovery:
                 logger.info(
                     "Trying bootstrap client protocol for %s", address
                 )
+                # Sprint 150 — version must match runtime package
+                # version, not a stale literal. Pre-fix this was
+                # hardcoded "0.24.0" even after shipping v1.x.
+                import prsm as _prsm_pkg
                 client = BootstrapClient(
                     bootstrap_url=address,
                     node_id=self.transport.identity.node_id,
                     port=getattr(self.transport, 'port', 8000),
                     capabilities=self._local_capabilities,
-                    version="0.24.0",
+                    version=_prsm_pkg.__version__,
                     connect_timeout=self.bootstrap_connect_timeout,
                 )
 

@@ -523,12 +523,22 @@ def _get_debug() -> bool:
 
 
 def _get_version():
-    """Read version from package metadata (single source of truth: pyproject.toml)."""
+    """Read version from package metadata (single source of truth: pyproject.toml).
+
+    Sprint 150 — fallback now reads `prsm.__version__` instead of a
+    stale literal. The hardcoded "0.24.0" leaked into bootstrap
+    server registrations + assorted UA strings on every importlib
+    metadata-miss path.
+    """
     try:
         from importlib.metadata import version as pkg_version
         return pkg_version("prsm-network")
     except Exception:
-        return "0.24.0"  # fallback
+        try:
+            import prsm as _prsm_pkg
+            return _prsm_pkg.__version__
+        except Exception:
+            return "unknown"
 
 
 @click.group()
