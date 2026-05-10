@@ -497,9 +497,26 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     @app.get("/peers")
     async def get_peers() -> Dict[str, Any]:
-        """List connected and known peers."""
+        """List connected and known peers.
+
+        Pre-fix the `connected` list only contained OUTBOUND
+        peers (those this node initiated via connect_to_peer).
+        Inbound peers (connections initiated by remote nodes)
+        live in the C/libp2p layer and weren't tracked in
+        `transport._peers`. Result: /peers and /status reported
+        different `connected_count` for the same node.
+
+        Post-fix: the count comes from `transport.peer_count`
+        (kernel-truth). The list still emits rich metadata for
+        outbound peers (display_name, connected_at) but also
+        synthesizes minimal entries for inbound peers, so
+        operators can see ALL connected peers even if some
+        fields are missing.
+        """
         connected = []
+        seen_addresses = set()
         if node.transport:
+            # Outbound peers we initiated — full metadata available
             for pid, peer in node.transport.peers.items():
                 connected.append({
                     "peer_id": pid,
@@ -509,6 +526,24 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "last_seen": peer.last_seen,
                     "outbound": peer.outbound,
                 })
+                seen_addresses.add(peer.address)
+
+            # Inbound peers — only kernel knows about them. Use the
+            # libp2p peer list to backfill the connected[] list.
+            try:
+                for kernel_addr in node.transport.peer_addresses:
+                    if not kernel_addr or kernel_addr in seen_addresses:
+                        continue
+                    connected.append({
+                        "peer_id": None,  # unknown without deeper C-bridge work
+                        "address": kernel_addr,
+                        "display_name": "",
+                        "connected_at": None,
+                        "last_seen": None,
+                        "outbound": False,  # we didn't track them, so likely inbound
+                    })
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("peer_addresses probe failed: %s", exc)
 
         known = []
         if node.discovery:
@@ -520,10 +555,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "last_seen": info.last_seen,
                 })
 
+        # Truth count from the libp2p host (matches /status). The
+        # connected[] list above is best-effort union (outbound rich,
+        # inbound minimal); count is kernel-authoritative.
+        truth_count = (
+            node.transport.peer_count if node.transport else 0
+        )
         return {
             "connected": connected,
             "known": known,
-            "connected_count": len(connected),
+            "connected_count": truth_count,
             "known_count": len(known),
         }
 
