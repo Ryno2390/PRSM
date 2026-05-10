@@ -805,6 +805,21 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_distribution_trigger",
+        description=(
+            "Manually trigger pull_and_distribute on-chain. Use when "
+            "the PullAndDistributeScheduler has crashed / paused, or "
+            "to force an emission round (e.g., after weight "
+            "ratification) without waiting for the next scheduled "
+            "tick. Permissionless on-chain; caller pays gas. Backed "
+            "by POST /admin/distribution/trigger."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
         name="prsm_heartbeat_trigger",
         description=(
             "Manually record an on-chain heartbeat. Use when the "
@@ -2931,6 +2946,35 @@ async def handle_prsm_my_content(
     return "\n".join(lines)
 
 
+async def handle_prsm_distribution_trigger(
+    arguments: Dict[str, Any],
+) -> str:
+    """Manually trigger pull_and_distribute."""
+    try:
+        result = await _call_node_api(
+            "POST", "/admin/distribution/trigger",
+        )
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "tx_hash" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not wired" in detail.lower():
+            return (
+                f"CompensationDistributorClient not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"Distribution trigger failed.\n  Detail: {detail}"
+    return (
+        f"pull_and_distribute submitted on-chain.\n"
+        f"  tx_hash: {result['tx_hash']}\n"
+        f"  status:  {result.get('status', '?')}\n"
+        f"  Use prsm_distribution_history to confirm landing."
+    )
+
+
 async def handle_prsm_heartbeat_trigger(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3873,6 +3917,7 @@ TOOL_HANDLERS = {
     "prsm_canonical_check": handle_prsm_canonical_check,
     "prsm_forge_submit": handle_prsm_forge_submit,
     "prsm_my_content": handle_prsm_my_content,
+    "prsm_distribution_trigger": handle_prsm_distribution_trigger,
     "prsm_heartbeat_trigger": handle_prsm_heartbeat_trigger,
     "prsm_distribution_history": handle_prsm_distribution_history,
     "prsm_heartbeat_history": handle_prsm_heartbeat_history,

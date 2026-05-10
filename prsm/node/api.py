@@ -3766,6 +3766,44 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "limit": limit,
         }
 
+    @app.post("/admin/distribution/trigger")
+    async def admin_distribution_trigger() -> Dict[str, Any]:
+        """Manually trigger pull_and_distribute on-chain.
+
+        Operator action endpoint symmetric to heartbeat/trigger
+        (sprint 81). Use when the PullAndDistributeScheduler has
+        crashed / paused, or to force an emission round before
+        the next scheduled tick.
+
+        Permissionless on contract side; caller pays gas.
+
+        Status:
+          503 — CompensationDistributorClient not wired
+          502 — chain call raised
+          200 — {tx_hash, status}
+        """
+        client = getattr(node, "_compensation_distributor_client", None)
+        if client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "CompensationDistributorClient not wired. Set "
+                    "PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS + "
+                    "FTNS_WALLET_PRIVATE_KEY."
+                ),
+            )
+        try:
+            tx_hash, status = client.pull_and_distribute()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502,
+                detail=f"pull_and_distribute raised: {exc}",
+            )
+        return {
+            "tx_hash": tx_hash,
+            "status": status.name if hasattr(status, "name") else str(status),
+        }
+
     @app.post("/admin/heartbeat/trigger")
     async def admin_heartbeat_trigger() -> Dict[str, Any]:
         """Manually record a heartbeat on-chain.
