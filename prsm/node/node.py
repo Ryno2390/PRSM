@@ -776,7 +776,10 @@ def _build_watcher_state_store_or_none():
         return None
 
 
-def _build_key_distribution_watcher_or_none(*, client, state_store=None):
+def _build_key_distribution_watcher_or_none(
+    *, client, state_store=None, webhook_deliverer=None,
+    webhook_url=None, webhook_secret=None,
+):
     """Construct a KeyDistributionWatcher if operator opted in AND
     underlying client is non-None.
 
@@ -801,12 +804,31 @@ def _build_key_distribution_watcher_or_none(*, client, state_store=None):
             KeyDistributionWatcher,
         )
 
-        def _on_released(event):
+        async def _on_released(event):
             logger.info(
                 "KeyDistributionWatcher: KeyReleased "
                 "content_hash=0x%s recipient=%s",
                 event.content_hash.hex(), event.recipient,
             )
+            if webhook_deliverer is not None and webhook_url:
+                try:
+                    payload = {
+                        "event": "key.released",
+                        "content_hash": (
+                            "0x" + event.content_hash.hex()
+                        ),
+                        "recipient": event.recipient,
+                    }
+                    await webhook_deliverer.deliver(
+                        url=webhook_url,
+                        event="key.released",
+                        payload=payload,
+                        secret=webhook_secret,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "key.released webhook dispatch raised: %s", exc,
+                    )
 
         def _on_deposited(event):
             logger.info(
@@ -1589,6 +1611,9 @@ class PRSMNode:
             _build_key_distribution_watcher_or_none(
                 client=self._key_distribution_client,
                 state_store=self._watcher_state_store,
+                webhook_deliverer=self._webhook_deliverer,
+                webhook_url=_early_webhook_url,
+                webhook_secret=_early_webhook_secret,
             )
         )
         self._storage_slashing_watcher = (
