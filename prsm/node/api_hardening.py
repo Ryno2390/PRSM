@@ -653,10 +653,20 @@ def generate_openapi_schema(app: FastAPI) -> Dict[str, Any]:
     """
     if app.openapi_schema:
         return app.openapi_schema
-    
+
+    # Read canonical version from package metadata so the
+    # custom OpenAPI schema stays in sync with pyproject.toml.
+    # Sister to sprints 110-114 + 130 which fixed the same
+    # pattern at /api-info, FastAPI constructor, MCP Server,
+    # interface API spec, and webhook User-Agent.
+    try:
+        from importlib.metadata import version as _pkg_version
+        _spec_version = _pkg_version("prsm-network")
+    except Exception:  # noqa: BLE001
+        _spec_version = "unknown"
     openapi_schema = get_openapi(
         title="PRSM Node API",
-        version="1.0.0",
+        version=_spec_version,
         description="""
 # Protocol for Research, Storage, and Modeling (PRSM) Node API
 
