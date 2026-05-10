@@ -3095,6 +3095,36 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(
                 status_code=400, detail="shard_count must be >= 1",
             )
+        # Cap shard_count to prevent DoS via fragmentation —
+        # millions of tiny shards balloon the manifest +
+        # publishing overhead. PRSM_MAX_SHARD_COUNT (default
+        # 1000) is plenty for any practical dataset.
+        _shard_count_cap_raw = os.getenv(
+            "PRSM_MAX_SHARD_COUNT", "",
+        ).strip()
+        try:
+            _shard_count_cap = (
+                int(_shard_count_cap_raw)
+                if _shard_count_cap_raw else 1000
+            )
+            if _shard_count_cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            logger.warning(
+                "PRSM_MAX_SHARD_COUNT=%r not a positive int; "
+                "using 1000 default", _shard_count_cap_raw,
+            )
+            _shard_count_cap = 1000
+        if shard_count > _shard_count_cap:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"shard_count {shard_count} exceeds "
+                    f"PRSM_MAX_SHARD_COUNT cap of "
+                    f"{_shard_count_cap}. Lower shard_count or "
+                    f"have the operator raise the cap."
+                ),
+            )
 
         # Decode content. Empty payload is rejected — the previous
         # placeholder-CID behavior produced non-discoverable manifests
