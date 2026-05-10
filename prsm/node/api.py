@@ -2985,6 +2985,32 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not node.content_uploader:
             raise HTTPException(status_code=503, detail="Content uploader not initialized")
 
+        # Cap replicas to prevent DoS via excessive replication
+        # requests. Default 100 covers any practical use; operators
+        # tune via PRSM_MAX_REPLICAS env (typo / non-numeric falls
+        # back to default with WARNING log).
+        _cap_raw = os.getenv("PRSM_MAX_REPLICAS", "").strip()
+        try:
+            _cap = int(_cap_raw) if _cap_raw else 100
+            if _cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            logger.warning(
+                "PRSM_MAX_REPLICAS=%r not a positive int; using 100",
+                _cap_raw,
+            )
+            _cap = 100
+        if req.replicas > _cap:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"replicas={req.replicas} exceeds "
+                    f"PRSM_MAX_REPLICAS cap of {_cap}. Lower the "
+                    f"replicas count or have the operator raise "
+                    f"the cap."
+                ),
+            )
+
         result = await node.content_uploader.upload_text(
             text=req.text,
             filename=req.filename,
