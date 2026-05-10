@@ -2898,6 +2898,39 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "numeric; rate limiting disabled", _rps_raw,
                 )
 
+        # Sprint 155 — body validation BEFORE executor checks,
+        # mirroring sprints 153 + 154 fixes for /compute/forge +
+        # /compute/inference. Pre-fix all body errors leaked
+        # through to 503 ("Inference executor not initialized").
+
+        prompt = body.get("prompt", "")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Missing 'prompt' field")
+        model_id = body.get("model_id", "")
+        if not model_id:
+            raise HTTPException(status_code=400, detail="Missing 'model_id' field")
+        if "budget_ftns" in body:
+            _raw_b = body["budget_ftns"]
+            try:
+                budget_ftns = float(_raw_b)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"budget_ftns must be a positive number; "
+                        f"got {_raw_b!r}."
+                    ),
+                )
+        else:
+            budget_ftns = 1.0
+        if budget_ftns <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"budget_ftns must be > 0; got {budget_ftns}."
+                ),
+            )
+
         # Lazy imports — keep the inference module's dependencies out
         # of the API import graph for nodes that don't run inference.
         import dataclasses
@@ -2933,23 +2966,6 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "Inference executor does not support streaming. "
                     "Wire a ParallaxScheduledExecutor (Phase 3.x.8.1) to "
                     "enable /compute/inference/stream."
-                ),
-            )
-
-        # Validate input identical to /compute/inference.
-        prompt = body.get("prompt", "")
-        if not prompt:
-            raise HTTPException(status_code=400, detail="Missing 'prompt' field")
-        model_id = body.get("model_id", "")
-        if not model_id:
-            raise HTTPException(status_code=400, detail="Missing 'model_id' field")
-        budget_ftns = float(body.get("budget_ftns", 1.0))
-        if budget_ftns <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "FTNS budget required for inference. "
-                    "Set budget_ftns to at least 0.01 FTNS."
                 ),
             )
         try:

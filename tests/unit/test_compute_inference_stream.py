@@ -399,7 +399,8 @@ class TestStreamEndpointInputValidation:
         assert response.status_code == 400
         assert "model_id" in response.json()["detail"].lower()
 
-    def test_zero_budget_returns_400(self):
+    def test_zero_budget_returns_422(self):
+        """Sprint 155 — semantic validation failure → 422 (was 400)."""
         client = _make_test_client()
         response = client.post(
             "/compute/inference/stream",
@@ -409,7 +410,7 @@ class TestStreamEndpointInputValidation:
                 "budget_ftns": 0,
             },
         )
-        assert response.status_code == 400
+        assert response.status_code == 422
         assert "budget" in response.json()["detail"].lower()
 
 
