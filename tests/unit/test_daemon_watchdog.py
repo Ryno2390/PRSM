@@ -291,6 +291,50 @@ class TestCanonicalDrift:
         deliverer.deliver.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_drift_recovery_fires_event(self):
+        """When operator fixes a drifted pin (False → True
+        transition), fire canonical.recovered. Symmetric to
+        daemon.recovered."""
+        node = MagicMock()
+        node.identity.node_id = "test-node"
+        for attr in (
+            "_escrow_cleanup_task", "_heartbeat_scheduler_task",
+            "_compensation_scheduler_task",
+            "_key_distribution_watcher_task",
+            "_storage_slashing_watcher_task",
+            "_compensation_distributor_watcher_task",
+            "_job_reaper_task",
+        ):
+            setattr(node, attr, None)
+
+        current_match = {"ftns_ledger": False}  # already drifted
+
+        def check_fn():
+            if current_match["ftns_ledger"]:
+                return {"ftns_ledger": ("0xCORRECT", "0xCORRECT")}
+            return {"ftns_ledger": ("0xWRONG", "0xCORRECT")}
+
+        deliverer = _stub_deliverer()
+        watchdog = DaemonWatchdog(
+            node=node,
+            webhook_deliverer=deliverer,
+            webhook_url="https://hook.example.com",
+            check_canonical_pins=True,
+            canonical_check_fn=check_fn,
+        )
+        # First sweep: baseline (drifted, but skip on first
+        # observation per same rule).
+        await watchdog.check_once()
+        deliverer.deliver.assert_not_called()
+        # Operator restores correct address.
+        current_match["ftns_ledger"] = True
+        # Second sweep: detect transition + fire recovery.
+        await watchdog.check_once()
+        assert deliverer.deliver.await_count == 1
+        kwargs = deliverer.deliver.await_args.kwargs
+        assert kwargs["event"] == "canonical.recovered"
+
+    @pytest.mark.asyncio
     async def test_drift_transition_fires_once(self):
         """When match flips from True (correct) to False
         (drifted) → fire once. Doesn't re-fire on persistent

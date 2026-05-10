@@ -161,10 +161,10 @@ class DaemonWatchdog:
                 )
                 prior_match = self._last_canonical_match.get(subsys)
                 self._last_canonical_match[subsys] = match
-                # Fire only on True → False transition (drift onset).
-                # Steady-state drift doesn't re-fire; recovery
-                # back to match also doesn't fire (operator already
-                # restored, no need to page again).
+                # Drift onset: True → False transition fires
+                # canonical.drifted. Recovery: False → True
+                # transition fires canonical.recovered (operator
+                # close-out signal, parallel to daemon.recovered).
                 if prior_match is True and match is False:
                     logger.warning(
                         "DaemonWatchdog: %s canonical pin drifted "
@@ -173,7 +173,17 @@ class DaemonWatchdog:
                         subsys, wired, canonical,
                     )
                     await self._dispatch_canonical(
-                        subsys, wired, canonical,
+                        subsys, wired, canonical, "canonical.drifted",
+                    )
+                    emitted.append(f"canonical:{subsys}")
+                elif prior_match is False and match is True:
+                    logger.info(
+                        "DaemonWatchdog: %s canonical pin restored "
+                        "(wired=%s) — dispatching canonical.recovered",
+                        subsys, wired,
+                    )
+                    await self._dispatch_canonical(
+                        subsys, wired, canonical, "canonical.recovered",
                     )
                     emitted.append(f"canonical:{subsys}")
         return emitted
@@ -183,9 +193,10 @@ class DaemonWatchdog:
         subsystem: str,
         wired: Optional[str],
         canonical: Optional[str],
+        event: str = "canonical.drifted",
     ) -> None:
         payload = {
-            "event": "canonical.drifted",
+            "event": event,
             "node_id": getattr(
                 getattr(self._node, "identity", None),
                 "node_id",
@@ -199,20 +210,20 @@ class DaemonWatchdog:
         try:
             result = await self._deliverer.deliver(
                 url=self._webhook_url,
-                event="canonical.drifted",
+                event=event,
                 payload=payload,
                 secret=self._webhook_secret,
             )
             if not result.success:
                 logger.warning(
-                    "DaemonWatchdog: canonical.drifted delivery "
-                    "failed for %s after %d attempts: %s",
-                    subsystem, result.attempts, result.error,
+                    "DaemonWatchdog: %s delivery failed for "
+                    "%s after %d attempts: %s",
+                    event, subsystem, result.attempts, result.error,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.error(
-                "DaemonWatchdog: canonical.drifted dispatch raised "
-                "for %s: %s", subsystem, exc,
+                "DaemonWatchdog: %s dispatch raised for %s: %s",
+                event, subsystem, exc,
             )
 
     async def _dispatch(self, daemon_name: str, event: str) -> None:
