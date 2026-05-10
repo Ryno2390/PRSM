@@ -78,9 +78,17 @@ class ContentUploadRequest(BaseModel):
     """Request body for uploading text content."""
     text: str
     filename: str = "document.txt"
-    replicas: int = 3
+    # Sprint 160 — Pydantic field constraints. Pre-fix royalty_rate
+    # and replicas were unconstrained, so out-of-band values
+    # (negative royalties, zero/negative replicas, 10000% rates)
+    # silently passed model validation and either produced wrong
+    # downstream behavior or hit generic errors.
+    replicas: int = Field(
+        default=3, ge=0, le=1000,
+        description="Replication factor (0=local-only, max 1000)",
+    )
     royalty_rate: Optional[float] = Field(
-        default=None,
+        default=None, ge=0.001, le=0.1,
         description="FTNS earned per access (0.001–0.1, default 0.01)",
     )
     parent_cids: List[str] = Field(
