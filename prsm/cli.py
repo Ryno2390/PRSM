@@ -1584,6 +1584,24 @@ def node_distributions(api_port, output_format, limit):
     )
 
 
+@node.command("webhooks")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+)
+@click.option("--limit", default=20, type=int)
+def node_webhooks(api_port, output_format, limit):
+    """Show recent webhook dispatch attempts."""
+    _node_admin_history(
+        api_port=api_port,
+        path="/admin/webhook-history",
+        label="Webhooks",
+        output_format=output_format,
+        limit=limit,
+    )
+
+
 @node.command("install")
 @click.option("--dry-run", is_flag=True, help="Print service file without installing")
 @click.option("--host", default="127.0.0.1", help="Host to bind to")

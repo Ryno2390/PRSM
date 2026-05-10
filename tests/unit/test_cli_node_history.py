@@ -115,3 +115,15 @@ class TestDistributions:
             result = runner.invoke(node, ["distributions"])
         assert result.exit_code == 0
         assert "Distributions" in result.output
+
+
+class TestWebhooks:
+    def test_command_registered(self, runner):
+        with patch("httpx.Client") as MockClient:
+            ci = MockClient.return_value.__enter__.return_value
+            ci.get = MagicMock(
+                return_value=_ok({"entries": [], "total": 0}),
+            )
+            result = runner.invoke(node, ["webhooks"])
+        assert result.exit_code == 0
+        assert "Webhooks" in result.output
