@@ -633,6 +633,32 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_audit_summary",
+        description=(
+            "Aggregated bucketed counts over the audit ring "
+            "buffer for quick ops dashboards. Returns status "
+            "buckets (2xx/3xx/4xx/5xx), method counts, and "
+            "top-N most-frequent paths. Faster operator triage "
+            "than scrolling prsm_audit_recent. Backed by GET "
+            "/audit/summary."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "top_paths": {
+                    "type": "integer",
+                    "description": (
+                        "Number of top paths to surface (1..100). "
+                        "Default 10."
+                    ),
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 10,
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_audit_recent",
         description=(
             "Show recent state-changing API requests (POST/PUT/"
@@ -2444,6 +2470,64 @@ async def handle_prsm_spend_summary(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_audit_summary(
+    arguments: Dict[str, Any],
+) -> str:
+    """Handle prsm_audit_summary: render bucketed audit counts."""
+    params = []
+    if "top_paths" in arguments:
+        params.append(f"top_paths={arguments['top_paths']}")
+    path = "/audit/summary"
+    if params:
+        path += "?" + "&".join(params)
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "status_buckets" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"Audit summary failed.\n  Detail: {detail}"
+
+    total = result.get("total", 0)
+    status = result.get("status_buckets", {})
+    methods = result.get("method_buckets", {})
+    top = result.get("top_paths", [])
+
+    lines = [
+        f"PRSM Audit Summary (buffer total: {total}):",
+        f"",
+        f"  Status buckets:",
+    ]
+    for bucket in ("2xx", "3xx", "4xx", "5xx", "other"):
+        if bucket in status:
+            lines.append(f"    {bucket}:    {status[bucket]}")
+    if not status:
+        lines.append("    (empty)")
+
+    lines.append("")
+    lines.append("  Methods:")
+    for method, count in sorted(
+        methods.items(), key=lambda kv: kv[1], reverse=True,
+    ):
+        lines.append(f"    {method:<8}  {count}")
+    if not methods:
+        lines.append("    (empty)")
+
+    lines.append("")
+    lines.append("  Top paths:")
+    for entry in top:
+        lines.append(
+            f"    {entry['count']:>4}  {entry['path']}"
+        )
+    if not top:
+        lines.append("    (empty)")
+
+    return "\n".join(lines)
+
+
 async def handle_prsm_audit_recent(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3114,6 +3198,7 @@ TOOL_HANDLERS = {
     "prsm_arbitration_record_detail": handle_prsm_arbitration_record_detail,
     "prsm_arbitration_status": handle_prsm_arbitration_status,
     "prsm_audit_recent": handle_prsm_audit_recent,
+    "prsm_audit_summary": handle_prsm_audit_summary,
     "prsm_canonical_check": handle_prsm_canonical_check,
     "prsm_webhook_test": handle_prsm_webhook_test,
     "prsm_metrics_summary": handle_prsm_metrics_summary,
