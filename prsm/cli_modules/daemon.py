@@ -280,6 +280,27 @@ def daemon_status(output_format: str = "text"):
     pid = _get_daemon_pid()
     running = pid is not None and _is_daemon_running(pid)
 
+    # Probe the API to detect foreground-running nodes (operators
+    # who ran `prsm node start` in a tty rather than `prsm daemon
+    # start`). Without this probe, foreground nodes reported
+    # "Stopped (stale PID file)" which is misleading.
+    foreground_running = False
+    foreground_api_port = None
+    if not running:
+        for port in (8000, 8001):
+            try:
+                import httpx
+                with httpx.Client(timeout=0.5) as client:
+                    resp = client.get(
+                        f"http://127.0.0.1:{port}/health",
+                    )
+                if resp.status_code == 200:
+                    foreground_running = True
+                    foreground_api_port = port
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+
     data = {
         "ok": True,
         "running": running,
@@ -288,6 +309,8 @@ def daemon_status(output_format: str = "text"):
         "pid_file": str(_DAEMON_PID_FILE),
         "log_file": str(_DAEMON_LOG_FILE),
         "log_size": _get_log_size(),
+        "foreground_running": foreground_running,
+        "foreground_api_port": foreground_api_port,
     }
 
     if output_format == "json":
@@ -302,6 +325,15 @@ def daemon_status(output_format: str = "text"):
     if running:
         console.print(f"    Status:     {ICONS['success']} Running (PID {pid})")
         console.print(f"    Uptime:     {_get_daemon_uptime(pid)}")
+    elif foreground_running:
+        console.print(
+            f"    Status:     {ICONS['success']} Running (foreground "
+            f"on :{foreground_api_port})"
+        )
+        console.print(
+            f"    [dim]Note: started via `prsm node start` in a tty, "
+            f"not via daemon mode.[/dim]"
+        )
     else:
         if pid and not running:
             console.print(f"    Status:     {ICONS['warning']} Stopped (stale PID file)")
