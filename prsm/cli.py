@@ -1468,6 +1468,122 @@ def node_earnings(api_port: int, output_format: str):
         )
 
 
+def _node_admin_history(
+    *, api_port: int, path: str, label: str,
+    output_format: str, limit: int = 20,
+):
+    """Shared helper for the 3 admin-history CLI commands."""
+    import json
+    import datetime
+    import httpx
+
+    url = (
+        f"http://127.0.0.1:{api_port}{path}?limit={limit}"
+    )
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(url)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Start with: prsm node start[/dim]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+
+    if resp.status_code != 200:
+        if resp.status_code == 503:
+            console.print(
+                f"[yellow]{label} log not configured.[/yellow]\n"
+                f"[dim]{resp.json().get('detail', 'unknown')}[/dim]"
+            )
+            sys.exit(0)  # 503 is not an error — just unwired
+        console.print(
+            f"[red]{path} returned {resp.status_code}[/red]: "
+            f"{resp.text}"
+        )
+        sys.exit(1)
+
+    body = resp.json()
+    if output_format == "json":
+        console.print(json.dumps(body, indent=2))
+        return
+
+    entries = body.get("entries", [])
+    total = body.get("total", 0)
+    console.print(
+        f"[bold]PRSM {label}[/bold] (showing {len(entries)} of {total}):"
+    )
+    if not entries:
+        console.print(f"  [dim]No entries[/dim]")
+        return
+    for e in entries:
+        ts = e.get("timestamp", 0)
+        try:
+            t = datetime.datetime.fromtimestamp(ts).strftime(
+                "%H:%M:%S",
+            )
+        except Exception:
+            t = "????"
+        # Each command renders distinct fields — caller hooks
+        # in via this helper but currently we render generic.
+        console.print(f"  {t}  {e}")
+
+
+@node.command("slash-history")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+)
+@click.option("--limit", default=20, type=int)
+def node_slash_history(api_port, output_format, limit):
+    """Show recent on-chain slash events."""
+    _node_admin_history(
+        api_port=api_port,
+        path="/admin/slash-history",
+        label="Slash Events",
+        output_format=output_format,
+        limit=limit,
+    )
+
+
+@node.command("heartbeats")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+)
+@click.option("--limit", default=20, type=int)
+def node_heartbeats(api_port, output_format, limit):
+    """Show recent on-chain heartbeats."""
+    _node_admin_history(
+        api_port=api_port,
+        path="/admin/heartbeat-history",
+        label="Heartbeats",
+        output_format=output_format,
+        limit=limit,
+    )
+
+
+@node.command("distributions")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+)
+@click.option("--limit", default=20, type=int)
+def node_distributions(api_port, output_format, limit):
+    """Show recent on-chain Distributed events."""
+    _node_admin_history(
+        api_port=api_port,
+        path="/admin/distribution-history",
+        label="Distributions",
+        output_format=output_format,
+        limit=limit,
+    )
+
+
 @node.command("install")
 @click.option("--dry-run", is_flag=True, help="Print service file without installing")
 @click.option("--host", default="127.0.0.1", help="Host to bind to")
