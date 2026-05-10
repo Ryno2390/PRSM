@@ -4301,6 +4301,40 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "1 if DaemonWatchdog crash-webhook task is alive, 0 if crashed",
         )
 
+        # In-memory ring buffer counts. 4 dashboard rings —
+        # operators alert on growth/stagnation patterns. Each
+        # gauge emitted only when the ring is wired (None when
+        # unwired = gauge omitted, NOT zero).
+        for ring_metric, ring_attr, help_text in (
+            (
+                "prsm_webhook_log_count", "_webhook_log",
+                "WebhookDeliverer ring buffer entry count",
+            ),
+            (
+                "prsm_slash_event_log_count", "_slash_event_log",
+                "SlashEventRing entry count (proof_failure + missing_heartbeat)",
+            ),
+            (
+                "prsm_heartbeat_log_count", "_heartbeat_log",
+                "HeartbeatRecordedRing entry count",
+            ),
+            (
+                "prsm_distribution_log_count", "_distribution_log",
+                "DistributedEventRing entry count (Phase 8 emission rounds)",
+            ),
+        ):
+            try:
+                ring = getattr(node, ring_attr, None)
+                if ring is not None:
+                    count = ring.count()
+                    lines.append(f"# HELP {ring_metric} {help_text}")
+                    lines.append(f"# TYPE {ring_metric} gauge")
+                    lines.append(f"{ring_metric} {count}")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "metrics %s probe failed: %s", ring_metric, exc,
+                )
+
         # prsm_arbitration_pending_count
         try:
             arb = getattr(node, "_arbitration_queue", None)
