@@ -819,6 +819,30 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_distribution_history",
+        description=(
+            "Recent on-chain Distributed events observed by the "
+            "CompensationDistributorWatcher. Each entry: timestamp, "
+            "to_creator, to_operator, to_grant, total_distributed "
+            "(all FTNS wei). Operators verify emission rounds are "
+            "landing + tracks the 3-pool split over time. Backed "
+            "by GET /admin/distribution-history."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1, "maximum": 1000, "default": 20,
+                },
+                "offset": {
+                    "type": "integer",
+                    "minimum": 0, "default": 0,
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_heartbeat_history",
         description=(
             "Recent on-chain HeartbeatRecorded events observed by "
@@ -2935,6 +2959,64 @@ async def handle_prsm_heartbeat_trigger(
     )
 
 
+async def handle_prsm_distribution_history(
+    arguments: Dict[str, Any],
+) -> str:
+    """Render recent Distributed events."""
+    params = []
+    limit = arguments.get("limit", 20)
+    params.append(f"limit={limit}")
+    if "offset" in arguments:
+        params.append(f"offset={arguments['offset']}")
+    path = "/admin/distribution-history?" + "&".join(params)
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {str(e)}\n"
+            f"Start with: prsm node start"
+        )
+    if "entries" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in detail.lower():
+            return (
+                f"Distribution log not configured.\n"
+                f"  Detail: {detail}\n"
+                f"  Set PRSM_COMPENSATION_DISTRIBUTOR_WATCHER_ENABLED=1."
+            )
+        return f"Distribution history fetch failed.\n  Detail: {detail}"
+
+    entries = result["entries"]
+    total = result["total"]
+    if not entries:
+        return (
+            f"No distributions recorded "
+            f"(buffer total: {total})."
+        )
+
+    import datetime
+    lines = [
+        f"PRSM Distributions (showing {len(entries)} of {total}):",
+        f"  Time      Creator       Operator       Grant         Total",
+        "  " + "-" * 60,
+    ]
+    for e in entries:
+        ts = e.get("timestamp", 0)
+        try:
+            t = datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+        except Exception:
+            t = "????"
+        creator = e.get("to_creator", 0) / 1e18
+        operator = e.get("to_operator", 0) / 1e18
+        grant = e.get("to_grant", 0) / 1e18
+        total_d = e.get("total_distributed", 0) / 1e18
+        lines.append(
+            f"  {t}  {creator:>10.4f}  {operator:>10.4f}  "
+            f"{grant:>10.4f}  {total_d:>10.4f}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_heartbeat_history(
     arguments: Dict[str, Any],
 ) -> str:
@@ -3792,6 +3874,7 @@ TOOL_HANDLERS = {
     "prsm_forge_submit": handle_prsm_forge_submit,
     "prsm_my_content": handle_prsm_my_content,
     "prsm_heartbeat_trigger": handle_prsm_heartbeat_trigger,
+    "prsm_distribution_history": handle_prsm_distribution_history,
     "prsm_heartbeat_history": handle_prsm_heartbeat_history,
     "prsm_slash_history": handle_prsm_slash_history,
     "prsm_earnings_summary": handle_prsm_earnings_summary,

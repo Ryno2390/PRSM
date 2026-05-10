@@ -3804,6 +3804,46 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "status": status.name if hasattr(status, "name") else str(status),
         }
 
+    @app.get("/admin/distribution-history")
+    async def get_distribution_history(
+        limit: int = 50, offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Recent on-chain Distributed events observed by the
+        CompensationDistributorWatcher. Each entry: timestamp,
+        to_creator, to_operator, to_grant, total_distributed.
+
+        Status:
+          503 — distribution log not wired
+          422 — limit out of [1, 1000] OR offset < 0
+          200 — {entries, total, offset, limit}
+        """
+        if limit <= 0 or limit > 1000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 1000], got {limit}",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0, got {offset}",
+            )
+        ring = getattr(node, "_distribution_log", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Distribution log not initialized "
+                    "(requires CompensationDistributor watcher wiring)."
+                ),
+            )
+        entries = ring.recent(limit=limit, offset=offset)
+        return {
+            "entries": [e.to_dict() for e in entries],
+            "total": ring.count(),
+            "offset": offset,
+            "limit": limit,
+        }
+
     @app.get("/admin/heartbeat-history")
     async def get_heartbeat_history(
         limit: int = 50,

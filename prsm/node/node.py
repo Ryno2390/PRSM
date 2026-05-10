@@ -1031,7 +1031,7 @@ def _build_storage_slashing_watcher_or_none(
 
 def _build_compensation_distributor_watcher_or_none(
     *, client, state_store=None, webhook_deliverer=None,
-    webhook_url=None, webhook_secret=None,
+    webhook_url=None, webhook_secret=None, distribution_log=None,
 ):
     """Construct a CompensationDistributorWatcher if operator opted in
     AND underlying client is non-None.
@@ -1063,6 +1063,17 @@ def _build_compensation_distributor_watcher_or_none(
                 "to_creator=%d to_operator=%d to_grant=%d",
                 event.to_creator, event.to_operator, event.to_grant,
             )
+            if distribution_log is not None:
+                try:
+                    distribution_log.append(
+                        to_creator=event.to_creator,
+                        to_operator=event.to_operator,
+                        to_grant=event.to_grant,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "distribution_log.append raised: %s", exc,
+                    )
             if webhook_deliverer is not None and webhook_url:
                 try:
                     payload = {
@@ -1571,8 +1582,10 @@ class PRSMNode:
         # dashboard view.
         from prsm.node.slash_event_log import SlashEventRing
         from prsm.node.heartbeat_log import HeartbeatRecordedRing
+        from prsm.node.distribution_log import DistributedEventRing
         self._slash_event_log = SlashEventRing()
         self._heartbeat_log = HeartbeatRecordedRing()
+        self._distribution_log = DistributedEventRing()
 
         # Pre-construct webhook deliverer + log + URL + secret so
         # the StorageSlashingWatcher built below can fire
@@ -1634,6 +1647,7 @@ class PRSMNode:
                 webhook_deliverer=self._webhook_deliverer,
                 webhook_url=_early_webhook_url,
                 webhook_secret=_early_webhook_secret,
+                distribution_log=self._distribution_log,
             )
         )
         # Operator on-chain address for /admin/earnings-summary
