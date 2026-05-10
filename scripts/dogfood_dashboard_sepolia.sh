@@ -40,9 +40,12 @@ export PRSM_BASE_RPC_URL="${BASE_SEPOLIA_RPC_URL:-https://base-sepolia-rpc.publi
 # ── Wallet wiring ─────────────────────────────────────────────────
 export FTNS_WALLET_PRIVATE_KEY="${PRIVATE_KEY:?PRIVATE_KEY missing in contracts/.env}"
 
-# ── Phase 7-storage / Phase 8 contract addresses (per networks.py) ─
-export PRSM_STORAGE_SLASHING_ADDRESS="0x2ba1B361d2AD49f15F1131762fA3512d7824EB06"
-export PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS="0xFd730f8E513eD184F255cb1a62791e711B2e81b9"
+# ── Phase 7-storage / Phase 8 contract addresses ──────────────────
+# Sprint 144 — node builders fall back to networks.py canonical when
+# only PRSM_NETWORK is set, so per-contract pastes are no longer
+# needed for default-deployment dogfooding. Uncomment to override.
+# export PRSM_STORAGE_SLASHING_ADDRESS="0x2ba1B361d2AD49f15F1131762fA3512d7824EB06"
+# export PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS="0xFd730f8E513eD184F255cb1a62791e711B2e81b9"
 
 # ── Watcher activation (sprints 78, 79, 86) ───────────────────────
 export PRSM_STORAGE_SLASHING_WATCHER_ENABLED=1
@@ -64,8 +67,8 @@ export PRSM_DISTRIBUTION_LOG_DIR=~/.prsm/dogfood/distribution
 echo "─── Dogfood config ──────────────────────────────────"
 echo "  Network:        $PRSM_NETWORK ($PRSM_BASE_RPC_URL)"
 echo "  Wallet:         ${FTNS_WALLET_PRIVATE_KEY:0:6}…${FTNS_WALLET_PRIVATE_KEY: -4}"
-echo "  Slashing:       $PRSM_STORAGE_SLASHING_ADDRESS"
-echo "  Compensation:   $PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS"
+echo "  Slashing:       ${PRSM_STORAGE_SLASHING_ADDRESS:-(canonical fallback)}"
+echo "  Compensation:   ${PRSM_COMPENSATION_DISTRIBUTOR_ADDRESS:-(canonical fallback)}"
 echo "  Webhook:        $PRSM_WEBHOOK_URL"
 echo "─────────────────────────────────────────────────────"
 echo
