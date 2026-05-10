@@ -28,13 +28,12 @@ from prsm.mcp_server import (
 
 
 class TestMCPToolDefinitions:
-    def test_twenty_tools_defined(self):
-        # 17 prior + prsm_billing_status (Phase 3.x.1 Task 7) = 18.
-        # +prsm_balance_check (2026-05-08, Vision §13 Phase 5
-        # stand-in closure) = 19.
-        # +coinbase_offramp_initiate (2026-05-08, Vision §13 Phase 5
-        # cash-out write-side companion) = 20.
-        assert len(TOOLS) == 20
+    def test_at_least_twenty_tools_defined(self):
+        # Tool count was 20 at the post-coinbase_offramp_initiate
+        # baseline (2026-05-08). Subsequent sprints have added
+        # more tools; the invariant we care about is that the
+        # surface only grows from here.
+        assert len(TOOLS) >= 20
 
     def test_tool_names(self):
         names = [t.name for t in TOOLS]

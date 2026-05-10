@@ -49,11 +49,8 @@ class TestProvenancePersistence:
             identity=mock_identity,
             gossip=mock_gossip,
             ledger=mock_ledger,
-            ipfs_api_url="http://127.0.0.1:5001",
-            transport=mock_transport
+            transport=mock_transport,
         )
-        # Mock the internal IPFS session to avoid actual HTTP calls
-        uploader._ipfs_session = AsyncMock()
         return uploader
 
     @pytest.mark.asyncio

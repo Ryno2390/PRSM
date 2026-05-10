@@ -78,9 +78,15 @@ class TestPrsmBillingStatusToolDefinition:
         names = [t.name for t in TOOLS]
         assert "prsm_billing_status" in names
 
-    def test_tool_count_now_eighteen(self):
-        # 17 prior + prsm_billing_status = 18
-        assert len(TOOLS) == 18
+    def test_tool_count_grew_with_billing_status(self):
+        # Tool count was 18 when prsm_billing_status was added
+        # (17 prior + this one). Subsequent sprints have added
+        # more tools; the invariant we care about is that
+        # prsm_billing_status is present AND the total count
+        # never regresses below the 18-at-introduction baseline.
+        assert len(TOOLS) >= 18
+        names = [t.name for t in TOOLS]
+        assert "prsm_billing_status" in names
 
     def test_required_fields(self):
         schema = self._tool().inputSchema
