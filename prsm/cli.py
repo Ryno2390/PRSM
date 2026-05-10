@@ -514,6 +514,26 @@ main.add_command(provenance_group, "provenance")
 
 
 @main.command()
+def version():
+    """Print the installed PRSM package version.
+
+    Reads from importlib.metadata.version("prsm-network") so
+    it stays in sync with pyproject.toml across releases.
+    """
+    try:
+        from importlib.metadata import version as _pkg_version
+        v = _pkg_version("prsm-network")
+        console.print(f"PRSM {v}")
+    except Exception as exc:  # noqa: BLE001
+        console.print(
+            f"[yellow]Could not resolve PRSM version: {exc}[/yellow]\n"
+            f"[dim]Install via `pip install -e .` or check "
+            f"`pip show prsm-network`[/dim]"
+        )
+        sys.exit(1)
+
+
+@main.command()
 @click.option("--host", default="127.0.0.1", help="Host to bind to (default: localhost for security)")
 @click.option("--port", default=8000, help="Port to bind to")
 @click.option("--reload", is_flag=True, help="Enable auto-reload")
