@@ -76,3 +76,50 @@ class TestUnchanged:
         assert _is_protected("/content/upload")
         assert _is_protected("/content/upload/shard")  # via startswith
         assert _is_protected("/compute/forge")
+
+
+class TestSprint139Protected:
+    """Audit-pass coverage of remaining sensitive endpoints."""
+
+    def test_bridge_protected(self):
+        assert _is_protected("/bridge/deposit")
+        assert _is_protected("/bridge/withdraw")
+        assert _is_protected("/bridge/transactions")
+
+    def test_ftns_faucet_protected(self):
+        assert _is_protected("/ftns/faucet")
+
+    def test_ledger_transfer_protected(self):
+        assert _is_protected("/ledger/transfer")
+
+    def test_staking_protected(self):
+        for p in (
+            "/staking/stake", "/staking/unstake",
+            "/staking/claim-rewards",
+            "/staking/withdraw/abc123",
+            "/staking/cancel-unstake/abc123",
+        ):
+            assert _is_protected(p), f"{p} should be protected"
+
+    def test_agents_actions_protected(self):
+        for p in (
+            "/agents/abc/allowance",
+            "/agents/abc/pause",
+            "/agents/abc/resume",
+        ):
+            assert _is_protected(p), f"{p} should be protected"
+
+    def test_node_resources_put_protected(self):
+        assert _is_protected("/node/resources")
+
+    def test_settlement_protected(self):
+        assert _is_protected("/settlement/flush")
+
+    def test_compute_endpoints_broadened(self):
+        for p in (
+            "/compute/submit",
+            "/compute/cancel/job-abc",
+            "/compute/inference",
+            "/compute/cleanup-stale",
+        ):
+            assert _is_protected(p), f"{p} should be protected"

@@ -47,6 +47,23 @@ PROTECTED_PREFIXES = [
     # rule), the preview endpoint touches arbitration state and
     # should respect operator-set auth.
     "/content/arbitration/",
+    # Sprint 139 (continuation of dogfood audit). The broader
+    # set of sensitive endpoints. Each cluster either spends
+    # FTNS, modifies node-controlled state, or grants writes
+    # that other operators can exploit. Prefix-protecting them
+    # matches the operator's PRSM_NODE_API_KEY-set production
+    # intent. Dev mode (no key) is unaffected — auth_enabled
+    # gates the whole check at runtime.
+    "/bridge/",         # cross-chain deposit / withdraw
+    "/ftns/",           # faucet, transfers
+    "/ledger/",         # /ledger/transfer (direct FTNS xfer)
+    "/staking/",        # stake / unstake / claim / withdraw
+    "/agents/",         # allowance / pause / resume actions
+    "/node/resources",  # PUT modifies node config
+    "/settlement/",     # flush
+    "/compute/",        # forge already protected; broaden to
+                        # cover submit / cancel / inference /
+                        # cleanup-stale (all write-side)
 ]
 
 
