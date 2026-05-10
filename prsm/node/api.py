@@ -675,7 +675,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if payment_escrow is not None:
             try:
                 pending = payment_escrow.list_escrows_by_requester(target)
-                escrowed_ftns = sum(e.amount for e in pending)
+                # Sprint 162 — start=0.0 keeps the type float-stable when
+                # `pending` is empty (sum([]) is int 0, breaking the
+                # uniform-float contract sibling fields hold).
+                escrowed_ftns = sum(
+                    (e.amount for e in pending),
+                    start=0.0,
+                )
                 escrowed_available = True
             except Exception as e:
                 logger.warning(
