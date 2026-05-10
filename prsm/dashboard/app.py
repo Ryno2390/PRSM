@@ -148,7 +148,11 @@ class DashboardServer:
         )
         self.manager = ConnectionManager()
         self.auth_manager: Optional[AuthManager] = None
-        self.start_time: Optional[datetime] = None
+        # Sprint 158 — set start_time at construction so sub-mounted
+        # dashboards (where async start() is never called) still
+        # surface real uptime. Standalone path's start() reassignment
+        # remains correct as a refresh.
+        self.start_time: datetime = datetime.now(timezone.utc)
         self._server = None
         
         # Setup routes and middleware
