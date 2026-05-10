@@ -666,7 +666,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             },
         }
 
-    class _OfframpQuoteRequest(BaseModel):
+    # Renamed from `_OfframpQuoteRequest` (sprint dogfood) so
+    # OpenAPI schemas don't expose Python-private leading-
+    # underscore convention to public API consumers. CI-enforced
+    # composer-only invariant R-2026-05-08-1's source-string
+    # marker is updated in the same commit per same-change-set
+    # supersession protocol; the field-set invariant (no execute
+    # tokens) is unchanged.
+    class OfframpQuoteRequest(BaseModel):
         # Validation is in the handler so the 400 vs 422 boundary is
         # explicit (Pydantic's gt=0 returns 422; we want 400 for
         # operator-misconfig-class errors).
@@ -856,12 +863,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "include_terminal": include_terminal,
         }
 
-    class _RoyaltyClaimRequest(BaseModel):
+    # Renamed from `_RoyaltyClaimRequest` for OpenAPI hygiene.
+    class RoyaltyClaimRequest(BaseModel):
         dry_run: bool = True
 
     @app.post("/wallet/royalty/claim")
     async def post_royalty_claim(
-        body: _RoyaltyClaimRequest,
+        body: RoyaltyClaimRequest,
     ) -> Dict[str, Any]:
         """Claim accumulated royalties from RoyaltyDistributor.
 
@@ -951,7 +959,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     @app.post("/wallet/offramp/quote")
     async def post_offramp_quote(
-        body: _OfframpQuoteRequest,
+        body: OfframpQuoteRequest,
         address: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Pre-flight quote for FTNS → USDC → USD off-ramp via
@@ -1801,14 +1809,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             logger.error(f"Forge pipeline error: {e}")
             raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
-    class _ArbitrationPreviewRequest(BaseModel):
+    # Renamed from `_ArbitrationPreviewRequest` for OpenAPI hygiene.
+    class ArbitrationPreviewRequest(BaseModel):
         record_id: str
         decision: str
         by_council: List[str]
 
     @app.post("/content/arbitration/preview-resolution")
     async def post_arbitration_preview(
-        body: _ArbitrationPreviewRequest,
+        body: ArbitrationPreviewRequest,
     ) -> Dict[str, Any]:
         """Composer-only preview of what queue.resolve() WOULD
         do for the given (record_id, decision, by_council).

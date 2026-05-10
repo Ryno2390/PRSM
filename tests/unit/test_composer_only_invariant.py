@@ -118,20 +118,27 @@ class TestSchemaInvariant:
 
 
 class TestPydanticModelInvariant:
-    """The `_OfframpQuoteRequest` Pydantic model is defined as a nested
+    """The `OfframpQuoteRequest` Pydantic model is defined as a nested
     class inside `create_api_app`. Use source introspection to
-    verify its field set."""
+    verify its field set.
+
+    Renamed from `_OfframpQuoteRequest` for OpenAPI hygiene
+    (dogfood found Python-private underscore convention leaking
+    into public API schemas). Field-set invariant unchanged —
+    R-2026-05-08-1 still applies; only the marker string updated
+    per same-change-set supersession protocol.
+    """
 
     def test_offramp_quote_request_fields_excluded_from_execute_tokens(self):
         source = inspect.getsource(create_api_app)
-        # Find the _OfframpQuoteRequest class block.
-        marker_start = "class _OfframpQuoteRequest(BaseModel):"
+        # Find the OfframpQuoteRequest class block.
+        marker_start = "class OfframpQuoteRequest(BaseModel):"
         marker_end_candidates = [
             "@app.post(",  # next route definition
         ]
         start_idx = source.find(marker_start)
         assert start_idx >= 0, (
-            "_OfframpQuoteRequest class missing from create_api_app "
+            "OfframpQuoteRequest class missing from create_api_app "
             "source. R-2026-05-08-1 enforcement requires the model to "
             "exist for field-set introspection."
         )
