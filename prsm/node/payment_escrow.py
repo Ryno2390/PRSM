@@ -83,6 +83,7 @@ class PaymentEscrow:
         *,
         default_timeout: Optional[float] = None,
         cleanup_interval: Optional[float] = None,
+        on_cleanup_callback: Optional[Callable] = None,
     ):
         self.ledger = ledger
         self.node_id = node_id
@@ -90,6 +91,11 @@ class PaymentEscrow:
         self._escrows: Dict[str, EscrowEntry] = {}
         self._tasks: List[asyncio.Task] = []
         self._running = False
+        # Optional async callback invoked after each periodic cleanup
+        # sweep with the cleaned-count. When wired with a
+        # webhook-dispatcher callback (see Node init), operators get
+        # an "escrow.leaked" event when stale escrows are reaped.
+        self._on_cleanup_callback = on_cleanup_callback
 
         # Timeout for unreleased escrows. Resolution order:
         #   1) explicit constructor arg (wins)
@@ -588,7 +594,11 @@ class PaymentEscrow:
     async def periodic_cleanup(self) -> None:
         """Run cleanup every ``self.cleanup_interval`` seconds.
         Configurable via constructor arg or
-        PRSM_ESCROW_CLEANUP_INTERVAL_SEC env var; default 600s."""
+        PRSM_ESCROW_CLEANUP_INTERVAL_SEC env var; default 600s.
+
+        After each sweep, invokes ``on_cleanup_callback(cleaned)``
+        if wired. Callback is best-effort: exceptions logged at
+        WARN, never break the cleanup loop."""
         self._running = True
         while self._running:
             await asyncio.sleep(self.cleanup_interval)
@@ -596,6 +606,14 @@ class PaymentEscrow:
                 cleaned = await self.cleanup_expired_escrows()
                 if cleaned:
                     logger.info(f"Cleaned up {cleaned} expired escrows")
+                if self._on_cleanup_callback is not None:
+                    try:
+                        await self._on_cleanup_callback(cleaned)
+                    except Exception as cb_exc:
+                        logger.warning(
+                            "PaymentEscrow on_cleanup_callback raised: %s",
+                            cb_exc,
+                        )
             except Exception as e:
                 logger.error(f"Escrow cleanup error: {e}")
 

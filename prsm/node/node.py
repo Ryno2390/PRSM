@@ -1941,6 +1941,47 @@ class PRSMNode:
                     webhook_url,
                     " [signed]" if webhook_secret else "",
                 )
+                # Wire escrow.leaked webhook event source.
+                # When PaymentEscrow.periodic_cleanup reaps any
+                # stale escrows, this callback dispatches an
+                # escrow.leaked event with count + node_id.
+                if hasattr(self, "_payment_escrow") and (
+                    self._payment_escrow is not None
+                ):
+                    import time as _time
+                    async def _on_cleanup(count: int) -> None:
+                        if count <= 0:
+                            return  # only fire when leaked > 0
+                        try:
+                            await deliverer.deliver(
+                                url=webhook_url,
+                                event="escrow.leaked",
+                                payload={
+                                    "event": "escrow.leaked",
+                                    "node_id": self.identity.node_id,
+                                    "count": count,
+                                    "timestamp": _time.time(),
+                                },
+                                secret=webhook_secret,
+                            )
+                        except Exception as cb_exc:
+                            logger.warning(
+                                "escrow.leaked dispatch raised: %s",
+                                cb_exc,
+                            )
+                    # Best-effort: existing PaymentEscrow may not
+                    # have the on_cleanup_callback hook (older
+                    # impl). Set if attribute exists.
+                    if hasattr(
+                        self._payment_escrow,
+                        "_on_cleanup_callback",
+                    ):
+                        self._payment_escrow._on_cleanup_callback = (
+                            _on_cleanup
+                        )
+                        logger.info(
+                            "escrow.leaked webhook event source wired",
+                        )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "DaemonWatchdog construction failed: %s — "
