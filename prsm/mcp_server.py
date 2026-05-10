@@ -4001,10 +4001,20 @@ TOOL_HANDLERS = {
 # ── MCP Server ───────────────────────────────────────────────────────────
 
 def create_server() -> Server:
-    """Create and configure the PRSM MCP server."""
+    """Create and configure the PRSM MCP server.
+
+    Server version reads from installed package metadata so it
+    stays in sync with pyproject.toml across releases (parallel
+    to /api-info + /openapi.json + prsm_build_info gauge).
+    """
+    try:
+        from importlib.metadata import version as _pkg_version
+        _server_version = _pkg_version("prsm-network")
+    except Exception:  # noqa: BLE001
+        _server_version = "unknown"
     server = Server(
         name="prsm",
-        version="0.39.0",
+        version=_server_version,
         instructions=(
             "PRSM is a decentralized AI compute network. Use these tools to "
             "submit analysis queries, run TEE-attested inference, estimate "
