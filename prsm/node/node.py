@@ -2937,9 +2937,28 @@ class PRSMNode:
                 embedder=SentenceTransformerEmbedder(),
                 index=self.content_uploader._semantic_index,
             )
+            # Per-shard FTNS budget default. The orchestrator's
+            # retry-loop owns the actual per-call budget at request
+            # time; this constructor default applies only to call
+            # sites that don't override. Operators tune via env
+            # without forking.
+            try:
+                _per_shard_default = int(
+                    os.environ.get(
+                        "PRSM_PER_SHARD_FTNS_DEFAULT", "100",
+                    )
+                )
+                if _per_shard_default <= 0:
+                    raise ValueError("non-positive")
+            except (ValueError, TypeError):
+                logger.warning(
+                    "PRSM_PER_SHARD_FTNS_DEFAULT not a positive int; "
+                    "using 100"
+                )
+                _per_shard_default = 100
             dispatcher = SwarmDispatcherAdapter(
                 agent_dispatcher=self.agent_dispatcher,
-                per_shard_budget_ftns=100,  # placeholder; orch retry-loop owns
+                per_shard_budget_ftns=_per_shard_default,
             )
             # AggregatorClient + beacon need a Foundation Safe address
             # that this deployment trusts. Default to mainnet Safe;
