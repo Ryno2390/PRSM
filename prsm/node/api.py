@@ -2856,6 +2856,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not prompt:
             raise HTTPException(status_code=400, detail="Missing 'prompt' field")
 
+        # Sprint 198 — cap prompt size (DoS surface; sibling
+        # /compute/query has the same cap via PRSM_MAX_QUERY_BYTES).
+        # Default 100KB. Override: PRSM_MAX_INFERENCE_PROMPT_BYTES.
+        _ip_raw = os.environ.get(
+            "PRSM_MAX_INFERENCE_PROMPT_BYTES", "",
+        ).strip()
+        try:
+            _ip_cap = int(_ip_raw) if _ip_raw else 100 * 1024
+            if _ip_cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            _ip_cap = 100 * 1024
+        _ip_bytes = len(prompt.encode("utf-8"))
+        if _ip_bytes > _ip_cap:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"prompt size {_ip_bytes} bytes exceeds "
+                    f"PRSM_MAX_INFERENCE_PROMPT_BYTES cap of "
+                    f"{_ip_cap}. Trim the prompt or have the "
+                    f"operator raise the cap."
+                ),
+            )
+
         model_id = body.get("model_id", "")
         if not model_id:
             raise HTTPException(status_code=400, detail="Missing 'model_id' field")
@@ -3177,6 +3201,28 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         prompt = body.get("prompt", "")
         if not prompt:
             raise HTTPException(status_code=400, detail="Missing 'prompt' field")
+        # Sprint 198 — cap prompt size; shares
+        # PRSM_MAX_INFERENCE_PROMPT_BYTES with the unary sibling.
+        _ip_raw = os.environ.get(
+            "PRSM_MAX_INFERENCE_PROMPT_BYTES", "",
+        ).strip()
+        try:
+            _ip_cap = int(_ip_raw) if _ip_raw else 100 * 1024
+            if _ip_cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            _ip_cap = 100 * 1024
+        _ip_bytes = len(prompt.encode("utf-8"))
+        if _ip_bytes > _ip_cap:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"prompt size {_ip_bytes} bytes exceeds "
+                    f"PRSM_MAX_INFERENCE_PROMPT_BYTES cap of "
+                    f"{_ip_cap}. Trim the prompt or have the "
+                    f"operator raise the cap."
+                ),
+            )
         model_id = body.get("model_id", "")
         if not model_id:
             raise HTTPException(status_code=400, detail="Missing 'model_id' field")
