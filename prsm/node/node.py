@@ -3076,8 +3076,13 @@ class PRSMNode:
         from prsm.compute.query_orchestrator.node_wiring import (
             is_query_orchestrator_enabled,
         )
+        # Sprint 173 — diagnostic state for /info. Reset on each
+        # call so a stale value never lingers across re-wiring.
+        self._query_orchestrator_state = "disabled"
+        self._query_orchestrator_error = None
         if not is_query_orchestrator_enabled():
             return None
+        self._query_orchestrator_state = "enabled_constructing"
 
         try:
             from prsm.compute.query_orchestrator import (
@@ -3149,8 +3154,40 @@ class PRSMNode:
                     "using 100"
                 )
                 _per_shard_default = 100
+            # Sprint 173 — load the canonical WASM executor binary
+            # from operator-supplied path. The SwarmDispatcherAdapter
+            # requires this binary at construction time (it dispatches
+            # the same binary across every shard; per-shard variation
+            # lives in the InstructionManifest). No canonical binary
+            # ships in this repo today; operators build their own per
+            # the Wasmtime runtime docs and point this env var at
+            # the result.
+            _wasm_path = os.environ.get(
+                "PRSM_WASM_EXECUTOR_PATH", "",
+            ).strip()
+            if not _wasm_path:
+                raise RuntimeError(
+                    "PRSM_WASM_EXECUTOR_PATH not set — QueryOrchestrator "
+                    "wiring requires an operator-supplied WASM executor "
+                    "binary for SwarmDispatcherAdapter. Build per the "
+                    "Wasmtime runtime docs and set the env var to the "
+                    ".wasm file path."
+                )
+            try:
+                with open(_wasm_path, "rb") as f:
+                    _wasm_binary = f.read()
+            except OSError as exc:
+                raise RuntimeError(
+                    f"PRSM_WASM_EXECUTOR_PATH points at unreadable file: "
+                    f"{_wasm_path!r}: {exc}"
+                )
+            if not _wasm_binary:
+                raise RuntimeError(
+                    f"PRSM_WASM_EXECUTOR_PATH binary is empty: {_wasm_path!r}"
+                )
             dispatcher = SwarmDispatcherAdapter(
                 agent_dispatcher=self.agent_dispatcher,
+                wasm_executor_binary=_wasm_binary,
                 per_shard_budget_ftns=_per_shard_default,
             )
             # AggregatorClient + beacon need a Foundation Safe address
@@ -3219,13 +3256,27 @@ class PRSMNode:
             logger.info(
                 "QueryOrchestrator wired (env-enabled). agent_forge live."
             )
+            self._query_orchestrator_state = "wired"
             return orchestrator
         except Exception as exc:  # noqa: BLE001
+            # Sprint 173 — log the FULL traceback so the operator
+            # can see the missing primitive immediately. Pre-fix
+            # the exception was logged as a single line which
+            # truncated useful chained-error context (e.g. which
+            # AttributeError on which sub-object).
+            import traceback as _tb
             logger.warning(
                 "QueryOrchestrator construction failed: %s — falling "
                 "back to agent_forge=None. (Operator must wire missing "
-                "primitive before re-enabling.)",
+                "primitive before re-enabling.)\nTraceback:\n%s",
                 exc,
+                _tb.format_exc(),
+            )
+            # Surface the failure reason on the node so /info can
+            # show it without requiring log-file scraping.
+            self._query_orchestrator_state = "construction_failed"
+            self._query_orchestrator_error = (
+                f"{type(exc).__name__}: {exc}"
             )
             return None
 

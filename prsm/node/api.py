@@ -4650,6 +4650,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         op_addr = getattr(node, "_operator_address", None)
         if op_addr:
             body["operator_address"] = op_addr
+        # Sprint 173 — surface whether QueryOrchestrator (agent_forge)
+        # is wired. Operators flipping PRSM_QUERY_ORCHESTRATOR_ENABLED=1
+        # need a quick check that the env var actually produced a
+        # wired adapter — vs silently falling back to None on a missing
+        # primitive. Boolean: True iff agent_forge is set + non-None.
+        body["agent_forge_wired"] = bool(getattr(node, "agent_forge", None))
+        # Diagnostic state + error reason (set by
+        # `_build_query_orchestrator_or_none` in node.py). Lets operators
+        # see WHY agent_forge_wired=False without scraping logs.
+        qo_state = getattr(node, "_query_orchestrator_state", None)
+        if qo_state:
+            body["query_orchestrator_state"] = qo_state
+        qo_err = getattr(node, "_query_orchestrator_error", None)
+        if qo_err:
+            body["query_orchestrator_error"] = qo_err
         try:
             from prsm.config.networks import (
                 get_network_config, _resolve_network_name,
