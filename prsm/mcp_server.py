@@ -1121,6 +1121,35 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_unstake",
+        description=(
+            "Request to unstake FTNS tokens. Backed by POST "
+            "/staking/unstake. Creates an unstake request that "
+            "becomes available for withdrawal after the unstaking "
+            "period (default 7 days). amount is optional — omit to "
+            "unstake the full stake balance. Use prsm_staking_status "
+            "first to find your stake_id."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "stake_id": {
+                    "type": "string",
+                    "description": "ID of the stake to unstake.",
+                },
+                "amount": {
+                    "type": "number",
+                    "description": (
+                        "Optional amount to unstake. Omit to unstake "
+                        "the full stake balance. Must be positive."
+                    ),
+                    "exclusiveMinimum": 0,
+                },
+            },
+            "required": ["stake_id"],
+        },
+    ),
+    Tool(
         name="prsm_subsystem_stats",
         description=(
             "Stats for a chosen operator subsystem. Backed by GET "
@@ -4095,6 +4124,56 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_unstake(arguments: Dict[str, Any]) -> str:
+    """Sprint 217 — request to unstake FTNS tokens.
+
+    Local-side validation: stake_id required, amount must be
+    positive + finite when provided. Body-guard middleware on
+    the api side catches Infinity at the wire layer too (sprint
+    201), but we validate locally for friendlier UX.
+    """
+    import math as _math
+    stake_id = (arguments.get("stake_id") or "").strip()
+    if not stake_id:
+        return "Missing required 'stake_id' (non-empty)."
+    body: Dict[str, Any] = {"stake_id": stake_id}
+    if "amount" in arguments and arguments["amount"] is not None:
+        raw_amt = arguments["amount"]
+        try:
+            amount = float(raw_amt)
+        except (TypeError, ValueError):
+            return (
+                f"amount must be a positive finite number; "
+                f"got {raw_amt!r}."
+            )
+        if not _math.isfinite(amount) or amount <= 0:
+            return f"amount must be a positive finite number; got {amount}."
+        body["amount"] = amount
+    try:
+        result = await _call_node_api("POST", "/staking/unstake", body)
+    except Exception as e:
+        return (
+            f"prsm_unstake failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "request_id" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not found" in detail.lower():
+            return f"Unstake refused: {detail}"
+        return f"Unstake refused: {detail}"
+    return (
+        f"Unstake requested.\n"
+        f"  request_id:    {result.get('request_id', '?')}\n"
+        f"  stake_id:      {result.get('stake_id', '?')}\n"
+        f"  amount:        {result.get('amount', '?')} FTNS\n"
+        f"  status:        {result.get('status', '?')}\n"
+        f"  requested_at:  {result.get('requested_at', '?')}\n"
+        f"  available_at:  {result.get('available_at', '?')}\n"
+        f"  Use prsm_unstake_finalize to withdraw when available_at "
+        f"is reached, or to cancel before then."
+    )
+
+
 _SUBSYSTEM_STATS_PATHS = {
     "settler": "/settler/stats",
     "storage": "/storage/stats",
@@ -4686,6 +4765,7 @@ TOOL_HANDLERS = {
     "prsm_agents": handle_prsm_agents,
     "prsm_staking_status": handle_prsm_staking_status,
     "prsm_subsystem_stats": handle_prsm_subsystem_stats,
+    "prsm_unstake": handle_prsm_unstake,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
