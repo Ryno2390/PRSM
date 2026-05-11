@@ -278,3 +278,67 @@ def test_apply_notice_503_when_filter_unwired():
         f"/admin/content-filter/from-notice/{e.notice_id}",
     )
     assert resp.status_code == 503
+
+
+# ── Sprint 274 — notice status transitions ───────────────
+
+
+def test_set_status_happy_path():
+    r = TakedownNoticeRing()
+    e = r.record(
+        target_cid="bafy1", sender="x",
+        jurisdiction="j", basis="b",
+    )
+    resp = _client(r).post(
+        f"/admin/takedown-notices/{e.notice_id}/status",
+        json={"status": "disputed"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["notice_id"] == e.notice_id
+    assert body["status"] == "disputed"
+    # Ring reflects it
+    assert r.get(e.notice_id).status == "disputed"
+
+
+def test_set_status_422_on_bad_status():
+    r = TakedownNoticeRing()
+    e = r.record(
+        target_cid="bafy1", sender="x",
+        jurisdiction="j", basis="b",
+    )
+    resp = _client(r).post(
+        f"/admin/takedown-notices/{e.notice_id}/status",
+        json={"status": "bogus"},
+    )
+    assert resp.status_code == 422
+
+
+def test_set_status_422_missing_status_field():
+    r = TakedownNoticeRing()
+    e = r.record(
+        target_cid="bafy1", sender="x",
+        jurisdiction="j", basis="b",
+    )
+    resp = _client(r).post(
+        f"/admin/takedown-notices/{e.notice_id}/status",
+        json={},
+    )
+    assert resp.status_code == 422
+
+
+def test_set_status_404_missing_notice():
+    r = TakedownNoticeRing()
+    resp = _client(r).post(
+        "/admin/takedown-notices/nonexistent/status",
+        json={"status": "expired"},
+    )
+    assert resp.status_code == 404
+
+
+def test_set_status_503_when_unwired():
+    resp = _client(None).post(
+        "/admin/takedown-notices/abc/status",
+        json={"status": "expired"},
+    )
+    assert resp.status_code == 503

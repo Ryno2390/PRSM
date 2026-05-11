@@ -5887,6 +5887,44 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             ),
         }
 
+    # ── Sprint 274 — notice status transitions ────────────
+    # General-purpose status mutation (vs sprint-273 bridge
+    # which is acknowledged-only with filter side effect).
+    # Used for disputed/expired transitions where the
+    # operator does NOT want to apply the notice but does
+    # want to update its lifecycle status.
+
+    @app.post(
+        "/admin/takedown-notices/{notice_id}/status",
+        tags=["admin"],
+    )
+    async def set_takedown_notice_status(
+        notice_id: str,
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, Any]:
+        ring = getattr(node, "_takedown_notice_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Takedown notice ring not initialized.",
+            )
+        status = body.get("status")
+        if not status:
+            raise HTTPException(
+                status_code=422,
+                detail="missing required field: status",
+            )
+        try:
+            updated = ring.set_status(notice_id, status)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        if updated is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no notice with id={notice_id!r}",
+            )
+        return updated.to_dict()
+
     @app.get(
         "/admin/takedown-notices/{notice_id}", tags=["admin"],
     )

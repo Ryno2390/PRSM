@@ -1354,8 +1354,18 @@ TOOLS = [
                     "type": "string",
                     "enum": [
                         "list", "lookup", "record",
-                        "apply_to_filter",
+                        "apply_to_filter", "set_status",
                     ],
+                },
+                "notice_status": {
+                    "type": "string",
+                    "enum": [
+                        "received", "acknowledged",
+                        "disputed", "expired",
+                    ],
+                    "description": (
+                        "New status for action=set_status."
+                    ),
                 },
                 "limit": {
                     "type": "integer",
@@ -5607,7 +5617,10 @@ async def handle_prsm_content_filter(
 
 
 _TAKEDOWN_NOTICE_ACTIONS = {
-    "list", "lookup", "record", "apply_to_filter",
+    "list", "lookup", "record", "apply_to_filter", "set_status",
+}
+_TAKEDOWN_NOTICE_VALID_STATUSES = {
+    "received", "acknowledged", "disputed", "expired",
 }
 
 
@@ -5712,6 +5725,51 @@ async def handle_prsm_takedown_notices(
             f"  basis:        {result.get('basis', '?')}\n"
             f"  notice_text:\n"
             f"    {result.get('notice_text', '')[:1024]}"
+        )
+
+    if action == "set_status":
+        notice_id = (arguments.get("notice_id") or "").strip()
+        if not notice_id:
+            return "set_status requires 'notice_id'."
+        new_status = (
+            arguments.get("notice_status") or ""
+        ).strip().lower()
+        if not new_status:
+            return (
+                f"set_status requires 'notice_status' "
+                f"(must be one of "
+                f"{sorted(_TAKEDOWN_NOTICE_VALID_STATUSES)})."
+            )
+        if new_status not in _TAKEDOWN_NOTICE_VALID_STATUSES:
+            return (
+                f"notice_status must be one of "
+                f"{sorted(_TAKEDOWN_NOTICE_VALID_STATUSES)}; "
+                f"got {new_status!r}."
+            )
+        try:
+            result = await _call_node_api(
+                "POST",
+                f"/admin/takedown-notices/{notice_id}/status",
+                {"status": new_status},
+            )
+        except Exception as e:
+            return (
+                f"prsm_takedown_notices failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "status" not in result:
+            detail = result.get("detail", "unknown error")
+            if "no notice with id" in str(detail).lower():
+                return f"No notice with id={notice_id!r}."
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Takedown notice ring not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"set_status refused: {detail}"
+        return (
+            f"Notice {notice_id} status set to "
+            f"{result['status']!s}."
         )
 
     if action == "apply_to_filter":

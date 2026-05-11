@@ -283,3 +283,76 @@ class TestApplyToFilter:
                 "notice_id": "missing",
             })
         assert "no notice" in r.lower()
+
+
+# Sprint 274 — set_status MCP action
+
+
+class TestSetStatus:
+    @pytest.mark.asyncio
+    async def test_requires_notice_id(self):
+        r = await handle_prsm_takedown_notices({
+            "action": "set_status",
+            "notice_status": "disputed",
+        })
+        assert "notice_id" in r
+
+    @pytest.mark.asyncio
+    async def test_requires_notice_status(self):
+        r = await handle_prsm_takedown_notices({
+            "action": "set_status",
+            "notice_id": "abc",
+        })
+        assert "notice_status" in r
+
+    @pytest.mark.asyncio
+    async def test_rejects_bogus_status_client_side(self):
+        r = await handle_prsm_takedown_notices({
+            "action": "set_status",
+            "notice_id": "abc",
+            "notice_status": "explode",
+        })
+        assert "must be" in r.lower()
+
+    @pytest.mark.asyncio
+    async def test_happy_path(self):
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            new=AsyncMock(return_value={
+                "notice_id": "abc-123",
+                "status": "disputed",
+                "target_cid": "bafy1",
+                "timestamp": 100.0,
+                "sender": "x",
+                "jurisdiction": "j",
+                "basis": "b",
+                "notice_text": "",
+            }),
+        ) as mock_call:
+            r = await handle_prsm_takedown_notices({
+                "action": "set_status",
+                "notice_id": "abc-123",
+                "notice_status": "disputed",
+            })
+        call_args = mock_call.await_args[0]
+        assert call_args[0] == "POST"
+        assert call_args[1] == (
+            "/admin/takedown-notices/abc-123/status"
+        )
+        assert call_args[2] == {"status": "disputed"}
+        assert "disputed" in r
+
+    @pytest.mark.asyncio
+    async def test_missing_notice_message(self):
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            new=AsyncMock(return_value={
+                "detail": "no notice with id='missing'",
+            }),
+        ):
+            r = await handle_prsm_takedown_notices({
+                "action": "set_status",
+                "notice_id": "missing",
+                "notice_status": "expired",
+            })
+        assert "no notice" in r.lower()
