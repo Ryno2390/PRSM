@@ -4120,10 +4120,43 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             ContentRetrieveResponse with status and data (base64-encoded) or error
         """
         import base64
-        
+
+        # Sprint 203 — bound timeout. Pre-fix Infinity / NaN /
+        # negative / 999999 all passed straight through to
+        # request_content, tying up a worker indefinitely
+        # (slow-loris DoS). Body-guard middleware doesn't catch
+        # query params. Cap [0.1, PRSM_MAX_RETRIEVE_TIMEOUT_SEC]
+        # (default 300s = 5min).
+        import math as _math
+        _to_cap_raw = os.environ.get(
+            "PRSM_MAX_RETRIEVE_TIMEOUT_SEC", "",
+        ).strip()
+        try:
+            _to_cap = float(_to_cap_raw) if _to_cap_raw else 300.0
+            if _to_cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            _to_cap = 300.0
+        if not _math.isfinite(timeout):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"timeout must be a finite positive number; "
+                    f"got {timeout!r}."
+                ),
+            )
+        if timeout < 0.1 or timeout > _to_cap:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"timeout must be in [0.1, {_to_cap}] seconds; "
+                    f"got {timeout}."
+                ),
+            )
+
         if not node.content_provider:
             raise HTTPException(status_code=503, detail="Content provider not initialized")
-        
+
         # Get provider stats before retrieval to determine providers tried
         stats_before = node.content_provider.get_stats()
         
