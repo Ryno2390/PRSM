@@ -38,7 +38,16 @@ class JobSubmission(BaseModel):
     """Request body for submitting a compute job."""
     job_type: str  # inference, embedding, benchmark
     payload: Dict[str, Any] = {}
-    ftns_budget: float = 1.0
+    # Sprint 204 — bound ftns_budget. Pre-fix the bare `float =
+    # 1.0` accepted negative, zero, and absurdly-large values that
+    # then propagated to compute_requester.submit_job with
+    # undefined-behavior downstream. Upper bound is a sane absolute
+    # ceiling; PRSM_MAX_FTNS_PER_JOB on /forge is the operator
+    # cost-control knob, this is just garbage-rejection.
+    ftns_budget: float = Field(
+        default=1.0, gt=0, le=1e12, allow_inf_nan=False,
+        description="FTNS budget for the job (must be > 0)",
+    )
 
 
 class ResourceUpdateRequest(BaseModel):
