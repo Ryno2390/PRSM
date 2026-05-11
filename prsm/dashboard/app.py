@@ -207,6 +207,36 @@ class DashboardServer:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+        # Sprint 202 — mirror the api.py sprint-201 Inf/NaN body
+        # guard so the dashboard is self-defended when run
+        # standalone (mounted-under-api covers production via parent
+        # middleware, but tests + some deployments hit
+        # DashboardServer directly). Pre-fix /api/ftns/transfer with
+        # amount=Infinity reached signed_transfer; /api/jobs/submit
+        # with ftns_budget=NaN crashed with 500.
+        import re as _re_inf
+        _INF_NAN_RE = _re_inf.compile(
+            rb'(?<![\w"])(-?Infinity|NaN)(?![\w"])',
+        )
+        from starlette.responses import JSONResponse as _JSON
+
+        @self.app.middleware("http")
+        async def inf_nan_body_guard(request, call_next):
+            if request.method in ("POST", "PUT", "PATCH"):
+                ctype = request.headers.get("content-type", "")
+                if "json" in ctype.lower():
+                    body = await request.body()
+                    if body and _INF_NAN_RE.search(body):
+                        return _JSON(
+                            {"detail": (
+                                "Request body contains NaN or "
+                                "Infinity literal; only finite "
+                                "numbers are accepted."
+                            )},
+                            status_code=422,
+                        )
+            return await call_next(request)
     
     def _setup_routes(self):
         """Setup all API routes for the dashboard."""
