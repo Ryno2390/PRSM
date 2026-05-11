@@ -1121,6 +1121,20 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_info",
+        description=(
+            "Render static node metadata: node_id, api_version, "
+            "network, chain_id, rpc_host, operator_address, "
+            "agent_forge_wired, query_orchestrator state/error, "
+            "and the full canonical_addresses dict (FTNS token + "
+            "ProvenanceRegistry V1/V2 + RoyaltyDistributor + "
+            "Foundation Safe + audit-bundle + Phase 7/8 contracts). "
+            "Useful for verifying which chain/contracts a node is "
+            "pinned to without parsing /health/detailed."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_cancel_job",
         description=(
             "Cancel a submitted /compute/forge job by job_id. "
@@ -3961,6 +3975,51 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_info(arguments: Dict[str, Any]) -> str:
+    """Sprint 211 — render GET /info static node metadata.
+
+    Useful for verifying which chain/contracts the node is pinned
+    to without parsing /health/detailed."""
+    try:
+        result = await _call_node_api("GET", "/info")
+    except Exception as e:
+        return (
+            f"prsm_info failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    lines = ["PRSM Node Info:"]
+    lines.append(f"  node_id:     {result.get('node_id', '?')}")
+    lines.append(f"  api_version: {result.get('api_version', '?')}")
+    if "network" in result:
+        lines.append(f"  network:     {result['network']}")
+    if "chain_id" in result:
+        lines.append(f"  chain_id:    {result['chain_id']}")
+    if "rpc_host" in result:
+        lines.append(f"  rpc_host:    {result['rpc_host']}")
+    if "operator_address" in result:
+        lines.append(
+            f"  operator:    {result['operator_address']}"
+        )
+    if "agent_forge_wired" in result:
+        lines.append(
+            f"  agent_forge_wired: {result['agent_forge_wired']}"
+        )
+    if "query_orchestrator_state" in result:
+        lines.append(
+            f"  qo_state:    {result['query_orchestrator_state']}"
+        )
+    if "query_orchestrator_error" in result:
+        lines.append(
+            f"  qo_error:    {result['query_orchestrator_error']}"
+        )
+    canonical = result.get("canonical_addresses") or {}
+    if canonical:
+        lines.append("  canonical_addresses:")
+        for fld, addr in canonical.items():
+            lines.append(f"    {fld:<26} {addr}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_cancel_job(arguments: Dict[str, Any]) -> str:
     """Sprint 210 — cancel a submitted job by job_id via
     POST /compute/cancel/{job_id}. Marks history CANCELLED and
@@ -4260,6 +4319,7 @@ TOOL_HANDLERS = {
     "prsm_jobs_list": handle_prsm_jobs_list,
     "prsm_status_stream": handle_prsm_status_stream,
     "prsm_cancel_job": handle_prsm_cancel_job,
+    "prsm_info": handle_prsm_info,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
 }
