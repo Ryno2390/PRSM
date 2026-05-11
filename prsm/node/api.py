@@ -5863,7 +5863,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # Infinity-bypass on Pydantic gt=0 (NaN was already rejected
         # by gt=0; Infinity passed because `inf > 0` is True).
         amount: float = Field(
-            ..., gt=0, allow_inf_nan=False,
+            ..., gt=0, le=1e12, allow_inf_nan=False,
             description="Amount of FTNS to stake",
         )
         stake_type: str = Field(default="general", description="Type of staking: governance, validation, compute, storage, liquidity, general")
@@ -5883,7 +5883,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """Request body for unstaking FTNS tokens."""
         stake_id: str = Field(..., description="ID of the stake to unstake")
         amount: Optional[float] = Field(
-            default=None, gt=0, allow_inf_nan=False,
+            default=None, gt=0, le=1e12, allow_inf_nan=False,
             description="Amount to unstake (None = full stake)",
         )
 
@@ -6752,7 +6752,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     class BridgeDepositRequest(BaseModel):
         """Request body for bridge deposit operation."""
         amount: float = Field(
-            ..., gt=0, allow_inf_nan=False,
+            ..., gt=0, le=1e12, allow_inf_nan=False,
             description="Amount of FTNS to deposit (in token units)",
         )
         chain_address: str = Field(..., min_length=1, description="Destination on-chain address")
@@ -6764,7 +6764,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     class BridgeWithdrawRequest(BaseModel):
         """Request body for bridge withdraw operation."""
         amount: float = Field(
-            ..., gt=0, allow_inf_nan=False,
+            ..., gt=0, le=1e12, allow_inf_nan=False,
             description="Amount of FTNS to withdraw (in token units)",
         )
         chain_address: str = Field(..., min_length=1, description="Source on-chain address")
