@@ -367,6 +367,7 @@ class JobHistoryStore:
         status_filter: Optional[JobStatus] = None,
         limit: Optional[int] = None,
         offset: int = 0,
+        route_filter: Optional[str] = None,
     ) -> list:
         """Enumerate records most-recent-first (by started_at DESC),
         with optional status filter + pagination. Used by
@@ -375,10 +376,17 @@ class JobHistoryStore:
 
         Sort by started_at (not LRU touch order) so a get() doesn't
         re-order list output unexpectedly.
+
+        Sprint 260 — ``route_filter`` matches ``record.route``
+        exactly. Used by operators to scope queries to a single
+        compute path (forge | inference | inference_stream |
+        qo_swarm | direct_llm | swarm).
         """
         records = list(self._records.values())
         if status_filter is not None:
             records = [r for r in records if r.status == status_filter]
+        if route_filter is not None:
+            records = [r for r in records if r.route == route_filter]
         records.sort(key=lambda r: r.started_at, reverse=True)
         if offset:
             records = records[offset:]
@@ -390,12 +398,15 @@ class JobHistoryStore:
         self,
         *,
         status_filter: Optional[JobStatus] = None,
+        route_filter: Optional[str] = None,
     ) -> int:
         """Total number of records matching the filter — for
         pagination's `total` field. Cheaper than ``len(list(...))``
         because it skips sort + slice."""
-        if status_filter is None:
+        if status_filter is None and route_filter is None:
             return len(self._records)
         return sum(
-            1 for r in self._records.values() if r.status == status_filter
+            1 for r in self._records.values()
+            if (status_filter is None or r.status == status_filter)
+            and (route_filter is None or r.route == route_filter)
         )

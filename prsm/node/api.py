@@ -2589,6 +2589,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         status: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        route: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Paginated operator-side job list. Backs the
         ``prsm_jobs_list`` MCP tool.
@@ -2596,6 +2597,9 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         Query params:
           - status: optional JobStatus filter (in_progress |
             completed | failed | cancelled).
+          - route: optional route filter (forge | inference |
+            inference_stream | qo_swarm | direct_llm | swarm).
+            Sprint 260 — operators scope to a single compute path.
           - limit: page size (1..100, default 50).
           - offset: pagination offset, default 0.
 
@@ -2642,10 +2646,22 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     ),
                 )
 
+        # Sprint 260 — route validation (sanity-only; doesn't
+        # gate, since /compute/forge legacy paths emit route
+        # values that aren't enumerable here).
+        if route is not None and len(route) > 64:
+            raise HTTPException(
+                status_code=422,
+                detail=f"route length must be <= 64, got {len(route)}",
+            )
+
         records = history.list(
             status_filter=status_filter, limit=limit, offset=offset,
+            route_filter=route,
         )
-        total = history.count(status_filter=status_filter)
+        total = history.count(
+            status_filter=status_filter, route_filter=route,
+        )
         return {
             "jobs": [r.to_dict() for r in records],
             "total": total,

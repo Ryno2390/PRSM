@@ -1087,12 +1087,17 @@ TOOLS = [
     Tool(
         name="prsm_jobs_list",
         description=(
-            "List recent /compute/forge jobs from JobHistoryStore. "
-            "Backed by GET /compute/jobs. Most-recent-first by "
-            "started_at. Optional status filter (in_progress | "
-            "completed | failed | cancelled). Pagination via "
-            "offset + limit (max 100/page). Useful for operator "
-            "dashboards + 'find my last failed job' workflows."
+            "List recent compute jobs from JobHistoryStore — "
+            "covers /compute/forge, /compute/inference, and "
+            "/compute/inference/stream paths. Backed by GET "
+            "/compute/jobs. Most-recent-first by started_at. "
+            "Optional status filter (in_progress | completed | "
+            "failed | cancelled). Optional route filter scopes to "
+            "a single compute path (forge | inference | "
+            "inference_stream | qo_swarm | direct_llm | swarm). "
+            "Pagination via offset + limit (max 100/page). Useful "
+            "for operator dashboards + 'find my last failed job' "
+            "workflows."
         ),
         inputSchema={
             "type": "object",
@@ -1103,6 +1108,16 @@ TOOLS = [
                         "in_progress", "completed", "failed", "cancelled",
                     ],
                     "description": "Optional filter by job status.",
+                },
+                "route": {
+                    "type": "string",
+                    "description": (
+                        "Optional filter by compute route. "
+                        "Common values: forge | inference | "
+                        "inference_stream | qo_swarm | direct_llm "
+                        "| swarm."
+                    ),
+                    "maxLength": 64,
                 },
                 "limit": {
                     "type": "integer",
@@ -6555,11 +6570,15 @@ async def handle_prsm_cancel_job(arguments: Dict[str, Any]) -> str:
 
 
 async def handle_prsm_jobs_list(arguments: Dict[str, Any]) -> str:
-    """Handle prsm_jobs_list tool call: enumerate /compute/forge
-    jobs with optional filter + pagination."""
+    """Handle prsm_jobs_list tool call: enumerate /compute/forge,
+    /compute/inference, and /compute/inference/stream jobs with
+    optional filter + pagination. Sprint 260 — `route` filter
+    scopes results to a single compute path."""
     params = []
     if "status" in arguments:
         params.append(f"status={arguments['status']}")
+    if "route" in arguments and arguments["route"]:
+        params.append(f"route={arguments['route']}")
     if "limit" in arguments:
         params.append(f"limit={arguments['limit']}")
     else:
