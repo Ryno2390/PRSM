@@ -1243,6 +1243,45 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_royalty_dispatch_history",
+        description=(
+            "Audit trail for the on-chain content-access royalty "
+            "dispatcher (sprint 248 activation block). One entry "
+            "per shard per forge query when "
+            "PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1. Status is one "
+            "of: sent / skipped_no_record / skipped_bad_hash / "
+            "failed. Optional status + job_id filters. Backed by "
+            "GET /admin/royalty-dispatch-history."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Page size (1..1000). Default 20.",
+                    "minimum": 1, "maximum": 1000, "default": 20,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Pagination offset. Default 0.",
+                    "minimum": 0, "default": 0,
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "sent", "skipped_no_record",
+                        "skipped_bad_hash", "failed",
+                    ],
+                    "description": "Optional status filter.",
+                },
+                "job_id": {
+                    "type": "string",
+                    "description": "Optional job_id filter.",
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_receipt",
         description=(
             "Fetch a stored InferenceReceipt by job_id. Backed by "
@@ -5014,6 +5053,81 @@ async def handle_prsm_forge_quote(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_royalty_dispatch_history(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 249 — render the on-chain content-royalty dispatch
+    audit ring. Backed by GET /admin/royalty-dispatch-history."""
+    raw_limit = arguments.get("limit", 20)
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        return f"limit must be an integer; got {raw_limit!r}."
+    if limit < 1 or limit > 1000:
+        return f"limit must be in [1, 1000]; got {limit}."
+    raw_offset = arguments.get("offset", 0)
+    try:
+        offset = int(raw_offset)
+    except (TypeError, ValueError):
+        return f"offset must be an integer; got {raw_offset!r}."
+    if offset < 0:
+        return f"offset must be >= 0; got {offset}."
+
+    parts = [f"limit={limit}", f"offset={offset}"]
+    if arguments.get("status"):
+        parts.append(f"status={arguments['status']}")
+    if arguments.get("job_id"):
+        parts.append(f"job_id={arguments['job_id']}")
+    path = (
+        "/admin/royalty-dispatch-history?" + "&".join(parts)
+    )
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"prsm_royalty_dispatch_history failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "entries" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Royalty dispatch ring not wired on this node.\n"
+                f"  Detail: {detail}\n"
+                f"  Enable on-chain dispatch via "
+                f"PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1."
+            )
+        return f"prsm_royalty_dispatch_history refused: {detail}"
+    entries = result.get("entries") or []
+    total = result.get("total", len(entries))
+    if not entries:
+        return (
+            f"No royalty dispatch outcomes recorded "
+            f"(total={total}).\n"
+            f"  Enable on-chain dispatch via "
+            f"PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1, then run a "
+            f"forge query."
+        )
+    lines = [
+        f"PRSM On-Chain Royalty Dispatch History "
+        f"(showing {offset+1}–{offset+len(entries)} of {total}):",
+    ]
+    for e in entries:
+        cid_disp = (e.get("cid") or "?")[:14]
+        tx_disp = (e.get("tx_hash") or "—")[:14]
+        err = e.get("error")
+        err_part = f"  err={err}" if err else ""
+        lines.append(
+            f"  job={e.get('job_id', '?')[:14]:<14}  "
+            f"cid={cid_disp:<14}  "
+            f"status={e.get('status', '?'):<22}  "
+            f"tx={tx_disp:<14}  "
+            f"wei={e.get('gross_wei', 0)}"
+            f"{err_part}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_receipt(arguments: Dict[str, Any]) -> str:
     """Sprint 242 — fetch a stored InferenceReceipt by job_id.
 
@@ -6617,6 +6731,7 @@ TOOL_HANDLERS = {
     "prsm_pubkey": handle_prsm_pubkey,
     "prsm_verify_receipt": handle_prsm_verify_receipt,
     "prsm_receipt": handle_prsm_receipt,
+    "prsm_royalty_dispatch_history": handle_prsm_royalty_dispatch_history,
     "prsm_forge_quote": handle_prsm_forge_quote,
     "prsm_inference_quote": handle_prsm_inference_quote,
     "prsm_settler_admin": handle_prsm_settler_admin,

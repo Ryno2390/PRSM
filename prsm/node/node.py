@@ -2120,6 +2120,34 @@ class PRSMNode:
             )
             self._job_history = None
 
+        # Sprint 249 — RoyaltyDispatchRing for the on-chain
+        # content-royalty audit trail (sprint 248). Opt-in
+        # filesystem persistence via PRSM_ROYALTY_DISPATCH_LOG_DIR.
+        try:
+            import os as _os
+            from pathlib import Path as _Path
+            from prsm.node.royalty_dispatch_log import (
+                RoyaltyDispatchRing,
+            )
+            persist_raw = _os.getenv(
+                "PRSM_ROYALTY_DISPATCH_LOG_DIR", "",
+            ).strip()
+            persist_dir = _Path(persist_raw) if persist_raw else None
+            self._royalty_dispatch_ring = RoyaltyDispatchRing(
+                persist_dir=persist_dir,
+            )
+            logger.info(
+                "RoyaltyDispatchRing wired%s",
+                f", persisted to {persist_dir}" if persist_dir else "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "RoyaltyDispatchRing construction failed: %s — "
+                "/admin/royalty-dispatch-history will 503.",
+                exc,
+            )
+            self._royalty_dispatch_ring = None
+
         # Sprint 242 — ReceiptStore for signed InferenceReceipts.
         # Opt-in filesystem persistence via PRSM_RECEIPT_STORE_DIR.
         # Powers GET /compute/receipt/{job_id} for post-hoc audit.

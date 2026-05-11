@@ -2182,6 +2182,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                         job_id[:8], _sent, _skipped,
                                         _failed,
                                     )
+                                    # Sprint 249 — append each
+                                    # per-shard outcome to the audit
+                                    # ring so operators can inspect
+                                    # via /admin/royalty-dispatch-
+                                    # history. Best-effort: ring
+                                    # failures stay invisible.
+                                    _ring = getattr(
+                                        node,
+                                        "_royalty_dispatch_ring",
+                                        None,
+                                    )
+                                    if _ring is not None:
+                                        for _r in _royalty_results:
+                                            try:
+                                                _ring.append(
+                                                    job_id=job_id,
+                                                    cid=_r.cid,
+                                                    status=_r.status,
+                                                    tx_hash=_r.tx_hash,
+                                                    gross_wei=_wei,
+                                                    error=_r.error,
+                                                )
+                                            except Exception:  # noqa
+                                                pass
                         except Exception as exc:  # noqa: BLE001
                             logger.warning(
                                 "on-chain content royalty dispatch "
@@ -5148,6 +5172,54 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         entries = ring.recent(
             limit=limit, offset=offset, provider=provider,
+        )
+        return {
+            "entries": [e.to_dict() for e in entries],
+            "total": ring.count(),
+            "offset": offset,
+            "limit": limit,
+        }
+
+    @app.get("/admin/royalty-dispatch-history")
+    async def get_royalty_dispatch_history(
+        limit: int = 50,
+        offset: int = 0,
+        status: Optional[str] = None,
+        job_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Recent on-chain content-royalty dispatch outcomes
+        (sprint 249 audit ring). Each entry: timestamp, job_id,
+        cid, status (sent | skipped_no_record | skipped_bad_hash
+        | failed), tx_hash, gross_wei, error. Operators verify
+        their PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1 path is
+        actually firing distribute_royalty transactions.
+
+        Status:
+          503 — ring not wired
+          422 — limit out of [1, 1000] OR offset < 0
+          200 — {entries, total, offset, limit}
+        """
+        if limit <= 0 or limit > 1000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 1000], got {limit}",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0, got {offset}",
+            )
+        ring = getattr(node, "_royalty_dispatch_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Royalty dispatch ring not initialized."
+                ),
+            )
+        entries = ring.recent(
+            limit=limit, offset=offset,
+            status=status, job_id=job_id,
         )
         return {
             "entries": [e.to_dict() for e in entries],
