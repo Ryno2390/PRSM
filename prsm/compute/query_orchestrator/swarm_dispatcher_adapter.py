@@ -265,15 +265,42 @@ class SwarmDispatcherAdapter:
             Defaults to 0.0 — the aggregator's sum_privacy_budgets
             ceiling check is permissive when no budget is reported.
         """
+        # Sprint 176 — derive source_agent_pubkey with priority:
+        #   1. result["source_agent_pubkey"]: explicit 32-byte raw
+        #      bytes from a dispatcher that surfaces the agent's
+        #      signing key directly.
+        #   2. result["provider_public_key"]: base64-encoded
+        #      Ed25519 pubkey from `AgentExecutor` (the canonical
+        #      v1 path — same as source_agent_pubkey since the
+        #      provider IS the source agent in Phase 3).
+        #   3. 32 zero bytes — fail-loud default; aggregator-side
+        #      signature verification will reject.
+        # Pre-sprint-176 only path (1) was honored; path (2) was
+        # the v1 placeholder gap from the wiring-complete MEMORY
+        # entry's deferred-followups list.
+        _pubkey_raw = result.get("source_agent_pubkey")
+        if _pubkey_raw is None:
+            _b64 = result.get("provider_public_key")
+            if _b64:
+                try:
+                    import base64 as _b64mod
+                    _pubkey_raw = _b64mod.b64decode(_b64)
+                except (ValueError, TypeError):
+                    _pubkey_raw = b"\x00" * 32
+            else:
+                _pubkey_raw = b"\x00" * 32
+        # Defensive: enforce 32-byte width.
+        _pubkey_raw = bytes(_pubkey_raw)
+        if len(_pubkey_raw) != 32:
+            _pubkey_raw = b"\x00" * 32
+
         return PartialResult(
             shard_cid=shard.cid,
             payload=result["payload"],
             agent_signature=result["agent_signature"],
             creator_id=shard.creator_id,
             dp_noise_applied=bool(result.get("dp_noise_applied", False)),
-            source_agent_pubkey=bytes(
-                result.get("source_agent_pubkey", b"\x00" * 32)
-            ),
+            source_agent_pubkey=_pubkey_raw,
             privacy_budget_consumed=float(
                 result.get("privacy_budget_consumed", 0.0)
             ),
