@@ -3154,36 +3154,53 @@ class PRSMNode:
                     "using 100"
                 )
                 _per_shard_default = 100
-            # Sprint 173 — load the canonical WASM executor binary
-            # from operator-supplied path. The SwarmDispatcherAdapter
-            # requires this binary at construction time (it dispatches
-            # the same binary across every shard; per-shard variation
-            # lives in the InstructionManifest). No canonical binary
-            # ships in this repo today; operators build their own per
-            # the Wasmtime runtime docs and point this env var at
-            # the result.
+            # Sprint 173 + 174 — load the WASM executor binary.
+            # Priority:
+            #   1. PRSM_WASM_EXECUTOR_PATH env (operator-supplied custom
+            #      executor — required for production query execution)
+            #   2. Bundled minimal stub at
+            #      `prsm/compute/wasm/binaries/minimal_executor.wasm`
+            #      (smoke-test only — exports `run` → i32(42), does NOT
+            #      interpret InstructionManifest)
+            #
+            # Sprint 174 added the bundled fallback so a fresh node can
+            # construct SwarmDispatcherAdapter for dispatch-pipeline
+            # validation without first building a real executor.
+            # Production deployments MUST supply a real binary via the
+            # env var; the stub returns a fixed value for any input.
             _wasm_path = os.environ.get(
                 "PRSM_WASM_EXECUTOR_PATH", "",
             ).strip()
-            if not _wasm_path:
-                raise RuntimeError(
-                    "PRSM_WASM_EXECUTOR_PATH not set — QueryOrchestrator "
-                    "wiring requires an operator-supplied WASM executor "
-                    "binary for SwarmDispatcherAdapter. Build per the "
-                    "Wasmtime runtime docs and set the env var to the "
-                    ".wasm file path."
+            if _wasm_path:
+                try:
+                    with open(_wasm_path, "rb") as f:
+                        _wasm_binary = f.read()
+                except OSError as exc:
+                    raise RuntimeError(
+                        f"PRSM_WASM_EXECUTOR_PATH points at unreadable "
+                        f"file: {_wasm_path!r}: {exc}"
+                    )
+                if not _wasm_binary:
+                    raise RuntimeError(
+                        f"PRSM_WASM_EXECUTOR_PATH binary is empty: "
+                        f"{_wasm_path!r}"
+                    )
+                logger.info(
+                    "QueryOrchestrator: using operator-supplied WASM "
+                    "executor from %s (%d bytes)",
+                    _wasm_path, len(_wasm_binary),
                 )
-            try:
-                with open(_wasm_path, "rb") as f:
-                    _wasm_binary = f.read()
-            except OSError as exc:
-                raise RuntimeError(
-                    f"PRSM_WASM_EXECUTOR_PATH points at unreadable file: "
-                    f"{_wasm_path!r}: {exc}"
+            else:
+                from prsm.compute.wasm.binaries import (
+                    load_minimal_executor,
                 )
-            if not _wasm_binary:
-                raise RuntimeError(
-                    f"PRSM_WASM_EXECUTOR_PATH binary is empty: {_wasm_path!r}"
+                _wasm_binary = load_minimal_executor()
+                logger.warning(
+                    "QueryOrchestrator: using bundled MINIMAL executor "
+                    "stub (%d bytes) — dispatch pipeline runs but query "
+                    "execution returns the stub's fixed value. Set "
+                    "PRSM_WASM_EXECUTOR_PATH for production.",
+                    len(_wasm_binary),
                 )
             dispatcher = SwarmDispatcherAdapter(
                 agent_dispatcher=self.agent_dispatcher,
