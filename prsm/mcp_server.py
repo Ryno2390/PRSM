@@ -3097,9 +3097,21 @@ async def handle_prsm_privacy_status(arguments: Dict[str, Any]) -> str:
     if spends:
         lines.append("  Recent spends:")
         for s in spends[-5:]:
+            # Sprint 263 — surface job_id alongside operation +
+            # model_id. Pre-fix the renderer showed model_id but
+            # the field structurally contained the job_id due to
+            # an api.py arg mis-binding (now fixed).
+            jid = s.get("job_id") or ""
+            mid = s.get("model_id") or ""
+            extras = []
+            if jid:
+                extras.append(f"job={jid[:14]}")
+            if mid:
+                extras.append(f"model={mid}")
+            extras_str = "  " + "  ".join(extras) if extras else ""
             lines.append(
-                f"    - {s.get('operation', '?')}  ε={s.get('epsilon', 0):.3f}  "
-                f"model={s.get('model_id', '') or '(none)'}"
+                f"    - {s.get('operation', '?')}  "
+                f"ε={s.get('epsilon', 0):.3f}{extras_str}"
             )
     return "\n".join(lines)
 

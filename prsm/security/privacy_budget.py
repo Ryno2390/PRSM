@@ -20,6 +20,11 @@ class PrivacySpend:
     """A single privacy budget expenditure."""
     epsilon: float
     operation: str
+    # Sprint 263 — added job_id field. Pre-fix the 3 record_spend
+    # callsites in api.py passed the job_id positionally where
+    # model_id was expected, so the audit log was structurally
+    # confused (model_id contained job_id; actual model_id lost).
+    job_id: str = ""
     model_id: str = ""
     timestamp: float = field(default_factory=time.time)
 
@@ -42,8 +47,19 @@ class PrivacyBudgetTracker:
     def can_spend(self, epsilon: float) -> bool:
         return self.total_spent + epsilon <= self.max_epsilon
 
-    def record_spend(self, epsilon: float, operation: str, model_id: str = "") -> bool:
+    def record_spend(
+        self,
+        epsilon: float,
+        operation: str,
+        job_id: str = "",
+        model_id: str = "",
+    ) -> bool:
         """Record a privacy spend. Returns False if would exceed budget.
+
+        Sprint 263 — third positional arg is now ``job_id`` (was
+        ``model_id``, which collided with how api.py callers actually
+        pass it). ``model_id`` keyword preserved for sites that
+        legitimately want to record the model.
 
         Rejects non-finite (NaN / +inf / -inf) and non-positive ε before
         the budget check. The non-positive guard is load-bearing: a
@@ -65,6 +81,7 @@ class PrivacyBudgetTracker:
         self._spends.append(PrivacySpend(
             epsilon=epsilon,
             operation=operation,
+            job_id=job_id,
             model_id=model_id,
         ))
         return True
@@ -76,7 +93,13 @@ class PrivacyBudgetTracker:
             "remaining": self.remaining,
             "num_operations": len(self._spends),
             "spends": [
-                {"epsilon": s.epsilon, "operation": s.operation, "model_id": s.model_id}
+                {
+                    "epsilon": s.epsilon,
+                    "operation": s.operation,
+                    "job_id": s.job_id,
+                    "model_id": s.model_id,
+                    "timestamp": s.timestamp,
+                }
                 for s in self._spends[-20:]  # Last 20
             ],
         }

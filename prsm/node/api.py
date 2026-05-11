@@ -263,6 +263,7 @@ async def _settle_streaming_escrow(
         try:
             node.privacy_budget.record_spend(
                 result.receipt.epsilon_spent, "inference", job_id,
+                model_id=getattr(request, "model_id", ""),
             )
         except Exception as e:  # noqa: BLE001
             logger.warning(
@@ -3536,6 +3537,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                         receipt.epsilon_spent,
                         "inference",
                         job_id,
+                        model_id=request.model_id,
                     )
                 except Exception as e:
                     logger.warning(f"Privacy budget tracking failed: {e}")
