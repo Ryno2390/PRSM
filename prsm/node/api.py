@@ -1282,8 +1282,36 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         prompt = body.get("prompt", "")
         model = body.get("model", "nwtn")
-        timeout = float(body.get("timeout", 120.0))
-        budget = float(body.get("budget", 0.0))
+        # Sprint 196 — int/float casts were uncaught → 500 on
+        # non-numeric input. Also no bounds: negative timeout
+        # silently accepted (0 effective), negative budget silently
+        # treated as 0 (free query) — operator-confusing.
+        _raw_to = body.get("timeout", 120.0)
+        try:
+            timeout = float(_raw_to)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=422,
+                detail=f"timeout must be a positive number; got {_raw_to!r}.",
+            )
+        if timeout <= 0 or timeout > 3600:
+            raise HTTPException(
+                status_code=422,
+                detail=f"timeout must be in (0, 3600]; got {timeout}.",
+            )
+        _raw_b = body.get("budget", 0.0)
+        try:
+            budget = float(_raw_b)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=422,
+                detail=f"budget must be a non-negative number; got {_raw_b!r}.",
+            )
+        if budget < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"budget must be >= 0; got {budget}.",
+            )
 
         from prsm.node.compute_provider import JobType, ComputeJob
 
@@ -3584,8 +3612,38 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         dataset_id = body.get("dataset_id", "")
         title = body.get("title", dataset_id)
         content_b64 = body.get("content_b64", "")
-        shard_count = int(body.get("shard_count", 4))
-        royalty_rate = float(body.get("royalty_rate", 0.01))
+        # Sprint 196 — int/float casts uncaught → 500. Validate
+        # upfront, bound royalty_rate to documented [0.001, 0.1].
+        _raw_sc = body.get("shard_count", 4)
+        try:
+            shard_count = int(_raw_sc)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"shard_count must be a positive integer; "
+                    f"got {_raw_sc!r}."
+                ),
+            )
+        _raw_rr = body.get("royalty_rate", 0.01)
+        try:
+            royalty_rate = float(_raw_rr)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"royalty_rate must be a number in [0.001, 0.1]; "
+                    f"got {_raw_rr!r}."
+                ),
+            )
+        if royalty_rate < 0.001 or royalty_rate > 0.1:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"royalty_rate must be in [0.001, 0.1]; "
+                    f"got {royalty_rate}."
+                ),
+            )
 
         if not dataset_id:
             raise HTTPException(status_code=400, detail="Missing dataset_id")
