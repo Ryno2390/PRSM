@@ -3387,16 +3387,36 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             )
 
-        result = await node.content_uploader.upload_text(
-            text=req.text,
-            filename=req.filename,
-            replicas=req.replicas,
-            royalty_rate=req.royalty_rate,
-            parent_cids=req.parent_cids if req.parent_cids else None,
-        )
+        try:
+            result = await node.content_uploader.upload_text(
+                text=req.text,
+                filename=req.filename,
+                replicas=req.replicas,
+                royalty_rate=req.royalty_rate,
+                parent_cids=req.parent_cids if req.parent_cids else None,
+            )
+        except Exception as exc:
+            # Sprint 179 — surface the underlying exception in the
+            # 502 detail so operators see what really broke
+            # (libtorrent API drift, IPv6 binding, disk full, etc.)
+            # instead of a generic "content store unavailable?".
+            logger.exception("upload_text raised")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Upload failed: {type(exc).__name__}: {exc}",
+            )
 
         if not result:
-            raise HTTPException(status_code=502, detail="Upload failed — content store unavailable?")
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Upload failed — upload_text returned None. "
+                    "Common causes: content_publisher unwired, "
+                    "_publish_content raised + was swallowed (check "
+                    "logs for 'Content publish failed'), or BitTorrent "
+                    "layer crashed mid-upload."
+                ),
+            )
 
         return {
             "cid": result.cid,
