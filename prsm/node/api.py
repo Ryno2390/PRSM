@@ -6582,27 +6582,59 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         
         try:
             await status_ws.connect(websocket)
-            
+
             while True:
-                # Wait for messages from client
-                data = await websocket.receive_json()
-                
+                # Wait for messages from client. Sprint 184 — catch
+                # malformed JSON specifically so a client typo doesn't
+                # silently close the connection. The handler stays
+                # open and sends an error frame back; client can
+                # retry with valid JSON.
+                try:
+                    data = await websocket.receive_json()
+                except json.JSONDecodeError:
+                    await status_ws.send_personal_status(websocket, {
+                        "type": "error",
+                        "error": "malformed_json",
+                        "message": (
+                            "Received non-JSON frame. Send valid "
+                            "JSON like {\"type\": \"heartbeat\"}."
+                        ),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    continue
+
+                msg_type = data.get("type") if isinstance(data, dict) else None
+
                 # Handle heartbeat
-                if data.get("type") == "heartbeat":
+                if msg_type == "heartbeat":
                     await status_ws.send_personal_status(websocket, {
                         "type": "heartbeat_ack",
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
-                
+
                 # Handle status request
-                elif data.get("type") == "get_status":
+                elif msg_type == "get_status":
                     status = await node.get_status()
                     await status_ws.send_personal_status(websocket, {
                         "type": "status_update",
                         "data": status,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
-                    
+
+                else:
+                    # Sprint 184 — unknown commands now get an
+                    # explicit error frame instead of silent
+                    # ignore, so client can correct.
+                    await status_ws.send_personal_status(websocket, {
+                        "type": "error",
+                        "error": "unknown_command",
+                        "message": (
+                            f"Unknown message type: {msg_type!r}. "
+                            f"Supported: 'heartbeat', 'get_status'."
+                        ),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+
         except WebSocketDisconnect:
             status_ws.disconnect(websocket)
         except Exception as e:
