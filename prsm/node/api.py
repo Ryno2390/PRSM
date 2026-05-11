@@ -6605,7 +6605,29 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if os.environ.get("PRSM_FAUCET_ENABLED", "1") == "0":
             raise HTTPException(status_code=403, detail="Faucet disabled in production")
 
-        amount = min(float(body.get("amount", 100)), 100)  # Max 100 per request
+        # Sprint 181 — validate amount upfront. Pre-fix:
+        #   amount = min(float(body.get("amount", 100)), 100)
+        # capped at 100 max but had NO lower bound. amount=-1
+        # returned 200 with "granted":-1.0 and DEBITED the wallet —
+        # converting the faucet into an arbitrary-debit endpoint.
+        _raw_amt = body.get("amount", 100)
+        try:
+            amount = float(_raw_amt)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"amount must be a positive number; "
+                    f"got {_raw_amt!r}."
+                ),
+            )
+        if amount <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"amount must be > 0; got {amount}.",
+            )
+        # Cap to 100 (existing rate-limit invariant).
+        amount = min(amount, 100)
         wallet_id = body.get("wallet_id", node.identity.node_id)
 
         try:
