@@ -1150,6 +1150,59 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_forge_quote",
+        description=(
+            "Network-aware cost quote for a forge query. Backed "
+            "by POST /compute/forge/quote (same path the JS + Go "
+            "SDKs use). Distinct from prsm_quote which uses a "
+            "purely-local PricingEngine — this tool reflects real "
+            "network state including server-side validation. "
+            "Pairs with prsm_forge_submit: quote first, then submit "
+            "with budget ≥ Total."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The forge query text.",
+                    "minLength": 1,
+                },
+                "shard_cids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional explicit shard CID list. When "
+                        "present, server uses len(shard_cids) "
+                        "instead of shard_count."
+                    ),
+                },
+                "shard_count": {
+                    "type": "integer",
+                    "description": "Shard count (1..100). Default 3.",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 3,
+                },
+                "hardware_tier": {
+                    "type": "string",
+                    "enum": ["t1", "t2", "t3", "t4"],
+                    "description": "Hardware tier. Default t2.",
+                    "default": "t2",
+                },
+                "estimated_pcu_per_shard": {
+                    "type": "number",
+                    "description": (
+                        "Per-shard compute estimate. Default 50."
+                    ),
+                    "exclusiveMinimum": 0,
+                    "default": 50,
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
         name="prsm_models",
         description=(
             "List inference model_ids the node's executor will "
@@ -4748,6 +4801,63 @@ async def handle_prsm_settler_admin(
     return "\n".join(lines)
 
 
+async def handle_prsm_forge_quote(arguments: Dict[str, Any]) -> str:
+    """Sprint 236 — network-aware forge quote via POST
+    /compute/forge/quote. Pairs with prsm_forge_submit."""
+    query = (arguments.get("query") or "").strip()
+    if not query:
+        return "Missing required 'query' (non-empty)."
+    body: Dict[str, Any] = {"query": query}
+    if "shard_cids" in arguments and arguments["shard_cids"]:
+        body["shard_cids"] = list(arguments["shard_cids"])
+    elif "shard_count" in arguments:
+        try:
+            sc = int(arguments["shard_count"])
+        except (TypeError, ValueError):
+            return f"shard_count must be an integer; got {arguments['shard_count']!r}."
+        if sc < 1 or sc > 100:
+            return f"shard_count must be in [1, 100]; got {sc}."
+        body["shard_count"] = sc
+    if "hardware_tier" in arguments:
+        tier = str(arguments["hardware_tier"]).strip().lower()
+        if tier not in ("t1", "t2", "t3", "t4"):
+            return f"hardware_tier must be t1/t2/t3/t4; got {tier!r}."
+        body["hardware_tier"] = tier
+    if "estimated_pcu_per_shard" in arguments:
+        try:
+            pcu = float(arguments["estimated_pcu_per_shard"])
+        except (TypeError, ValueError):
+            return (
+                f"estimated_pcu_per_shard must be a positive "
+                f"number; got {arguments['estimated_pcu_per_shard']!r}."
+            )
+        import math as _math
+        if not _math.isfinite(pcu) or pcu <= 0:
+            return f"estimated_pcu_per_shard must be a positive finite number; got {pcu}."
+        body["estimated_pcu_per_shard"] = pcu
+
+    try:
+        result = await _call_node_api("POST", "/compute/forge/quote", body)
+    except Exception as e:
+        return (
+            f"prsm_forge_quote failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "total" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"Quote refused: {detail}"
+    return (
+        f"PRSM Forge Quote:\n"
+        f"  Compute:     {result.get('compute_cost', '?')} FTNS\n"
+        f"  Data:        {result.get('data_cost', '?')} FTNS\n"
+        f"  Network Fee: {result.get('network_fee', '?')} FTNS\n"
+        f"  Total:       {result.get('total', '?')} FTNS\n"
+        f"  Hardware:    {result.get('hardware_tier', '?').upper()}\n"
+        f"  Shards:      {result.get('shard_count', '?')}\n"
+        f"  Use prsm_forge_submit with budget ≥ Total to execute."
+    )
+
+
 async def handle_prsm_models(arguments: Dict[str, Any]) -> str:
     """Sprint 235 — list inference model_ids the executor accepts."""
     try:
@@ -6211,6 +6321,7 @@ TOOL_HANDLERS = {
     "prsm_node_resources": handle_prsm_node_resources,
     "prsm_ledger_sync": handle_prsm_ledger_sync,
     "prsm_models": handle_prsm_models,
+    "prsm_forge_quote": handle_prsm_forge_quote,
     "prsm_settler_admin": handle_prsm_settler_admin,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
