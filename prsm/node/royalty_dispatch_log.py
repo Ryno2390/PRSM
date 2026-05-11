@@ -30,10 +30,16 @@ class RoyaltyDispatchEntry:
     timestamp: float
     job_id: str
     cid: str
-    status: str  # sent|skipped_no_record|skipped_bad_hash|failed
+    # sent | skipped_no_record | skipped_bad_hash |
+    # skipped_zero_amount | failed
+    status: str
     tx_hash: Optional[str]
     gross_wei: int
     error: Optional[str] = None
+    # Sprint 258 — allocation_mode = "uniform" | "rate_weighted".
+    # Default None for backward-compat with pre-258 persisted
+    # entries. Populated by api.py forge settlement at append time.
+    allocation_mode: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -44,6 +50,7 @@ class RoyaltyDispatchEntry:
             "tx_hash": self.tx_hash,
             "gross_wei": self.gross_wei,
             "error": self.error,
+            "allocation_mode": self.allocation_mode,
         }
 
 
@@ -98,6 +105,7 @@ class RoyaltyDispatchRing:
                     tx_hash=d.get("tx_hash"),
                     gross_wei=int(d.get("gross_wei", 0)),
                     error=d.get("error"),
+                    allocation_mode=d.get("allocation_mode"),
                 ))
             except (KeyError, TypeError) as exc:
                 logger.warning(
@@ -130,6 +138,7 @@ class RoyaltyDispatchRing:
         gross_wei: int,
         error: Optional[str] = None,
         timestamp: Optional[float] = None,
+        allocation_mode: Optional[str] = None,
     ) -> None:
         entry = RoyaltyDispatchEntry(
             timestamp=timestamp if timestamp is not None else time.time(),
@@ -139,6 +148,7 @@ class RoyaltyDispatchRing:
             tx_hash=tx_hash,
             gross_wei=int(gross_wei),
             error=error,
+            allocation_mode=allocation_mode,
         )
         self._entries.append(entry)
         self._write_to_disk(entry)
@@ -150,6 +160,7 @@ class RoyaltyDispatchRing:
         offset: int = 0,
         status: Optional[str] = None,
         job_id: Optional[str] = None,
+        allocation_mode: Optional[str] = None,
     ) -> List[RoyaltyDispatchEntry]:
         if not isinstance(limit, int) or limit <= 0 or limit > 1000:
             raise ValueError(
@@ -165,6 +176,11 @@ class RoyaltyDispatchRing:
             snap = [e for e in snap if e.status == status]
         if job_id:
             snap = [e for e in snap if e.job_id == job_id]
+        if allocation_mode:
+            snap = [
+                e for e in snap
+                if e.allocation_mode == allocation_mode
+            ]
         return snap[offset:offset + limit]
 
     def count(self) -> int:

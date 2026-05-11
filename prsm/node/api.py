@@ -2237,6 +2237,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                     if _ring is not None:
                                         for _r in _royalty_results:
                                             try:
+                                                # Sprint 258 — surface
+                                                # which allocation
+                                                # policy produced this
+                                                # row so post-hoc audit
+                                                # can distinguish a
+                                                # 50/50 uniform-2-shard
+                                                # split from an equally
+                                                # weighted rate_weighted
+                                                # outcome.
                                                 _ring.append(
                                                     job_id=job_id,
                                                     cid=_r.cid,
@@ -2244,6 +2253,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                                     tx_hash=_r.tx_hash,
                                                     gross_wei=_wei,
                                                     error=_r.error,
+                                                    allocation_mode=_mode,
                                                 )
                                             except Exception:  # noqa
                                                 pass
@@ -5412,6 +5422,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         offset: int = 0,
         status: Optional[str] = None,
         job_id: Optional[str] = None,
+        allocation_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Recent on-chain content-royalty dispatch outcomes
         (sprint 249 audit ring). Each entry: timestamp, job_id,
@@ -5446,6 +5457,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         entries = ring.recent(
             limit=limit, offset=offset,
             status=status, job_id=job_id,
+            allocation_mode=allocation_mode,
         )
         return {
             "entries": [e.to_dict() for e in entries],

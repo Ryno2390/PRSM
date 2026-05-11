@@ -1270,13 +1270,22 @@ TOOLS = [
                     "type": "string",
                     "enum": [
                         "sent", "skipped_no_record",
-                        "skipped_bad_hash", "failed",
+                        "skipped_bad_hash",
+                        "skipped_zero_amount", "failed",
                     ],
                     "description": "Optional status filter.",
                 },
                 "job_id": {
                     "type": "string",
                     "description": "Optional job_id filter.",
+                },
+                "allocation_mode": {
+                    "type": "string",
+                    "enum": ["uniform", "rate_weighted"],
+                    "description": (
+                        "Optional filter — show only outcomes "
+                        "produced by this allocation policy."
+                    ),
                 },
             },
         },
@@ -5108,6 +5117,10 @@ async def handle_prsm_royalty_dispatch_history(
         parts.append(f"status={arguments['status']}")
     if arguments.get("job_id"):
         parts.append(f"job_id={arguments['job_id']}")
+    if arguments.get("allocation_mode"):
+        parts.append(
+            f"allocation_mode={arguments['allocation_mode']}"
+        )
     path = (
         "/admin/royalty-dispatch-history?" + "&".join(parts)
     )
@@ -5147,12 +5160,15 @@ async def handle_prsm_royalty_dispatch_history(
         tx_disp = (e.get("tx_hash") or "—")[:14]
         err = e.get("error")
         err_part = f"  err={err}" if err else ""
+        mode = e.get("allocation_mode")
+        mode_part = f"  mode={mode}" if mode else ""
         lines.append(
             f"  job={e.get('job_id', '?')[:14]:<14}  "
             f"cid={cid_disp:<14}  "
             f"status={e.get('status', '?'):<22}  "
             f"tx={tx_disp:<14}  "
             f"wei={e.get('gross_wei', 0)}"
+            f"{mode_part}"
             f"{err_part}"
         )
     return "\n".join(lines)
