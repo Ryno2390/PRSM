@@ -4770,9 +4770,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return body
 
-    @app.get("/health")
+    # Sprint 186 — register /health for both GET and HEAD so
+    # infrastructure-side health probes (Kubernetes liveness, AWS
+    # ELB, generic monitoring) that default to HEAD don't see PRSM
+    # nodes as unhealthy. The mount at "" (dashboard sub-app, see
+    # line ~6753) was shadowing FastAPI's auto-HEAD-for-GET path:
+    # HEAD requests fell through to the dashboard's catch-all and
+    # returned 404. Explicit api_route closes that gap.
+    @app.api_route("/health", methods=["GET", "HEAD"])
     async def health() -> Dict[str, str]:
-        """Simple health check."""
+        """Simple health check (GET + HEAD)."""
         return {"status": "ok", "node_id": node.identity.node_id if node.identity else "unknown"}
 
     @app.get("/metrics")
