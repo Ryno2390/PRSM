@@ -59,8 +59,14 @@ class TransferRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     """Request body for dashboard login."""
-    username: str
-    password: str
+    # Sprint 185 — bound max length on both fields. Pre-fix the
+    # endpoint accepted arbitrarily-large password values (probed
+    # at 10MB returning 200), allocating + hashing each request.
+    # Real auth_manager would have crashed or DoS'd; the demo-stub
+    # path just wasted memory. Both fields now Pydantic-rejected
+    # above sane practical limits.
+    username: str = Field(..., min_length=1, max_length=256)
+    password: str = Field(..., min_length=1, max_length=1024)
 
 
 class StatusResponse(BaseModel):
