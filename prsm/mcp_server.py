@@ -1121,6 +1121,44 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_status_stream",
+        description=(
+            "Stream live status transitions for a submitted job. "
+            "Backed by GET /compute/status/{job_id}/stream (Server-"
+            "Sent Events). Blocks until the server emits a terminal "
+            "event (completed / history_terminal / escrow_terminal / "
+            "timeout) OR max_wait_sec elapses (default 60, clamped to "
+            "[1, 600]). Returns a rendered trajectory of unique "
+            "status snapshots + the terminal reason + the final "
+            "status. Closes the gap referenced in prsm_forge_submit's "
+            "idempotent-replay hint — end-users no longer need to "
+            "hand-poll prsm_agent_status to track progress."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "description": (
+                        "Job ID returned by prsm_forge_submit or "
+                        "prsm_inference."
+                    ),
+                },
+                "max_wait_sec": {
+                    "type": "number",
+                    "description": (
+                        "Max seconds to block waiting for terminal "
+                        "event. Clamped to [1, 600]. Default 60."
+                    ),
+                    "default": 60,
+                    "minimum": 1,
+                    "maximum": 600,
+                },
+            },
+            "required": ["job_id"],
+        },
+    ),
+    Tool(
         name="prsm_royalty_claim",
         description=(
             "Claim accumulated FTNS royalties from RoyaltyDistributor. "
@@ -3730,6 +3768,173 @@ async def handle_prsm_escrow_summary(arguments: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Sprint 209 — prsm_status_stream
+# Consumes /compute/status/{job_id}/stream SSE feed and renders
+# status-transition trajectory for end-users polling job progress
+# via MCP.
+# ──────────────────────────────────────────────────────────────────────
+
+
+async def _consume_status_stream(
+    job_id: str, *, max_wait_sec: float,
+) -> Tuple[List[Dict[str, Any]], str, Optional[str]]:
+    """Open a GET-SSE connection to /compute/status/{job_id}/stream,
+    collect unique status snapshots, return when terminal event or
+    max_wait_sec elapses.
+
+    Returns ``(snapshots, terminal_reason, last_status)``:
+      - ``snapshots`` — ordered list of unique status-dict snapshots
+      - ``terminal_reason`` — one of "completed"/"history_terminal"/
+        "escrow_terminal"/"timeout" (server-side) or "client_timeout"
+        (max_wait_sec elapsed before server emitted terminal)
+      - ``last_status`` — best-effort final status string
+
+    Raises ``RuntimeError`` on network failure (caller renders).
+    """
+    import aiohttp
+    import asyncio as _asyncio
+
+    url = await _get_node_api_url()
+    api_key = os.environ.get("PRSM_NODE_API_KEY", "")
+    headers = {"Accept": "text/event-stream"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    snapshots: List[Dict[str, Any]] = []
+    terminal_reason: str = "client_timeout"
+    last_status: Optional[str] = None
+
+    async def _read():
+        nonlocal terminal_reason, last_status
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{url}/compute/status/{job_id}/stream",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=max_wait_sec + 10),
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise RuntimeError(
+                        f"HTTP {resp.status}: {body[:200]}"
+                    )
+                async for event_type, data in _parse_sse(resp):
+                    try:
+                        payload = json.loads(data) if data else {}
+                    except json.JSONDecodeError:
+                        payload = {"raw": data}
+                    if event_type == "status":
+                        # Dedup by JSON equality against prior tail
+                        # snapshot — same shape the SSE emitter uses.
+                        if not snapshots or snapshots[-1] != payload:
+                            snapshots.append(payload)
+                            last_status = (
+                                payload.get("status")
+                                or payload.get("history", {}).get("status")
+                                or last_status
+                            )
+                    elif event_type == "terminal":
+                        terminal_reason = (
+                            payload.get("reason") or "completed"
+                        )
+                        # Capture any final-status field if present.
+                        last_status = (
+                            payload.get("status") or last_status
+                        )
+                        return
+                    elif event_type == "error":
+                        terminal_reason = "error"
+                        last_status = (
+                            payload.get("error") or last_status
+                        )
+                        return
+
+    try:
+        await _asyncio.wait_for(_read(), timeout=max_wait_sec)
+    except _asyncio.TimeoutError:
+        terminal_reason = "client_timeout"
+    return snapshots, terminal_reason, last_status
+
+
+async def handle_prsm_status_stream(
+    arguments: Dict[str, Any],
+    *, emit_progress: Optional[Any] = None,
+) -> str:
+    """Stream job-status transitions for a given job_id.
+
+    Blocks until the server emits a terminal SSE event OR
+    max_wait_sec elapses. Returns a rendered trajectory of unique
+    status snapshots + the terminal reason.
+    """
+    job_id = (arguments.get("job_id") or "").strip()
+    if not job_id:
+        return "Missing required 'job_id' (non-empty)."
+
+    raw_wait = arguments.get("max_wait_sec", 60)
+    try:
+        max_wait_sec = float(raw_wait)
+    except (TypeError, ValueError):
+        max_wait_sec = 60.0
+    # Clamp to [1, 600]. Sub-second polling wastes worker; 10-min
+    # ceiling avoids accidentally hanging the LLM session forever.
+    if max_wait_sec < 1:
+        max_wait_sec = 1.0
+    if max_wait_sec > 600:
+        max_wait_sec = 600.0
+
+    try:
+        snapshots, terminal_reason, last_status = (
+            await _consume_status_stream(
+                job_id, max_wait_sec=max_wait_sec,
+            )
+        )
+    except Exception as e:
+        return (
+            f"prsm_status_stream failed for job_id={job_id}: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+
+    # Emit one progress per unique transition (optional).
+    if emit_progress is not None:
+        try:
+            for i, snap in enumerate(snapshots):
+                s = (
+                    snap.get("status")
+                    or snap.get("history", {}).get("status")
+                    or "?"
+                )
+                await emit_progress(
+                    progress=i + 1,
+                    total=max(1, len(snapshots)),
+                    message=f"status={s}",
+                )
+        except Exception:  # noqa: BLE001
+            # Progress is best-effort; don't fail the call.
+            pass
+
+    lines = [
+        f"Status stream for job_id={job_id}:",
+    ]
+    if not snapshots:
+        lines.append(
+            f"  (no status frames received before "
+            f"{terminal_reason}; final={last_status or 'unknown'})"
+        )
+    else:
+        for i, snap in enumerate(snapshots):
+            s = (
+                snap.get("status")
+                or snap.get("history", {}).get("status")
+                or "?"
+            )
+            lines.append(f"  {i+1}. status={s}")
+    lines.append(
+        f"  terminal_reason={terminal_reason}; "
+        f"final_status={last_status or 'unknown'}"
+    )
+    return "\n".join(lines)
+
+
 async def handle_prsm_jobs_list(arguments: Dict[str, Any]) -> str:
     """Handle prsm_jobs_list tool call: enumerate /compute/forge
     jobs with optional filter + pagination."""
@@ -3993,6 +4198,7 @@ TOOL_HANDLERS = {
     "prsm_escrow_lookup": handle_prsm_escrow_lookup,
     "prsm_escrow_summary": handle_prsm_escrow_summary,
     "prsm_jobs_list": handle_prsm_jobs_list,
+    "prsm_status_stream": handle_prsm_status_stream,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
 }
