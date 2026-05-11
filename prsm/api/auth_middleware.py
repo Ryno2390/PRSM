@@ -14,6 +14,7 @@ from typing import Optional, Set
 
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,12 @@ PROTECTED_PREFIXES = [
     "/compute/",        # forge already protected; broaden to
                         # cover submit / cancel / inference /
                         # cleanup-stale (all write-side)
+    # Sprint 183 — these were unprotected pre-fix. /transactions
+    # leaks the operator's full transaction history (financial
+    # PII); /content/mine leaks the operator's uploaded-content
+    # list (workflow PII + provenance fingerprinting risk).
+    "/transactions",
+    "/content/mine",
 ]
 
 
@@ -104,18 +111,34 @@ class NodeAuthMiddleware(BaseHTTPMiddleware):
         is_protected = any(path.startswith(prefix) for prefix in PROTECTED_PREFIXES)
 
         if is_protected and self.auth_enabled:
-            # Extract API key from headers
+            # Extract API key from headers.
+            #
+            # Sprint 183 — return JSONResponse directly instead of
+            # raising HTTPException. Starlette's BaseHTTPMiddleware
+            # does NOT catch HTTPException in dispatch(); a raise
+            # here propagates up to the ASGI error handler and
+            # surfaces as 500 to the client. Pre-fix every
+            # auth-failure (no key + wrong key) returned 500, which
+            # monitoring tools mis-classify as outage and clients
+            # mis-interpret as server-broken-please-retry instead
+            # of access-denied.
             api_key = self._extract_key(request)
             if not api_key:
-                raise HTTPException(
+                return JSONResponse(
                     status_code=401,
-                    detail="Authentication required. Provide 'Authorization: Bearer <key>' or 'X-API-Key: <key>' header.",
+                    content={
+                        "detail": (
+                            "Authentication required. Provide "
+                            "'Authorization: Bearer <key>' or "
+                            "'X-API-Key: <key>' header."
+                        ),
+                    },
                 )
 
             if hash_api_key(api_key) != self._api_key_hash:
-                raise HTTPException(
+                return JSONResponse(
                     status_code=403,
-                    detail="Invalid API key.",
+                    content={"detail": "Invalid API key."},
                 )
 
         return await call_next(request)
