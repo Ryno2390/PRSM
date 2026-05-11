@@ -1121,6 +1121,37 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_faucet",
+        description=(
+            "Request testnet FTNS from the node faucet. Backed by "
+            "POST /ftns/faucet. 100 FTNS max per request, 1000 "
+            "FTNS max per wallet (rate-limited). Disabled in "
+            "production via PRSM_FAUCET_ENABLED=0 — returns 403 "
+            "with a friendly message if so."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number",
+                    "description": (
+                        "Optional amount (default 100, capped at "
+                        "100 server-side)."
+                    ),
+                    "exclusiveMinimum": 0,
+                    "maximum": 100,
+                },
+                "wallet_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional target wallet (defaults to the "
+                        "node's own identity)."
+                    ),
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_bridge",
         description=(
             "Bridge FTNS between local balance and external chain. "
@@ -4323,6 +4354,50 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_faucet(arguments: Dict[str, Any]) -> str:
+    """Sprint 223 — request testnet FTNS from /ftns/faucet.
+
+    100 FTNS max per request, 1000 FTNS max per wallet. Disabled
+    in production (PRSM_FAUCET_ENABLED=0)."""
+    import math as _math
+    body: Dict[str, Any] = {}
+    if "amount" in arguments and arguments["amount"] is not None:
+        try:
+            amount = float(arguments["amount"])
+        except (TypeError, ValueError):
+            return (
+                f"amount must be a finite positive number; "
+                f"got {arguments['amount']!r}."
+            )
+        if not _math.isfinite(amount) or amount <= 0:
+            return f"amount must be a finite positive number; got {amount}."
+        body["amount"] = amount
+    wallet_id = (arguments.get("wallet_id") or "").strip()
+    if wallet_id:
+        body["wallet_id"] = wallet_id
+    try:
+        result = await _call_node_api("POST", "/ftns/faucet", body)
+    except Exception as e:
+        return (
+            f"prsm_faucet failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "granted" not in result:
+        detail = result.get("detail", "unknown error")
+        if "disabled" in detail.lower():
+            return (
+                f"Faucet disabled (production node).\n"
+                f"  Detail: {detail}"
+            )
+        return f"Faucet refused: {detail}"
+    return (
+        f"Faucet grant succeeded.\n"
+        f"  wallet_id:   {result.get('wallet_id', '?')}\n"
+        f"  granted:     {result.get('granted', 0)} FTNS\n"
+        f"  new_balance: {result.get('new_balance', '?')} FTNS"
+    )
+
+
 async def handle_prsm_bridge(arguments: Dict[str, Any]) -> str:
     """Sprint 222 — bridge FTNS between local + external chain.
 
@@ -5281,6 +5356,7 @@ TOOL_HANDLERS = {
     "prsm_settlers": handle_prsm_settlers,
     "prsm_agent_admin": handle_prsm_agent_admin,
     "prsm_bridge": handle_prsm_bridge,
+    "prsm_faucet": handle_prsm_faucet,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
