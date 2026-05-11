@@ -1418,6 +1418,102 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return paymaster.spend_summary()
 
+    # ── Sprint 279 — Aerodrome read-only pool quoter ──────
+    # Operator-side surface for the AerodromeClient. Real
+    # production code (no commission gate). Distinguishes
+    # NOT_CONFIGURED (pool address not yet pasted into env;
+    # seeding ceremony pending) from POOL_UNAVAILABLE (RPC
+    # error tried-and-failed) — both fail-soft, 200.
+
+    @app.get("/wallet/pool/state", tags=["wallet"])
+    async def get_pool_state() -> Dict[str, Any]:
+        pool = getattr(node, "_aerodrome_client", None)
+        if pool is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Aerodrome client not initialized.",
+            )
+        if not pool.is_configured():
+            return {
+                "status": "NOT_CONFIGURED",
+                "note": (
+                    "Set BASE_RPC_URL + "
+                    "AERODROME_USDC_FTNS_POOL_ADDRESS env "
+                    "vars after the seeding ceremony "
+                    "(Vision gantt 2026-06-15)."
+                ),
+            }
+        state = pool.get_pool_state()
+        if state is None:
+            return {
+                "status": "POOL_UNAVAILABLE",
+                "pool_address": pool.pool_address,
+                "note": (
+                    "Pool RPC call returned no state — "
+                    "Base RPC may be unreachable or the "
+                    "pool contract may not exist at the "
+                    "configured address yet."
+                ),
+            }
+        out = state.to_dict()
+        out["status"] = "OK"
+        return out
+
+    @app.get("/wallet/pool/quote", tags=["wallet"])
+    async def get_pool_quote(
+        amount_in: int,
+        token_in: str,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.aerodrome_client import (
+            AerodromeQuoteError,
+        )
+        if amount_in <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"amount_in must be > 0, got {amount_in}"
+                ),
+            )
+        if not token_in:
+            raise HTTPException(
+                status_code=422,
+                detail="token_in is required",
+            )
+        pool = getattr(node, "_aerodrome_client", None)
+        if pool is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Aerodrome client not initialized.",
+            )
+        if not pool.is_configured():
+            return {
+                "status": "NOT_CONFIGURED",
+                "amount_in": amount_in,
+                "token_in": token_in,
+                "note": (
+                    "Set BASE_RPC_URL + "
+                    "AERODROME_USDC_FTNS_POOL_ADDRESS after "
+                    "the seeding ceremony."
+                ),
+            }
+        try:
+            quote = pool.quote_swap(
+                amount_in=amount_in, token_in=token_in,
+            )
+        except AerodromeQuoteError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        if quote is None:
+            return {
+                "status": "POOL_UNAVAILABLE",
+                "amount_in": amount_in,
+                "token_in": token_in,
+            }
+        out = quote.to_dict()
+        out["status"] = "OK"
+        return out
+
     # Renamed from `_RoyaltyClaimRequest` for OpenAPI hygiene.
     class RoyaltyClaimRequest(BaseModel):
         dry_run: bool = True

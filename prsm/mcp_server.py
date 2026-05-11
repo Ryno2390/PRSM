@@ -1437,6 +1437,48 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_pool_quote",
+        description=(
+            "Aerodrome USDC-FTNS pool inspection. Read-only "
+            "(no commission gate). Single tool with `action` "
+            "selector: state | quote. state returns the pool's "
+            "live reserves + fee tier + block number; quote "
+            "computes an exact-amount-in swap quote with "
+            "price-impact (slippage only, excludes fee) "
+            "telemetry. NOT_CONFIGURED returned pre-Vision-"
+            "gantt-2026-06-15 seeding ceremony — once "
+            "BASE_RPC_URL + AERODROME_USDC_FTNS_POOL_ADDRESS "
+            "are set, real pool state surfaces immediately. "
+            "Backed by /wallet/pool/state + /wallet/pool/quote."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["state", "quote"],
+                },
+                "amount_in": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Exact-input amount for action=quote "
+                        "(token base units)."
+                    ),
+                },
+                "token_in": {
+                    "type": "string",
+                    "description": (
+                        "Address of the input token for "
+                        "action=quote. Must equal one of the "
+                        "pool's token0/token1."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_gasless_transfer",
         description=(
             "Gasless FTNS transfer via Coinbase paymaster — "
@@ -6046,6 +6088,145 @@ async def handle_prsm_takedown_notices(
     )
 
 
+_POOL_QUOTE_ACTIONS = {"state", "quote"}
+
+
+async def handle_prsm_pool_quote(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 279 — Aerodrome USDC-FTNS pool inspection.
+
+    Read-only; no commission gate. action=state returns the
+    pool's live reserves; action=quote computes an exact-amount-
+    in swap quote. Pre-seeding-ceremony, NOT_CONFIGURED is
+    surfaced so operators see the plumbing is wired and just
+    waiting on the pool address."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_POOL_QUOTE_ACTIONS)})."
+        )
+    if action not in _POOL_QUOTE_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_POOL_QUOTE_ACTIONS)}; got {action!r}."
+        )
+
+    if action == "state":
+        try:
+            result = await _call_node_api(
+                "GET", "/wallet/pool/state",
+            )
+        except Exception as e:
+            return (
+                f"prsm_pool_quote failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        status = result.get("status")
+        if status is None:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Aerodrome client not wired on this "
+                    f"node.\n  Detail: {detail}"
+                )
+            return f"state refused: {detail}"
+        if status == "NOT_CONFIGURED":
+            return (
+                f"Aerodrome USDC-FTNS pool — NOT_CONFIGURED\n"
+                f"  {result.get('note', '')}"
+            )
+        if status == "POOL_UNAVAILABLE":
+            return (
+                f"Aerodrome USDC-FTNS pool — POOL_UNAVAILABLE\n"
+                f"  pool_address: "
+                f"{result.get('pool_address', '?')}\n"
+                f"  {result.get('note', '')}"
+            )
+        return "\n".join([
+            f"Aerodrome USDC-FTNS pool state (OK):",
+            f"  pool_address:  {result.get('pool_address', '?')}",
+            f"  token0:        {result.get('token0', '?')}",
+            f"  token1:        {result.get('token1', '?')}",
+            f"  reserve0:      {result.get('reserve0', 0)}",
+            f"  reserve1:      {result.get('reserve1', 0)}",
+            f"  total_supply:  {result.get('total_supply', 0)}",
+            f"  stable:        {result.get('stable', False)}",
+            f"  fee_bps:       {result.get('fee_bps', 0)}",
+            f"  block_number:  {result.get('block_number', 0)}",
+        ])
+
+    # action == "quote"
+    amount_in = arguments.get("amount_in")
+    if amount_in is None:
+        return "quote requires 'amount_in' (positive integer)."
+    token_in = (arguments.get("token_in") or "").strip()
+    if not token_in:
+        return "quote requires 'token_in' (token address)."
+    try:
+        amount_int = int(amount_in)
+    except (ValueError, TypeError):
+        return f"amount_in must be an integer, got {amount_in!r}."
+    if amount_int <= 0:
+        return f"amount_in must be > 0, got {amount_int}."
+
+    try:
+        path = (
+            f"/wallet/pool/quote?amount_in={amount_int}"
+            f"&token_in={token_in}"
+        )
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"prsm_pool_quote failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    status = result.get("status")
+    if status is None:
+        detail = result.get("detail", "unknown error")
+        d_lower = str(detail).lower()
+        if "not in pool" in d_lower:
+            return (
+                f"Token not in the USDC-FTNS pool.\n"
+                f"  Detail: {detail}"
+            )
+        if "stable" in d_lower:
+            return (
+                f"Stable-pool curve not supported in v1 "
+                f"quoter; volatile pools only.\n"
+                f"  Detail: {detail}"
+            )
+        if "not initialized" in d_lower:
+            return (
+                f"Aerodrome client not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"quote refused: {detail}"
+    if status == "NOT_CONFIGURED":
+        return (
+            f"Aerodrome pool NOT_CONFIGURED — quote unavailable "
+            f"until seeding ceremony completes."
+        )
+    if status == "POOL_UNAVAILABLE":
+        return (
+            f"Aerodrome pool POOL_UNAVAILABLE — RPC may be "
+            f"down or pool contract missing."
+        )
+    return "\n".join([
+        f"Aerodrome quote (OK):",
+        f"  amount_in:        {result.get('amount_in', 0)} "
+        f"{result.get('token_in', '?')}",
+        f"  amount_out:       {result.get('amount_out', 0)} "
+        f"{result.get('token_out', '?')}",
+        f"  price_impact_bps: "
+        f"{result.get('price_impact_bps', 0)} "
+        f"(slippage; excludes fee)",
+        f"  fee_bps:          {result.get('fee_bps', 0)}",
+        f"  route:            {result.get('route', '?')}",
+    ])
+
+
 _GASLESS_TRANSFER_ACTIONS = {"quote", "execute", "status"}
 
 
@@ -8593,6 +8774,7 @@ TOOL_HANDLERS = {
     "prsm_marketplace_reputation": handle_prsm_marketplace_reputation,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
+    "prsm_pool_quote": handle_prsm_pool_quote,
     "prsm_content_provider_stats": handle_prsm_content_provider_stats,
     "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,

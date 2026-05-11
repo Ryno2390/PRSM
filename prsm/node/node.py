@@ -2229,6 +2229,31 @@ class PRSMNode:
             )
             self._paymaster_client = None
 
+        # Sprint 279 — Aerodrome read-only pool quoter. Real
+        # production code (no commission gate). Pre-seeding,
+        # is_configured() returns False and the endpoints
+        # surface NOT_CONFIGURED. Post-seeding (env vars
+        # pasted), endpoints return live pool state.
+        try:
+            from prsm.economy.web3.aerodrome_client import (
+                AerodromeClient,
+            )
+            self._aerodrome_client = AerodromeClient.from_env()
+            aerodrome_configured = (
+                self._aerodrome_client.is_configured()
+            )
+            logger.info(
+                "AerodromeClient wired (configured=%s)",
+                aerodrome_configured,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "AerodromeClient construction failed: %s — "
+                "/wallet/pool/* endpoints will return 503.",
+                exc,
+            )
+            self._aerodrome_client = None
+
         # Sprint 249 — RoyaltyDispatchRing for the on-chain
         # content-royalty audit trail (sprint 248). Opt-in
         # filesystem persistence via PRSM_ROYALTY_DISPATCH_LOG_DIR.
