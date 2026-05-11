@@ -2274,6 +2274,39 @@ class PRSMNode:
             )
             self._kyc_client = None
 
+        # Sprint 282 — Fiat compliance audit ring. Records
+        # quotes + executes across all Phase 5 fiat surfaces
+        # (onramp/offramp/gasless/KYC) for regulatory
+        # reporting. Persistence via
+        # PRSM_FIAT_COMPLIANCE_LOG_DIR; jurisdiction tag via
+        # PRSM_OPERATOR_JURISDICTION.
+        try:
+            from prsm.economy.web3.fiat_compliance_ring import (
+                FiatComplianceRing,
+            )
+            self._fiat_compliance_ring = (
+                FiatComplianceRing.from_env()
+            )
+            logger.info(
+                "FiatComplianceRing wired "
+                "(persist_dir=%s, jurisdiction=%s)",
+                getattr(
+                    self._fiat_compliance_ring,
+                    "_persist_dir", None,
+                ),
+                getattr(
+                    self._fiat_compliance_ring,
+                    "_default_jurisdiction", None,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FiatComplianceRing construction failed: %s — "
+                "/admin/fiat-compliance/* will return 503.",
+                exc,
+            )
+            self._fiat_compliance_ring = None
+
         # Sprint 249 — RoyaltyDispatchRing for the on-chain
         # content-royalty audit trail (sprint 248). Opt-in
         # filesystem persistence via PRSM_ROYALTY_DISPATCH_LOG_DIR.

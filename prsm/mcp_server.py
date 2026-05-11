@@ -1437,6 +1437,71 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_fiat_compliance",
+        description=(
+            "Fiat compliance audit log query surface. Single "
+            "tool with `action` selector: list | summary | "
+            "lookup. Records every onramp/offramp/gasless "
+            "quote + execute + KYC event for AUSTRAC / FinCEN "
+            "/ IRS reporting once Phase 5 ramps are live. "
+            "Recording is automatic from the fiat surface "
+            "handlers — no write paths via MCP. Set "
+            "PRSM_FIAT_COMPLIANCE_LOG_DIR for 5-7yr disk "
+            "retention and PRSM_OPERATOR_JURISDICTION to tag "
+            "entries. Backed by /admin/fiat-compliance + "
+            "/admin/fiat-compliance/summary + "
+            "/admin/fiat-compliance/{entry_id}."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "summary", "lookup"],
+                },
+                "entry_id": {
+                    "type": "string",
+                    "description": (
+                        "Entry id for action=lookup."
+                    ),
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "onramp_quote", "onramp_execute",
+                        "offramp_quote", "offramp_execute",
+                        "gasless_transfer_quote",
+                        "gasless_transfer_execute",
+                        "kyc_initiate", "kyc_status_change",
+                    ],
+                    "description": (
+                        "Filter for action=list."
+                    ),
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": (
+                        "Filter for action=list."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1, "maximum": 10000,
+                    "description": (
+                        "Row cap for action=list (default 100)."
+                    ),
+                },
+                "offset": {
+                    "type": "integer", "minimum": 0,
+                    "description": (
+                        "Page offset for action=list (default 0)."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_kyc",
         description=(
             "KYC vendor adapter inspection + session "
@@ -6149,6 +6214,154 @@ async def handle_prsm_takedown_notices(
     )
 
 
+_FIAT_COMPLIANCE_ACTIONS = {"list", "summary", "lookup"}
+
+
+async def handle_prsm_fiat_compliance(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 282 — operator query surface for the fiat
+    compliance audit ring. action selector: list | summary |
+    lookup. No write paths — recording is automatic from
+    quote + execute handlers."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_FIAT_COMPLIANCE_ACTIONS)})."
+        )
+    if action not in _FIAT_COMPLIANCE_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_FIAT_COMPLIANCE_ACTIONS)}; "
+            f"got {action!r}."
+        )
+
+    if action == "summary":
+        try:
+            result = await _call_node_api(
+                "GET", "/admin/fiat-compliance/summary",
+            )
+        except Exception as e:
+            return (
+                f"prsm_fiat_compliance failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "by_kind" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Fiat compliance ring not wired.\n"
+                    f"  Detail: {detail}\n"
+                    f"  Set PRSM_FIAT_COMPLIANCE_LOG_DIR to "
+                    f"enable persistence."
+                )
+            return f"summary refused: {detail}"
+        by_kind = result.get("by_kind") or {}
+        total = result.get("total_entries", 0)
+        lines = [
+            f"Fiat Compliance — {total} total entries:",
+        ]
+        if not by_kind:
+            lines.append("  (no events recorded yet)")
+        for kind in sorted(by_kind.keys()):
+            bucket = by_kind[kind]
+            lines.append(
+                f"  {kind:>28}  count={bucket.get('count', 0):>6}"
+                f"  total_usd=${bucket.get('total_usd', 0):,.2f}"
+            )
+        return "\n".join(lines)
+
+    if action == "lookup":
+        entry_id = (arguments.get("entry_id") or "").strip()
+        if not entry_id:
+            return "lookup requires 'entry_id'."
+        try:
+            result = await _call_node_api(
+                "GET", f"/admin/fiat-compliance/{entry_id}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_fiat_compliance failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "entry_id" not in result:
+            detail = result.get("detail", "unknown error")
+            if "no entry with id" in str(detail).lower():
+                return f"No entry with id={entry_id!r}."
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Fiat compliance ring not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"lookup refused: {detail}"
+        return "\n".join([
+            f"Fiat Compliance Entry {result['entry_id']}:",
+            f"  timestamp:    {result.get('timestamp', 0)}",
+            f"  kind:         {result.get('kind', '?')}",
+            f"  user_id:      {result.get('user_id', '?')}",
+            f"  status:       {result.get('status', '?')}",
+            f"  kyc_status:   {result.get('kyc_status', '?')}",
+            f"  usd_amount:   "
+            f"${result.get('usd_amount', 0):,.2f}",
+            f"  ftns_amount:  "
+            f"{result.get('ftns_amount', 0):.6f} FTNS",
+            f"  address:      {result.get('address', '?')}",
+            f"  tx_hash:      {result.get('tx_hash', '?')}",
+            f"  vendor_ref:   {result.get('vendor_ref', '?')}",
+            f"  jurisdiction: {result.get('jurisdiction', '?')}",
+            f"  metadata:     {result.get('metadata', {})}",
+        ])
+
+    # action == "list"
+    params = []
+    limit = int(arguments.get("limit", 100))
+    offset = int(arguments.get("offset", 0))
+    params.append(f"limit={limit}")
+    params.append(f"offset={offset}")
+    kind = (arguments.get("kind") or "").strip()
+    if kind:
+        params.append(f"kind={kind}")
+    user_id = (arguments.get("user_id") or "").strip()
+    if user_id:
+        params.append(f"user_id={user_id}")
+    path = "/admin/fiat-compliance?" + "&".join(params)
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"prsm_fiat_compliance failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "entries" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Fiat compliance ring not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"list refused: {detail}"
+    entries = result.get("entries") or []
+    total = result.get("count", 0)
+    lines = [
+        f"Fiat Compliance Log — {len(entries)} of {total} "
+        f"(newest first):",
+    ]
+    if not entries:
+        lines.append("  (no events recorded yet)")
+    for e in entries:
+        eid = (e.get("entry_id") or "?")[:8]
+        usd = e.get("usd_amount", 0)
+        ftns = e.get("ftns_amount", 0)
+        lines.append(
+            f"  {eid}…  {e.get('kind', '?'):>28}  "
+            f"user={e.get('user_id', '-') or '-':<12}  "
+            f"${usd:,.2f}  {ftns:.4f} FTNS  "
+            f"status={e.get('status', '?')}"
+        )
+    return "\n".join(lines)
+
+
 _KYC_ACTIONS = {"initiate", "lookup", "list", "status"}
 
 
@@ -9055,6 +9268,7 @@ TOOL_HANDLERS = {
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,
     "prsm_kyc": handle_prsm_kyc,
+    "prsm_fiat_compliance": handle_prsm_fiat_compliance,
     "prsm_content_provider_stats": handle_prsm_content_provider_stats,
     "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,

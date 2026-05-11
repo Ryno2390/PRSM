@@ -1048,6 +1048,23 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 else:
                     kyc_status = "VERIFIED"
 
+        # Sprint 282 — record to fiat compliance audit ring.
+        # Best-effort; failures don't break the primary
+        # surface.
+        _record_fiat_compliance(
+            kind="onramp_quote",
+            user_id=destination_user_id or "",
+            usd_amount=float(body.usd_amount),
+            ftns_amount=float(ftns_to_receive),
+            status="PENDING_COMMISSION",
+            kyc_status=kyc_status,
+            address=destination_address,
+            metadata={
+                "payment_method_alias":
+                    body.payment_method_alias,
+            },
+        )
+
         return {
             "requested_usd": body.usd_amount,
             "destination_user_id": destination_user_id,
@@ -1432,6 +1449,32 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         result = paymaster.sponsor_user_op(
             user_op, dry_run=body.dry_run,
         )
+
+        # Sprint 282 — record to fiat compliance audit ring.
+        # dry_run → gasless_transfer_quote; execute →
+        # gasless_transfer_execute.
+        try:
+            _ftns_amount_float = float(body.ftns_amount)
+        except (ValueError, TypeError):
+            _ftns_amount_float = 0.0
+        _record_fiat_compliance(
+            kind=(
+                "gasless_transfer_execute"
+                if not body.dry_run
+                else "gasless_transfer_quote"
+            ),
+            user_id=body.from_user_id,
+            usd_amount=0.0,
+            ftns_amount=_ftns_amount_float,
+            status=result.status,
+            tx_hash=result.tx_hash,
+            address=sender.address,
+            metadata={
+                "to_address": body.to_address,
+                "sender_address": sender.address,
+            },
+        )
+
         out = result.to_dict()
         out["from_user_id"] = body.from_user_id
         out["to_address"] = body.to_address
@@ -1544,6 +1587,108 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         out = quote.to_dict()
         out["status"] = "OK"
         return out
+
+    # ── Sprint 282 — Fiat compliance audit ring ───────────
+    # Single queryable log across all fiat surfaces. Records
+    # quotes + executes so operators have audit trail for
+    # AUSTRAC / FinCEN / IRS reporting. Recording is best-
+    # effort: ring exceptions are caught + logged so telemetry
+    # failures never deny the primary fiat surface.
+
+    def _record_fiat_compliance(**kwargs: Any) -> None:
+        """Best-effort ring write. Swallows exceptions; logs
+        warnings. Called from onramp/offramp/gasless handlers
+        after they produce their artifact."""
+        ring = getattr(node, "_fiat_compliance_ring", None)
+        if ring is None:
+            return
+        try:
+            ring.record(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FiatComplianceRing.record failed: %s "
+                "(kind=%s, user_id=%s)",
+                exc, kwargs.get("kind"),
+                kwargs.get("user_id"),
+            )
+
+    @app.get("/admin/fiat-compliance", tags=["admin"])
+    async def list_fiat_compliance(
+        limit: int = 100,
+        offset: int = 0,
+        kind: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if limit <= 0 or limit > 10000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 10000], got {limit}",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0, got {offset}",
+            )
+        ring = getattr(node, "_fiat_compliance_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Fiat compliance ring not initialized."
+                ),
+            )
+        try:
+            entries = ring.recent(
+                limit=limit, offset=offset,
+                kind=kind, user_id=user_id,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {
+            "entries": [e.to_dict() for e in entries],
+            "count": ring.count(),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    @app.get(
+        "/admin/fiat-compliance/summary", tags=["admin"],
+    )
+    async def get_fiat_compliance_summary() -> Dict[str, Any]:
+        ring = getattr(node, "_fiat_compliance_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Fiat compliance ring not initialized."
+                ),
+            )
+        return {
+            "by_kind": ring.summary_by_kind(),
+            "total_entries": ring.count(),
+        }
+
+    @app.get(
+        "/admin/fiat-compliance/{entry_id}", tags=["admin"],
+    )
+    async def get_fiat_compliance_entry(
+        entry_id: str,
+    ) -> Dict[str, Any]:
+        ring = getattr(node, "_fiat_compliance_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Fiat compliance ring not initialized."
+                ),
+            )
+        entry = ring.get(entry_id)
+        if entry is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no entry with id={entry_id!r}",
+            )
+        return entry.to_dict()
 
     # ── Sprint 280 — KYC vendor adapter endpoints ─────────
     # Pluggable KYC surface (Persona / Onfido / Plaid Identity
@@ -1914,6 +2059,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     offramp_kyc_session_url = rec.session_url
                 else:
                     offramp_kyc_status = "VERIFIED"
+
+        # Sprint 282 — record to fiat compliance audit ring.
+        _record_fiat_compliance(
+            kind="offramp_quote",
+            user_id=body.source_user_id or "",
+            usd_amount=float(body.usd_amount),
+            ftns_amount=float(ftns_to_swap),
+            status="PENDING_COMMISSION",
+            kyc_status=offramp_kyc_status,
+            address=target,
+            metadata={
+                "bank_account_alias": body.bank_account_alias,
+                "claim_required": claim_required,
+            },
+        )
 
         return {
             "requested_usd": body.usd_amount,
