@@ -1447,12 +1447,64 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=400, detail="Missing 'query' field")
 
         shard_cids = body.get("shard_cids") or []
-        # If caller passed shard_cids, use that count; otherwise honor explicit shard_count
-        shard_count = len(shard_cids) if shard_cids else int(body.get("shard_count", 3))
-        if shard_count < 1:
-            shard_count = 1
+        # If caller passed shard_cids, use that count; otherwise honor explicit shard_count.
+        # Sprint 195 — int/float coercion was uncaught and raised
+        # ValueError → 500 on non-numeric input. Validate upfront.
+        if shard_cids:
+            shard_count = len(shard_cids)
+        else:
+            _raw_sc = body.get("shard_count", 3)
+            try:
+                shard_count = int(_raw_sc)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"shard_count must be a positive integer; "
+                        f"got {_raw_sc!r}."
+                    ),
+                )
+        # Clamp to sane bounds: 1 ≤ shard_count ≤ 100 (matches
+        # PRSM_MAX_FORGE_SHARDS default used elsewhere).
+        if shard_count < 1 or shard_count > 100:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"shard_count must be in [1, 100]; got {shard_count}."
+                ),
+            )
         hardware_tier = str(body.get("hardware_tier", "t2"))
-        estimated_pcu = float(body.get("estimated_pcu_per_shard", 50.0))
+        # Hardware tier must match a known tier — t1/t2/t3/t4.
+        # Pre-fix unknown tiers (e.g. "<script>") passed through to
+        # PricingEngine which then hung trying to map them.
+        _ALLOWED_TIERS = ("t1", "t2", "t3", "t4")
+        if hardware_tier not in _ALLOWED_TIERS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"hardware_tier must be one of {list(_ALLOWED_TIERS)}; "
+                    f"got {hardware_tier!r}."
+                ),
+            )
+        _raw_pcu = body.get("estimated_pcu_per_shard", 50.0)
+        try:
+            estimated_pcu = float(_raw_pcu)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"estimated_pcu_per_shard must be a positive "
+                    f"number; got {_raw_pcu!r}."
+                ),
+            )
+        if estimated_pcu <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"estimated_pcu_per_shard must be > 0; "
+                    f"got {estimated_pcu}."
+                ),
+            )
 
         engine = PricingEngine()
         quote = engine.quote_swarm_job(
