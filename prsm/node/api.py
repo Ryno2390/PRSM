@@ -3180,11 +3180,36 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=500,
                 detail=f"estimate_cost() failed: {e}",
             )
+        # Sprint 262 — surface projected ε spend so end-users can
+        # plan against the privacy budget (the actual /compute/
+        # inference pre-flight gate uses the same value). ε=0 for
+        # PrivacyLevel.NONE.
+        if privacy_level == PrivacyLevel.NONE:
+            epsilon_estimated = 0.0
+        else:
+            try:
+                epsilon_estimated = (
+                    PrivacyLevel.config_for_level(privacy_level).epsilon
+                )
+            except Exception:  # noqa: BLE001
+                epsilon_estimated = None
+        # Surface remaining privacy-budget so the caller can spot
+        # "I have enough FTNS but not enough ε" before submitting.
+        privacy_budget_remaining: Optional[float] = None
+        try:
+            pb = getattr(node, "privacy_budget", None)
+            if pb is not None:
+                privacy_budget_remaining = float(pb.remaining())
+        except Exception:  # noqa: BLE001
+            privacy_budget_remaining = None
+
         return {
             "model_id": model_id,
             "cost_ftns": str(cost),
             "privacy_tier": privacy_level.value,
             "content_tier": content_tier.value,
+            "epsilon_estimated": epsilon_estimated,
+            "privacy_budget_remaining": privacy_budget_remaining,
         }
 
     @app.post("/compute/inference")

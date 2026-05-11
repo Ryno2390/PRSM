@@ -5040,14 +5040,33 @@ async def handle_prsm_inference_quote(
     if "cost_ftns" not in result:
         detail = result.get("detail", "unknown error")
         return f"Quote refused: {detail}"
-    return (
-        f"PRSM Inference Quote:\n"
-        f"  model_id:     {result.get('model_id', '?')}\n"
-        f"  cost_ftns:    {result.get('cost_ftns', '?')} FTNS\n"
-        f"  privacy_tier: {result.get('privacy_tier', '?')}\n"
-        f"  content_tier: {result.get('content_tier', '?')}\n"
-        f"  Run prsm_inference with budget_ftns ≥ cost_ftns to execute."
+    lines = [
+        "PRSM Inference Quote:",
+        f"  model_id:        {result.get('model_id', '?')}",
+        f"  cost_ftns:       {result.get('cost_ftns', '?')} FTNS",
+        f"  privacy_tier:    {result.get('privacy_tier', '?')}",
+        f"  content_tier:    {result.get('content_tier', '?')}",
+    ]
+    # Sprint 262 — surface projected ε spend + remaining budget
+    # so the caller spots an "ε exhausted before FTNS" rejection
+    # before submitting.
+    eps = result.get("epsilon_estimated")
+    if eps is not None:
+        lines.append(f"  epsilon_spend:   {eps}")
+    remaining = result.get("privacy_budget_remaining")
+    if remaining is not None:
+        lines.append(f"  privacy_budget_remaining: {remaining}")
+        if eps not in (None, 0.0) and remaining < float(eps):
+            lines.append(
+                f"  ⚠  ε spend ({eps}) > remaining "
+                f"({remaining}); request will reject at "
+                f"the /compute/inference pre-flight gate."
+            )
+    lines.append(
+        "  Run prsm_inference with budget_ftns ≥ cost_ftns "
+        "to execute."
     )
+    return "\n".join(lines)
 
 
 async def handle_prsm_forge_quote(arguments: Dict[str, Any]) -> str:
