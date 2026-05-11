@@ -35,6 +35,29 @@ logger = structlog.get_logger(__name__)
 
 # ── Request/Response Models ─────────────────────────────────────────────────────
 
+def _iso_ts(ts: Any) -> Optional[str]:
+    """Sprint 191 — coerce a timestamp value to an ISO-8601 UTC
+    string. Handles None, datetime (has .isoformat), and Unix
+    float/int (PRSM's LocalLedger / submitted_jobs surfaces).
+
+    Pre-fix multiple dashboard handlers crashed with
+    `AttributeError: 'float' object has no attribute 'isoformat'`
+    because they assumed datetime everywhere. Sprint 190 fixed
+    /api/ftns/transfer inline; sprint 191 promotes the coercion
+    to a shared helper for /api/jobs + /api/jobs/{id} +
+    future dashboard handlers.
+    """
+    if ts is None:
+        return None
+    if hasattr(ts, "isoformat"):
+        return ts.isoformat()
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        return _dt.fromtimestamp(float(ts), tz=_tz.utc).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
 class JobSubmitRequest(BaseModel):
     """Request body for submitting a compute job."""
     job_type: str = Field(..., description="Type of job: inference, embedding, benchmark")
@@ -358,8 +381,8 @@ class DashboardServer:
                     "job_type": job.job_type.value,
                     "ftns_budget": job.ftns_budget,
                     "provider_id": job.provider_id,
-                    "created_at": job.created_at.isoformat() if job.created_at else None,
-                    "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+                    "created_at": _iso_ts(job.created_at),
+                    "completed_at": _iso_ts(job.completed_at),
                     "error": job.error,
                 })
             
@@ -431,8 +454,8 @@ class DashboardServer:
                 "result": job.result,
                 "result_verified": job.result_verified,
                 "error": job.error,
-                "created_at": job.created_at.isoformat() if job.created_at else None,
-                "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+                "created_at": _iso_ts(job.created_at),
+                "completed_at": _iso_ts(job.completed_at),
             }
         
         # ── FTNS Balance Endpoints ───────────────────────────────────────────────
@@ -532,27 +555,14 @@ class DashboardServer:
                 }
             })
             
-            # Sprint 190 — `tx.timestamp` is a Unix float on
-            # LocalLedger transactions; pre-fix the handler called
-            # `.isoformat()` unconditionally and crashed with
-            # AttributeError on float. Coerce to datetime first.
-            _ts = tx.timestamp
-            if _ts is None:
-                _ts_iso = None
-            elif hasattr(_ts, "isoformat"):
-                _ts_iso = _ts.isoformat()
-            else:
-                # Unix float / int — convert to ISO via datetime.
-                from datetime import datetime, timezone
-                _ts_iso = datetime.fromtimestamp(
-                    float(_ts), tz=timezone.utc,
-                ).isoformat()
+            # Sprint 190+191 — Unix-float timestamp coerced via
+            # shared _iso_ts helper.
             return {
                 "tx_id": tx.tx_id,
                 "from": tx.from_wallet,
                 "to": tx.to_wallet,
                 "amount": tx.amount,
-                "timestamp": _ts_iso,
+                "timestamp": _iso_ts(tx.timestamp),
             }
         
         @self.app.post("/api/ftns/stake")
