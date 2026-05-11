@@ -4276,6 +4276,26 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not node.ledger or not node.identity:
             raise HTTPException(status_code=503, detail="Not initialized")
 
+        # Sprint 200 — NaN/Infinity slip through `<= 0` (both
+        # comparisons are False); guard upfront. Same goes for
+        # epoch_hours since it controls a window calculation.
+        import math
+        if not math.isfinite(amount):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"amount must be a finite positive number; "
+                    f"got {amount!r}."
+                ),
+            )
+        if not math.isfinite(epoch_hours):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"epoch_hours must be a finite positive number; "
+                    f"got {epoch_hours!r}."
+                ),
+            )
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be positive")
 
@@ -6226,7 +6246,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """
         if not hasattr(node, "_settler_registry") or not node._settler_registry:
             raise HTTPException(503, "Settler registry not initialized")
-        
+
+        # Sprint 200 — guard NaN/Infinity bond_amount.
+        import math
+        if not math.isfinite(bond_amount):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"bond_amount must be a finite positive number; "
+                    f"got {bond_amount!r}."
+                ),
+            )
+
         try:
             settler = await node._settler_registry.register_settler(
                 settler_id=settler_id,
@@ -6382,7 +6413,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """
         if not hasattr(node, "_settler_registry") or not node._settler_registry:
             raise HTTPException(503, "Settler registry not initialized")
-        
+
+        # Sprint 200 — guard NaN/Infinity slash_amount.
+        import math
+        if not math.isfinite(slash_amount):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"slash_amount must be a finite positive number; "
+                    f"got {slash_amount!r}."
+                ),
+            )
+
         try:
             proposal = await node._settler_registry.propose_slash(
                 settler_id=settler_id,
