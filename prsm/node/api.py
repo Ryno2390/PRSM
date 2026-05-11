@@ -924,6 +924,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # operator-misconfig-class errors).
         usd_amount: float
         bank_account_alias: str = "primary"
+        # Sprint 281 — optional source_user_id resolves the
+        # source address via WaaS + drives KYC gating.
+        # Backwards compat: when None, legacy `address` query
+        # param path is used unchanged and no KYC gating applies.
+        source_user_id: Optional[str] = None
 
     # Sprint 278 — Coinbase onramp quote (USD → FTNS).
     # Mirrors the offramp quote: composer-only
@@ -1020,12 +1025,38 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         ftns_to_receive = body.usd_amount / usd_rate
 
+        # Sprint 281 — KYC gating. When destination_user_id is
+        # supplied AND a KYC client is wired, surface the
+        # prerequisite (mirrors the claim_required pattern).
+        # Explicit destination_address bypasses (caller-side
+        # responsibility). When KYC client is unwired, fields
+        # stay neutral so the artifact is still useful.
+        kyc_required = False
+        kyc_status = None
+        kyc_session_url = None
+        if destination_user_id:
+            kyc = getattr(node, "_kyc_client", None)
+            if kyc is not None:
+                rec = kyc.get_status(destination_user_id)
+                if rec is None:
+                    kyc_required = True
+                    kyc_status = "NOT_STARTED"
+                elif rec.status != "VERIFIED":
+                    kyc_required = True
+                    kyc_status = rec.status
+                    kyc_session_url = rec.session_url
+                else:
+                    kyc_status = "VERIFIED"
+
         return {
             "requested_usd": body.usd_amount,
             "destination_user_id": destination_user_id,
             "destination_address": destination_address,
             "ftns_to_receive": ftns_to_receive,
             "usd_rate": usd_rate,
+            "kyc_required": kyc_required,
+            "kyc_status": kyc_status,
+            "kyc_session_url": kyc_session_url,
             "quote": {
                 "usd_in": body.usd_amount,
                 "usdc_acquired": body.usd_amount,
@@ -1776,7 +1807,38 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             )
 
-        target = address or node.ftns_ledger._connected_address
+        # Sprint 281 — source_user_id resolution via WaaS.
+        # Mutually exclusive with explicit `address` query
+        # param (which legacy callers still use). When both
+        # are absent, default to the operator's connected
+        # ledger address.
+        resolved_address = address
+        if body.source_user_id:
+            waas = getattr(node, "_coinbase_waas_client", None)
+            if waas is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "WaaS client not initialized; cannot "
+                        "resolve source_user_id."
+                    ),
+                )
+            rec = waas.get_wallet(body.source_user_id)
+            if rec is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"no WaaS wallet for source_user_id="
+                        f"{body.source_user_id!r}"
+                    ),
+                )
+            if rec.address:
+                resolved_address = rec.address
+
+        target = (
+            resolved_address
+            or node.ftns_ledger._connected_address
+        )
         balance_ftns = await node.ftns_ledger.get_balance(target)
 
         rate_raw = os.getenv("PRSM_FTNS_USD_RATE", "").strip()
@@ -1832,9 +1894,31 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             max(0.0, ftns_to_swap - balance_ftns) if claim_required else 0.0
         )
 
+        # Sprint 281 — KYC gating mirrors the onramp side.
+        # Only triggers when source_user_id is supplied; legacy
+        # `address`-based callers see neutral fields preserving
+        # backwards-compat.
+        offramp_kyc_required = False
+        offramp_kyc_status = None
+        offramp_kyc_session_url = None
+        if body.source_user_id:
+            kyc = getattr(node, "_kyc_client", None)
+            if kyc is not None:
+                rec = kyc.get_status(body.source_user_id)
+                if rec is None:
+                    offramp_kyc_required = True
+                    offramp_kyc_status = "NOT_STARTED"
+                elif rec.status != "VERIFIED":
+                    offramp_kyc_required = True
+                    offramp_kyc_status = rec.status
+                    offramp_kyc_session_url = rec.session_url
+                else:
+                    offramp_kyc_status = "VERIFIED"
+
         return {
             "requested_usd": body.usd_amount,
             "source_address": target,
+            "source_user_id": body.source_user_id,
             "source_balance_ftns": balance_ftns,
             "source_balance_usd": balance_usd,
             # Aggregate-source mirror (additive — clients reading
@@ -1844,6 +1928,9 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "claimable_royalties_ftns": claimable_ftns,
             "claim_required": claim_required,
             "claim_amount_ftns": claim_amount_ftns,
+            "kyc_required": offramp_kyc_required,
+            "kyc_status": offramp_kyc_status,
+            "kyc_session_url": offramp_kyc_session_url,
             "quote": {
                 "ftns_to_swap": ftns_to_swap,
                 "usdc_received": body.usd_amount,

@@ -8817,6 +8817,22 @@ async def handle_coinbase_onramp_initiate(
     ]
     if dest_uid:
         lines.append(f"  Resolved from user_id: {dest_uid}")
+    # Sprint 281 — KYC prerequisite block (mirrors the
+    # claim_required block on the offramp side).
+    if result.get("kyc_required"):
+        kyc_status = result.get("kyc_status", "NOT_STARTED")
+        kyc_url = result.get("kyc_session_url")
+        lines += ["", "  Prerequisite: KYC required."]
+        lines.append(f"    Current KYC status: {kyc_status}")
+        if kyc_url:
+            lines.append(
+                f"    Complete vendor flow: {kyc_url}"
+            )
+        else:
+            lines.append(
+                "    Start a session with "
+                "prsm_kyc?action=initiate"
+            )
     lines += [
         "",
         f"  Payment method:    {quote.get('payment_method_alias', 'primary')}",
@@ -8906,6 +8922,29 @@ async def handle_coinbase_offramp_initiate(arguments: Dict[str, Any]) -> str:
             f"    Claimable royalties:    {claimable:.6f} FTNS\n"
         )
 
+    # Sprint 281 — KYC prerequisite block (mirrors the
+    # onramp side; surfaces when source_user_id was supplied
+    # and the resolved user is not VERIFIED).
+    kyc_block = ""
+    if result.get("kyc_required"):
+        kyc_status = result.get("kyc_status", "NOT_STARTED")
+        kyc_url = result.get("kyc_session_url")
+        kyc_lines = [
+            "",
+            "  Prerequisite: KYC required.",
+            f"    Current KYC status: {kyc_status}",
+        ]
+        if kyc_url:
+            kyc_lines.append(
+                f"    Complete vendor flow: {kyc_url}"
+            )
+        else:
+            kyc_lines.append(
+                "    Start a session with "
+                "prsm_kyc?action=initiate"
+            )
+        kyc_block = "\n".join(kyc_lines) + "\n"
+
     return (
         f"PRSM Cash-Out Pre-Flight\n"
         f"  Requested:    ${result['requested_usd']:,.2f} USD\n"
@@ -8914,6 +8953,7 @@ async def handle_coinbase_offramp_initiate(arguments: Dict[str, Any]) -> str:
         f"(${result['source_balance_usd']:,.2f} @ "
         f"{result['usd_rate']} USD/FTNS)\n"
         f"{prereq_block}"
+        f"{kyc_block}"
         f"\n"
         f"  Quote:\n"
         f"    Swap:       {quote['ftns_to_swap']:.6f} FTNS  "
