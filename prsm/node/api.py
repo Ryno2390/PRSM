@@ -387,6 +387,40 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         response.headers["X-Request-ID"] = request_id
         return response
 
+    # Sprint 188 — security response headers. Applied uniformly to
+    # every response. Documented OWASP recommendations for HTTP-API
+    # services that may be embedded in browsers (dashboard) or
+    # consumed by third-party clients.
+    #
+    #   X-Content-Type-Options: nosniff
+    #     Prevents browsers from MIME-sniffing past the declared
+    #     Content-Type (defends against polyglot attacks where a
+    #     response declared application/json is sniffed as
+    #     text/html and executes inline script).
+    #
+    #   X-Frame-Options: DENY
+    #     Prevents the API responses from being embedded in iframes
+    #     (defends against clickjacking on the dashboard surface).
+    #
+    #   Referrer-Policy: strict-origin-when-cross-origin
+    #     Limits Referer header leakage to other origins —
+    #     defends against operator-IP / endpoint enumeration via
+    #     outbound clickthroughs from the dashboard.
+    #
+    # Strict-Transport-Security is intentionally NOT set here —
+    # PRSM runs on http://127.0.0.1 by default; HSTS belongs on
+    # the operator's reverse proxy (Caddy/nginx/Cloudflare) where
+    # the TLS termination actually happens.
+    @app.middleware("http")
+    async def security_headers_middleware(request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin",
+        )
+        return response
+
     # Sprint 187 — HEAD-rewriting middleware. The dashboard sub-app
     # mount at `""` (see ~line 6753) catches HEAD requests before
     # FastAPI's auto-HEAD-for-GET path runs, returning 404 for any
