@@ -1270,6 +1270,68 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
+        name="prsm_content_filter",
+        description=(
+            "Operator's content-filter CRUD via MCP. Single tool "
+            "with `action` selector: list | add_cids | remove_cid "
+            "| add_tags | remove_tag | set_action. Per "
+            "R9-SCOPING-1 §8 this is operator-local — the "
+            "blocklist is never propagated to other operators. "
+            "Use to manage your own jurisdiction-specific content "
+            "refusal list (CIDs, model tags, action mode). "
+            "Backed by /admin/content-filter/* endpoints."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "list", "add_cids", "remove_cid",
+                        "add_tags", "remove_tag", "set_action",
+                    ],
+                },
+                "cids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "CID list for action=add_cids "
+                        "(max 1000)."
+                    ),
+                    "maxItems": 1000,
+                },
+                "cid": {
+                    "type": "string",
+                    "description": "CID for action=remove_cid.",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Tag list for action=add_tags "
+                        "(max 100)."
+                    ),
+                    "maxItems": 100,
+                },
+                "tag": {
+                    "type": "string",
+                    "description": "Tag for action=remove_tag.",
+                },
+                "filter_action": {
+                    "type": "string",
+                    "enum": [
+                        "refuse", "log_and_refuse",
+                        "silent_refuse",
+                    ],
+                    "description": (
+                        "Action mode for action=set_action."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_pinned_stats",
         description=(
             "Render per-pinned-content storage challenge stats: "
@@ -5235,6 +5297,220 @@ async def handle_prsm_content_provider_stats(
     return "\n".join(lines)
 
 
+_CONTENT_FILTER_ACTIONS = {
+    "list", "add_cids", "remove_cid",
+    "add_tags", "remove_tag", "set_action",
+}
+
+
+async def handle_prsm_content_filter(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 270 — operator's content-filter CRUD via MCP.
+
+    action selector mirrors prsm_agent_admin / prsm_settler_admin
+    patterns. Per R9-SCOPING-1 §8 this is operator-local — the
+    blocklist is never propagated to other operators."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_CONTENT_FILTER_ACTIONS)})."
+        )
+    if action not in _CONTENT_FILTER_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_CONTENT_FILTER_ACTIONS)}; got {action!r}."
+        )
+
+    if action == "list":
+        try:
+            result = await _call_node_api(
+                "GET", "/admin/content-filter",
+            )
+        except Exception as e:
+            return (
+                f"prsm_content_filter failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "count_cids" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Content filter store not wired on this "
+                    f"node.\n  Detail: {detail}\n"
+                    f"  Set PRSM_CONTENT_FILTER_DIR for "
+                    f"persistence."
+                )
+            return f"list refused: {detail}"
+        cids = result.get("blocked_content_ids") or []
+        tags = result.get("blocked_model_tags") or []
+        patterns = result.get("blocked_input_patterns") or []
+        lines = [
+            "PRSM Content Filter — operator blocklist:",
+            f"  action_on_match: {result.get('action_on_match', '?')}",
+            f"  count_cids:      {len(cids)}",
+            f"  count_tags:      {len(tags)}",
+            f"  count_patterns:  {len(patterns)}",
+        ]
+        if cids:
+            lines.append("  blocked_content_ids:")
+            for c in cids[:20]:
+                lines.append(f"    {c}")
+            if len(cids) > 20:
+                lines.append(f"    ...+{len(cids) - 20} more")
+        if tags:
+            lines.append("  blocked_model_tags:")
+            for t in tags:
+                lines.append(f"    {t}")
+        if patterns:
+            lines.append("  blocked_input_patterns:")
+            for p in patterns[:10]:
+                lines.append(f"    {p}")
+            if len(patterns) > 10:
+                lines.append(
+                    f"    ...+{len(patterns) - 10} more"
+                )
+        return "\n".join(lines)
+
+    if action == "add_cids":
+        cids = arguments.get("cids")
+        if not isinstance(cids, list):
+            return "add_cids requires 'cids' as a list of strings."
+        try:
+            result = await _call_node_api(
+                "POST", "/admin/content-filter/cids",
+                {"cids": cids},
+            )
+        except Exception as e:
+            return (
+                f"prsm_content_filter failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "added" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Content filter store not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"add_cids refused: {detail}"
+        return (
+            f"Content filter updated: added={result['added']}, "
+            f"total={result.get('total', '?')}."
+        )
+
+    if action == "remove_cid":
+        cid = (arguments.get("cid") or "").strip()
+        if not cid:
+            return "remove_cid requires 'cid'."
+        try:
+            result = await _call_node_api(
+                "DELETE",
+                f"/admin/content-filter/cids/{cid}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_content_filter failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "removed" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not in blocklist" in str(detail).lower():
+                return (
+                    f"cid={cid!r} not in blocklist; nothing to "
+                    f"remove."
+                )
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Content filter store not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"remove_cid refused: {detail}"
+        return (
+            f"Removed {result['removed']!s} from filter "
+            f"(total now {result.get('total', '?')})."
+        )
+
+    if action == "add_tags":
+        tags = arguments.get("tags")
+        if not isinstance(tags, list):
+            return "add_tags requires 'tags' as a list of strings."
+        try:
+            result = await _call_node_api(
+                "POST", "/admin/content-filter/tags",
+                {"tags": tags},
+            )
+        except Exception as e:
+            return (
+                f"prsm_content_filter failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "added" not in result:
+            detail = result.get("detail", "unknown error")
+            return f"add_tags refused: {detail}"
+        return (
+            f"Content filter updated: added={result['added']}, "
+            f"total={result.get('total', '?')} tags."
+        )
+
+    if action == "remove_tag":
+        tag = (arguments.get("tag") or "").strip()
+        if not tag:
+            return "remove_tag requires 'tag'."
+        try:
+            result = await _call_node_api(
+                "DELETE",
+                f"/admin/content-filter/tags/{tag}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_content_filter failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "removed" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not in blocklist" in str(detail).lower():
+                return (
+                    f"tag={tag!r} not in blocklist; nothing to "
+                    f"remove."
+                )
+            return f"remove_tag refused: {detail}"
+        return (
+            f"Removed tag {result['removed']!s} (total now "
+            f"{result.get('total', '?')})."
+        )
+
+    # action == "set_action" — meta-action; choose the actual
+    # filter action via filter_action arg to avoid name
+    # collision with the dispatch action selector.
+    filter_action = (
+        arguments.get("filter_action") or ""
+    ).strip().lower()
+    if not filter_action:
+        return (
+            "set_action requires 'filter_action' "
+            "(refuse | log_and_refuse | silent_refuse)."
+        )
+    try:
+        result = await _call_node_api(
+            "POST", "/admin/content-filter/action",
+            {"action": filter_action},
+        )
+    except Exception as e:
+        return (
+            f"prsm_content_filter failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "action_on_match" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"set_action refused: {detail}"
+    return (
+        f"Content filter action set to "
+        f"{result['action_on_match']!s}."
+    )
+
+
 async def handle_prsm_pinned_stats(
     arguments: Dict[str, Any],
 ) -> str:
@@ -7211,6 +7487,7 @@ TOOL_HANDLERS = {
     "prsm_royalty_dispatch_summary": handle_prsm_royalty_dispatch_summary,
     "prsm_bootstrap_status": handle_prsm_bootstrap_status,
     "prsm_pinned_stats": handle_prsm_pinned_stats,
+    "prsm_content_filter": handle_prsm_content_filter,
     "prsm_content_provider_stats": handle_prsm_content_provider_stats,
     "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,
