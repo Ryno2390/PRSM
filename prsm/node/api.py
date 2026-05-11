@@ -1694,6 +1694,67 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             **quote.to_dict(),
         }
 
+    # Sprint 271 — operator content filter enforcement helper for
+    # the 3 compute entry points (forge / inference / inference_
+    # stream). Per ContentSelfFilter design (R9 Phase 6.4) the
+    # filter must run BEFORE escrow lock / compute cost. HTTP 451
+    # (Unavailable For Legal Reasons, RFC 7725) is the canonical
+    # refusal. No filter wired → pre-271 pass-through.
+    def _enforce_content_filter(
+        *,
+        prompt: str = "",
+        shard_cids: Optional[List[str]] = None,
+        model_id: str = "",
+    ) -> None:
+        store = getattr(node, "_content_filter_store", None)
+        if store is None:
+            return
+        from prsm.node.content_self_filter import DispatchContext
+        snapshot = store.current()
+        # Check each shard_cid as a separate dispatch context;
+        # ANY blocked CID refuses the whole dispatch.
+        for cid in (shard_cids or []):
+            decision = snapshot.evaluate(
+                DispatchContext(content_id=cid)
+            )
+            if not decision.allow:
+                logger.info(
+                    "content-filter: refused (forge) "
+                    "cid=%s reason=%s",
+                    (cid or "")[:14], decision.reason,
+                )
+                raise HTTPException(
+                    status_code=451,
+                    detail=(
+                        f"dispatch refused by operator's "
+                        f"content filter: {decision.reason} "
+                        f"(matched={decision.matched_value!r})"
+                    ),
+                )
+        # Then check prompt + model tags. model_id passed as a
+        # 1-element tag set so an operator-blocked model maps to
+        # the same blocked_model_tag axis.
+        if prompt or model_id:
+            decision = snapshot.evaluate(DispatchContext(
+                prompt_text=prompt or "",
+                model_tags=frozenset(
+                    [model_id] if model_id else []
+                ),
+            ))
+            if not decision.allow:
+                logger.info(
+                    "content-filter: refused (inference) "
+                    "model=%s reason=%s",
+                    model_id[:20], decision.reason,
+                )
+                raise HTTPException(
+                    status_code=451,
+                    detail=(
+                        f"dispatch refused by operator's "
+                        f"content filter: {decision.reason}"
+                    ),
+                )
+
     @app.post("/compute/forge")
     async def compute_forge(
         body: Dict[str, Any] = {},
@@ -1935,6 +1996,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                         f"have the operator raise the cap."
                     ),
                 )
+
+        # Sprint 271 — operator content filter (BEFORE escrow
+        # lock / forge availability / compute cost). Refuses with
+        # 451 if query matches blocked_input_patterns OR any
+        # shard_cid is in blocked_content_ids.
+        _enforce_content_filter(
+            prompt=query,
+            shard_cids=_early_shard_cids,
+        )
 
         if not hasattr(node, 'agent_forge') or node.agent_forge is None:
             raise HTTPException(
@@ -3337,6 +3407,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not model_id:
             raise HTTPException(status_code=400, detail="Missing 'model_id' field")
 
+        # Sprint 271 — operator content filter (BEFORE budget
+        # validation / escrow / privacy budget / executor).
+        # Refuses with 451 if prompt matches blocked_input_patterns
+        # OR model_id is in blocked_model_tags.
+        _enforce_content_filter(prompt=prompt, model_id=model_id)
+
         # Validate budget_ftns FIELD type/value upfront (422 for
         # well-formed body that fails semantic validation).
         if "budget_ftns" in body:
@@ -3777,6 +3853,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         model_id = body.get("model_id", "")
         if not model_id:
             raise HTTPException(status_code=400, detail="Missing 'model_id' field")
+
+        # Sprint 271 — operator content filter (BEFORE budget
+        # validation / escrow / privacy budget / executor stream).
+        _enforce_content_filter(prompt=prompt, model_id=model_id)
+
         if "budget_ftns" in body:
             _raw_b = body["budget_ftns"]
             try:
