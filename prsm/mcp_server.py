@@ -1121,6 +1121,58 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_agents",
+        description=(
+            "List or search PRSM agents. Without `capability`, "
+            "calls GET /agents (with optional `local_only` filter). "
+            "With `capability`, routes to GET /agents/search filtered "
+            "by that capability string. Useful for discovering "
+            "which agents the operator can dispatch jobs to."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "capability": {
+                    "type": "string",
+                    "description": (
+                        "Optional capability string. When provided, "
+                        "calls /agents/search; otherwise lists all."
+                    ),
+                    "maxLength": 256,
+                },
+                "local_only": {
+                    "type": "boolean",
+                    "description": (
+                        "When listing (no capability), restrict to "
+                        "locally-registered agents. Default false."
+                    ),
+                    "default": False,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        "Max results when searching (1..100). "
+                        "Default 20."
+                    ),
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20,
+                },
+            },
+        },
+    ),
+    Tool(
+        name="prsm_agent_spending",
+        description=(
+            "Aggregate spending dashboard across all local agents. "
+            "Backed by GET /agents/spending. Returns per-agent spent "
+            "+ allowance plus totals. Useful for operators tracking "
+            "agent budget burn before granting more FTNS via "
+            "/agents/{agent_id}/allowance."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_peers",
         description=(
             "List currently-connected peers (outbound + inbound). "
@@ -4009,6 +4061,88 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_agents(arguments: Dict[str, Any]) -> str:
+    """Sprint 214 — list or search agents.
+
+    If `capability` is provided, routes to GET /agents/search;
+    otherwise GET /agents with optional `local_only` filter.
+    """
+    capability = (arguments.get("capability") or "").strip()
+    if capability:
+        if len(capability) > 256:
+            return f"capability must be <= 256 chars; got {len(capability)}."
+        raw_limit = arguments.get("limit", 20)
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            return f"limit must be an integer; got {raw_limit!r}."
+        if limit < 1 or limit > 100:
+            return f"limit must be in [1, 100]; got {limit}."
+        path = (
+            f"/agents/search?capability={capability}&limit={limit}"
+        )
+    else:
+        local_only = bool(arguments.get("local_only", False))
+        path = (
+            f"/agents?local_only={'true' if local_only else 'false'}"
+        )
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"prsm_agents failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    agents = result.get("agents") or []
+    count = result.get("count", len(agents))
+    header = (
+        f"PRSM Agents matching capability='{capability}' "
+        f"(count={count}):"
+        if capability
+        else f"PRSM Agents (count={count}):"
+    )
+    if not agents:
+        return f"{header}\n  (none)"
+    lines = [header]
+    for a in agents:
+        lines.append(
+            f"  {a.get('agent_id', '?'):<16}  "
+            f"{(a.get('display_name') or ''):<24}  "
+            f"status={a.get('status', '?')}"
+        )
+    return "\n".join(lines)
+
+
+async def handle_prsm_agent_spending(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 214 — render GET /agents/spending aggregate dashboard."""
+    try:
+        result = await _call_node_api("GET", "/agents/spending")
+    except Exception as e:
+        return (
+            f"prsm_agent_spending failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    agents = result.get("agents") or []
+    total_spent = result.get("total_spent", 0)
+    total_allow = result.get("total_allowance", 0)
+    lines = [
+        f"PRSM Agent Spending (total {total_spent} FTNS of "
+        f"{total_allow} FTNS allowance):",
+    ]
+    if not agents:
+        lines.append("  (no agents with spending records)")
+    else:
+        for a in agents:
+            lines.append(
+                f"  {a.get('agent_id', '?'):<16}  "
+                f"spent={a.get('spent', '?')} / "
+                f"allowance={a.get('allowance', '?')}"
+            )
+    return "\n".join(lines)
+
+
 async def handle_prsm_peers(arguments: Dict[str, Any]) -> str:
     """Sprint 213 — render GET /peers connected-peer list."""
     try:
@@ -4430,6 +4564,8 @@ TOOL_HANDLERS = {
     "prsm_info": handle_prsm_info,
     "prsm_transactions": handle_prsm_transactions,
     "prsm_peers": handle_prsm_peers,
+    "prsm_agents": handle_prsm_agents,
+    "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
 }
