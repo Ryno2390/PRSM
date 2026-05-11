@@ -2120,6 +2120,25 @@ class PRSMNode:
             )
             self._job_history = None
 
+        # Sprint 269 — ContentFilterStore for the operator's
+        # self-managed content blocklist (Vision §14 "content
+        # moderation" mitigation; R9-SCOPING-1 §7-8 operator-side
+        # filter, not Foundation-curated). Opt-in filesystem
+        # persistence via PRSM_CONTENT_FILTER_DIR. Failure-soft.
+        try:
+            from prsm.node.content_filter_store import (
+                ContentFilterStore,
+            )
+            self._content_filter_store = ContentFilterStore.from_env()
+            logger.info("ContentFilterStore wired")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ContentFilterStore construction failed: %s — "
+                "/content/retrieve will not enforce blocklist.",
+                exc,
+            )
+            self._content_filter_store = None
+
         # Sprint 249 — RoyaltyDispatchRing for the on-chain
         # content-royalty audit trail (sprint 248). Opt-in
         # filesystem persistence via PRSM_ROYALTY_DISPATCH_LOG_DIR.

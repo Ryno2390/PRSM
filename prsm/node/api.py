@@ -4805,6 +4805,29 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not node.content_provider:
             raise HTTPException(status_code=503, detail="Content provider not initialized")
 
+        # Sprint 269 — operator content filter enforcement.
+        # Refuses BEFORE any compute cost / network fetch, per
+        # ContentSelfFilter design (R9-SCOPING-1 §7). Local-only
+        # decision; doesn't affect what other operators serve.
+        _filter_store = getattr(
+            node, "_content_filter_store", None,
+        )
+        if (
+            _filter_store is not None
+            and _filter_store.is_cid_blocked(cid)
+        ):
+            logger.info(
+                "content-filter: refused cid=%s (operator blocklist)",
+                cid[:14],
+            )
+            raise HTTPException(
+                status_code=451,  # Unavailable For Legal Reasons
+                detail=(
+                    f"content cid={cid!r} is blocked by this "
+                    f"operator's content filter"
+                ),
+            )
+
         # Get provider stats before retrieval to determine providers tried
         stats_before = node.content_provider.get_stats()
         
@@ -5507,6 +5530,149 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "offset": offset,
             "limit": limit,
         }
+
+    # ── Sprint 269 — operator-side content filter CRUD ────────
+    # Vision §14 "Content moderation" mitigation. Per-operator
+    # blocklist; never propagated. R9-SCOPING-1 §7-8 invariants
+    # preserved: each operator manages their own list.
+
+    @app.get("/admin/content-filter", tags=["admin"])
+    async def get_content_filter() -> Dict[str, Any]:
+        """Snapshot the operator's current content filter."""
+        store = getattr(node, "_content_filter_store", None)
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Content filter store not initialized.",
+            )
+        return store.to_dict()
+
+    @app.post("/admin/content-filter/cids", tags=["admin"])
+    async def add_filter_cids(
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, Any]:
+        """Add CIDs to the operator's content blocklist.
+
+        Body: {"cids": ["bafy123", "Qm..."]}.
+        Idempotent: existing CIDs are no-ops in the `added` count.
+        """
+        store = getattr(node, "_content_filter_store", None)
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Content filter store not initialized.",
+            )
+        cids = body.get("cids")
+        if not isinstance(cids, list):
+            raise HTTPException(
+                status_code=422,
+                detail="body.cids must be a list of strings",
+            )
+        if len(cids) > 1000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"max 1000 CIDs per request; got {len(cids)}",
+            )
+        added = store.add_cids(cids)
+        return {
+            "added": added,
+            "total": store.to_dict()["count_cids"],
+        }
+
+    @app.delete(
+        "/admin/content-filter/cids/{cid}", tags=["admin"],
+    )
+    async def remove_filter_cid(cid: str) -> Dict[str, Any]:
+        """Remove a single CID from the blocklist."""
+        store = getattr(node, "_content_filter_store", None)
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Content filter store not initialized.",
+            )
+        removed = store.remove_cid(cid)
+        if not removed:
+            raise HTTPException(
+                status_code=404,
+                detail=f"cid={cid!r} not in blocklist",
+            )
+        return {
+            "removed": cid,
+            "total": store.to_dict()["count_cids"],
+        }
+
+    @app.post("/admin/content-filter/tags", tags=["admin"])
+    async def add_filter_tags(
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, Any]:
+        """Add model tags to the operator's content blocklist."""
+        store = getattr(node, "_content_filter_store", None)
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Content filter store not initialized.",
+            )
+        tags = body.get("tags")
+        if not isinstance(tags, list):
+            raise HTTPException(
+                status_code=422,
+                detail="body.tags must be a list of strings",
+            )
+        if len(tags) > 100:
+            raise HTTPException(
+                status_code=422,
+                detail=f"max 100 tags per request; got {len(tags)}",
+            )
+        added = store.add_tags(tags)
+        return {
+            "added": added,
+            "total": store.to_dict()["count_tags"],
+        }
+
+    @app.delete(
+        "/admin/content-filter/tags/{tag}", tags=["admin"],
+    )
+    async def remove_filter_tag(tag: str) -> Dict[str, Any]:
+        store = getattr(node, "_content_filter_store", None)
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Content filter store not initialized.",
+            )
+        removed = store.remove_tag(tag)
+        if not removed:
+            raise HTTPException(
+                status_code=404,
+                detail=f"tag={tag!r} not in blocklist",
+            )
+        return {
+            "removed": tag,
+            "total": store.to_dict()["count_tags"],
+        }
+
+    @app.post("/admin/content-filter/action", tags=["admin"])
+    async def set_filter_action(
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, Any]:
+        """Set the action mode: refuse / log_and_refuse /
+        silent_refuse."""
+        store = getattr(node, "_content_filter_store", None)
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Content filter store not initialized.",
+            )
+        action = body.get("action")
+        if not isinstance(action, str):
+            raise HTTPException(
+                status_code=422,
+                detail="body.action must be a string",
+            )
+        try:
+            store.set_action(action)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {"action_on_match": action}
 
     @app.get("/admin/royalty-dispatch-summary")
     async def get_royalty_dispatch_summary() -> Dict[str, Any]:
