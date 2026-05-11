@@ -176,27 +176,47 @@ class BitTorrentClient:
         try:
             self._loop = asyncio.get_event_loop()
 
-            # Create session settings
-            settings = lt.settings_pack()
-            settings.set_int(lt.settings_pack.listen_interfaces,
-                           f"0.0.0.0:{self.config.port_range_start}")
+            # Sprint 179 — libtorrent 2.0.12+ removed `settings_pack`
+            # from Python bindings; use the dict-based `default_settings()`
+            # API instead. The old settings_pack path is retained as a
+            # legacy branch for libtorrent <2.0.12.
+            if hasattr(lt, "default_settings"):
+                settings = lt.default_settings()
+                settings["listen_interfaces"] = (
+                    f"0.0.0.0:{self.config.port_range_start}"
+                )
+                if self.config.dht_enabled:
+                    settings["enable_dht"] = True
+                settings["upload_rate_limit"] = (
+                    self.config.upload_rate_limit * 1024
+                )
+                settings["download_rate_limit"] = (
+                    self.config.download_rate_limit * 1024
+                )
+                self._session = lt.session(settings)
+            else:
+                settings = lt.settings_pack()
+                settings.set_int(lt.settings_pack.listen_interfaces,
+                               f"0.0.0.0:{self.config.port_range_start}")
+                if self.config.dht_enabled:
+                    settings.set_bool(lt.settings_pack.enable_dht, True)
+                settings.set_int(lt.settings_pack.upload_rate_limit,
+                               self.config.upload_rate_limit * 1024)
+                settings.set_int(lt.settings_pack.download_rate_limit,
+                               self.config.download_rate_limit * 1024)
+                self._session = lt.session(settings)
 
-            # Enable DHT
-            if self.config.dht_enabled:
-                settings.set_bool(lt.settings_pack.enable_dht, True)
+            # DHT bootstrap nodes (same on both API paths).
+            # Sprint 179 — libtorrent 2.0.12+ moved add_dht_router from
+            # module-level to session method; older versions exposed
+            # both. Prefer the method form when available.
+            if self.config.dht_enabled and self._session is not None:
                 for node in self.config.dht_bootstrap_nodes:
                     host, port = node.rsplit(":", 1)
-                    # Add DHT router
-                    lt.add_dht_router(self._session, host, int(port)) if self._session else None
-
-            # Set rate limits
-            settings.set_int(lt.settings_pack.upload_rate_limit,
-                           self.config.upload_rate_limit * 1024)  # Convert to bytes
-            settings.set_int(lt.settings_pack.download_rate_limit,
-                           self.config.download_rate_limit * 1024)
-
-            # Create the session
-            self._session = lt.session(settings)
+                    if hasattr(self._session, "add_dht_router"):
+                        self._session.add_dht_router(host, int(port))
+                    elif hasattr(lt, "add_dht_router"):
+                        lt.add_dht_router(self._session, host, int(port))
 
             # Ensure download directory exists
             download_dir = self.config.get_download_dir()

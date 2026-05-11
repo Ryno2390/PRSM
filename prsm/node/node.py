@@ -2013,10 +2013,15 @@ class PRSMNode:
             )
             await self.bt_manifest_store.initialize()
 
-            # Initialize provider (seeder)
+            # Initialize provider (seeder).
+            # Sprint 179 — coerce data_dir to pathlib.Path so `/`
+            # join works regardless of whether config supplies str
+            # or Path (NodeConfig defaults to str).
+            from pathlib import Path as _Path
+            _data_dir = _Path(self.config.data_dir)
             bt_provider_config = BitTorrentProviderConfig(
                 max_torrents=getattr(self.config, 'bt_max_torrents', 50),
-                data_dir=str(self.config.data_dir / "torrents"),
+                data_dir=str(_data_dir / "torrents"),
                 seeder_reward_per_gb=getattr(self.config, 'bt_seeder_reward_per_gb', Decimal("0.10")),
             )
             self.bt_provider = BitTorrentProvider(
@@ -2033,7 +2038,7 @@ class PRSMNode:
             # Initialize requester (downloader)
             bt_requester_config = BitTorrentRequesterConfig(
                 max_concurrent_downloads=getattr(self.config, 'bt_max_downloads', 10),
-                data_dir=str(self.config.data_dir / "torrents"),
+                data_dir=str(_data_dir / "torrents"),
                 download_cost_per_gb=getattr(self.config, 'bt_download_cost_per_gb', Decimal("0.05")),
             )
             self.bt_requester = BitTorrentRequester(
@@ -2059,8 +2064,8 @@ class PRSMNode:
                 ContentRetriever,
             )
 
-            staging_dir = self.config.data_dir / "content_publish_staging"
-            cache_dir = self.config.data_dir / "content_fetch_cache"
+            staging_dir = _data_dir / "content_publish_staging"
+            cache_dir = _data_dir / "content_fetch_cache"
 
             self.content_publisher = ContentPublisher(
                 bt_provider=self.bt_provider,
