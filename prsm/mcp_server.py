@@ -1121,6 +1121,29 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_claim_rewards",
+        description=(
+            "Claim accumulated staking rewards. Backed by POST "
+            "/staking/claim-rewards. Without `stake_id`, claims "
+            "across all of the node's stakes; with `stake_id`, "
+            "scopes to that single stake. Returns total rewards "
+            "claimed + stakes processed. Use prsm_staking_status "
+            "first to see unclaimed reward balance."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "stake_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional specific stake ID. Omit to claim "
+                        "across all stakes."
+                    ),
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_unstake",
         description=(
             "Request to unstake FTNS tokens. Backed by POST "
@@ -4124,6 +4147,41 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_claim_rewards(arguments: Dict[str, Any]) -> str:
+    """Sprint 218 — claim accumulated staking rewards.
+
+    Without stake_id, claims across all of the node's stakes.
+    With stake_id, scopes to that single stake.
+    """
+    stake_id = (arguments.get("stake_id") or "").strip()
+    path = "/staking/claim-rewards"
+    if stake_id:
+        path = f"{path}?stake_id={stake_id}"
+    try:
+        result = await _call_node_api("POST", path)
+    except Exception as e:
+        return (
+            f"prsm_claim_rewards failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "total_rewards_claimed" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"Claim refused: {detail}"
+    total = result.get("total_rewards_claimed", 0)
+    n = result.get("stakes_processed", 0)
+    if float(total) == 0:
+        return (
+            f"No rewards to claim (stakes processed: {n}).\n"
+            f"  user_id: {result.get('user_id', '?')}"
+        )
+    return (
+        f"Rewards claimed:\n"
+        f"  user_id:               {result.get('user_id', '?')}\n"
+        f"  total_rewards_claimed: {total} FTNS\n"
+        f"  stakes_processed:      {n}"
+    )
+
+
 async def handle_prsm_unstake(arguments: Dict[str, Any]) -> str:
     """Sprint 217 — request to unstake FTNS tokens.
 
@@ -4766,6 +4824,7 @@ TOOL_HANDLERS = {
     "prsm_staking_status": handle_prsm_staking_status,
     "prsm_subsystem_stats": handle_prsm_subsystem_stats,
     "prsm_unstake": handle_prsm_unstake,
+    "prsm_claim_rewards": handle_prsm_claim_rewards,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
