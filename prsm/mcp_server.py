@@ -1121,6 +1121,58 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_bridge",
+        description=(
+            "Bridge FTNS between local balance and external chain. "
+            "Routes to POST /bridge/deposit (local burn → remote "
+            "mint on destination_chain) or POST /bridge/withdraw "
+            "(remote burn → local mint from source_chain) via "
+            "`direction` selector. Default chain is 137 (Polygon "
+            "mainnet). Useful for users moving FTNS between Base "
+            "and other supported chains."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "direction": {
+                    "type": "string",
+                    "enum": ["deposit", "withdraw"],
+                    "description": "Bridge direction.",
+                },
+                "amount": {
+                    "type": "number",
+                    "description": (
+                        "FTNS amount to bridge. Must be positive + "
+                        "finite."
+                    ),
+                    "exclusiveMinimum": 0,
+                },
+                "chain_address": {
+                    "type": "string",
+                    "description": "External chain address.",
+                    "minLength": 1,
+                },
+                "destination_chain": {
+                    "type": "integer",
+                    "description": (
+                        "Destination chain ID (deposit only). "
+                        "Default 137 (Polygon)."
+                    ),
+                    "default": 137,
+                },
+                "source_chain": {
+                    "type": "integer",
+                    "description": (
+                        "Source chain ID (withdraw only). "
+                        "Default 137 (Polygon)."
+                    ),
+                    "default": 137,
+                },
+            },
+            "required": ["direction", "amount", "chain_address"],
+        },
+    ),
+    Tool(
         name="prsm_agent_admin",
         description=(
             "Admin actions on a single agent: set_allowance, "
@@ -4271,6 +4323,73 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_bridge(arguments: Dict[str, Any]) -> str:
+    """Sprint 222 — bridge FTNS between local + external chain.
+
+    direction=deposit  → POST /bridge/deposit (local burn,
+                          remote mint on destination_chain)
+    direction=withdraw → POST /bridge/withdraw (remote burn,
+                          local mint from source_chain)
+
+    Defaults destination_chain/source_chain to 137 (Polygon).
+    """
+    import math as _math
+    direction = (arguments.get("direction") or "").strip().lower()
+    if not direction:
+        return "Missing required 'direction' (deposit or withdraw)."
+    if direction not in ("deposit", "withdraw"):
+        return f"direction must be 'deposit' or 'withdraw'; got {direction!r}."
+    if "amount" not in arguments or arguments["amount"] is None:
+        return "Missing required 'amount'."
+    try:
+        amount = float(arguments["amount"])
+    except (TypeError, ValueError):
+        return (
+            f"amount must be a finite positive number; "
+            f"got {arguments['amount']!r}."
+        )
+    if not _math.isfinite(amount) or amount <= 0:
+        return f"amount must be a finite positive number; got {amount}."
+    chain_address = (arguments.get("chain_address") or "").strip()
+    if not chain_address:
+        return "Missing required 'chain_address'."
+
+    body: Dict[str, Any] = {
+        "amount": amount,
+        "chain_address": chain_address,
+    }
+    if direction == "deposit":
+        body["destination_chain"] = int(
+            arguments.get("destination_chain", 137)
+        )
+        path = "/bridge/deposit"
+    else:
+        body["source_chain"] = int(
+            arguments.get("source_chain", 137)
+        )
+        path = "/bridge/withdraw"
+
+    try:
+        result = await _call_node_api("POST", path, body)
+    except Exception as e:
+        return (
+            f"prsm_bridge failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if not result.get("success"):
+        detail = result.get("detail", "unknown error")
+        return f"Bridge {direction} refused: {detail}"
+    tx = result.get("transaction") or {}
+    return (
+        f"Bridge {direction} initiated.\n"
+        f"  transaction_id:  {tx.get('transaction_id', '?')}\n"
+        f"  amount:          {tx.get('amount', '?')} FTNS\n"
+        f"  status:          {tx.get('status', '?')}\n"
+        f"  source_chain:    {tx.get('source_chain', '?')}\n"
+        f"  destination_chain: {tx.get('destination_chain', '?')}"
+    )
+
+
 async def handle_prsm_agent_admin(arguments: Dict[str, Any]) -> str:
     """Sprint 221 — agent admin actions: set allowance / revoke /
     pause / resume."""
@@ -5161,6 +5280,7 @@ TOOL_HANDLERS = {
     "prsm_unstake_finalize": handle_prsm_unstake_finalize,
     "prsm_settlers": handle_prsm_settlers,
     "prsm_agent_admin": handle_prsm_agent_admin,
+    "prsm_bridge": handle_prsm_bridge,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
