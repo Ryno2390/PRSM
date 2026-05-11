@@ -6927,6 +6927,42 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             }
         return node.compute_provider.get_stats()
 
+    # Sprint 250 — paginated enumeration of all stored receipts
+    # for audit + operator-side review. Optional model_id filter.
+    @app.get("/compute/receipts", tags=["compute"])
+    async def list_inference_receipts(
+        limit: int = 50,
+        offset: int = 0,
+        model_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Paginated list of stored InferenceReceipts (newest
+        first). Backed by ReceiptStore.list()."""
+        if limit < 1 or limit > 1000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 1000]; got {limit}",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0; got {offset}",
+            )
+        store = getattr(node, "_receipt_store", None)
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Receipt store not initialized.",
+            )
+        entries = store.list(
+            offset=offset, limit=limit, model_id=model_id,
+        )
+        return {
+            "receipts": entries,
+            "total": store.count(),
+            "offset": offset,
+            "limit": limit,
+        }
+
     # Sprint 242 — post-hoc receipt lookup. /compute/inference
     # persists every signed receipt to node._receipt_store (when
     # wired). Audit-friendly: end-users + auditors can fetch a

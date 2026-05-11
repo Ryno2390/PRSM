@@ -1282,6 +1282,36 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_receipts_list",
+        description=(
+            "Paginated enumeration of stored InferenceReceipts. "
+            "Newest first. Optional model_id filter. Backed by "
+            "GET /compute/receipts. Pair with prsm_receipt for "
+            "deep-dive on a specific job_id, or prsm_verify_"
+            "receipt for signature validation. Useful for "
+            "auditors enumerating a node's signed outputs."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Page size (1..1000). Default 20.",
+                    "minimum": 1, "maximum": 1000, "default": 20,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Pagination offset. Default 0.",
+                    "minimum": 0, "default": 0,
+                },
+                "model_id": {
+                    "type": "string",
+                    "description": "Optional model_id filter.",
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_receipt",
         description=(
             "Fetch a stored InferenceReceipt by job_id. Backed by "
@@ -5128,6 +5158,75 @@ async def handle_prsm_royalty_dispatch_history(
     return "\n".join(lines)
 
 
+async def handle_prsm_receipts_list(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 250 — paginated list of stored InferenceReceipts.
+
+    Backed by GET /compute/receipts. Pair with prsm_receipt for
+    deep-dive on a specific job_id, or prsm_verify_receipt to
+    validate signatures."""
+    raw_limit = arguments.get("limit", 20)
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        return f"limit must be an integer; got {raw_limit!r}."
+    if limit < 1 or limit > 1000:
+        return f"limit must be in [1, 1000]; got {limit}."
+    raw_offset = arguments.get("offset", 0)
+    try:
+        offset = int(raw_offset)
+    except (TypeError, ValueError):
+        return f"offset must be an integer; got {raw_offset!r}."
+    if offset < 0:
+        return f"offset must be >= 0; got {offset}."
+
+    parts = [f"limit={limit}", f"offset={offset}"]
+    if arguments.get("model_id"):
+        parts.append(f"model_id={arguments['model_id']}")
+    path = "/compute/receipts?" + "&".join(parts)
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"prsm_receipts_list failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "receipts" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Receipt store not wired on this node.\n"
+                f"  Detail: {detail}\n"
+                f"  Set PRSM_RECEIPT_STORE_DIR to persist "
+                f"receipts across restarts."
+            )
+        return f"prsm_receipts_list refused: {detail}"
+    receipts = result.get("receipts") or []
+    total = result.get("total", len(receipts))
+    if not receipts:
+        return (
+            f"No stored receipts (total={total}). Run "
+            f"prsm_inference to populate."
+        )
+    lines = [
+        f"PRSM Stored InferenceReceipts "
+        f"(showing {offset+1}–{offset+len(receipts)} of {total}):",
+    ]
+    for r in receipts:
+        lines.append(
+            f"  job={r.get('job_id', '?')[:16]:<16}  "
+            f"model={r.get('model_id', '?'):<22}  "
+            f"cost={r.get('cost_ftns', '?')} FTNS  "
+            f"settler={r.get('settler_node_id', '?')[:14]}"
+        )
+    lines.append(
+        "  Use prsm_receipt <job_id> for full record, "
+        "prsm_verify_receipt to validate signature."
+    )
+    return "\n".join(lines)
+
+
 async def handle_prsm_receipt(arguments: Dict[str, Any]) -> str:
     """Sprint 242 — fetch a stored InferenceReceipt by job_id.
 
@@ -6731,6 +6830,7 @@ TOOL_HANDLERS = {
     "prsm_pubkey": handle_prsm_pubkey,
     "prsm_verify_receipt": handle_prsm_verify_receipt,
     "prsm_receipt": handle_prsm_receipt,
+    "prsm_receipts_list": handle_prsm_receipts_list,
     "prsm_royalty_dispatch_history": handle_prsm_royalty_dispatch_history,
     "prsm_forge_quote": handle_prsm_forge_quote,
     "prsm_inference_quote": handle_prsm_inference_quote,

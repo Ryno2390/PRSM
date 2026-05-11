@@ -117,3 +117,39 @@ class ReceiptStore:
 
     def __len__(self) -> int:
         return len(self._cache)
+
+    def count(self) -> int:
+        """Symmetric with JobHistoryStore.count() — useful where
+        callers want a method instead of len()."""
+        return len(self._cache)
+
+    def list(
+        self,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+        model_id: Optional[str] = None,
+    ) -> list:
+        """Sprint 250 — paginated enumeration of stored receipts,
+        most-recently-put first. Optional ``model_id`` filter.
+
+        Raises ``ValueError`` for out-of-range limit / offset.
+        """
+        if not isinstance(limit, int) or limit < 1 or limit > 1000:
+            raise ValueError(
+                f"limit must be in [1, 1000]; got {limit}"
+            )
+        if not isinstance(offset, int) or offset < 0:
+            raise ValueError(
+                f"offset must be >= 0; got {offset}"
+            )
+        # OrderedDict insertion order — most recent is at the
+        # end. Reverse for newest-first.
+        items = list(self._cache.values())
+        items.reverse()
+        if model_id:
+            items = [
+                r for r in items
+                if r.get("model_id") == model_id
+            ]
+        return items[offset:offset + limit]
