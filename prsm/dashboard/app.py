@@ -52,9 +52,19 @@ class StakeRequest(BaseModel):
 
 class TransferRequest(BaseModel):
     """Request body for transferring FTNS."""
-    to_wallet: str = Field(..., description="Destination wallet ID")
+    # Sprint 190 — bound to_wallet to reject empty string + cap
+    # length. Pre-fix empty to_wallet reached signed_transfer()
+    # and crashed downstream with a 500. Same DoS-via-bad-input
+    # pattern as LoginRequest in sprint 185.
+    to_wallet: str = Field(
+        ..., min_length=1, max_length=256,
+        description="Destination wallet ID",
+    )
     amount: float = Field(..., gt=0, description="Amount to transfer")
-    description: Optional[str] = Field(default=None, description="Transfer description")
+    description: Optional[str] = Field(
+        default=None, max_length=512,
+        description="Transfer description",
+    )
 
 
 class LoginRequest(BaseModel):
@@ -489,13 +499,26 @@ class DashboardServer:
             
             if request.amount <= 0:
                 raise HTTPException(status_code=400, detail="Amount must be positive")
-            
-            tx = await self.node.ledger_sync.signed_transfer(
-                to_wallet=request.to_wallet,
-                amount=request.amount,
-                description=request.description or f"Transfer to {request.to_wallet[:12]}...",
-            )
-            
+
+            # Sprint 190 — catch downstream crashes from
+            # signed_transfer and map to a non-500 status so
+            # operators see "bad request" instead of "server
+            # broken" for malformed wallet IDs.
+            try:
+                tx = await self.node.ledger_sync.signed_transfer(
+                    to_wallet=request.to_wallet,
+                    amount=request.amount,
+                    description=request.description or f"Transfer to {request.to_wallet[:12]}...",
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Transfer rejected: {type(exc).__name__}: "
+                        f"{exc}"
+                    ),
+                )
+
             if not tx:
                 raise HTTPException(status_code=400, detail="Insufficient balance")
             
@@ -509,12 +532,27 @@ class DashboardServer:
                 }
             })
             
+            # Sprint 190 — `tx.timestamp` is a Unix float on
+            # LocalLedger transactions; pre-fix the handler called
+            # `.isoformat()` unconditionally and crashed with
+            # AttributeError on float. Coerce to datetime first.
+            _ts = tx.timestamp
+            if _ts is None:
+                _ts_iso = None
+            elif hasattr(_ts, "isoformat"):
+                _ts_iso = _ts.isoformat()
+            else:
+                # Unix float / int — convert to ISO via datetime.
+                from datetime import datetime, timezone
+                _ts_iso = datetime.fromtimestamp(
+                    float(_ts), tz=timezone.utc,
+                ).isoformat()
             return {
                 "tx_id": tx.tx_id,
                 "from": tx.from_wallet,
                 "to": tx.to_wallet,
                 "amount": tx.amount,
-                "timestamp": tx.timestamp.isoformat() if tx.timestamp else None,
+                "timestamp": _ts_iso,
             }
         
         @self.app.post("/api/ftns/stake")
