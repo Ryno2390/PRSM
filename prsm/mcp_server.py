@@ -1243,6 +1243,33 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_receipt",
+        description=(
+            "Fetch a stored InferenceReceipt by job_id. Backed by "
+            "GET /compute/receipt/{job_id}. /compute/inference "
+            "writes every signed receipt to an LRU-bounded "
+            "ReceiptStore (in-memory by default; filesystem "
+            "persistence via PRSM_RECEIPT_STORE_DIR). Useful for "
+            "auditors verifying a node's outputs after the fact, "
+            "or end-users who didn't save the original "
+            "prsm_inference response. Pair with "
+            "prsm_verify_receipt to cryptographically validate the "
+            "settler_signature."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "description": (
+                        "Job ID returned by prsm_inference."
+                    ),
+                },
+            },
+            "required": ["job_id"],
+        },
+    ),
+    Tool(
         name="prsm_pubkey",
         description=(
             "Render the running node's Ed25519 public key for "
@@ -4987,6 +5014,50 @@ async def handle_prsm_forge_quote(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_receipt(arguments: Dict[str, Any]) -> str:
+    """Sprint 242 — fetch a stored InferenceReceipt by job_id.
+
+    Returns the receipt as a formatted text block so end-users +
+    auditors can verify what was signed even when they didn't
+    save the original /compute/inference response."""
+    job_id = (arguments.get("job_id") or "").strip()
+    if not job_id:
+        return "Missing required 'job_id' (non-empty)."
+    try:
+        result = await _call_node_api(
+            "GET", f"/compute/receipt/{job_id}",
+        )
+    except Exception as e:
+        return (
+            f"prsm_receipt failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "job_id" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Receipt store not wired on this node.\n"
+                f"  Detail: {detail}\n"
+                f"  Set PRSM_RECEIPT_STORE_DIR for filesystem "
+                f"persistence."
+            )
+        if "no receipt" in str(detail).lower():
+            return f"No receipt found for job_id={job_id!r}."
+        return f"Receipt lookup refused: {detail}"
+    return (
+        f"PRSM InferenceReceipt:\n"
+        f"  job_id:           {result.get('job_id', '?')}\n"
+        f"  request_id:       {result.get('request_id', '?')}\n"
+        f"  model_id:         {result.get('model_id', '?')}\n"
+        f"  privacy_tier:     {result.get('privacy_tier', '?')}\n"
+        f"  content_tier:     {result.get('content_tier', '?')}\n"
+        f"  tee_type:         {result.get('tee_type', '?')}\n"
+        f"  cost_ftns:        {result.get('cost_ftns', '?')}\n"
+        f"  settler_node_id:  {result.get('settler_node_id', '?')}\n"
+        f"  Use prsm_verify_receipt to validate the signature."
+    )
+
+
 async def handle_prsm_pubkey(arguments: Dict[str, Any]) -> str:
     """Sprint 241 — render GET /node/identity/pubkey."""
     try:
@@ -6545,6 +6616,7 @@ TOOL_HANDLERS = {
     "prsm_models": handle_prsm_models,
     "prsm_pubkey": handle_prsm_pubkey,
     "prsm_verify_receipt": handle_prsm_verify_receipt,
+    "prsm_receipt": handle_prsm_receipt,
     "prsm_forge_quote": handle_prsm_forge_quote,
     "prsm_inference_quote": handle_prsm_inference_quote,
     "prsm_settler_admin": handle_prsm_settler_admin,

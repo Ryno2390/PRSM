@@ -3310,6 +3310,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 except Exception as e:
                     logger.warning(f"Inference escrow release failed: {e}")
 
+            # Sprint 242 — persist the signed receipt for post-hoc
+            # lookup via /compute/receipt/{job_id}. Best-effort.
+            if (
+                receipt is not None
+                and hasattr(node, "_receipt_store")
+                and node._receipt_store is not None
+            ):
+                try:
+                    node._receipt_store.put(job_id, receipt.to_dict())
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        "ReceiptStore put failed for job_id=%s: %s",
+                        job_id[:8], e,
+                    )
+
             return {
                 "success": True,
                 "job_id": job_id,
@@ -6736,6 +6751,31 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "message": "Compute provider not initialized"
             }
         return node.compute_provider.get_stats()
+
+    # Sprint 242 — post-hoc receipt lookup. /compute/inference
+    # persists every signed receipt to node._receipt_store (when
+    # wired). Audit-friendly: end-users + auditors can fetch a
+    # receipt by job_id after the fact.
+    @app.get("/compute/receipt/{job_id}", tags=["compute"])
+    async def get_inference_receipt(job_id: str) -> Dict[str, Any]:
+        """Return the signed InferenceReceipt for a job_id."""
+        store = getattr(node, "_receipt_store", None)
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Receipt store not initialized. "
+                    "PRSM_RECEIPT_STORE_DIR can opt in to "
+                    "filesystem persistence."
+                ),
+            )
+        receipt = store.get(job_id)
+        if receipt is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No receipt for job_id={job_id!r}",
+            )
+        return receipt
 
     # Sprint 241 — surface the node's own Ed25519 public key so
     # end-users can verify signed InferenceReceipts. Returns

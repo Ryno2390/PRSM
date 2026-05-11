@@ -2120,6 +2120,23 @@ class PRSMNode:
             )
             self._job_history = None
 
+        # Sprint 242 — ReceiptStore for signed InferenceReceipts.
+        # Opt-in filesystem persistence via PRSM_RECEIPT_STORE_DIR.
+        # Powers GET /compute/receipt/{job_id} for post-hoc audit.
+        try:
+            from prsm.node.receipt_store import ReceiptStore
+            self._receipt_store = ReceiptStore.from_env()
+            logger.info(
+                "ReceiptStore wired (in-memory LRU)"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ReceiptStore construction failed: %s — "
+                "/compute/receipt/{job_id} will return 503.",
+                exc,
+            )
+            self._receipt_store = None
+
         # Operator audit log (in-memory ring buffer of state-changing
         # API requests). Optional filesystem persistence via
         # PRSM_AUDIT_LOG_DIR. Best-effort wiring — failure-soft.
