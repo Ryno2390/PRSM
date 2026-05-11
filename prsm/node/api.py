@@ -316,6 +316,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     except Exception:  # noqa: BLE001
         _api_version = "unknown"
 
+    # Sprint 189 — declare default `servers` so openapi-generator
+    # and similar tooling can prefill the API base URL instead of
+    # leaving it null. Operators on non-default deploys can
+    # override by setting PRSM_API_BASE_URL.
+    _default_server = os.environ.get(
+        "PRSM_API_BASE_URL", "http://127.0.0.1:8000",
+    ).strip() or "http://127.0.0.1:8000"
+
     app = FastAPI(
         title="PRSM Node API",
         description="Management API for a PRSM network node",
@@ -323,6 +331,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        servers=[{"url": _default_server, "description": "PRSM node"}],
     )
 
     # Audit log middleware (ships 2026-05-09). Records every
