@@ -1121,6 +1121,35 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_settler_admin",
+        description=(
+            "Settler write actions: register (POST /settler/"
+            "register), unbond (POST /settler/unbond), sign batch "
+            "(POST /settler/batch/sign), or slash (POST /settler/"
+            "slash/propose). All four are sensitive ops with "
+            "server-side auth enforcement. Useful for settlers "
+            "managing their bond + multi-sig duties via MCP."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["register", "unbond", "sign", "slash"],
+                },
+                "settler_id": {"type": "string"},
+                "address": {"type": "string"},
+                "bond_amount": {"type": "number", "exclusiveMinimum": 0},
+                "batch_id": {"type": "string"},
+                "signature": {"type": "string"},
+                "slash_amount": {"type": "number", "exclusiveMinimum": 0},
+                "reason": {"type": "string"},
+                "proposer_id": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_ledger_sync",
         description=(
             "Render ledger gossip-sync statistics: messages "
@@ -4604,6 +4633,107 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_settler_admin(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 234 — settler write actions: register, unbond,
+    sign (batch), slash (propose)."""
+    import math as _math
+    import urllib.parse as _up
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            "Missing required 'action' (register, unbond, sign, "
+            "or slash)."
+        )
+    if action not in ("register", "unbond", "sign", "slash"):
+        return (
+            f"action must be one of register/unbond/sign/slash; "
+            f"got {action!r}."
+        )
+
+    if action == "register":
+        for req in ("settler_id", "address", "bond_amount"):
+            if not arguments.get(req):
+                return f"register requires '{req}'."
+        try:
+            bond = float(arguments["bond_amount"])
+        except (TypeError, ValueError):
+            return (
+                f"bond_amount must be a finite positive number; "
+                f"got {arguments['bond_amount']!r}."
+            )
+        if not _math.isfinite(bond) or bond <= 0:
+            return (
+                f"bond_amount must be a finite positive number; "
+                f"got {bond}."
+            )
+        sid = _up.quote(arguments["settler_id"])
+        addr = _up.quote(arguments["address"])
+        path = (
+            f"/settler/register?settler_id={sid}"
+            f"&address={addr}&bond_amount={bond}"
+        )
+    elif action == "unbond":
+        if not arguments.get("settler_id"):
+            return "unbond requires 'settler_id'."
+        sid = _up.quote(arguments["settler_id"])
+        path = f"/settler/unbond?settler_id={sid}"
+    elif action == "sign":
+        for req in ("batch_id", "settler_id", "signature"):
+            if not arguments.get(req):
+                return f"sign requires '{req}'."
+        bid = _up.quote(arguments["batch_id"])
+        sid = _up.quote(arguments["settler_id"])
+        sig = _up.quote(arguments["signature"])
+        path = (
+            f"/settler/batch/sign?batch_id={bid}"
+            f"&settler_id={sid}&signature={sig}"
+        )
+    else:  # slash
+        for req in (
+            "settler_id", "slash_amount", "reason", "proposer_id",
+        ):
+            if arguments.get(req) is None or arguments.get(req) == "":
+                return f"slash requires '{req}'."
+        try:
+            slash = float(arguments["slash_amount"])
+        except (TypeError, ValueError):
+            return (
+                f"slash_amount must be a finite positive number; "
+                f"got {arguments['slash_amount']!r}."
+            )
+        if not _math.isfinite(slash) or slash <= 0:
+            return (
+                f"slash_amount must be a finite positive number; "
+                f"got {slash}."
+            )
+        sid = _up.quote(arguments["settler_id"])
+        pid = _up.quote(arguments["proposer_id"])
+        reason = _up.quote(arguments["reason"])
+        path = (
+            f"/settler/slash/propose?settler_id={sid}"
+            f"&slash_amount={slash}&reason={reason}"
+            f"&proposer_id={pid}"
+        )
+
+    try:
+        result = await _call_node_api("POST", path)
+    except Exception as e:
+        return (
+            f"prsm_settler_admin failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if not isinstance(result, dict):
+        return f"Settler {action} returned: {result}"
+    if "detail" in result and "status" not in result and "settler_id" not in result and "batch_id" not in result and "proposal_id" not in result:
+        return f"Settler {action} refused: {result.get('detail', '?')}"
+    lines = [f"Settler {action} executed:"]
+    for k, v in result.items():
+        lines.append(f"  {k:<20} {v}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_ledger_sync(arguments: Dict[str, Any]) -> str:
     """Sprint 233 — render GET /ledger/sync/stats."""
     try:
@@ -6041,6 +6171,7 @@ TOOL_HANDLERS = {
     "prsm_settlement_view": handle_prsm_settlement_view,
     "prsm_node_resources": handle_prsm_node_resources,
     "prsm_ledger_sync": handle_prsm_ledger_sync,
+    "prsm_settler_admin": handle_prsm_settler_admin,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
