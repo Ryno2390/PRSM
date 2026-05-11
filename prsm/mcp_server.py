@@ -1121,6 +1121,17 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_index_stats",
+        description=(
+            "Render content-index statistics: total records, "
+            "total bytes indexed, distinct providers, last update. "
+            "Backed by GET /content/index/stats. Useful for "
+            "operators triaging index health (search latency, "
+            "fragmentation)."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_local_balance",
         description=(
             "Render local-ledger FTNS balance + 20 most-recent "
@@ -4396,6 +4407,23 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_index_stats(arguments: Dict[str, Any]) -> str:
+    """Sprint 226 — render GET /content/index/stats."""
+    try:
+        result = await _call_node_api("GET", "/content/index/stats")
+    except Exception as e:
+        return (
+            f"prsm_index_stats failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if not isinstance(result, dict) or not result:
+        return "Content index stats: (empty response)"
+    lines = ["PRSM Content Index Stats:"]
+    for k, v in result.items():
+        lines.append(f"  {k:<24} {v}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_local_balance(
     arguments: Dict[str, Any],
 ) -> str:
@@ -5480,6 +5508,7 @@ TOOL_HANDLERS = {
     "prsm_faucet": handle_prsm_faucet,
     "prsm_transfer": handle_prsm_transfer,
     "prsm_local_balance": handle_prsm_local_balance,
+    "prsm_index_stats": handle_prsm_index_stats,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
