@@ -36,11 +36,13 @@ def test_dispatcher_module_exposes_dispatch_function():
 
 def test_dispatch_result_status_vocabulary():
     """Sprint 248 settlement reads .status to count sent/skipped/
-    failed. Pin the four statuses the dispatcher emits."""
+    failed. Pin the statuses the dispatcher emits (sprint 257
+    added skipped_zero_amount)."""
     valid = {
         "sent",
         "skipped_no_record",
         "skipped_bad_hash",
+        "skipped_zero_amount",
         "failed",
     }
     # Each constructable.
@@ -55,6 +57,7 @@ def test_status_startswith_skipped_taxonomy():
     valid_started_with_skipped = {
         "skipped_no_record",
         "skipped_bad_hash",
+        "skipped_zero_amount",
     }
     valid_not_skipped = {"sent", "failed"}
     for s in valid_started_with_skipped:

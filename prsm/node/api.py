@@ -2152,17 +2152,58 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                     and _contributing
                                 ):
                                     from prsm.economy.onchain_content_royalty import (
+                                        allocate_royalty_amounts,
                                         dispatch_content_access_royalties,
                                     )
-                                    _royalty_results = (
-                                        dispatch_content_access_royalties(
+                                    # Sprint 257 — choose allocation
+                                    # mode. uniform = each shard gets
+                                    # PRSM_CONTENT_ROYALTY_PER_SHARD_
+                                    # WEI (sprint-248 behavior).
+                                    # rate_weighted = interpret env
+                                    # var as TOTAL pool, split by
+                                    # ContentRecord.royalty_rate.
+                                    _mode = _os_for_royalty.environ.get(
+                                        "PRSM_CONTENT_ROYALTY_ALLOCATION_MODE",
+                                        "uniform",
+                                    ).strip().lower()
+                                    if _mode not in (
+                                        "uniform", "rate_weighted",
+                                    ):
+                                        _mode = "uniform"
+                                    if _mode == "rate_weighted":
+                                        # Treat per-shard env as the
+                                        # TOTAL pool size when rate-
+                                        # weighted: simpler operator
+                                        # mental model than a separate
+                                        # env var, since the per-shard
+                                        # interpretation only made
+                                        # sense in uniform mode.
+                                        _pool = _wei * len(_contributing)
+                                        _amounts = allocate_royalty_amounts(
                                             shards=_contributing,
                                             content_index=_index,
-                                            royalty_client=_client,
-                                            serving_node_address=_op_addr,
-                                            gross_per_shard_wei=_wei,
+                                            total_pool_wei=_pool,
+                                            mode="rate_weighted",
                                         )
-                                    )
+                                        _royalty_results = (
+                                            dispatch_content_access_royalties(
+                                                shards=_contributing,
+                                                content_index=_index,
+                                                royalty_client=_client,
+                                                serving_node_address=_op_addr,
+                                                gross_amounts_wei=_amounts,
+                                            )
+                                        )
+                                    else:
+                                        _royalty_results = (
+                                            dispatch_content_access_royalties(
+                                                shards=_contributing,
+                                                content_index=_index,
+                                                royalty_client=_client,
+                                                serving_node_address=_op_addr,
+                                                gross_per_shard_wei=_wei,
+                                            )
+                                        )
                                     _sent = sum(
                                         1 for r in _royalty_results
                                         if r.status == "sent"

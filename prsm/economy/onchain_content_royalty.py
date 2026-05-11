@@ -171,23 +171,60 @@ def dispatch_content_access_royalties(
     content_index: Any,
     royalty_client: Any,
     serving_node_address: str,
-    gross_per_shard_wei: int,
+    gross_per_shard_wei: Optional[int] = None,
+    gross_amounts_wei: Optional[Dict[str, int]] = None,
 ) -> List[DispatchResult]:
     """Send one ``distribute_royalty`` tx per shard.
+
+    Caller MUST supply exactly one of:
+      - ``gross_per_shard_wei``: uniform amount applied to every
+        shard (legacy sprint-248 signature, still supported).
+      - ``gross_amounts_wei``: per-shard ``{cid: wei}`` dict
+        produced by :func:`allocate_royalty_amounts`. Allows
+        rate-weighted or other non-uniform policies.
 
     Raises
     ------
     ValueError
-        ``gross_per_shard_wei <= 0``.
+        Neither / both amount kwargs supplied, or any amount <= 0.
     """
-    if gross_per_shard_wei <= 0:
+    if (
+        (gross_per_shard_wei is None) ==
+        (gross_amounts_wei is None)
+    ):
+        raise ValueError(
+            "must supply exactly one of gross_per_shard_wei OR "
+            "gross_amounts_wei"
+        )
+    if gross_per_shard_wei is not None and gross_per_shard_wei <= 0:
         raise ValueError(
             f"gross_per_shard_wei must be > 0; "
             f"got {gross_per_shard_wei}"
         )
+    if gross_amounts_wei is not None:
+        for cid, amt in gross_amounts_wei.items():
+            if amt < 0:
+                raise ValueError(
+                    f"gross_amounts_wei[{cid!r}] must be >= 0; "
+                    f"got {amt}"
+                )
 
     results: List[DispatchResult] = []
     for cid in shards:
+        # Resolve the per-shard amount for the tx + audit ring.
+        if gross_per_shard_wei is not None:
+            amount_for_cid = gross_per_shard_wei
+        else:
+            amount_for_cid = gross_amounts_wei.get(cid, 0)
+        # Zero amount short-circuits — don't waste an on-chain tx
+        # paying nothing. Surface as a distinct status so audit
+        # ring can show why.
+        if amount_for_cid == 0:
+            results.append(DispatchResult(
+                cid=cid,
+                status="skipped_zero_amount",
+            ))
+            continue
         try:
             record = content_index.lookup(cid)
         except Exception as exc:  # noqa: BLE001
@@ -219,7 +256,7 @@ def dispatch_content_access_royalties(
             tx_hash, _status = royalty_client.distribute_royalty(
                 hash_bytes,
                 serving_node_address,
-                gross_per_shard_wei,
+                amount_for_cid,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
