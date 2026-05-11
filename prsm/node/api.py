@@ -3724,10 +3724,27 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     @app.get("/content/search")
     async def search_content(q: str = "", limit: int = 20) -> Dict[str, Any]:
         """Search the network content index by keyword."""
+        # Sprint 194 — same bounds-validation as sprint 193 fixed
+        # on the dashboard duplicate. Pre-fix `min(limit, 100)`
+        # capped upper but accepted negative — limit=-1 returned
+        # the entire content index.
+        if limit < 1 or limit > 100:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 100], got {limit}",
+            )
+        if len(q) > 1024:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"q size {len(q)} chars exceeds cap of 1024. "
+                    f"Trim the query."
+                ),
+            )
         if not node.content_index:
             raise HTTPException(status_code=503, detail="Content index not initialized")
 
-        results = node.content_index.search(q, limit=min(limit, 100))
+        results = node.content_index.search(q, limit=limit)
         return {
             "query": q,
             "results": [
@@ -3988,10 +4005,25 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     @app.get("/agents/search")
     async def search_agents(capability: str, limit: int = 20) -> Dict[str, Any]:
         """Search agents by capability."""
+        # Sprint 194 — bounds validation. Pre-fix limit=-1 passed
+        # through to agent_registry.search returning all agents.
+        if limit < 1 or limit > 100:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 100], got {limit}",
+            )
+        if len(capability) > 256:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"capability size {len(capability)} chars exceeds "
+                    f"cap of 256. Trim the capability string."
+                ),
+            )
         if not node.agent_registry:
             raise HTTPException(status_code=503, detail="Agent registry not initialized")
 
-        results = node.agent_registry.search(capability, limit=min(limit, 100))
+        results = node.agent_registry.search(capability, limit=limit)
         return {
             "capability": capability,
             "agents": [a.to_dict() for a in results],
@@ -6601,6 +6633,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     @app.get("/bridge/transactions", tags=["bridge"])
     async def list_bridge_transactions(limit: int = 50) -> Dict[str, Any]:
+        """Sprint 194 — limit bounds checked below."""
         """
         List bridge transactions for the current user.
         
@@ -6616,12 +6649,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
             raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
         
+        # Sprint 194 — bounds validation. Pre-fix `min(limit, 200)`
+        # capped upper but accepted negative — limit=-1 returned
+        # all bridge transactions for the user.
+        if limit < 1 or limit > 200:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 200], got {limit}",
+            )
+
         if not node.identity:
             raise HTTPException(status_code=503, detail="Node identity not initialized")
-        
+
         transactions = await node.ftns_bridge.get_user_transactions(
             user_id=node.identity.node_id,
-            limit=min(limit, 200)
+            limit=limit,
         )
         
         return {
