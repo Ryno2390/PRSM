@@ -1520,6 +1520,10 @@ class ContentUploader:
             "parent_cids": parents,
             "embedding_id": embedding_id,
             "provenance_hash": provenance_hash_hex,
+            # Sprint 245 — propagate creator's on-chain address so
+            # remote peers' ContentIndex carries it. Used by the
+            # eventual on-chain content-access royalty dispatch.
+            "creator_eth_address": creator_eth_address,
         })
 
         # Request storage replication
@@ -1651,6 +1655,7 @@ class ContentUploader:
                 near_duplicate_similarity=near_dup_sim,
                 provenance_hash=provenance_hash_hex,
                 provenance_tx_hash=sharded_provenance_tx_hash,
+                creator_eth_address=creator_eth_address,
             )
             self.uploaded_content[manifest_cid] = uploaded
             self._register_with_provider(uploaded)  # Phase 1.3: populate provider._local_content
@@ -1699,6 +1704,8 @@ class ContentUploader:
                 "total_shards": manifest.total_shards,
                 "embedding_id": embedding_id,
                 "provenance_hash": provenance_hash_hex,
+                # Sprint 245 — see corresponding inline above.
+                "creator_eth_address": creator_eth_address,
             })
 
             # Request storage replication for each shard
@@ -1777,6 +1784,7 @@ class ContentUploader:
                 parent_cids=parent_cids,
                 is_sharded=False,
                 provenance_hash=provenance_hash_hex,
+                creator_eth_address=creator_eth_address,
             )
             self.uploaded_content[cid] = uploaded
             self._register_with_provider(uploaded)  # Phase 1.3: populate provider._local_content
@@ -1799,6 +1807,8 @@ class ContentUploader:
                 "royalty_rate": royalty_rate,
                 "parent_cids": parent_cids,
                 "provenance_hash": provenance_hash_hex,
+                # Sprint 245 — see corresponding inline above.
+                "creator_eth_address": creator_eth_address,
             })
             if replicas > 0:
                 await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
