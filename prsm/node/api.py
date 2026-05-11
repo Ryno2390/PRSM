@@ -1194,6 +1194,111 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return record.to_dict()
 
+    # ── Sprint 277 — Gasless FTNS transfer via paymaster ──
+    # Per Vision §14 "Crypto-UX adoption barrier" mitigation:
+    # users should never need to hold gas tokens. Composes a
+    # UserOperation from a WaaS-managed sender and routes it
+    # through the paymaster for sponsored submission.
+    # dry_run=True (default) → estimate-only; False → submit.
+
+    class _GaslessTransferRequest(BaseModel):
+        from_user_id: str
+        to_address: str
+        ftns_amount: str  # decimal string to preserve precision
+        dry_run: bool = True
+
+    @app.post("/wallet/transfer/gasless", tags=["wallet"])
+    async def post_gasless_transfer(
+        body: _GaslessTransferRequest,
+    ) -> Dict[str, Any]:
+        waas = getattr(node, "_coinbase_waas_client", None)
+        if waas is None:
+            raise HTTPException(
+                status_code=503,
+                detail="WaaS client not initialized.",
+            )
+        paymaster = getattr(node, "_paymaster_client", None)
+        if paymaster is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Paymaster client not initialized.",
+            )
+        # Validate amount
+        try:
+            amount_value = float(body.ftns_amount)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"ftns_amount must be a positive decimal, "
+                    f"got {body.ftns_amount!r}"
+                ),
+            )
+        if amount_value <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="ftns_amount must be > 0",
+            )
+        if not body.to_address:
+            raise HTTPException(
+                status_code=422,
+                detail="to_address must be non-empty",
+            )
+
+        sender = waas.get_wallet(body.from_user_id)
+        if sender is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"no WaaS wallet for from_user_id="
+                    f"{body.from_user_id!r}; run /wallet/waas/"
+                    f"provision first"
+                ),
+            )
+        # If the sender wallet is itself pre-commission, surface
+        # that condition explicitly.
+        if sender.status != "PROVISIONED" or not sender.address:
+            return {
+                "status": "PENDING_COMMISSION",
+                "from_user_id": body.from_user_id,
+                "to_address": body.to_address,
+                "ftns_amount": body.ftns_amount,
+                "tx_hash": None,
+                "sponsor_amount_wei": None,
+                "gas_estimate_wei": None,
+                "note": (
+                    "Sender wallet has status="
+                    f"{sender.status} — provision must complete "
+                    "before transfers."
+                ),
+            }
+
+        user_op = {
+            "sender": sender.address,
+            "to": body.to_address,
+            "ftns_amount": body.ftns_amount,
+            "kind": "ftns_transfer",
+        }
+        result = paymaster.sponsor_user_op(
+            user_op, dry_run=body.dry_run,
+        )
+        out = result.to_dict()
+        out["from_user_id"] = body.from_user_id
+        out["to_address"] = body.to_address
+        out["ftns_amount"] = body.ftns_amount
+        out["sender_address"] = sender.address
+        return out
+
+    @app.get("/wallet/paymaster/status", tags=["wallet"])
+    async def get_paymaster_status() -> Dict[str, Any]:
+        paymaster = getattr(node, "_paymaster_client", None)
+        if paymaster is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Paymaster client not initialized.",
+            )
+        return paymaster.spend_summary()
+
     # Renamed from `_RoyaltyClaimRequest` for OpenAPI hygiene.
     class RoyaltyClaimRequest(BaseModel):
         dry_run: bool = True

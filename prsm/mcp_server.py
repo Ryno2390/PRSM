@@ -1437,6 +1437,52 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_gasless_transfer",
+        description=(
+            "Gasless FTNS transfer via Coinbase paymaster — "
+            "the user never sees gas or holds ETH. Single tool "
+            "with `action` selector: quote | execute | status. "
+            "quote returns an estimate-only dry-run artifact; "
+            "execute submits the sponsored UserOperation; "
+            "status returns paymaster commission state + "
+            "cumulative spend telemetry. Per Vision §14 "
+            "'Crypto-UX adoption barrier' mitigation: FTNS "
+            "transfers feel like normal money. "
+            "PENDING_COMMISSION pattern — when paymaster env "
+            "keys are absent, quote/execute return preview "
+            "records. Backed by /wallet/transfer/gasless + "
+            "/wallet/paymaster/status. Sender must already have "
+            "a WaaS wallet (use prsm_waas_wallet?action=provision)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["quote", "execute", "status"],
+                },
+                "from_user_id": {
+                    "type": "string",
+                    "description": (
+                        "Sender's PRSM user id "
+                        "(must have a WaaS wallet)."
+                    ),
+                },
+                "to_address": {
+                    "type": "string",
+                    "description": "Recipient on-chain address.",
+                },
+                "ftns_amount": {
+                    "type": "string",
+                    "description": (
+                        "FTNS amount as decimal string."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_waas_wallet",
         description=(
             "Coinbase Wallet-as-a-Service (WaaS) — provisions "
@@ -5945,6 +5991,158 @@ async def handle_prsm_takedown_notices(
     )
 
 
+_GASLESS_TRANSFER_ACTIONS = {"quote", "execute", "status"}
+
+
+async def handle_prsm_gasless_transfer(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 277 — gasless FTNS transfer via Coinbase paymaster.
+
+    Per Vision §14 "Crypto-UX adoption barrier" mitigation, this
+    is the LLM-facing surface that makes FTNS feel like normal
+    money: user says "send 10 FTNS to Bob," LLM calls quote (or
+    execute), user never sees gas. PENDING_COMMISSION until
+    paymaster env keys are set."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_GASLESS_TRANSFER_ACTIONS)})."
+        )
+    if action not in _GASLESS_TRANSFER_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_GASLESS_TRANSFER_ACTIONS)}; got {action!r}."
+        )
+
+    if action == "status":
+        try:
+            result = await _call_node_api(
+                "GET", "/wallet/paymaster/status",
+            )
+        except Exception as e:
+            return (
+                f"prsm_gasless_transfer failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "commissioned" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Paymaster client not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"status refused: {detail}"
+        commissioned = result.get("commissioned")
+        lines = [
+            f"PRSM Paymaster — "
+            f"{'commissioned' if commissioned else 'PENDING_COMMISSION'}",
+            f"  endpoint:            "
+            f"{result.get('endpoint') or '(not set)'}",
+            f"  policy_id:           "
+            f"{result.get('policy_id') or '(not set)'}",
+            f"  sponsorships:        {result.get('sponsorships', 0)}",
+            f"  total_sponsored_wei: "
+            f"{result.get('total_sponsored_wei', 0)}",
+        ]
+        if not commissioned:
+            lines.append(
+                "  Set COINBASE_CDP_PAYMASTER_ENDPOINT + "
+                "COINBASE_CDP_PAYMASTER_API_KEY to commission."
+            )
+        return "\n".join(lines)
+
+    # quote + execute share field validation
+    from_user_id = (arguments.get("from_user_id") or "").strip()
+    if not from_user_id:
+        return f"{action} requires 'from_user_id'."
+    to_address = (arguments.get("to_address") or "").strip()
+    if not to_address:
+        return f"{action} requires 'to_address'."
+    ftns_amount = (arguments.get("ftns_amount") or "").strip()
+    if not ftns_amount:
+        return f"{action} requires 'ftns_amount' (decimal string)."
+
+    dry_run = action == "quote"  # quote → dry_run; execute → submit
+    try:
+        result = await _call_node_api(
+            "POST", "/wallet/transfer/gasless",
+            {
+                "from_user_id": from_user_id,
+                "to_address": to_address,
+                "ftns_amount": ftns_amount,
+                "dry_run": dry_run,
+            },
+        )
+    except Exception as e:
+        return (
+            f"prsm_gasless_transfer failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "status" not in result:
+        detail = result.get("detail", "unknown error")
+        d_lower = str(detail).lower()
+        if "no waas wallet" in d_lower:
+            return (
+                f"No WaaS wallet for from_user_id="
+                f"{from_user_id!r}. Provision one first with "
+                f"prsm_waas_wallet?action=provision."
+            )
+        if "not initialized" in d_lower:
+            return (
+                f"Required client not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"{action} refused: {detail}"
+
+    status = result.get("status", "?")
+    base = (
+        f"Gasless transfer — "
+        f"from={result.get('from_user_id', '?')} → "
+        f"to={result.get('to_address', '?')}  "
+        f"amount={result.get('ftns_amount', '?')} FTNS"
+    )
+    if status == "PENDING_COMMISSION":
+        return (
+            f"{base}\n"
+            f"  status: PENDING_COMMISSION\n"
+            f"  Paymaster not commissioned yet — this is a "
+            f"preview. Set COINBASE_CDP_PAYMASTER_ENDPOINT + "
+            f"COINBASE_CDP_PAYMASTER_API_KEY to enable real "
+            f"sponsored submission."
+        )
+    if status == "ESTIMATED":
+        return (
+            f"{base}\n"
+            f"  status:           ESTIMATED (dry_run)\n"
+            f"  sender_address:   "
+            f"{result.get('sender_address', '?')}\n"
+            f"  gas_estimate_wei: "
+            f"{result.get('gas_estimate_wei', 0)}\n"
+            f"  Re-run with action=execute to submit."
+        )
+    if status == "SUBMITTED":
+        return (
+            f"{base}\n"
+            f"  status:             SUBMITTED ✅\n"
+            f"  tx_hash:            {result.get('tx_hash', '?')}\n"
+            f"  user_op_hash:       "
+            f"{result.get('user_op_hash', '?')}\n"
+            f"  sponsor_amount_wei: "
+            f"{result.get('sponsor_amount_wei', 0)}"
+        )
+    if status == "FAILED":
+        return (
+            f"{base}\n"
+            f"  status: FAILED ⚠\n"
+            f"  error:  {result.get('error', '?')}"
+        )
+    return (
+        f"{base}\n  status: {status}\n  {result!s}"
+    )
+
+
 _WAAS_WALLET_ACTIONS = {
     "provision", "lookup", "list", "status",
 }
@@ -8229,6 +8427,7 @@ TOOL_HANDLERS = {
     "prsm_takedown_notices": handle_prsm_takedown_notices,
     "prsm_marketplace_reputation": handle_prsm_marketplace_reputation,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
+    "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_content_provider_stats": handle_prsm_content_provider_stats,
     "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,

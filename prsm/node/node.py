@@ -2203,6 +2203,32 @@ class PRSMNode:
             )
             self._coinbase_waas_client = None
 
+        # Sprint 277 — Coinbase paymaster adapter for gasless
+        # FTNS transfers. Same PENDING_COMMISSION pattern as
+        # WaaS: client always constructs; commission gate is
+        # internal via env-key presence. /wallet/transfer/gasless
+        # returns PENDING_COMMISSION preview records until
+        # paymaster env keys land.
+        try:
+            from prsm.economy.web3.paymaster_client import (
+                PaymasterClient,
+            )
+            self._paymaster_client = PaymasterClient.from_env()
+            paymaster_commissioned = (
+                self._paymaster_client.is_commissioned()
+            )
+            logger.info(
+                "PaymasterClient wired (commissioned=%s)",
+                paymaster_commissioned,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "PaymasterClient construction failed: %s — "
+                "/wallet/transfer/gasless will return 503.",
+                exc,
+            )
+            self._paymaster_client = None
+
         # Sprint 249 — RoyaltyDispatchRing for the on-chain
         # content-royalty audit trail (sprint 248). Opt-in
         # filesystem persistence via PRSM_ROYALTY_DISPATCH_LOG_DIR.
