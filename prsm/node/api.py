@@ -54,14 +54,33 @@ class ResourceUpdateRequest(BaseModel):
     """Request model for updating node resource settings."""
     cpu_allocation_pct: Optional[int] = Field(default=None, ge=10, le=90, description="CPU allocation percentage (10-90)")
     memory_allocation_pct: Optional[int] = Field(default=None, ge=10, le=90, description="Memory allocation percentage (10-90)")
-    storage_gb: Optional[float] = Field(default=None, gt=0, description="Storage pledge in GB")
-    max_concurrent_jobs: Optional[int] = Field(default=None, ge=1, description="Maximum concurrent jobs")
+    # Sprint 207 — upper bounds, allow_inf_nan=False, active_days
+    # max_items. 1 PB storage / 1M-job concurrency / 1 Tbps cap is
+    # well past any plausible single-node value but below any
+    # value that would crash downstream schedulers.
+    storage_gb: Optional[float] = Field(
+        default=None, gt=0, le=1_000_000_000, allow_inf_nan=False,
+        description="Storage pledge in GB",
+    )
+    max_concurrent_jobs: Optional[int] = Field(
+        default=None, ge=1, le=1_000_000,
+        description="Maximum concurrent jobs",
+    )
     gpu_allocation_pct: Optional[int] = Field(default=None, ge=10, le=100, description="GPU allocation percentage (10-100)")
-    upload_mbps_limit: Optional[float] = Field(default=None, ge=0, description="Upload bandwidth limit in Mbps (0=unlimited)")
-    download_mbps_limit: Optional[float] = Field(default=None, ge=0, description="Download bandwidth limit in Mbps (0=unlimited)")
+    upload_mbps_limit: Optional[float] = Field(
+        default=None, ge=0, le=1_000_000, allow_inf_nan=False,
+        description="Upload bandwidth limit in Mbps (0=unlimited)",
+    )
+    download_mbps_limit: Optional[float] = Field(
+        default=None, ge=0, le=1_000_000, allow_inf_nan=False,
+        description="Download bandwidth limit in Mbps (0=unlimited)",
+    )
     active_hours_start: Optional[int] = Field(default=None, ge=0, le=23, description="Active hours start (0-23)")
     active_hours_end: Optional[int] = Field(default=None, ge=0, le=23, description="Active hours end (0-23)")
-    active_days: Optional[List[int]] = Field(default=None, description="Active days (0=Mon...6=Sun, empty=every day)")
+    active_days: Optional[List[int]] = Field(
+        default=None, max_length=7,
+        description="Active days (0=Mon...6=Sun, empty=every day)",
+    )
 
 
 class ResourceConfigResponse(BaseModel):
