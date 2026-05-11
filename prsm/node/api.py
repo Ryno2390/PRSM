@@ -4355,6 +4355,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not node.ledger_sync:
             raise HTTPException(status_code=503, detail="Ledger sync not initialized")
 
+        # Sprint 199 — reject NaN/inf BEFORE the `<= 0` check.
+        # `nan <= 0` is False and `inf <= 0` is False, so both
+        # would silently pass through to signed_transfer.
+        import math
+        if not math.isfinite(amount):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"amount must be a finite positive number; "
+                    f"got {amount!r} (NaN/Infinity rejected)."
+                ),
+            )
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Amount must be positive")
 
