@@ -506,6 +506,11 @@ class UploadedContent:
     # ProvenanceRegistryClient. None when on-chain registration was skipped
     # (no client wired) or failed (logged separately; doesn't block upload).
     provenance_tx_hash: Optional[str] = None  # 0x-prefixed hex
+    # Sprint 243 + 244 — creator's on-chain ETH address. Captured at
+    # upload time, used as the destination for the eventual
+    # RoyaltyDistributor.distribute_royalty() call. None when not
+    # supplied (v1 backwards-compat).
+    creator_eth_address: Optional[str] = None  # 0x-prefixed 40-hex
 
 
 class ContentUploader:
@@ -1189,6 +1194,7 @@ class ContentUploader:
         royalty_rate: Optional[float] = None,
         parent_cids: Optional[List[str]] = None,
         force_shard: bool = False,
+        creator_eth_address: Optional[str] = None,
     ) -> Optional[UploadedContent]:
         """Upload content to storage and register provenance.
 
@@ -1467,6 +1473,7 @@ class ContentUploader:
             near_duplicate_similarity=near_dup_sim,
             provenance_hash=provenance_hash_hex,
             provenance_tx_hash=provenance_tx_hash,
+            creator_eth_address=creator_eth_address,
         )
         self.uploaded_content[cid] = uploaded
         self._register_with_provider(uploaded)  # Phase 1.3: populate provider._local_content
@@ -1828,9 +1835,18 @@ class ContentUploader:
         replicas: int = 3,
         royalty_rate: Optional[float] = None,
         parent_cids: Optional[List[str]] = None,
+        creator_eth_address: Optional[str] = None,
     ) -> Optional[UploadedContent]:
         """Upload text content to content storage."""
-        return await self.upload(text.encode("utf-8"), filename, metadata, replicas, royalty_rate, parent_cids)
+        return await self.upload(
+            text.encode("utf-8"),
+            filename,
+            metadata,
+            replicas,
+            royalty_rate,
+            parent_cids,
+            creator_eth_address=creator_eth_address,
+        )
 
     async def record_access(self, cid: str, accessor_id: str) -> None:
         """Record that content was accessed, distributing royalties.

@@ -3878,6 +3878,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 replicas=req.replicas,
                 royalty_rate=req.royalty_rate,
                 parent_cids=req.parent_cids if req.parent_cids else None,
+                creator_eth_address=req.creator_eth_address,
             )
         except Exception as exc:
             # Sprint 179 — surface the underlying exception in the
@@ -4292,6 +4293,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "metadata": record.metadata,
             "royalty_rate": record.royalty_rate,
             "parent_cids": record.parent_cids,
+            # Sprint 244 — surface on-chain creator address (None
+            # when not set at upload time).
+            "creator_eth_address": getattr(
+                record, "creator_eth_address", None,
+            ),
         }
 
     class ContentRetrieveResponse(BaseModel):

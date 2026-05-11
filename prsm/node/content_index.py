@@ -50,6 +50,12 @@ class ContentRecord:
     # hex). Set from the gossip advertisement so peers discovering
     # content remotely can still route royalties on-chain.
     provenance_hash: Optional[str] = None
+    # Sprint 244 — creator's on-chain ETH address. Captured at
+    # upload time via /content/upload?creator_eth_address=... and
+    # propagated via gossip advertise (sprint TBD wires the wire
+    # format). Used as destination for on-chain royalty when the
+    # leg ships. None when not supplied (v1 backwards-compat).
+    creator_eth_address: Optional[str] = None
 
 
 class ContentIndex:
@@ -141,6 +147,7 @@ class ContentIndex:
                 embedding_id=data.get("embedding_id"),
                 near_duplicate_of=data.get("near_duplicate_of"),
                 provenance_hash=data.get("provenance_hash"),
+                creator_eth_address=data.get("creator_eth_address"),
             )
             self._records[cid] = record
             self._index_keywords(record)
