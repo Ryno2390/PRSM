@@ -1906,6 +1906,23 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                         "job_id=%s: %s",
                         job_id, hist_exc,
                     )
+            # Sprint 175 — map "no shards above similarity threshold"
+            # from the orchestrator to 404 instead of 500. That error
+            # is a query/content mismatch (operator-fixable: upload
+            # relevant content or refine query), not a server fault.
+            _err_str = str(e)
+            if "no shards above similarity threshold" in _err_str:
+                logger.info(
+                    "Forge query found no matching shards: %s", _err_str,
+                )
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        "No content shards above the similarity "
+                        "threshold for this query. Upload relevant "
+                        "content to this node or refine the query."
+                    ),
+                )
             logger.error(f"Forge pipeline error: {e}")
             raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
