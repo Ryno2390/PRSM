@@ -391,6 +391,45 @@ class DashboardServer:
         @self.app.post("/api/jobs/submit")
         async def submit_job(job: JobSubmitRequest):
             """Submit a compute job to the network."""
+            # Sprint 197 — bound payload size. Pre-fix a 1MB payload
+            # accepted with 200 → gossip-propagated to swarm.
+            # Network-DoS vector. Cap at 100KB (matches
+            # PRSM_MAX_QUERY_BYTES). Operator override via
+            # PRSM_MAX_JOB_PAYLOAD_BYTES.
+            import json as _json
+            try:
+                _payload_bytes = len(
+                    _json.dumps(job.payload).encode("utf-8"),
+                )
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=422,
+                    detail="payload must be JSON-serializable",
+                )
+            import os as _os
+            _payload_cap_raw = _os.environ.get(
+                "PRSM_MAX_JOB_PAYLOAD_BYTES", "",
+            ).strip()
+            try:
+                _payload_cap = (
+                    int(_payload_cap_raw)
+                    if _payload_cap_raw else 100 * 1024
+                )
+                if _payload_cap <= 0:
+                    raise ValueError("non-positive")
+            except (ValueError, TypeError):
+                _payload_cap = 100 * 1024
+            if _payload_bytes > _payload_cap:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"payload size {_payload_bytes} bytes exceeds "
+                        f"PRSM_MAX_JOB_PAYLOAD_BYTES cap of "
+                        f"{_payload_cap}. Trim the payload or have "
+                        f"the operator raise the cap."
+                    ),
+                )
+
             if not self.node or not self.node.compute_requester:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
