@@ -5792,6 +5792,49 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             logger.warning("metrics history probe failed: %s", exc)
 
+        # Sprint 254 — prsm_receipt_store_size. Stored signed
+        # InferenceReceipts (forge+inference+stream paths). Useful
+        # for operators tracking long-term audit-trail growth.
+        try:
+            rstore = getattr(node, "_receipt_store", None)
+            if rstore is not None:
+                lines.append(
+                    "# HELP prsm_receipt_store_size "
+                    "Stored signed InferenceReceipt count"
+                )
+                lines.append(
+                    "# TYPE prsm_receipt_store_size gauge"
+                )
+                lines.append(
+                    f"prsm_receipt_store_size {rstore.count()}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "metrics receipt_store probe failed: %s", exc,
+            )
+
+        # Sprint 254 — prsm_royalty_dispatch_ring_size. On-chain
+        # content-royalty dispatch audit outcomes. Goes nonzero
+        # only when PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1.
+        try:
+            ring = getattr(node, "_royalty_dispatch_ring", None)
+            if ring is not None:
+                lines.append(
+                    "# HELP prsm_royalty_dispatch_ring_size "
+                    "On-chain royalty dispatch outcome count"
+                )
+                lines.append(
+                    "# TYPE prsm_royalty_dispatch_ring_size gauge"
+                )
+                lines.append(
+                    f"prsm_royalty_dispatch_ring_size "
+                    f"{ring.count()}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "metrics royalty_dispatch probe failed: %s", exc,
+            )
+
         # prsm_claimable_royalties_wei
         try:
             royalty = getattr(node, "_royalty_distributor_client", None)
