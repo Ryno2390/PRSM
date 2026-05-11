@@ -1121,6 +1121,39 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_settlers",
+        description=(
+            "List active Phase-6 settlers OR look up a specific "
+            "settler by id. Without `settler_id`, calls GET "
+            "/settler/list/active. With `settler_id`, calls GET "
+            "/settler/{id}. Useful for verifying who's authorized "
+            "to approve batch settlements."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "settler_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional settler ID for lookup. Omit to "
+                        "list all active."
+                    ),
+                },
+            },
+        },
+    ),
+    Tool(
+        name="prsm_settler_batches",
+        description=(
+            "List pending multi-sig settlement batches. Backed by "
+            "GET /settler/batch/pending. Shows batch_id, transfer "
+            "count, total amount, signature_count/threshold, and "
+            "approved status per batch. Useful for tracking which "
+            "batches still need additional settler signatures."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_unstake_finalize",
         description=(
             "Finalize an unstake request: withdraw (after the "
@@ -4183,6 +4216,87 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_settlers(arguments: Dict[str, Any]) -> str:
+    """Sprint 220 — list active settlers or look up specific by id.
+
+    With `settler_id`, calls GET /settler/{id}. Without, calls
+    GET /settler/list/active."""
+    settler_id = (arguments.get("settler_id") or "").strip()
+    if settler_id:
+        path = f"/settler/{settler_id}"
+    else:
+        path = "/settler/list/active"
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"prsm_settlers failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if settler_id:
+        if not isinstance(result, dict) or "settler_id" not in result:
+            detail = (
+                result.get("detail", "unknown error")
+                if isinstance(result, dict) else "unexpected response"
+            )
+            if "not found" in str(detail).lower():
+                return f"Settler {settler_id} not found."
+            return f"Settler lookup refused: {detail}"
+        return (
+            f"PRSM Settler {result.get('settler_id', '?')}:\n"
+            f"  address:        {result.get('address', '?')}\n"
+            f"  bond_amount:    {result.get('bond_amount', '?')} FTNS\n"
+            f"  status:         {result.get('status', '?')}\n"
+            f"  can_settle:     {result.get('can_settle', '?')}\n"
+            f"  total_settled:  {result.get('total_settled', 0)}\n"
+            f"  slashed_amount: {result.get('slashed_amount', 0)}"
+        )
+    # list path
+    settlers = result if isinstance(result, list) else []
+    if not settlers:
+        return "No active settlers (Phase 6 registry empty)."
+    lines = [f"PRSM Active Settlers (count={len(settlers)}):"]
+    for s in settlers:
+        lines.append(
+            f"  {s.get('settler_id', '?'):<16}  "
+            f"{(s.get('address') or '?')[:14]:<14}  "
+            f"bond={s.get('bond_amount', '?')!s:>10}  "
+            f"settled={s.get('total_settled', 0)}"
+        )
+    return "\n".join(lines)
+
+
+async def handle_prsm_settler_batches(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 220 — list pending multi-sig settlement batches."""
+    try:
+        result = await _call_node_api(
+            "GET", "/settler/batch/pending",
+        )
+    except Exception as e:
+        return (
+            f"prsm_settler_batches failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    batches = result if isinstance(result, list) else []
+    if not batches:
+        return "No pending settlement batches."
+    lines = [f"PRSM Pending Settlement Batches (count={len(batches)}):"]
+    for b in batches:
+        sig = b.get("signature_count", 0)
+        thr = b.get("threshold", "?")
+        approved = b.get("approved", False)
+        lines.append(
+            f"  {b.get('batch_id', '?'):<16}  "
+            f"transfers={b.get('transfer_count', 0):>3}  "
+            f"total={b.get('total_amount', 0)} FTNS  "
+            f"sigs={sig}/{thr}  "
+            f"approved={approved}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_unstake_finalize(
     arguments: Dict[str, Any],
 ) -> str:
@@ -4913,6 +5027,8 @@ TOOL_HANDLERS = {
     "prsm_unstake": handle_prsm_unstake,
     "prsm_claim_rewards": handle_prsm_claim_rewards,
     "prsm_unstake_finalize": handle_prsm_unstake_finalize,
+    "prsm_settlers": handle_prsm_settlers,
+    "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
