@@ -1258,6 +1258,19 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_royalty_dispatch_summary",
+        description=(
+            "Aggregate view over the on-chain content-royalty "
+            "dispatch audit ring: total entries, status counts "
+            "(sent/failed/skipped_*), total_sent_wei, "
+            "by_allocation_mode breakdown, earliest/latest "
+            "timestamps. Symmetric to prsm_earnings_summary but "
+            "for the OUTGOING royalty flow. Backed by GET "
+            "/admin/royalty-dispatch-summary."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_royalty_dispatch_history",
         description=(
             "Audit trail for the on-chain content-access royalty "
@@ -5138,6 +5151,63 @@ async def handle_prsm_forge_quote(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_royalty_dispatch_summary(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 265 — render the aggregate on-chain royalty
+    dispatch summary. Symmetric to prsm_royalty_dispatch_history
+    (paginated rows) but at aggregate level. Backed by GET
+    /admin/royalty-dispatch-summary."""
+    try:
+        result = await _call_node_api(
+            "GET", "/admin/royalty-dispatch-summary",
+        )
+    except Exception as e:
+        return (
+            f"prsm_royalty_dispatch_summary failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "total" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Royalty dispatch ring not wired on this node.\n"
+                f"  Detail: {detail}\n"
+                f"  Enable on-chain dispatch via "
+                f"PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1."
+            )
+        return f"prsm_royalty_dispatch_summary refused: {detail}"
+    total = result.get("total", 0)
+    if total == 0:
+        return (
+            f"No royalty dispatch outcomes recorded "
+            f"(total={total}).\n"
+            f"  Enable PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1 + "
+            f"run a forge query."
+        )
+    lines = [
+        f"PRSM On-Chain Royalty Dispatch Summary "
+        f"(total={total}):",
+        f"  total_sent_wei:    {result.get('total_sent_wei', 0)}",
+    ]
+    earliest = result.get("earliest_ts")
+    latest = result.get("latest_ts")
+    if earliest is not None and latest is not None:
+        lines.append(f"  earliest_ts:       {earliest}")
+        lines.append(f"  latest_ts:         {latest}")
+    sc = result.get("status_counts") or {}
+    if sc:
+        lines.append("  status_counts:")
+        for k in sorted(sc.keys()):
+            lines.append(f"    {k:<24} {sc[k]}")
+    bm = result.get("by_allocation_mode") or {}
+    if bm:
+        lines.append("  by_allocation_mode:")
+        for k in sorted(bm.keys()):
+            lines.append(f"    {k:<16} {bm[k]}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_royalty_dispatch_history(
     arguments: Dict[str, Any],
 ) -> str:
@@ -6903,6 +6973,7 @@ TOOL_HANDLERS = {
     "prsm_receipt": handle_prsm_receipt,
     "prsm_receipts_list": handle_prsm_receipts_list,
     "prsm_royalty_dispatch_history": handle_prsm_royalty_dispatch_history,
+    "prsm_royalty_dispatch_summary": handle_prsm_royalty_dispatch_summary,
     "prsm_forge_quote": handle_prsm_forge_quote,
     "prsm_inference_quote": handle_prsm_inference_quote,
     "prsm_settler_admin": handle_prsm_settler_admin,

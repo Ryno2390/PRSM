@@ -5459,6 +5459,59 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "limit": limit,
         }
 
+    @app.get("/admin/royalty-dispatch-summary")
+    async def get_royalty_dispatch_summary() -> Dict[str, Any]:
+        """Aggregate view over the sprint-249 royalty dispatch
+        audit ring. Symmetric to /admin/earnings-summary but for
+        the OUTGOING content-royalty flow.
+
+        Returns:
+          - total: ring entry count
+          - status_counts: {sent, failed, skipped_*}
+          - total_sent_wei: sum of gross_wei across sent entries
+          - by_allocation_mode: {uniform, rate_weighted, unknown}
+          - earliest_ts / latest_ts: timestamp bookends
+
+        Status:
+          503 — ring not wired
+          200 — summary dict
+        """
+        ring = getattr(node, "_royalty_dispatch_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Royalty dispatch ring not initialized.",
+            )
+        # Snapshot all entries by passing a large limit (ring caps
+        # internally at 1024 by default, so this is bounded).
+        entries = ring.recent(limit=1000, offset=0)
+        total = len(entries)
+        status_counts: Dict[str, int] = {}
+        total_sent_wei = 0
+        by_mode: Dict[str, int] = {}
+        earliest_ts = None
+        latest_ts = None
+        for e in entries:
+            status_counts[e.status] = (
+                status_counts.get(e.status, 0) + 1
+            )
+            if e.status == "sent":
+                total_sent_wei += int(e.gross_wei)
+            mode = e.allocation_mode or "unknown"
+            by_mode[mode] = by_mode.get(mode, 0) + 1
+            if earliest_ts is None or e.timestamp < earliest_ts:
+                earliest_ts = e.timestamp
+            if latest_ts is None or e.timestamp > latest_ts:
+                latest_ts = e.timestamp
+        return {
+            "total": total,
+            "status_counts": status_counts,
+            "total_sent_wei": total_sent_wei,
+            "by_allocation_mode": by_mode,
+            "earliest_ts": earliest_ts,
+            "latest_ts": latest_ts,
+        }
+
     @app.get("/admin/royalty-dispatch-history")
     async def get_royalty_dispatch_history(
         limit: int = 50,
