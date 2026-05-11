@@ -741,6 +741,31 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "known_count": len(known),
         }
 
+    # Sprint 266 — expose PeerDiscovery.get_bootstrap_status() so
+    # operators can triage "am I actually connected to bootstrap
+    # or just random peers?" without scraping logs.
+    @app.get("/bootstrap/status", tags=["network"])
+    async def get_bootstrap_status_endpoint() -> Dict[str, Any]:
+        """Return bootstrap connection state for operator triage:
+        configured/attempted/failed nodes, connected_count,
+        degraded_mode, retry attempts, fallback telemetry, and
+        whether the BootstrapClient is currently active."""
+        disco = getattr(node, "discovery", None)
+        if disco is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Peer discovery not initialized.",
+            )
+        try:
+            return disco.get_bootstrap_status()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"get_bootstrap_status() raised: {exc}"
+                ),
+            )
+
     @app.get("/balance")
     async def get_balance() -> Dict[str, Any]:
         """Get FTNS balance and recent transactions."""

@@ -1258,6 +1258,19 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_bootstrap_status",
+        description=(
+            "Render bootstrap connection state for operator "
+            "triage: configured/attempted/failed nodes, "
+            "connected_count, degraded_mode, retry attempts, "
+            "fallback telemetry, BootstrapClient active flag. "
+            "Inline ✓/⚠ marker indicates healthy / degraded / "
+            "disconnected. Backed by GET /bootstrap/status. Pair "
+            "with prsm_peers for full network-side visibility."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_royalty_dispatch_summary",
         description=(
             "Aggregate view over the on-chain content-royalty "
@@ -5151,6 +5164,66 @@ async def handle_prsm_forge_quote(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_bootstrap_status(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 266 — render PeerDiscovery bootstrap status for
+    triage. Pairs with prsm_peers for full network visibility."""
+    try:
+        result = await _call_node_api("GET", "/bootstrap/status")
+    except Exception as e:
+        return (
+            f"prsm_bootstrap_status failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "connected_count" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Peer discovery not wired on this node.\n"
+                f"  Detail: {detail}"
+            )
+        return f"prsm_bootstrap_status refused: {detail}"
+    connected = result.get("connected_count", 0)
+    degraded = result.get("degraded_mode", False)
+    success = result.get("success_node") or "(none)"
+    health_marker = "✓ healthy" if (
+        connected > 0 and not degraded
+    ) else (
+        "⚠ degraded" if degraded else "⚠ disconnected"
+    )
+    lines = [
+        f"PRSM Bootstrap Status — {health_marker}",
+        f"  connected_count:        {connected}",
+        f"  degraded_mode:          {degraded}",
+        f"  success_node:           {success}",
+        f"  retry_attempts:         {result.get('retry_attempts', 0)}",
+        f"  bootstrap_client_active: "
+        f"{result.get('bootstrap_client_active', False)}",
+        f"  fallback_enabled:       "
+        f"{result.get('fallback_enabled', False)}",
+        f"  fallback_activated:     "
+        f"{result.get('fallback_activated', False)}",
+        f"  fallback_succeeded:     "
+        f"{result.get('fallback_succeeded', False)}",
+        f"  addresses_rejected:     "
+        f"{result.get('addresses_rejected', 0)}",
+        f"  source_policy:          "
+        f"{result.get('source_policy', '?')}",
+    ]
+    configured = result.get("configured_nodes") or []
+    failed = result.get("failed_nodes") or []
+    if configured:
+        lines.append(f"  configured_nodes ({len(configured)}):")
+        for n in configured:
+            lines.append(f"    {n}")
+    if failed:
+        lines.append(f"  ⚠ failed_nodes ({len(failed)}):")
+        for n in failed:
+            lines.append(f"    {n}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_royalty_dispatch_summary(
     arguments: Dict[str, Any],
 ) -> str:
@@ -6974,6 +7047,7 @@ TOOL_HANDLERS = {
     "prsm_receipts_list": handle_prsm_receipts_list,
     "prsm_royalty_dispatch_history": handle_prsm_royalty_dispatch_history,
     "prsm_royalty_dispatch_summary": handle_prsm_royalty_dispatch_summary,
+    "prsm_bootstrap_status": handle_prsm_bootstrap_status,
     "prsm_forge_quote": handle_prsm_forge_quote,
     "prsm_inference_quote": handle_prsm_inference_quote,
     "prsm_settler_admin": handle_prsm_settler_admin,
