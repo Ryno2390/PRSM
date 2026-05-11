@@ -1121,6 +1121,42 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_unstake_finalize",
+        description=(
+            "Finalize an unstake request: withdraw (after the "
+            "unlock period) or cancel (before unlock; restores "
+            "tokens to active staking). Single tool covers POST "
+            "/staking/withdraw/{request_id} and POST "
+            "/staking/cancel-unstake/{request_id} via `action` "
+            "selector. Use prsm_staking_status to find pending "
+            "request_id values and their available_at timestamps."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "description": "ID of the unstake request.",
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["withdraw", "cancel"],
+                    "description": (
+                        "withdraw: finalize after unlock. cancel: "
+                        "abort before unlock, restoring tokens."
+                    ),
+                },
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "Optional reason string (cancel only)."
+                    ),
+                },
+            },
+            "required": ["request_id", "action"],
+        },
+    ),
+    Tool(
         name="prsm_claim_rewards",
         description=(
             "Claim accumulated staking rewards. Backed by POST "
@@ -4147,6 +4183,57 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_unstake_finalize(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 219 — finalize an unstake request: withdraw (after
+    unlock) or cancel (before unlock). Single selector tool covers
+    both endpoints since they operate on the same request_id."""
+    import urllib.parse as _up
+    request_id = (arguments.get("request_id") or "").strip()
+    if not request_id:
+        return "Missing required 'request_id' (non-empty)."
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return "Missing required 'action' (must be 'withdraw' or 'cancel')."
+    if action not in ("withdraw", "cancel"):
+        return (
+            f"action must be 'withdraw' or 'cancel'; got {action!r}."
+        )
+    if action == "withdraw":
+        path = f"/staking/withdraw/{request_id}"
+    else:
+        reason = (arguments.get("reason") or "").strip()
+        path = f"/staking/cancel-unstake/{request_id}"
+        if reason:
+            path = f"{path}?reason={_up.quote(reason)}"
+    try:
+        result = await _call_node_api("POST", path)
+    except Exception as e:
+        return (
+            f"prsm_unstake_finalize failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if action == "withdraw":
+        if "amount_withdrawn" not in result:
+            detail = result.get("detail", "unknown error")
+            return f"Withdraw refused: {detail}"
+        return (
+            f"Withdraw {'succeeded' if result.get('success') else 'failed'}.\n"
+            f"  request_id:        {result.get('request_id', '?')}\n"
+            f"  amount_withdrawn:  {result.get('amount_withdrawn', 0)} FTNS"
+        )
+    # cancel
+    if "cancelled" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"Cancel refused: {detail}"
+    return (
+        f"Unstake request {'cancelled' if result.get('cancelled') else 'not cancelled'}.\n"
+        f"  request_id: {result.get('request_id', '?')}\n"
+        f"  reason:     {result.get('reason') or '(none)'}"
+    )
+
+
 async def handle_prsm_claim_rewards(arguments: Dict[str, Any]) -> str:
     """Sprint 218 — claim accumulated staking rewards.
 
@@ -4825,6 +4912,7 @@ TOOL_HANDLERS = {
     "prsm_subsystem_stats": handle_prsm_subsystem_stats,
     "prsm_unstake": handle_prsm_unstake,
     "prsm_claim_rewards": handle_prsm_claim_rewards,
+    "prsm_unstake_finalize": handle_prsm_unstake_finalize,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
