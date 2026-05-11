@@ -1121,6 +1121,18 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_local_balance",
+        description=(
+            "Render local-ledger FTNS balance + 20 most-recent "
+            "transactions. Backed by GET /balance. Distinct from "
+            "prsm_balance_check which hits /balance/onchain "
+            "(aggregates on-chain + claimable royalties + "
+            "escrowed). Use this when you just want a quick "
+            "local-ledger view."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_transfer",
         description=(
             "Send FTNS to another wallet via signed gossip-"
@@ -4384,6 +4396,41 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_local_balance(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 225 — render GET /balance (local-ledger + recent 20).
+
+    Distinct from prsm_balance_check which hits /balance/onchain
+    (aggregates on-chain + claimable + escrowed). Use this for a
+    quick local view without aggregate round-trip."""
+    try:
+        result = await _call_node_api("GET", "/balance")
+    except Exception as e:
+        return (
+            f"prsm_local_balance failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    wallet = result.get("wallet_id", "?")
+    balance = result.get("balance", 0)
+    txs = result.get("recent_transactions") or []
+    lines = [
+        f"PRSM Local Balance (wallet_id={wallet}):",
+        f"  balance: {balance} FTNS",
+        f"  recent_transactions ({len(txs)}):",
+    ]
+    if not txs:
+        lines.append("    (none)")
+    else:
+        for tx in txs:
+            lines.append(
+                f"    {tx.get('tx_id', '?')[:18]:<18} "
+                f"{tx.get('type', '?'):<18} "
+                f"{tx.get('amount', '?')!s:>10} FTNS"
+            )
+    return "\n".join(lines)
+
+
 async def handle_prsm_transfer(arguments: Dict[str, Any]) -> str:
     """Sprint 224 — send FTNS to another wallet (signed +
     gossip-broadcast). Endpoint: POST /ledger/transfer."""
@@ -5432,6 +5479,7 @@ TOOL_HANDLERS = {
     "prsm_bridge": handle_prsm_bridge,
     "prsm_faucet": handle_prsm_faucet,
     "prsm_transfer": handle_prsm_transfer,
+    "prsm_local_balance": handle_prsm_local_balance,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
