@@ -2068,11 +2068,24 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                             total_budget=budget_ftns,
                             aggregator_share_bps=agg_share_bps,
                         )
+                        # Sprint 240 — resolve source_agent_pubkey_hex
+                        # → operator FTNS wallet via the opt-in
+                        # ComputeWalletMap. Operators running N
+                        # compute agents map all N pubkeys to their
+                        # single wallet. Empty map = pure pass-
+                        # through (v1 backward-compat).
+                        from prsm.node.compute_wallet_map import (
+                            ComputeWalletMap, resolve_splits,
+                        )
+                        wallet_map = ComputeWalletMap.from_env()
+                        splits = resolve_splits(splits, wallet_map)
                         logger.info(
                             "forge release split (mode=%s, n=%d, "
-                            "agg_bps=%d) for job %s",
+                            "agg_bps=%d, wallet_map_size=%d) "
+                            "for job %s",
                             split_mode, len(qo_participants),
-                            agg_share_bps, job_id[:8],
+                            agg_share_bps, len(wallet_map),
+                            job_id[:8],
                         )
                         await node._payment_escrow.release_escrow_split(
                             job_id=job_id,
