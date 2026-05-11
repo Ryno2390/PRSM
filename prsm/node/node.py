@@ -2254,6 +2254,26 @@ class PRSMNode:
             )
             self._aerodrome_client = None
 
+        # Sprint 280 — KYC vendor adapter. Pluggable backend
+        # (Persona / Onfido / Plaid). PENDING_COMMISSION
+        # records when KYC_VENDOR_API_KEY absent.
+        try:
+            from prsm.economy.web3.kyc_client import KYCClient
+            self._kyc_client = KYCClient.from_env()
+            kyc_commissioned = self._kyc_client.is_commissioned()
+            logger.info(
+                "KYCClient wired (commissioned=%s, vendor=%s)",
+                kyc_commissioned,
+                getattr(self._kyc_client, "_vendor", None),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "KYCClient construction failed: %s — "
+                "/wallet/kyc/* endpoints will return 503.",
+                exc,
+            )
+            self._kyc_client = None
+
         # Sprint 249 — RoyaltyDispatchRing for the on-chain
         # content-royalty audit trail (sprint 248). Opt-in
         # filesystem persistence via PRSM_ROYALTY_DISPATCH_LOG_DIR.

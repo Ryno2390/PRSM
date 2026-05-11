@@ -1437,6 +1437,67 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_kyc",
+        description=(
+            "KYC vendor adapter inspection + session "
+            "initiation. Single tool with `action` selector: "
+            "initiate | lookup | list | status. Pluggable "
+            "backend (Persona / Onfido / Plaid Identity) — "
+            "swap vendors via KYC_VENDOR env var. "
+            "PENDING_COMMISSION pattern: pre-commission "
+            "returns preview records without vendor API "
+            "calls. Per Vision §14 'Crypto-UX adoption "
+            "barrier' mitigation: KYC flow is vendor-hosted "
+            "(Persona modal, Onfido iframe), user installs "
+            "nothing. Backed by /wallet/kyc + "
+            "/wallet/kyc/{user_id} + /wallet/kyc/initiate + "
+            "/wallet/kyc/status."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "initiate", "lookup", "list", "status",
+                    ],
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": (
+                        "PRSM user id (initiate + lookup)."
+                    ),
+                },
+                "email": {
+                    "type": "string",
+                    "description": (
+                        "User email (initiate only); vendor "
+                        "uses this for recovery / notices."
+                    ),
+                },
+                "level": {
+                    "type": "string",
+                    "enum": ["basic", "enhanced"],
+                    "description": (
+                        "KYC level for initiate: 'basic' "
+                        "(selfie + ID) or 'enhanced' (proof "
+                        "of address + source of funds). "
+                        "Defaults to 'basic'."
+                    ),
+                    "default": "basic",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1, "maximum": 10000,
+                    "description": (
+                        "Row cap for action=list (default 100)."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_pool_quote",
         description=(
             "Aerodrome USDC-FTNS pool inspection. Read-only "
@@ -6088,6 +6149,184 @@ async def handle_prsm_takedown_notices(
     )
 
 
+_KYC_ACTIONS = {"initiate", "lookup", "list", "status"}
+
+
+async def handle_prsm_kyc(arguments: Dict[str, Any]) -> str:
+    """Sprint 280 — KYC vendor adapter inspection + initiation.
+
+    LLM-facing surface. action selector: initiate | lookup |
+    list | status. Webhook handler intentionally absent from
+    MCP — vendor → operator callbacks go through the HTTP
+    surface directly."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_KYC_ACTIONS)})."
+        )
+    if action not in _KYC_ACTIONS:
+        return (
+            f"action must be one of {sorted(_KYC_ACTIONS)}; "
+            f"got {action!r}."
+        )
+
+    if action == "status":
+        try:
+            result = await _call_node_api(
+                "GET", "/wallet/kyc/status",
+            )
+        except Exception as e:
+            return (
+                f"prsm_kyc failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "commissioned" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"KYC client not wired.\n  Detail: {detail}"
+                )
+            return f"status refused: {detail}"
+        commissioned = result.get("commissioned")
+        vendor = result.get("vendor") or "(not set)"
+        supported = result.get("supported_vendors") or []
+        if commissioned:
+            return "\n".join([
+                "PRSM KYC — commissioned",
+                f"  vendor:            {vendor}",
+                f"  record_count:      "
+                f"{result.get('record_count', 0)}",
+                f"  supported_vendors: {', '.join(supported)}",
+            ])
+        return "\n".join([
+            "PRSM KYC — PENDING_COMMISSION",
+            f"  vendor:            {vendor}",
+            f"  record_count:      "
+            f"{result.get('record_count', 0)}",
+            f"  supported_vendors: {', '.join(supported)}",
+            "  Set KYC_VENDOR + KYC_VENDOR_API_KEY to "
+            "commission.",
+        ])
+
+    if action == "initiate":
+        user_id = (arguments.get("user_id") or "").strip()
+        if not user_id:
+            return "initiate requires 'user_id'."
+        email = (arguments.get("email") or "").strip()
+        if not email:
+            return "initiate requires 'email'."
+        level = (arguments.get("level") or "basic").strip()
+        try:
+            result = await _call_node_api(
+                "POST", "/wallet/kyc/initiate",
+                {"user_id": user_id, "email": email,
+                 "level": level},
+            )
+        except Exception as e:
+            return (
+                f"prsm_kyc failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "status" not in result:
+            detail = result.get("detail", "unknown error")
+            d_lower = str(detail).lower()
+            if "not initialized" in d_lower:
+                return (
+                    f"KYC client not wired.\n  Detail: {detail}"
+                )
+            return f"initiate refused: {detail}"
+        status = result.get("status", "?")
+        vendor = result.get("vendor") or "(not set)"
+        if status == "PENDING_COMMISSION":
+            return (
+                f"KYC initiation preview for user_id="
+                f"{user_id!s} (status=PENDING_COMMISSION):\n"
+                f"  email:    {email}\n"
+                f"  level:    {level}\n"
+                f"  vendor:   {vendor}\n"
+                f"  Set KYC_VENDOR + KYC_VENDOR_API_KEY to "
+                f"enable real vendor session creation."
+            )
+        return (
+            f"KYC session {status} for user_id={user_id!s}:\n"
+            f"  email:       {email}\n"
+            f"  level:       {result.get('level', level)}\n"
+            f"  vendor:      {vendor}\n"
+            f"  vendor_ref:  {result.get('vendor_ref', '?')}\n"
+            f"  session_url: "
+            f"{result.get('session_url', '?')}"
+        )
+
+    if action == "lookup":
+        user_id = (arguments.get("user_id") or "").strip()
+        if not user_id:
+            return "lookup requires 'user_id'."
+        try:
+            result = await _call_node_api(
+                "GET", f"/wallet/kyc/{user_id}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_kyc failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "user_id" not in result:
+            detail = result.get("detail", "unknown error")
+            if "no kyc record" in str(detail).lower():
+                return f"No KYC record for user_id={user_id!r}."
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"KYC client not wired.\n  Detail: {detail}"
+                )
+            return f"lookup refused: {detail}"
+        return "\n".join([
+            f"KYC record user_id={result['user_id']!s}:",
+            f"  status:      {result.get('status', '?')}",
+            f"  level:       {result.get('level', '?')}",
+            f"  vendor:      {result.get('vendor', '?')}",
+            f"  vendor_ref:  {result.get('vendor_ref', '?')}",
+            f"  session_url: {result.get('session_url', '?')}",
+            f"  email:       {result.get('email', '?')}",
+            f"  created_at:  {result.get('created_at', 0)}",
+            f"  verified_at: {result.get('verified_at', 0)}",
+        ])
+
+    # action == "list"
+    limit = int(arguments.get("limit", 100))
+    try:
+        result = await _call_node_api(
+            "GET", f"/wallet/kyc?limit={limit}",
+        )
+    except Exception as e:
+        return (
+            f"prsm_kyc failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "records" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return f"KYC client not wired.\n  Detail: {detail}"
+        return f"list refused: {detail}"
+    records = result.get("records") or []
+    total = result.get("count", 0)
+    lines = [
+        f"PRSM KYC Records — {len(records)} of {total} "
+        f"(newest first):",
+    ]
+    if not records:
+        lines.append("  (none)")
+    for r in records:
+        lines.append(
+            f"  user_id={r.get('user_id', '?')}  "
+            f"status={r.get('status', '?'):>20}  "
+            f"level={r.get('level', '?')}  "
+            f"vendor={r.get('vendor', '?')}  "
+            f"email={r.get('email', '?')}"
+        )
+    return "\n".join(lines)
+
+
 _POOL_QUOTE_ACTIONS = {"state", "quote"}
 
 
@@ -8775,6 +9014,7 @@ TOOL_HANDLERS = {
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,
+    "prsm_kyc": handle_prsm_kyc,
     "prsm_content_provider_stats": handle_prsm_content_provider_stats,
     "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,

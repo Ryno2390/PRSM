@@ -1514,6 +1514,133 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         out["status"] = "OK"
         return out
 
+    # ── Sprint 280 — KYC vendor adapter endpoints ─────────
+    # Pluggable KYC surface (Persona / Onfido / Plaid Identity
+    # via dependency-injected backend). PENDING_COMMISSION
+    # pattern preserved when no vendor + API key configured.
+    # Webhook endpoint accepts vendor-name in the URL for
+    # routing — the path's vendor segment is informational
+    # only in v1; the configured vendor is the authority.
+
+    class _KYCInitiateRequest(BaseModel):
+        user_id: str
+        email: str
+        level: str = "basic"
+
+    class _KYCWebhookRequest(BaseModel):
+        user_id: str
+        status: str
+        vendor_ref: Optional[str] = None
+
+    @app.post("/wallet/kyc/initiate", tags=["wallet"])
+    async def post_kyc_initiate(
+        body: _KYCInitiateRequest,
+    ) -> Dict[str, Any]:
+        kyc = getattr(node, "_kyc_client", None)
+        if kyc is None:
+            raise HTTPException(
+                status_code=503,
+                detail="KYC client not initialized.",
+            )
+        try:
+            record = kyc.initiate(
+                user_id=body.user_id,
+                email=body.email,
+                level=body.level,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return record.to_dict()
+
+    @app.get("/wallet/kyc/status", tags=["wallet"])
+    async def get_kyc_status_summary() -> Dict[str, Any]:
+        kyc = getattr(node, "_kyc_client", None)
+        if kyc is None:
+            raise HTTPException(
+                status_code=503,
+                detail="KYC client not initialized.",
+            )
+        return {
+            "commissioned": kyc.is_commissioned(),
+            "vendor": getattr(kyc, "_vendor", None),
+            "supported_vendors": list(
+                getattr(kyc, "SUPPORTED_VENDORS", []),
+            ),
+            "record_count": len(kyc.list_records()),
+        }
+
+    @app.get("/wallet/kyc", tags=["wallet"])
+    async def list_kyc_records(
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        if limit <= 0 or limit > 10000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 10000], got {limit}",
+            )
+        kyc = getattr(node, "_kyc_client", None)
+        if kyc is None:
+            raise HTTPException(
+                status_code=503,
+                detail="KYC client not initialized.",
+            )
+        records = kyc.list_records()
+        records.sort(key=lambda r: r.created_at, reverse=True)
+        return {
+            "records": [r.to_dict() for r in records[:limit]],
+            "count": len(records),
+            "limit": limit,
+        }
+
+    @app.get("/wallet/kyc/{user_id}", tags=["wallet"])
+    async def get_kyc_record(user_id: str) -> Dict[str, Any]:
+        kyc = getattr(node, "_kyc_client", None)
+        if kyc is None:
+            raise HTTPException(
+                status_code=503,
+                detail="KYC client not initialized.",
+            )
+        record = kyc.get_status(user_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no KYC record for user_id={user_id!r}",
+            )
+        return record.to_dict()
+
+    @app.post(
+        "/wallet/kyc/webhook/{vendor}", tags=["wallet"],
+    )
+    async def post_kyc_webhook(
+        vendor: str,
+        body: _KYCWebhookRequest,
+    ) -> Dict[str, Any]:
+        """Vendor webhook callback. v1 routes every vendor's
+        webhook through the same handler — the configured
+        client + the {vendor} URL segment must agree (TODO:
+        signature verification per vendor in a follow-on
+        sprint)."""
+        kyc = getattr(node, "_kyc_client", None)
+        if kyc is None:
+            raise HTTPException(
+                status_code=503,
+                detail="KYC client not initialized.",
+            )
+        try:
+            updated = kyc.update_status(
+                user_id=body.user_id,
+                new_status=body.status,
+                vendor_ref_update=body.vendor_ref,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        if updated is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no KYC record for user_id={body.user_id!r}",
+            )
+        return updated.to_dict()
+
     # Renamed from `_RoyaltyClaimRequest` for OpenAPI hygiene.
     class RoyaltyClaimRequest(BaseModel):
         dry_run: bool = True
