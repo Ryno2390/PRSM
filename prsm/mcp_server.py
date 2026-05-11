@@ -1121,6 +1121,32 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_stake_lookup",
+        description=(
+            "Single-record lookup for a stake or an unstake "
+            "request. Routes to GET /staking/stakes/{id} when "
+            "kind='stake', GET /staking/unstake-requests/{id} when "
+            "kind='unstake_request'. Use prsm_staking_status for "
+            "the full dashboard, this tool for deep-inspecting a "
+            "specific record."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": ["stake", "unstake_request"],
+                    "description": "Record type to look up.",
+                },
+                "id": {
+                    "type": "string",
+                    "description": "Target stake_id or request_id.",
+                },
+            },
+            "required": ["kind", "id"],
+        },
+    ),
+    Tool(
         name="prsm_get_agent",
         description=(
             "Look up a single agent by id and render the full "
@@ -4456,6 +4482,45 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_stake_lookup(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 229 — single stake or unstake-request lookup."""
+    kind = (arguments.get("kind") or "").strip().lower()
+    if kind not in ("stake", "unstake_request"):
+        return (
+            f"kind must be 'stake' or 'unstake_request'; "
+            f"got {kind!r}."
+        )
+    ident = (arguments.get("id") or "").strip()
+    if not ident:
+        return "Missing required 'id' (non-empty)."
+    if kind == "stake":
+        path = f"/staking/stakes/{ident}"
+    else:
+        path = f"/staking/unstake-requests/{ident}"
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"prsm_stake_lookup failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    key = "stake_id" if kind == "stake" else "request_id"
+    if key not in result:
+        detail = result.get("detail", "unknown error")
+        if "not found" in detail.lower():
+            return f"{kind} {ident} not found."
+        return f"{kind} lookup refused: {detail}"
+    title = "Stake" if kind == "stake" else "Unstake Request"
+    lines = [f"PRSM {title} {result.get(key, ident)}:"]
+    for k, v in result.items():
+        if k == key:
+            continue
+        lines.append(f"  {k:<24} {v}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_get_agent(arguments: Dict[str, Any]) -> str:
     """Sprint 228 — render full agent record for a given id.
 
@@ -5635,6 +5700,7 @@ TOOL_HANDLERS = {
     "prsm_index_stats": handle_prsm_index_stats,
     "prsm_agent_conversations": handle_prsm_agent_conversations,
     "prsm_get_agent": handle_prsm_get_agent,
+    "prsm_stake_lookup": handle_prsm_stake_lookup,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
