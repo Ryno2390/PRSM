@@ -418,6 +418,42 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     #
     # Strict-Transport-Security is intentionally NOT set here —
     # PRSM runs on http://127.0.0.1 by default; HSTS belongs on
+    # Sprint 201 — reject JSON bodies containing the non-standard
+    # `Infinity` / `-Infinity` / `NaN` literals. Python's stdlib
+    # `json.loads` accepts these by default; Pydantic v2 `gt=0`
+    # accepts Infinity (`inf > 0` is True), and even
+    # `allow_inf_nan=False` causes FastAPI's error renderer to
+    # crash on the validation-error `input` field (cannot serialize
+    # inf back to JSON). Intercept upstream of body parsing.
+    #
+    # Strategy: only apply to POST/PUT/PATCH with JSON content-type.
+    # Use a regex on the raw bytes that matches the JSON token form
+    # (unquoted whole-word `Infinity` / `NaN`, not embedded in a
+    # string literal). Body is cached on `request._body` so handlers
+    # downstream read the same bytes from Starlette's cache.
+    import re as _re_inf
+    _INF_NAN_RE = _re_inf.compile(
+        rb'(?<![\w"])(-?Infinity|NaN)(?![\w"])',
+    )
+
+    @app.middleware("http")
+    async def inf_nan_body_guard(request, call_next):
+        if request.method in ("POST", "PUT", "PATCH"):
+            ctype = request.headers.get("content-type", "")
+            if "json" in ctype.lower():
+                body = await request.body()
+                if body and _INF_NAN_RE.search(body):
+                    from starlette.responses import JSONResponse
+                    return JSONResponse(
+                        {"detail": (
+                            "Request body contains NaN or Infinity "
+                            "literal; only finite numbers are "
+                            "accepted."
+                        )},
+                        status_code=422,
+                    )
+        return await call_next(request)
+
     # the operator's reverse proxy (Caddy/nginx/Cloudflare) where
     # the TLS termination actually happens.
     @app.middleware("http")
@@ -5781,7 +5817,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     class StakeRequest(BaseModel):
         """Request body for staking FTNS tokens."""
-        amount: float = Field(..., gt=0, description="Amount of FTNS to stake")
+        # Sprint 201 — `allow_inf_nan=False` closes the residual
+        # Infinity-bypass on Pydantic gt=0 (NaN was already rejected
+        # by gt=0; Infinity passed because `inf > 0` is True).
+        amount: float = Field(
+            ..., gt=0, allow_inf_nan=False,
+            description="Amount of FTNS to stake",
+        )
         stake_type: str = Field(default="general", description="Type of staking: governance, validation, compute, storage, liquidity, general")
         metadata: Optional[Dict[str, Any]] = Field(default=None, description="Optional metadata for the stake")
 
@@ -5798,7 +5840,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     class UnstakeRequest(BaseModel):
         """Request body for unstaking FTNS tokens."""
         stake_id: str = Field(..., description="ID of the stake to unstake")
-        amount: Optional[float] = Field(default=None, gt=0, description="Amount to unstake (None = full stake)")
+        amount: Optional[float] = Field(
+            default=None, gt=0, allow_inf_nan=False,
+            description="Amount to unstake (None = full stake)",
+        )
 
     class UnstakeResponse(BaseModel):
         """Response model for an unstake operation."""
@@ -6664,7 +6709,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     # a wired bridge.
     class BridgeDepositRequest(BaseModel):
         """Request body for bridge deposit operation."""
-        amount: float = Field(..., gt=0, description="Amount of FTNS to deposit (in token units)")
+        amount: float = Field(
+            ..., gt=0, allow_inf_nan=False,
+            description="Amount of FTNS to deposit (in token units)",
+        )
         chain_address: str = Field(..., min_length=1, description="Destination on-chain address")
         destination_chain: int = Field(
             default=137, ge=1, le=2147483647,
@@ -6673,7 +6721,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     class BridgeWithdrawRequest(BaseModel):
         """Request body for bridge withdraw operation."""
-        amount: float = Field(..., gt=0, description="Amount of FTNS to withdraw (in token units)")
+        amount: float = Field(
+            ..., gt=0, allow_inf_nan=False,
+            description="Amount of FTNS to withdraw (in token units)",
+        )
         chain_address: str = Field(..., min_length=1, description="Source on-chain address")
         source_chain: int = Field(
             default=137, ge=1, le=2147483647,
