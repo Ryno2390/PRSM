@@ -1121,6 +1121,25 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_get_agent",
+        description=(
+            "Look up a single agent by id and render the full "
+            "record (display_name + capabilities + status + "
+            "current allowance from ledger). Backed by GET "
+            "/agents/{agent_id}. Use prsm_agents for list/search."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Target agent ID.",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    ),
+    Tool(
         name="prsm_agent_conversations",
         description=(
             "Render recent conversation threads for a single "
@@ -4437,6 +4456,35 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_get_agent(arguments: Dict[str, Any]) -> str:
+    """Sprint 228 — render full agent record for a given id.
+
+    Backed by GET /agents/{agent_id} which includes allowance
+    from the ledger (when wired). Distinct from prsm_agents
+    (list/search short-form)."""
+    agent_id = (arguments.get("agent_id") or "").strip()
+    if not agent_id:
+        return "Missing required 'agent_id' (non-empty)."
+    try:
+        result = await _call_node_api("GET", f"/agents/{agent_id}")
+    except Exception as e:
+        return (
+            f"prsm_get_agent failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "agent_id" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not found" in detail.lower():
+            return f"Agent {agent_id} not found."
+        return f"Agent lookup refused: {detail}"
+    lines = [f"PRSM Agent {result.get('agent_id', agent_id)}:"]
+    for k, v in result.items():
+        if k == "agent_id":
+            continue
+        lines.append(f"  {k:<16} {v}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_agent_conversations(
     arguments: Dict[str, Any],
 ) -> str:
@@ -5586,6 +5634,7 @@ TOOL_HANDLERS = {
     "prsm_local_balance": handle_prsm_local_balance,
     "prsm_index_stats": handle_prsm_index_stats,
     "prsm_agent_conversations": handle_prsm_agent_conversations,
+    "prsm_get_agent": handle_prsm_get_agent,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
