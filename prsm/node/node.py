@@ -3191,15 +3191,20 @@ class PRSMNode:
                     _wasm_path, len(_wasm_binary),
                 )
             else:
+                # Sprint 177 — bundled real executor (~188 KB Rust
+                # binary, compiled to wasm32-wasip1). Interprets all
+                # 11 AgentOps against CSV / JSON / JSONL data via
+                # WASI stdin/stdout ABI. Operator can still override
+                # via PRSM_WASM_EXECUTOR_PATH for custom workflows.
                 from prsm.compute.wasm.binaries import (
-                    load_minimal_executor,
+                    load_bundled_executor,
                 )
-                _wasm_binary = load_minimal_executor()
-                logger.warning(
-                    "QueryOrchestrator: using bundled MINIMAL executor "
-                    "stub (%d bytes) — dispatch pipeline runs but query "
-                    "execution returns the stub's fixed value. Set "
-                    "PRSM_WASM_EXECUTOR_PATH for production.",
+                _wasm_binary = load_bundled_executor()
+                logger.info(
+                    "QueryOrchestrator: using bundled prsm_executor.wasm "
+                    "(%d bytes) — real instruction interpreter. Override "
+                    "with PRSM_WASM_EXECUTOR_PATH if you need a custom "
+                    "build.",
                     len(_wasm_binary),
                 )
             dispatcher = SwarmDispatcherAdapter(
