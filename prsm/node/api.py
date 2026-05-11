@@ -7969,12 +7969,33 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if os.environ.get("PRSM_FAUCET_ENABLED", "1") == "0":
             raise HTTPException(status_code=403, detail="Faucet disabled in production")
 
+        # Sprint 264 — env-tunable caps (default 100/1000 preserves
+        # sprint-181 behavior). Fail-soft to defaults on non-numeric
+        # / zero / negative values: zero would brick the faucet, so
+        # defensive clamp.
+        def _resolve_pos_int(env_key: str, default: int) -> int:
+            raw = os.environ.get(env_key, "").strip()
+            if not raw:
+                return default
+            try:
+                v = int(raw)
+            except (TypeError, ValueError):
+                return default
+            return v if v > 0 else default
+
+        per_request_cap = _resolve_pos_int(
+            "PRSM_FAUCET_MAX_PER_REQUEST", 100,
+        )
+        per_wallet_cap = _resolve_pos_int(
+            "PRSM_FAUCET_MAX_PER_WALLET", 1000,
+        )
+
         # Sprint 181 — validate amount upfront. Pre-fix:
         #   amount = min(float(body.get("amount", 100)), 100)
         # capped at 100 max but had NO lower bound. amount=-1
         # returned 200 with "granted":-1.0 and DEBITED the wallet —
         # converting the faucet into an arbitrary-debit endpoint.
-        _raw_amt = body.get("amount", 100)
+        _raw_amt = body.get("amount", per_request_cap)
         try:
             amount = float(_raw_amt)
         except (TypeError, ValueError):
@@ -7990,14 +8011,20 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=422,
                 detail=f"amount must be > 0; got {amount}.",
             )
-        # Cap to 100 (existing rate-limit invariant).
-        amount = min(amount, 100)
+        # Cap per-request to PRSM_FAUCET_MAX_PER_REQUEST (default 100).
+        amount = min(amount, per_request_cap)
         wallet_id = body.get("wallet_id", node.identity.node_id)
 
         try:
             balance = await node.ledger.get_balance(wallet_id)
-            if balance >= 1000:
-                raise HTTPException(status_code=429, detail=f"Wallet already has {balance:.0f} FTNS (max 1000 from faucet)")
+            if balance >= per_wallet_cap:
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        f"Wallet already has {balance:.0f} FTNS "
+                        f"(max {per_wallet_cap} from faucet)"
+                    ),
+                )
 
             from prsm.node.local_ledger import TransactionType
             await node.ledger.credit(
