@@ -1121,6 +1121,18 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_peers",
+        description=(
+            "List currently-connected peers (outbound + inbound). "
+            "Backed by GET /peers. Useful for verifying bootstrap "
+            "connectivity — degraded mode is typically caused by "
+            "no peers reaching the canonical wss:// bootstrap. "
+            "Shows direction (outbound/inbound), peer_id, address, "
+            "display_name per peer."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_transactions",
         description=(
             "Render the node's FTNS transaction history. Backed by "
@@ -3997,6 +4009,34 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_peers(arguments: Dict[str, Any]) -> str:
+    """Sprint 213 — render GET /peers connected-peer list."""
+    try:
+        result = await _call_node_api("GET", "/peers")
+    except Exception as e:
+        return (
+            f"prsm_peers failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    peers = result.get("connected") or []
+    count = result.get("connected_count", len(peers))
+    if not peers:
+        return (
+            f"No peers connected (count={count}). If degraded, check "
+            f"PRSM_BOOTSTRAP_ENDPOINT + /info network."
+        )
+    lines = [f"PRSM Connected Peers (count={count}):"]
+    for p in peers:
+        direction = "outbound" if p.get("outbound") else "inbound "
+        peer_id = (p.get("peer_id") or "?")[:14]
+        addr = (p.get("address") or "?")[:60]
+        name = p.get("display_name") or ""
+        lines.append(
+            f"  [{direction}] {peer_id:<14}  {addr}  {name}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_transactions(arguments: Dict[str, Any]) -> str:
     """Sprint 212 — render GET /transactions history.
 
@@ -4389,6 +4429,7 @@ TOOL_HANDLERS = {
     "prsm_cancel_job": handle_prsm_cancel_job,
     "prsm_info": handle_prsm_info,
     "prsm_transactions": handle_prsm_transactions,
+    "prsm_peers": handle_prsm_peers,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
 }
