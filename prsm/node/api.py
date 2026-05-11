@@ -17,12 +17,12 @@ import logging
 import os
 import time as _time_for_history
 import uuid as _uuid
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Header, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from prsm.node.api_hardening import (
     APIHardening,
@@ -104,8 +104,13 @@ class ResourceConfigResponse(BaseModel):
 
 class ContentUploadRequest(BaseModel):
     """Request body for uploading text content."""
-    text: str
-    filename: str = "document.txt"
+    # Sprint 208 — text Pydantic ceiling matches the default
+    # PRSM_MAX_UPLOAD_BYTES (10MB). Endpoint env-knob lets the
+    # operator raise the runtime cap, but a hard Pydantic ceiling
+    # prevents a 1GB JSON from being materialized in memory just
+    # to be 413'd a microsecond later.
+    text: str = Field(..., max_length=10 * 1024 * 1024)
+    filename: str = Field(default="document.txt", max_length=512)
     # Sprint 160 — Pydantic field constraints. Pre-fix royalty_rate
     # and replicas were unconstrained, so out-of-band values
     # (negative royalties, zero/negative replicas, 10000% rates)
@@ -119,8 +124,9 @@ class ContentUploadRequest(BaseModel):
         default=None, ge=0.001, le=0.1,
         description="FTNS earned per access (0.001–0.1, default 0.01)",
     )
-    parent_cids: List[str] = Field(
+    parent_cids: List[Annotated[str, StringConstraints(max_length=256)]] = Field(
         default_factory=list,
+        max_length=10_000,
         description="CIDs of source material this content derives from",
     )
 
