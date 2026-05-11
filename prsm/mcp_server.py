@@ -1258,6 +1258,18 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_content_provider_stats",
+        description=(
+            "Render ContentProvider runtime stats: local content "
+            "count, pending requests, content discovery sub-stats, "
+            "cumulative fetch telemetry (successful/failed). "
+            "Symmetric pair to prsm_index_stats but for the "
+            "provider-side fetch pipeline. Backed by GET "
+            "/content/provider-stats."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_pinned_stats",
         description=(
             "Render per-pinned-content storage challenge stats: "
@@ -5188,6 +5200,41 @@ async def handle_prsm_forge_quote(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_content_provider_stats(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 268 — render ContentProvider runtime stats."""
+    try:
+        result = await _call_node_api(
+            "GET", "/content/provider-stats",
+        )
+    except Exception as e:
+        return (
+            f"prsm_content_provider_stats failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if not isinstance(result, dict):
+        return f"Unexpected response shape: {result!r}"
+    if "detail" in result and "local_content_count" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Content provider not wired on this node.\n"
+                f"  Detail: {detail}"
+            )
+        return f"prsm_content_provider_stats refused: {detail}"
+    lines = ["PRSM Content Provider Stats:"]
+    for k in sorted(result.keys()):
+        v = result[k]
+        if isinstance(v, dict):
+            lines.append(f"  {k}:")
+            for sk in sorted(v.keys()):
+                lines.append(f"    {sk:<22} {v[sk]}")
+        else:
+            lines.append(f"  {k:<24} {v}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_pinned_stats(
     arguments: Dict[str, Any],
 ) -> str:
@@ -7164,6 +7211,7 @@ TOOL_HANDLERS = {
     "prsm_royalty_dispatch_summary": handle_prsm_royalty_dispatch_summary,
     "prsm_bootstrap_status": handle_prsm_bootstrap_status,
     "prsm_pinned_stats": handle_prsm_pinned_stats,
+    "prsm_content_provider_stats": handle_prsm_content_provider_stats,
     "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,
     "prsm_inference_quote": handle_prsm_inference_quote,

@@ -4618,6 +4618,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=503, detail="Content index not initialized")
         return node.content_index.get_stats()
 
+    # Sprint 268 — surface ContentProvider runtime stats:
+    # local_content_count, pending_requests, discovery sub-stats,
+    # fetch telemetry. Symmetric pair to /content/index/stats but
+    # for the provider-side fetch pipeline. Pre-fix only used
+    # internally by /content/retrieve.
+    @app.get("/content/provider-stats", tags=["content"])
+    async def content_provider_stats() -> Dict[str, Any]:
+        """ContentProvider runtime statistics: local content
+        count, pending request count, discovery sub-stats, +
+        cumulative fetch telemetry."""
+        cp = getattr(node, "content_provider", None)
+        if cp is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Content provider not initialized.",
+            )
+        try:
+            return cp.get_stats()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=f"get_stats() raised: {exc}",
+            )
+
     @app.get("/content/mine")
     async def get_my_content(
         limit: int = 50, offset: int = 0,
