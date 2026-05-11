@@ -1221,6 +1221,41 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     @app.post("/compute/submit")
     async def submit_compute_job(job: JobSubmission) -> Dict[str, Any]:
         """Submit a compute job to the network."""
+        # Sprint 197 — same payload-size cap as /api/jobs/submit
+        # (gossip-DoS surface). PRSM_MAX_JOB_PAYLOAD_BYTES env
+        # override; default 100KB.
+        try:
+            _payload_bytes = len(
+                json.dumps(job.payload).encode("utf-8"),
+            )
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=422,
+                detail="payload must be JSON-serializable",
+            )
+        _payload_cap_raw = os.environ.get(
+            "PRSM_MAX_JOB_PAYLOAD_BYTES", "",
+        ).strip()
+        try:
+            _payload_cap = (
+                int(_payload_cap_raw)
+                if _payload_cap_raw else 100 * 1024
+            )
+            if _payload_cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            _payload_cap = 100 * 1024
+        if _payload_bytes > _payload_cap:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"payload size {_payload_bytes} bytes exceeds "
+                    f"PRSM_MAX_JOB_PAYLOAD_BYTES cap of "
+                    f"{_payload_cap}. Trim the payload or have "
+                    f"the operator raise the cap."
+                ),
+            )
+
         if not node.compute_requester:
             raise HTTPException(status_code=503, detail="Compute requester not initialized")
 
