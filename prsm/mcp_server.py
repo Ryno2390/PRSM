@@ -1121,6 +1121,27 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_subsystem_stats",
+        description=(
+            "Stats for a chosen operator subsystem. Backed by GET "
+            "/settler/stats, /storage/stats, or /compute/stats "
+            "depending on the `subsystem` selector. Useful for "
+            "operators checking single-subsystem health without "
+            "loading the full /health/detailed response."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "subsystem": {
+                    "type": "string",
+                    "enum": ["settler", "storage", "compute"],
+                    "description": "Which subsystem to probe.",
+                },
+            },
+            "required": ["subsystem"],
+        },
+    ),
+    Tool(
         name="prsm_staking_status",
         description=(
             "Render the user's full staking dashboard. Backed by "
@@ -4074,6 +4095,46 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+_SUBSYSTEM_STATS_PATHS = {
+    "settler": "/settler/stats",
+    "storage": "/storage/stats",
+    "compute": "/compute/stats",
+}
+
+
+async def handle_prsm_subsystem_stats(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 216 — render stats for settler/storage/compute
+    subsystems via a single MCP tool selector."""
+    subsystem = (arguments.get("subsystem") or "").strip().lower()
+    if not subsystem:
+        return (
+            f"Missing required 'subsystem'. Must be one of "
+            f"{sorted(_SUBSYSTEM_STATS_PATHS)}."
+        )
+    if subsystem not in _SUBSYSTEM_STATS_PATHS:
+        return (
+            f"subsystem must be one of "
+            f"{sorted(_SUBSYSTEM_STATS_PATHS)}; got {subsystem!r}."
+        )
+    path = _SUBSYSTEM_STATS_PATHS[subsystem]
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"prsm_subsystem_stats({subsystem}) failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    lines = [f"PRSM {subsystem.title()} Stats:"]
+    if not result:
+        lines.append("  (empty response)")
+    else:
+        for k, v in result.items():
+            lines.append(f"  {k:<24} {v}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_staking_status(arguments: Dict[str, Any]) -> str:
     """Sprint 215 — render GET /staking/status user dashboard."""
     try:
@@ -4624,6 +4685,7 @@ TOOL_HANDLERS = {
     "prsm_peers": handle_prsm_peers,
     "prsm_agents": handle_prsm_agents,
     "prsm_staking_status": handle_prsm_staking_status,
+    "prsm_subsystem_stats": handle_prsm_subsystem_stats,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
