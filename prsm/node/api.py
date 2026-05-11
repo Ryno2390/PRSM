@@ -1108,6 +1108,92 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "include_terminal": include_terminal,
         }
 
+    # ── Sprint 276 — Coinbase Wallet-as-a-Service (WaaS) ──
+    # Operator-facing CRUD surface for embedded MPC wallets
+    # via Coinbase CDP. Per Vision §14 "Crypto-UX adoption
+    # barrier" mitigation: makes wallet provisioning
+    # invisible to end users — email in, address out, no
+    # seed phrase. PENDING_COMMISSION pattern: returns
+    # preview records when CDP keys are absent.
+
+    class _WaasProvisionRequest(BaseModel):
+        user_id: str
+        email: str
+
+    @app.post("/wallet/waas/provision", tags=["wallet"])
+    async def post_waas_provision(
+        body: _WaasProvisionRequest,
+    ) -> Dict[str, Any]:
+        client = getattr(node, "_coinbase_waas_client", None)
+        if client is None:
+            raise HTTPException(
+                status_code=503,
+                detail="WaaS client not initialized.",
+            )
+        try:
+            record = client.provision_wallet(
+                user_id=body.user_id, email=body.email,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return record.to_dict()
+
+    @app.get("/wallet/waas/status", tags=["wallet"])
+    async def get_waas_status() -> Dict[str, Any]:
+        client = getattr(node, "_coinbase_waas_client", None)
+        if client is None:
+            raise HTTPException(
+                status_code=503,
+                detail="WaaS client not initialized.",
+            )
+        return {
+            "commissioned": client.is_commissioned(),
+            "network": getattr(
+                client, "_network", "base-mainnet",
+            ),
+            "wallet_count": len(client.list_wallets()),
+        }
+
+    @app.get("/wallet/waas", tags=["wallet"])
+    async def list_waas_wallets(
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        if limit <= 0 or limit > 10000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 10000], got {limit}",
+            )
+        client = getattr(node, "_coinbase_waas_client", None)
+        if client is None:
+            raise HTTPException(
+                status_code=503,
+                detail="WaaS client not initialized.",
+            )
+        wallets = client.list_wallets()
+        # Sort newest-first for operator UX.
+        wallets.sort(key=lambda r: r.created_at, reverse=True)
+        return {
+            "wallets": [r.to_dict() for r in wallets[:limit]],
+            "count": len(wallets),
+            "limit": limit,
+        }
+
+    @app.get("/wallet/waas/{user_id}", tags=["wallet"])
+    async def get_waas_wallet(user_id: str) -> Dict[str, Any]:
+        client = getattr(node, "_coinbase_waas_client", None)
+        if client is None:
+            raise HTTPException(
+                status_code=503,
+                detail="WaaS client not initialized.",
+            )
+        record = client.get_wallet(user_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no wallet for user_id={user_id!r}",
+            )
+        return record.to_dict()
+
     # Renamed from `_RoyaltyClaimRequest` for OpenAPI hygiene.
     class RoyaltyClaimRequest(BaseModel):
         dry_run: bool = True

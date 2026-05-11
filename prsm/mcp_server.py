@@ -1437,6 +1437,55 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_waas_wallet",
+        description=(
+            "Coinbase Wallet-as-a-Service (WaaS) — provisions "
+            "MPC-secured embedded wallets for end users via "
+            "Coinbase CDP. Single tool with `action` selector: "
+            "provision | lookup | list | status. Per Vision §14 "
+            "'Crypto-UX adoption barrier' mitigation: makes "
+            "wallet creation invisible (email in, address out, "
+            "no seed phrase). PENDING_COMMISSION pattern: when "
+            "COINBASE_CDP_API_KEY_NAME + "
+            "COINBASE_CDP_API_KEY_PRIVATE env vars are absent, "
+            "returns preview records; real provisioning lands on "
+            "Coinbase commission. Backed by /wallet/waas(/*) "
+            "endpoints."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "provision", "lookup", "list", "status",
+                    ],
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": (
+                        "PRSM user id (provision + lookup)."
+                    ),
+                },
+                "email": {
+                    "type": "string",
+                    "description": (
+                        "User email (provision only); used by "
+                        "Coinbase CDP for recovery and notices."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1, "maximum": 10000,
+                    "description": (
+                        "Row cap for action=list (default 100)."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_marketplace_reputation",
         description=(
             "Operator visibility into marketplace "
@@ -5896,6 +5945,184 @@ async def handle_prsm_takedown_notices(
     )
 
 
+_WAAS_WALLET_ACTIONS = {
+    "provision", "lookup", "list", "status",
+}
+
+
+async def handle_prsm_waas_wallet(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 276 — Coinbase WaaS wallet provisioning + inspection.
+
+    Per Vision §14 "Crypto-UX adoption barrier" mitigation, this
+    is the LLM-facing surface that makes wallet provisioning
+    invisible: user says "give me a wallet," LLM calls this with
+    action=provision, user gets back an address (or a
+    PENDING_COMMISSION preview until Coinbase CDP commissions).
+    """
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_WAAS_WALLET_ACTIONS)})."
+        )
+    if action not in _WAAS_WALLET_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_WAAS_WALLET_ACTIONS)}; got {action!r}."
+        )
+
+    if action == "provision":
+        user_id = (arguments.get("user_id") or "").strip()
+        if not user_id:
+            return "provision requires 'user_id'."
+        email = (arguments.get("email") or "").strip()
+        if not email:
+            return "provision requires 'email'."
+        try:
+            result = await _call_node_api(
+                "POST", "/wallet/waas/provision",
+                {"user_id": user_id, "email": email},
+            )
+        except Exception as e:
+            return (
+                f"prsm_waas_wallet failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "user_id" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"WaaS client not wired on this node.\n"
+                    f"  Detail: {detail}\n"
+                    f"  Set COINBASE_CDP_API_KEY_NAME + "
+                    f"COINBASE_CDP_API_KEY_PRIVATE to commission."
+                )
+            return f"provision refused: {detail}"
+        status = result.get("status", "?")
+        if status == "PENDING_COMMISSION":
+            return (
+                f"Wallet preview for user_id={result['user_id']!s} "
+                f"(status=PENDING_COMMISSION):\n"
+                f"  email:   {result.get('email', '?')}\n"
+                f"  network: {result.get('network', '?')}\n"
+                f"  Note: Coinbase CDP not commissioned yet — "
+                f"this is a preview record. Real provisioning "
+                f"lands when COINBASE_CDP_API_KEY_NAME + "
+                f"COINBASE_CDP_API_KEY_PRIVATE are configured."
+            )
+        return (
+            f"Wallet PROVISIONED for user_id="
+            f"{result['user_id']!s}:\n"
+            f"  email:     {result.get('email', '?')}\n"
+            f"  wallet_id: {result.get('wallet_id', '?')}\n"
+            f"  address:   {result.get('address', '?')}\n"
+            f"  network:   {result.get('network', '?')}"
+        )
+
+    if action == "lookup":
+        user_id = (arguments.get("user_id") or "").strip()
+        if not user_id:
+            return "lookup requires 'user_id'."
+        try:
+            result = await _call_node_api(
+                "GET", f"/wallet/waas/{user_id}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_waas_wallet failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "user_id" not in result:
+            detail = result.get("detail", "unknown error")
+            if "no wallet for" in str(detail).lower():
+                return (
+                    f"No wallet exists for user_id="
+                    f"{user_id!r}. Run action=provision first."
+                )
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"WaaS client not wired.\n  Detail: {detail}"
+                )
+            return f"lookup refused: {detail}"
+        return (
+            f"WaaS wallet user_id={result['user_id']!s}:\n"
+            f"  status:    {result.get('status', '?')}\n"
+            f"  email:     {result.get('email', '?')}\n"
+            f"  wallet_id: {result.get('wallet_id', '?')}\n"
+            f"  address:   {result.get('address', '?')}\n"
+            f"  network:   {result.get('network', '?')}\n"
+            f"  created:   {result.get('created_at', 0)}"
+        )
+
+    if action == "list":
+        limit = int(arguments.get("limit", 100))
+        try:
+            result = await _call_node_api(
+                "GET", f"/wallet/waas?limit={limit}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_waas_wallet failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "wallets" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"WaaS client not wired.\n  Detail: {detail}"
+                )
+            return f"list refused: {detail}"
+        wallets = result.get("wallets") or []
+        total = result.get("count", 0)
+        lines = [
+            f"PRSM WaaS Wallets — {len(wallets)} of {total} "
+            f"(newest first):",
+        ]
+        if not wallets:
+            lines.append("  (none)")
+        for w in wallets:
+            lines.append(
+                f"  user_id={w.get('user_id', '?')}  "
+                f"status={w.get('status', '?'):>20}  "
+                f"address={w.get('address') or '(pending)'}  "
+                f"email={w.get('email', '?')}"
+            )
+        return "\n".join(lines)
+
+    # action == "status"
+    try:
+        result = await _call_node_api("GET", "/wallet/waas/status")
+    except Exception as e:
+        return (
+            f"prsm_waas_wallet failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "commissioned" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"WaaS client not wired.\n  Detail: {detail}"
+            )
+        return f"status refused: {detail}"
+    commissioned = result.get("commissioned")
+    if commissioned:
+        return (
+            f"WaaS commissioned=True\n"
+            f"  network:      {result.get('network', '?')}\n"
+            f"  wallet_count: {result.get('wallet_count', 0)}"
+        )
+    return (
+        f"WaaS commissioned=False (PENDING_COMMISSION)\n"
+        f"  network:      {result.get('network', '?')}\n"
+        f"  wallet_count: {result.get('wallet_count', 0)}\n"
+        f"  Set COINBASE_CDP_API_KEY_NAME + "
+        f"COINBASE_CDP_API_KEY_PRIVATE to enable real "
+        f"provisioning."
+    )
+
+
 _MARKETPLACE_REPUTATION_ACTIONS = {"list", "lookup"}
 
 
@@ -8001,6 +8228,7 @@ TOOL_HANDLERS = {
     "prsm_content_filter": handle_prsm_content_filter,
     "prsm_takedown_notices": handle_prsm_takedown_notices,
     "prsm_marketplace_reputation": handle_prsm_marketplace_reputation,
+    "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_content_provider_stats": handle_prsm_content_provider_stats,
     "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,

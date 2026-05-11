@@ -2172,6 +2172,37 @@ class PRSMNode:
             )
             self._content_filter_store = None
 
+        # Sprint 276 — Coinbase Wallet-as-a-Service adapter.
+        # Per Vision §14 "Crypto-UX adoption barrier"
+        # mitigation: embedded MPC wallets with email-only
+        # onboarding. Failure-soft (None when scaffold not
+        # importable). The client always constructs; the
+        # commission gate is internal — it returns
+        # PENDING_COMMISSION records when CDP env keys are
+        # absent rather than failing.
+        try:
+            from prsm.economy.web3.coinbase_waas_client import (
+                CoinbaseWaaSClient,
+            )
+            self._coinbase_waas_client = (
+                CoinbaseWaaSClient.from_env()
+            )
+            commissioned = (
+                self._coinbase_waas_client
+                and self._coinbase_waas_client.is_commissioned()
+            )
+            logger.info(
+                "CoinbaseWaaSClient wired (commissioned=%s)",
+                commissioned,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "CoinbaseWaaSClient construction failed: %s — "
+                "/wallet/waas/* endpoints will return 503.",
+                exc,
+            )
+            self._coinbase_waas_client = None
+
         # Sprint 249 — RoyaltyDispatchRing for the on-chain
         # content-royalty audit trail (sprint 248). Opt-in
         # filesystem persistence via PRSM_ROYALTY_DISPATCH_LOG_DIR.
