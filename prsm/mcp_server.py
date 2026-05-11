@@ -1121,6 +1121,28 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_transactions",
+        description=(
+            "Render the node's FTNS transaction history. Backed by "
+            "GET /transactions. Returns tx_id, type, from/to wallet, "
+            "amount, description, timestamp per record. Limit defaults "
+            "to 50; capped server-side at 200. Useful for end-users "
+            "tracking FTNS flows without grepping the local ledger."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Number of records (1..200). Default 50.",
+                    "minimum": 1,
+                    "maximum": 200,
+                    "default": 50,
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_info",
         description=(
             "Render static node metadata: node_id, api_version, "
@@ -3975,6 +3997,52 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_transactions(arguments: Dict[str, Any]) -> str:
+    """Sprint 212 — render GET /transactions history.
+
+    Local-side limit validation: server caps at [1, 200]; reject
+    out-of-range before round-trip so users get an instant error
+    instead of a 422.
+    """
+    raw_limit = arguments.get("limit", 50)
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        return f"limit must be an integer in [1, 200]; got {raw_limit!r}."
+    if limit < 1 or limit > 200:
+        return f"limit must be in [1, 200]; got {limit}."
+
+    try:
+        result = await _call_node_api(
+            "GET", f"/transactions?limit={limit}",
+        )
+    except Exception as e:
+        return (
+            f"prsm_transactions failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    txs = result.get("transactions") or []
+    count = result.get("count", len(txs))
+    if not txs:
+        return f"No transactions in history (count={count})."
+    lines = [f"PRSM Transactions (count={count}, showing {len(txs)}):"]
+    for tx in txs:
+        ts = tx.get("timestamp")
+        ts_str = (
+            f"{int(ts) % 86400 // 3600:02d}:"
+            f"{int(ts) % 3600 // 60:02d}:{int(ts) % 60:02d}"
+            if isinstance(ts, (int, float)) else "????"
+        )
+        lines.append(
+            f"  {tx.get('tx_id', '?')[:18]:<18} "
+            f"{tx.get('type', '?'):<18} "
+            f"{tx.get('amount', '?')!s:>10} FTNS  "
+            f"{(tx.get('from') or '?')[:10]}→{(tx.get('to') or '?')[:10]}  "
+            f"@~{ts_str}"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_info(arguments: Dict[str, Any]) -> str:
     """Sprint 211 — render GET /info static node metadata.
 
@@ -4320,6 +4388,7 @@ TOOL_HANDLERS = {
     "prsm_status_stream": handle_prsm_status_stream,
     "prsm_cancel_job": handle_prsm_cancel_job,
     "prsm_info": handle_prsm_info,
+    "prsm_transactions": handle_prsm_transactions,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
 }
