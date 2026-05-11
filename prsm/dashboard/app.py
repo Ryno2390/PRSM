@@ -491,20 +491,11 @@ class DashboardServer:
                     "to": tx.to_wallet,
                     "amount": tx.amount,
                     "description": tx.description,
-                    "timestamp": (
-                        # tx.timestamp may be a float (Unix epoch)
-                        # or a datetime depending on storage backend.
-                        # Handle both. Sprint 136 fix.
-                        tx.timestamp.isoformat()
-                        if hasattr(tx.timestamp, "isoformat")
-                        else (
-                            datetime.fromtimestamp(
-                                float(tx.timestamp),
-                                tz=timezone.utc,
-                            ).isoformat()
-                            if tx.timestamp else None
-                        )
-                    ),
+                    # Sprint 136 fix refactored to shared helper in
+                    # sprint 192 (alongside /api/peers, content search,
+                    # and /api/jobs flows). `_iso_ts` handles datetime
+                    # + Unix-float + None uniformly.
+                    "timestamp": _iso_ts(tx.timestamp),
                 }
                 for tx in history
             ]
@@ -606,8 +597,11 @@ class DashboardServer:
                         "peer_id": pid,
                         "address": str(peer.address),
                         "display_name": peer.display_name,
-                        "connected_at": peer.connected_at.isoformat() if peer.connected_at else None,
-                        "last_seen": peer.last_seen.isoformat() if peer.last_seen else None,
+                        # Sprint 192 — _iso_ts handles both
+                        # datetime + Unix-float (libp2p transport
+                        # surface uses floats).
+                        "connected_at": _iso_ts(peer.connected_at),
+                        "last_seen": _iso_ts(peer.last_seen),
                         "outbound": peer.outbound,
                     })
             
@@ -618,7 +612,10 @@ class DashboardServer:
                         "node_id": info.node_id,
                         "address": str(info.address),
                         "display_name": info.display_name,
-                        "last_seen": info.last_seen.isoformat() if info.last_seen else None,
+                        # Sprint 192 — PeerInfo.last_seen is a Unix
+                        # float on Libp2pDiscovery (see sprint 165
+                        # `_hydrate_peers_from_bootstrap`).
+                        "last_seen": _iso_ts(info.last_seen),
                     })
             
             return {
@@ -679,7 +676,9 @@ class DashboardServer:
                         "filename": r.filename,
                         "size_bytes": r.size_bytes,
                         "creator_id": r.creator_id,
-                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                        # Sprint 192 — ContentRecord.created_at
+                        # is a Unix float per content_index.py.
+                        "created_at": _iso_ts(r.created_at),
                     }
                     for r in results
                 ],
