@@ -129,6 +129,22 @@ class ContentUploadRequest(BaseModel):
         max_length=10_000,
         description="CIDs of source material this content derives from",
     )
+    # Sprint 243 — capture creator's on-chain ETH address for the
+    # eventual RoyaltyDistributor.distribute_royalty() destination.
+    # Optional (default None) for backwards-compat with v1 uploads.
+    # Validated upfront as 0x-prefixed 40-hex-char address.
+    creator_eth_address: Optional[
+        Annotated[str, StringConstraints(
+            pattern=r"^0x[0-9a-fA-F]{40}$",
+        )]
+    ] = Field(
+        default=None,
+        description=(
+            "Optional 0x-prefixed Ethereum address. Used as the "
+            "destination for on-chain royalty distribution when "
+            "the leg is wired."
+        ),
+    )
 
 
 
