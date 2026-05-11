@@ -1437,6 +1437,46 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_marketplace_reputation",
+        description=(
+            "Operator visibility into marketplace "
+            "ReputationTracker. Single tool with `action` "
+            "selector: list | lookup. list returns the "
+            "score-desc-sorted provider table (per-provider "
+            "successes/failures/preempted/slashed counts + "
+            "p50/p95 latency + slash markers). lookup returns "
+            "single-provider detail incl on-chain slash event "
+            "history (batch_id, reason, wei amount, tx_hash). "
+            "Backed by /marketplace/reputation(/{id}). Cold-start "
+            "neutral score (0.5) returned for unknown providers "
+            "AND known-but-<10-sample providers per the "
+            "ReputationTracker contract."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "lookup"],
+                },
+                "provider_id": {
+                    "type": "string",
+                    "description": (
+                        "Provider id for action=lookup."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1, "maximum": 10000,
+                    "description": (
+                        "Row cap for action=list (default 100)."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_pinned_stats",
         description=(
             "Render per-pinned-content storage challenge stats: "
@@ -5856,6 +5896,132 @@ async def handle_prsm_takedown_notices(
     )
 
 
+_MARKETPLACE_REPUTATION_ACTIONS = {"list", "lookup"}
+
+
+async def handle_prsm_marketplace_reputation(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 275 — operator visibility into ReputationTracker
+    state. action=list returns score-sorted provider table;
+    action=lookup returns single-provider detail incl slash
+    events."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_MARKETPLACE_REPUTATION_ACTIONS)})."
+        )
+    if action not in _MARKETPLACE_REPUTATION_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_MARKETPLACE_REPUTATION_ACTIONS)}; "
+            f"got {action!r}."
+        )
+
+    if action == "list":
+        limit = int(arguments.get("limit", 100))
+        path = f"/marketplace/reputation?limit={limit}"
+        try:
+            result = await _call_node_api("GET", path)
+        except Exception as e:
+            return (
+                f"prsm_marketplace_reputation failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "providers" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Reputation tracker not wired on this "
+                    f"node.\n  Detail: {detail}\n"
+                    f"  Tracker is built when QueryOrchestrator "
+                    f"wires; ensure marketplace path is active."
+                )
+            return f"list refused: {detail}"
+        providers = result.get("providers") or []
+        total = result.get("count", 0)
+        lines = [
+            f"PRSM Marketplace Reputation — "
+            f"{len(providers)} of {total} known providers "
+            f"(score desc):",
+        ]
+        if not providers:
+            lines.append("  (none)")
+        for p in providers:
+            slash_marker = (
+                "⚠" if p.get("has_been_slashed") else " "
+            )
+            score = p.get("score", 0.0)
+            lines.append(
+                f"  {slash_marker} {p.get('provider_id', '?')}  "
+                f"score={score:.3f}  "
+                f"ok/fail/pre/slash="
+                f"{p.get('successes', 0)}/"
+                f"{p.get('failures', 0)}/"
+                f"{p.get('preempted', 0)}/"
+                f"{p.get('slashed_count', 0)}  "
+                f"p50={p.get('latency_p50_ms')}ms  "
+                f"p95={p.get('latency_p95_ms')}ms"
+            )
+        return "\n".join(lines)
+
+    # action == "lookup"
+    provider_id = (arguments.get("provider_id") or "").strip()
+    if not provider_id:
+        return "lookup requires 'provider_id'."
+    try:
+        result = await _call_node_api(
+            "GET", f"/marketplace/reputation/{provider_id}",
+        )
+    except Exception as e:
+        return (
+            f"prsm_marketplace_reputation failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "provider_id" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Reputation tracker not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"lookup refused: {detail}"
+    known = result.get("known", False)
+    cold_start = (
+        " (cold-start — < MIN_SAMPLES_FOR_SCORE observations)"
+        if (not known) or
+        (result.get("successes", 0) + result.get("failures", 0) < 10)
+        else ""
+    )
+    lines = [
+        f"Marketplace Reputation — {result['provider_id']}:",
+        f"  known:           {known}",
+        f"  score:           {result.get('score', 0.0):.3f}"
+        f"{cold_start}",
+        f"  successes:       {result.get('successes', 0)}",
+        f"  failures:        {result.get('failures', 0)}",
+        f"  preempted:       {result.get('preempted', 0)}",
+        f"  slashed_count:   {result.get('slashed_count', 0)}",
+        f"  has_been_slashed:{result.get('has_been_slashed')}",
+        f"  latency_p50_ms:  {result.get('latency_p50_ms')}",
+        f"  latency_p95_ms:  {result.get('latency_p95_ms')}",
+        f"  first_seen_unix: {result.get('first_seen_unix', 0)}",
+        f"  last_seen_unix:  {result.get('last_seen_unix', 0)}",
+    ]
+    slash_events = result.get("slash_events") or []
+    if slash_events:
+        lines.append(f"  slash_events ({len(slash_events)}):")
+        for s in slash_events:
+            lines.append(
+                f"    batch={s.get('batch_id', '?')}  "
+                f"reason={s.get('reason', '?')}  "
+                f"wei={s.get('slash_amount_wei', 0)}  "
+                f"tx={s.get('tx_hash', '?')}"
+            )
+    return "\n".join(lines)
+
+
 async def handle_prsm_pinned_stats(
     arguments: Dict[str, Any],
 ) -> str:
@@ -7834,6 +8000,7 @@ TOOL_HANDLERS = {
     "prsm_pinned_stats": handle_prsm_pinned_stats,
     "prsm_content_filter": handle_prsm_content_filter,
     "prsm_takedown_notices": handle_prsm_takedown_notices,
+    "prsm_marketplace_reputation": handle_prsm_marketplace_reputation,
     "prsm_content_provider_stats": handle_prsm_content_provider_stats,
     "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,

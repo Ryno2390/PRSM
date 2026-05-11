@@ -5944,6 +5944,105 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return entry.to_dict()
 
+    # ── Sprint 275 — marketplace reputation operator surface ─
+    # ReputationTracker has informed the marketplace candidate
+    # pool since Phase 3 Task 6, but operators had no surface
+    # to inspect it. These read-only endpoints close that gap.
+    # Per `prsm/marketplace/reputation.py` contract: NEUTRAL_SCORE
+    # (0.5) is returned for unknown providers AND for known
+    # providers with < MIN_SAMPLES_FOR_SCORE total observations.
+
+    def _reputation_row(tracker, provider_id: str) -> Dict[str, Any]:
+        """Materialize one provider's row from the tracker."""
+        rep = tracker.get_reputation(provider_id)
+        if rep is None:
+            return {
+                "provider_id": provider_id,
+                "known": False,
+                "score": tracker.NEUTRAL_SCORE,
+                "successes": 0,
+                "failures": 0,
+                "preempted": 0,
+                "slashed_count": 0,
+                "has_been_slashed": False,
+                "latency_p50_ms": None,
+                "latency_p95_ms": None,
+                "first_seen_unix": 0,
+                "last_seen_unix": 0,
+            }
+        return {
+            "provider_id": provider_id,
+            "known": True,
+            "score": tracker.score_for(provider_id),
+            "successes": len(rep.successful_dispatches),
+            "failures": len(rep.failed_dispatches),
+            "preempted": len(rep.preempted_dispatches),
+            "slashed_count": tracker.slashed_count(provider_id),
+            "has_been_slashed": tracker.has_been_slashed(provider_id),
+            "latency_p50_ms": tracker.latency_p50(provider_id),
+            "latency_p95_ms": tracker.latency_p95(provider_id),
+            "first_seen_unix": rep.first_seen_unix,
+            "last_seen_unix": rep.last_seen_unix,
+        }
+
+    @app.get("/marketplace/reputation", tags=["marketplace"])
+    async def list_marketplace_reputation(
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Sorted (score desc) list of every provider the local
+        ReputationTracker has observed."""
+        if limit <= 0 or limit > 10000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 10000], got {limit}",
+            )
+        tracker = getattr(node, "reputation_tracker", None)
+        if tracker is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Reputation tracker not initialized.",
+            )
+        provider_ids = tracker.known_providers()
+        rows = [_reputation_row(tracker, pid) for pid in provider_ids]
+        rows.sort(
+            key=lambda r: (r["score"], r["successes"]),
+            reverse=True,
+        )
+        return {
+            "providers": rows[:limit],
+            "count": len(provider_ids),
+            "limit": limit,
+        }
+
+    @app.get(
+        "/marketplace/reputation/{provider_id}",
+        tags=["marketplace"],
+    )
+    async def get_marketplace_reputation(
+        provider_id: str,
+    ) -> Dict[str, Any]:
+        """Single-provider detail incl slash event history."""
+        tracker = getattr(node, "reputation_tracker", None)
+        if tracker is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Reputation tracker not initialized.",
+            )
+        row = _reputation_row(tracker, provider_id)
+        # Add the slash event list (not surfaced in /list rows
+        # to keep payloads small).
+        row["slash_events"] = [
+            {
+                "batch_id": e.batch_id,
+                "slash_amount_wei": e.slash_amount_wei,
+                "reason": e.reason,
+                "recorded_unix": e.recorded_unix,
+                "tx_hash": e.tx_hash,
+            }
+            for e in tracker.get_slash_events(provider_id)
+        ]
+        return row
+
     @app.get("/admin/royalty-dispatch-summary")
     async def get_royalty_dispatch_summary() -> Dict[str, Any]:
         """Aggregate view over the sprint-249 royalty dispatch

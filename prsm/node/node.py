@@ -3232,6 +3232,10 @@ class PRSMNode:
             # subsystem (separate sprint), pull these from self.* instead.
             marketplace_directory = MarketplaceDirectory(self.gossip)
             reputation_tracker = ReputationTracker()
+            # Sprint 275 — expose tracker on Node so operator
+            # endpoints (/marketplace/reputation/*) can read it.
+            # Lifetime is tied to the QO instance.
+            self.reputation_tracker = reputation_tracker
 
             semantic_index = SemanticIndexAdapter(
                 embedder=SentenceTransformerEmbedder(),
