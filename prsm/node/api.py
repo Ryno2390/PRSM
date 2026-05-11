@@ -3809,6 +3809,29 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         _record_history("in_progress")
 
+        # Sprint 253 — persist the signed receipt to ReceiptStore
+        # on streaming success (mirrors sprint 242's unary
+        # wiring). The receipt is signed inside _result_to_dict
+        # for the wire payload; this helper re-applies the same
+        # rebind+sign so we get the canonical signed receipt for
+        # the audit store. Best-effort.
+        def _record_receipt(item: Any) -> None:
+            store = getattr(node, "_receipt_store", None)
+            if store is None or item.receipt is None:
+                return
+            try:
+                import dataclasses as _dc
+                receipt = _dc.replace(item.receipt, job_id=job_id)
+                if node.identity is not None:
+                    from prsm.compute.inference import sign_receipt
+                    receipt = sign_receipt(receipt, node.identity)
+                store.put(job_id, receipt.to_dict())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ReceiptStore put failed for streaming "
+                    "job_id=%s: %s", job_id[:8], exc,
+                )
+
         # Lock escrow — same pre-pay billing pattern as the unary
         # endpoint. Failure paths refund; success path settles after
         # the terminal result event.
@@ -3887,6 +3910,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                 "completed",
                                 response_text=item.output,
                             )
+                            # Sprint 253 — persist signed receipt.
+                            _record_receipt(item)
                             yield _sse_event(
                                 "result",
                                 _result_to_dict(
