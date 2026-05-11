@@ -925,6 +925,125 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         usd_amount: float
         bank_account_alias: str = "primary"
 
+    # Sprint 278 — Coinbase onramp quote (USD → FTNS).
+    # Mirrors the offramp quote: composer-only
+    # PENDING_COMMISSION artifact. Either destination_user_id
+    # (resolved via WaaS) or destination_address (explicit)
+    # required; XOR enforced in the handler.
+    class OnrampQuoteRequest(BaseModel):
+        usd_amount: float
+        destination_user_id: Optional[str] = None
+        destination_address: Optional[str] = None
+        payment_method_alias: str = "primary"
+
+    @app.post("/wallet/onramp/quote", tags=["wallet"])
+    async def post_onramp_quote(
+        body: OnrampQuoteRequest,
+    ) -> Dict[str, Any]:
+        """Pre-flight quote for USD → USDC → FTNS on-ramp via
+        Coinbase CDP + Aerodrome.
+
+        Composer-only PENDING_COMMISSION: returns artifact only.
+        Does NOT initiate any swap or fiat on-ramp; actual
+        execution gates on CDP commission per Vision gantt
+        2026-06-22."""
+        if body.usd_amount <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="usd_amount must be positive (> 0)",
+            )
+        # XOR: exactly one destination must be supplied.
+        has_user_id = bool(body.destination_user_id)
+        has_address = bool(body.destination_address)
+        if has_user_id and has_address:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "supply destination_user_id OR "
+                    "destination_address, not both"
+                ),
+            )
+        if not has_user_id and not has_address:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "either destination_user_id or "
+                    "destination_address is required"
+                ),
+            )
+
+        destination_user_id: Optional[str] = body.destination_user_id
+        destination_address: Optional[str] = body.destination_address
+        note: Optional[str] = None
+
+        if has_user_id:
+            waas = getattr(node, "_coinbase_waas_client", None)
+            if waas is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "WaaS client not initialized; cannot "
+                        "resolve destination_user_id."
+                    ),
+                )
+            record = waas.get_wallet(body.destination_user_id)
+            if record is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"no WaaS wallet for destination_user_id="
+                        f"{body.destination_user_id!r}; run "
+                        f"/wallet/waas/provision first"
+                    ),
+                )
+            destination_address = record.address  # may be None pre-commission
+            if not destination_address:
+                note = (
+                    f"Destination WaaS wallet is "
+                    f"status={record.status} (no address yet). "
+                    f"Quote returns PENDING_COMMISSION until "
+                    f"both Coinbase CDP and the WaaS wallet "
+                    f"are commissioned."
+                )
+
+        # Rate: PRSM_FTNS_USD_RATE env (default 1.0). Mirrors the
+        # offramp side so a 1.0 default is round-trippable.
+        rate_raw = os.getenv("PRSM_FTNS_USD_RATE", "").strip()
+        usd_rate = 1.0
+        if rate_raw:
+            try:
+                parsed = float(rate_raw)
+                if parsed > 0:
+                    usd_rate = parsed
+            except ValueError:
+                pass
+
+        ftns_to_receive = body.usd_amount / usd_rate
+
+        return {
+            "requested_usd": body.usd_amount,
+            "destination_user_id": destination_user_id,
+            "destination_address": destination_address,
+            "ftns_to_receive": ftns_to_receive,
+            "usd_rate": usd_rate,
+            "quote": {
+                "usd_in": body.usd_amount,
+                "usdc_acquired": body.usd_amount,
+                "ftns_received": ftns_to_receive,
+                "onramp_route": "coinbase-cdp",
+                "swap_route": "aerodrome",
+                "payment_method_alias": body.payment_method_alias,
+            },
+            "status": "PENDING_COMMISSION",
+            "note": note or (
+                "Coinbase CDP onramp commission gates on "
+                "Aerodrome USDC-FTNS pool seeding (Vision "
+                "gantt 2026-06-22). This is a preview "
+                "artifact; nothing has moved on-chain or "
+                "via fiat rails."
+            ),
+        }
+
     @app.get("/wallet/spend")
     async def get_wallet_spend(
         days: int = 30,

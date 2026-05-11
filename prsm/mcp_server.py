@@ -2501,6 +2501,61 @@ TOOLS = [
         },
     ),
     Tool(
+        name="coinbase_onramp_initiate",
+        description=(
+            "Compose a pre-flight transaction summary for "
+            "buying FTNS with USD via Coinbase CDP on-ramp + "
+            "the Aerodrome USDC-FTNS pool. Mirror of "
+            "coinbase_offramp_initiate in the opposite "
+            "direction. V1 returns a PENDING_COMMISSION artifact; "
+            "does NOT initiate any fiat charge or on-chain "
+            "movement. Real execution gates on Coinbase CDP "
+            "on-ramp commission (Vision gantt 2026-06-22). "
+            "Either destination_user_id (resolved via WaaS — "
+            "use prsm_waas_wallet?action=provision first) or "
+            "destination_address is required."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "usd_amount": {
+                    "type": "number",
+                    "description": (
+                        "USD amount to convert to FTNS. Must "
+                        "be positive."
+                    ),
+                    "minimum": 0.01,
+                },
+                "destination_user_id": {
+                    "type": "string",
+                    "description": (
+                        "PRSM user id; resolved to the user's "
+                        "WaaS-managed wallet address. Mutually "
+                        "exclusive with destination_address."
+                    ),
+                },
+                "destination_address": {
+                    "type": "string",
+                    "description": (
+                        "Explicit on-chain destination address. "
+                        "Mutually exclusive with "
+                        "destination_user_id."
+                    ),
+                },
+                "payment_method_alias": {
+                    "type": "string",
+                    "description": (
+                        "Optional payment-method nickname "
+                        "(e.g. 'primary', 'savings'). "
+                        "Defaults to 'primary'."
+                    ),
+                    "default": "primary",
+                },
+            },
+            "required": ["usd_amount"],
+        },
+    ),
+    Tool(
         name="coinbase_offramp_initiate",
         description=(
             "Compose a pre-flight transaction summary for cashing out "
@@ -8247,6 +8302,116 @@ async def handle_prsm_royalty_claim(arguments: Dict[str, Any]) -> str:
     return f"Royalty claim returned unknown status: {status}"
 
 
+async def handle_coinbase_onramp_initiate(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 278 — composer-only USD → FTNS on-ramp artifact.
+
+    Mirrors handle_coinbase_offramp_initiate in the opposite
+    direction. Composer-only: no execute path. Status returned is
+    always PENDING_COMMISSION until Coinbase CDP commissions per
+    Vision gantt 2026-06-22.
+
+    Either destination_user_id (WaaS-resolved) or
+    destination_address is required; the endpoint enforces XOR.
+    """
+    if "usd_amount" not in arguments:
+        return (
+            "Missing required argument: usd_amount.\n"
+            "Example: {\"usd_amount\": 100.0, "
+            "\"destination_user_id\": \"alice\"}"
+        )
+    dest_user_id = arguments.get("destination_user_id")
+    dest_address = arguments.get("destination_address")
+    if not dest_user_id and not dest_address:
+        return (
+            "Missing destination. Supply either "
+            "destination_user_id (WaaS-resolved) OR "
+            "destination_address."
+        )
+
+    body: Dict[str, Any] = {
+        "usd_amount": arguments["usd_amount"],
+        "payment_method_alias": arguments.get(
+            "payment_method_alias", "primary",
+        ),
+    }
+    if dest_user_id:
+        body["destination_user_id"] = dest_user_id
+    if dest_address:
+        body["destination_address"] = dest_address
+
+    try:
+        result = await _call_node_api(
+            "POST", "/wallet/onramp/quote", body,
+        )
+    except Exception as e:
+        return (
+            f"Cannot reach PRSM node: {e}\n"
+            f"Start with: prsm node start"
+        )
+
+    if "quote" not in result:
+        detail = str(result.get("detail", "unknown error"))
+        d_lower = detail.lower()
+        if "no waas wallet" in d_lower:
+            return (
+                f"No WaaS wallet for destination_user_id="
+                f"{dest_user_id!r}. Provision one first with "
+                f"prsm_waas_wallet?action=provision."
+            )
+        if "positive" in d_lower or "> 0" in detail:
+            return (
+                f"usd_amount must be positive (> 0).\n"
+                f"  Detail: {detail}"
+            )
+        if (
+            "destination_user_id" in d_lower
+            or "destination_address" in d_lower
+        ):
+            return (
+                f"Destination validation failed.\n"
+                f"  Detail: {detail}"
+            )
+        if "not initialized" in d_lower:
+            return (
+                f"WaaS client not configured on this node.\n"
+                f"  Detail: {detail}"
+            )
+        return f"On-ramp quote failed.\n  Detail: {detail}"
+
+    quote = result["quote"]
+    dest_addr = result.get("destination_address")
+    dest_uid = result.get("destination_user_id")
+    addr_display = dest_addr if dest_addr else "(pending — wallet not yet provisioned)"
+    lines = [
+        f"Coinbase On-Ramp — Transaction Summary "
+        f"(status: {result.get('status', 'PENDING_COMMISSION')}):",
+        "",
+        f"  USD in:            ${quote.get('usd_in', 0):.2f}",
+        f"  USDC acquired:     ${quote.get('usdc_acquired', 0):.2f}",
+        f"  FTNS received:     {quote.get('ftns_received', 0):.6f} FTNS",
+        f"  Rate:              ${result.get('usd_rate', 1.0)} USD/FTNS",
+        "",
+        f"  Destination:       {addr_display}",
+    ]
+    if dest_uid:
+        lines.append(f"  Resolved from user_id: {dest_uid}")
+    lines += [
+        "",
+        f"  Payment method:    {quote.get('payment_method_alias', 'primary')}",
+        f"  On-ramp route:     {quote.get('onramp_route', 'coinbase-cdp')}",
+        f"  Swap route:        {quote.get('swap_route', 'aerodrome')}",
+        "",
+        f"  Note: {result.get('note', '')}",
+        "",
+        "This is a preview artifact only. No on-chain or fiat "
+        "rails movement has occurred. Real execution lands when "
+        "Coinbase CDP commissions.",
+    ]
+    return "\n".join(lines)
+
+
 async def handle_coinbase_offramp_initiate(arguments: Dict[str, Any]) -> str:
     """Handle coinbase_offramp_initiate tool call.
 
@@ -8437,6 +8602,7 @@ TOOL_HANDLERS = {
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
+    "coinbase_onramp_initiate": handle_coinbase_onramp_initiate,
 }
 
 
