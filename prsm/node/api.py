@@ -6116,6 +6116,54 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "available": False, "status": "not_wired",
             }
 
+        # Sprint 255 — Receipt store (optional). Holds the signed
+        # InferenceReceipts persisted by /compute/inference +
+        # /compute/inference/stream. Operators see persisted=True
+        # when PRSM_RECEIPT_STORE_DIR is set.
+        rstore = getattr(node, "_receipt_store", None)
+        if rstore is not None:
+            try:
+                subsystems["receipt_store"] = {
+                    "available": True, "status": "ok",
+                    "count": rstore.count(),
+                    "persisted": (
+                        rstore._persist_dir is not None
+                    ),
+                }
+            except Exception as exc:  # noqa: BLE001
+                subsystems["receipt_store"] = {
+                    "available": False, "status": "error",
+                    "error": str(exc),
+                }
+        else:
+            subsystems["receipt_store"] = {
+                "available": False, "status": "not_wired",
+            }
+
+        # Sprint 255 — Royalty dispatch ring (optional). Holds
+        # per-shard on-chain dispatch outcomes. Goes nonzero only
+        # when PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1 and a
+        # RoyaltyDistributorClient is wired.
+        royalty_ring = getattr(node, "_royalty_dispatch_ring", None)
+        if royalty_ring is not None:
+            try:
+                subsystems["royalty_dispatch_ring"] = {
+                    "available": True, "status": "ok",
+                    "count": royalty_ring.count(),
+                    "persisted": (
+                        royalty_ring._persist_dir is not None
+                    ),
+                }
+            except Exception as exc:  # noqa: BLE001
+                subsystems["royalty_dispatch_ring"] = {
+                    "available": False, "status": "error",
+                    "error": str(exc),
+                }
+        else:
+            subsystems["royalty_dispatch_ring"] = {
+                "available": False, "status": "not_wired",
+            }
+
         # Provenance registry (optional). Canonical pin is V2
         # (post-A-08 ceremony 2026-05-09); v1 callers will surface
         # canonical_match=False as a signal to migrate.
