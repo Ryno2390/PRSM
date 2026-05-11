@@ -1150,6 +1150,46 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_inference_quote",
+        description=(
+            "Pre-flight cost quote for an inference request. "
+            "Backed by POST /compute/inference/quote which returns "
+            "InferenceExecutor.estimate_cost() WITHOUT executing "
+            "or locking escrow. Pair with prsm_inference: quote "
+            "first, then submit with budget_ftns ≥ cost_ftns. "
+            "Closes the gap that pre-fix forced users to lock "
+            "escrow just to discover inference cost."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Prompt text.",
+                    "minLength": 1,
+                },
+                "model_id": {
+                    "type": "string",
+                    "description": "Model ID (use prsm_models to discover).",
+                    "minLength": 1,
+                },
+                "privacy_tier": {
+                    "type": "string",
+                    "enum": ["none", "standard", "high", "maximum"],
+                    "default": "standard",
+                },
+                "content_tier": {
+                    "type": "string",
+                    "enum": ["A", "B", "C"],
+                    "default": "A",
+                },
+                "max_tokens": {"type": "integer"},
+                "temperature": {"type": "number"},
+            },
+            "required": ["prompt", "model_id"],
+        },
+    ),
+    Tool(
         name="prsm_forge_quote",
         description=(
             "Network-aware cost quote for a forge query. Backed "
@@ -4801,6 +4841,50 @@ async def handle_prsm_settler_admin(
     return "\n".join(lines)
 
 
+async def handle_prsm_inference_quote(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 237 — pre-flight inference cost quote via
+    POST /compute/inference/quote. Pairs with prsm_inference."""
+    prompt = (arguments.get("prompt") or "").strip()
+    if not prompt:
+        return "Missing required 'prompt' (non-empty)."
+    model_id = (arguments.get("model_id") or "").strip()
+    if not model_id:
+        return (
+            "Missing required 'model_id'. Use prsm_models to "
+            "discover available IDs."
+        )
+    body: Dict[str, Any] = {
+        "prompt": prompt, "model_id": model_id,
+    }
+    for opt in (
+        "privacy_tier", "content_tier", "max_tokens", "temperature",
+    ):
+        if opt in arguments and arguments[opt] is not None:
+            body[opt] = arguments[opt]
+    try:
+        result = await _call_node_api(
+            "POST", "/compute/inference/quote", body,
+        )
+    except Exception as e:
+        return (
+            f"prsm_inference_quote failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "cost_ftns" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"Quote refused: {detail}"
+    return (
+        f"PRSM Inference Quote:\n"
+        f"  model_id:     {result.get('model_id', '?')}\n"
+        f"  cost_ftns:    {result.get('cost_ftns', '?')} FTNS\n"
+        f"  privacy_tier: {result.get('privacy_tier', '?')}\n"
+        f"  content_tier: {result.get('content_tier', '?')}\n"
+        f"  Run prsm_inference with budget_ftns ≥ cost_ftns to execute."
+    )
+
+
 async def handle_prsm_forge_quote(arguments: Dict[str, Any]) -> str:
     """Sprint 236 — network-aware forge quote via POST
     /compute/forge/quote. Pairs with prsm_forge_submit."""
@@ -6322,6 +6406,7 @@ TOOL_HANDLERS = {
     "prsm_ledger_sync": handle_prsm_ledger_sync,
     "prsm_models": handle_prsm_models,
     "prsm_forge_quote": handle_prsm_forge_quote,
+    "prsm_inference_quote": handle_prsm_inference_quote,
     "prsm_settler_admin": handle_prsm_settler_admin,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,

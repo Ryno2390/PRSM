@@ -2855,6 +2855,127 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "refund_amount_ftns": refund_amount_ftns,
         }
 
+    # Sprint 237 — inference cost-quote endpoint. Pre-fix
+    # prsm_inference was the only path to discover cost, but
+    # submitting locked escrow. Pre-flight cost discovery now
+    # surfaces InferenceExecutor.estimate_cost() over HTTP
+    # without executing.
+    @app.post("/compute/inference/quote")
+    async def compute_inference_quote(
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, Any]:
+        """Return the cost estimate for an inference request
+        WITHOUT executing it. Same body shape as /compute/inference
+        minus billing — caller doesn't need budget_ftns."""
+        prompt = body.get("prompt", "")
+        if not prompt:
+            raise HTTPException(
+                status_code=400, detail="Missing 'prompt' field",
+            )
+        # Sprint 198 cap inherited.
+        _ip_raw = os.environ.get(
+            "PRSM_MAX_INFERENCE_PROMPT_BYTES", "",
+        ).strip()
+        try:
+            _ip_cap = int(_ip_raw) if _ip_raw else 100 * 1024
+            if _ip_cap <= 0:
+                raise ValueError("non-positive")
+        except (ValueError, TypeError):
+            _ip_cap = 100 * 1024
+        _ip_bytes = len(prompt.encode("utf-8"))
+        if _ip_bytes > _ip_cap:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"prompt size {_ip_bytes} bytes exceeds "
+                    f"PRSM_MAX_INFERENCE_PROMPT_BYTES cap of "
+                    f"{_ip_cap}."
+                ),
+            )
+        model_id = body.get("model_id", "")
+        if not model_id:
+            raise HTTPException(
+                status_code=400, detail="Missing 'model_id' field",
+            )
+
+        executor = getattr(node, "inference_executor", None)
+        if executor is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Inference executor not initialized.",
+            )
+
+        from decimal import Decimal
+        from prsm.compute.inference import (
+            ContentTier,
+            InferenceRequest,
+        )
+        from prsm.compute.inference.executor import (
+            UnsupportedModelError,
+        )
+        from prsm.compute.tee.models import PrivacyLevel
+
+        _privacy_raw = body.get("privacy_tier", "standard")
+        try:
+            privacy_level = PrivacyLevel(_privacy_raw)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"privacy_tier must be one of "
+                    f"{[lvl.value for lvl in PrivacyLevel]}; "
+                    f"got {_privacy_raw!r}."
+                ),
+            )
+        _content_raw = body.get("content_tier", "A")
+        try:
+            content_tier = ContentTier(_content_raw)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"content_tier must be one of "
+                    f"{[t.value for t in ContentTier]}; "
+                    f"got {_content_raw!r}."
+                ),
+            )
+
+        # Quote doesn't need real budget; pass 0 since estimate_cost
+        # ignores it.
+        try:
+            request = InferenceRequest(
+                prompt=prompt,
+                model_id=model_id,
+                budget_ftns=Decimal("0"),
+                privacy_tier=privacy_level,
+                content_tier=content_tier,
+                max_tokens=body.get("max_tokens"),
+                temperature=body.get("temperature"),
+                requester_node_id=(
+                    node.identity.node_id if node.identity else None
+                ),
+            )
+        except (ValueError, TypeError) as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid request: {e}",
+            )
+        try:
+            cost = await executor.estimate_cost(request)
+        except UnsupportedModelError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=f"estimate_cost() failed: {e}",
+            )
+        return {
+            "model_id": model_id,
+            "cost_ftns": str(cost),
+            "privacy_tier": privacy_level.value,
+            "content_tier": content_tier.value,
+        }
+
     @app.post("/compute/inference")
     async def compute_inference(body: Dict[str, Any] = {}) -> Dict[str, Any]:
         """Run TEE-attested model inference with verifiable signed receipts.
