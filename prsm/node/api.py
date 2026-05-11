@@ -5845,6 +5845,48 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "limit": limit,
         }
 
+    # ── Sprint 273 — bridge: notice → operator filter ─────
+    # One-call operator action that adds a notice's
+    # target_cid to the operator's ContentFilterStore AND
+    # marks the notice acknowledged. Operator EXPLICITLY
+    # initiates — Foundation never auto-propagates.
+
+    @app.post(
+        "/admin/content-filter/from-notice/{notice_id}",
+        tags=["admin"],
+    )
+    async def apply_takedown_notice_to_filter(
+        notice_id: str,
+    ) -> Dict[str, Any]:
+        ring = getattr(node, "_takedown_notice_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Takedown notice ring not initialized.",
+            )
+        store = getattr(node, "_content_filter_store", None)
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Content filter store not initialized.",
+            )
+        entry = ring.get(notice_id)
+        if entry is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no notice with id={notice_id!r}",
+            )
+        added = store.add_cids([entry.target_cid])
+        updated = ring.set_status(notice_id, "acknowledged")
+        return {
+            "notice_id": notice_id,
+            "target_cid": entry.target_cid,
+            "added": added,
+            "notice_status": (
+                updated.status if updated else "received"
+            ),
+        }
+
     @app.get(
         "/admin/takedown-notices/{notice_id}", tags=["admin"],
     )

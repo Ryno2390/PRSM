@@ -181,6 +181,44 @@ class TakedownNoticeRing:
     def get(self, notice_id: str) -> Optional[TakedownNoticeEntry]:
         return self._by_id.get(notice_id)
 
+    def set_status(
+        self, notice_id: str, status: str,
+    ) -> Optional[TakedownNoticeEntry]:
+        """Update an existing notice's status field.
+
+        Returns the updated entry, or None if the id doesn't
+        exist. The entry is frozen, so we materialize a new
+        dataclass instance and swap it into both the deque
+        and the secondary index. Order in the deque is
+        preserved.
+        """
+        if status not in _VALID_STATUSES:
+            raise ValueError(
+                f"status must be one of {sorted(_VALID_STATUSES)}, "
+                f"got {status!r}"
+            )
+        old = self._by_id.get(notice_id)
+        if old is None:
+            return None
+        updated = TakedownNoticeEntry(
+            notice_id=old.notice_id,
+            timestamp=old.timestamp,
+            target_cid=old.target_cid,
+            sender=old.sender,
+            jurisdiction=old.jurisdiction,
+            basis=old.basis,
+            notice_text=old.notice_text,
+            status=status,
+        )
+        # Swap in-place in the deque so recent() ordering holds.
+        for i, e in enumerate(self._entries):
+            if e.notice_id == notice_id:
+                self._entries[i] = updated
+                break
+        self._by_id[notice_id] = updated
+        self._write_to_disk(updated)
+        return updated
+
     def recent(
         self,
         *,

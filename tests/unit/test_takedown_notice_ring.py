@@ -172,3 +172,81 @@ def test_max_entries_enforced():
             jurisdiction="j", basis="b",
         )
     assert r.count() == 2
+
+
+# Sprint 273 — status transition primitive
+
+
+def test_set_status_happy_path():
+    r = TakedownNoticeRing()
+    e = r.record(
+        target_cid="bafy1", sender="s",
+        jurisdiction="j", basis="b",
+    )
+    assert e.status == "received"
+    updated = r.set_status(e.notice_id, "acknowledged")
+    assert updated is not None
+    assert updated.status == "acknowledged"
+    assert updated.notice_id == e.notice_id
+    # All other fields preserved
+    assert updated.target_cid == "bafy1"
+    assert updated.timestamp == e.timestamp
+    # Re-fetch reflects the new status
+    fetched = r.get(e.notice_id)
+    assert fetched is not None
+    assert fetched.status == "acknowledged"
+
+
+def test_set_status_returns_none_when_missing():
+    r = TakedownNoticeRing()
+    assert r.set_status("nonexistent", "acknowledged") is None
+
+
+def test_set_status_validates_status():
+    r = TakedownNoticeRing()
+    e = r.record(
+        target_cid="bafy1", sender="s",
+        jurisdiction="j", basis="b",
+    )
+    with pytest.raises(ValueError):
+        r.set_status(e.notice_id, "bogus")
+    # Original entry untouched
+    fetched = r.get(e.notice_id)
+    assert fetched.status == "received"
+
+
+def test_set_status_persisted_to_disk(tmp_path):
+    r1 = TakedownNoticeRing(persist_dir=tmp_path)
+    e = r1.record(
+        target_cid="bafy1", sender="s",
+        jurisdiction="j", basis="b", timestamp=100.0,
+    )
+    r1.set_status(e.notice_id, "acknowledged")
+    # New ring instance loads the updated status
+    r2 = TakedownNoticeRing(persist_dir=tmp_path)
+    fetched = r2.get(e.notice_id)
+    assert fetched is not None
+    assert fetched.status == "acknowledged"
+
+
+def test_set_status_preserves_order_in_deque():
+    r = TakedownNoticeRing()
+    e1 = r.record(
+        target_cid="c1", sender="s",
+        jurisdiction="j", basis="b", timestamp=100.0,
+    )
+    e2 = r.record(
+        target_cid="c2", sender="s",
+        jurisdiction="j", basis="b", timestamp=200.0,
+    )
+    e3 = r.record(
+        target_cid="c3", sender="s",
+        jurisdiction="j", basis="b", timestamp=300.0,
+    )
+    r.set_status(e2.notice_id, "acknowledged")
+    # recent() should still return entries in newest-first order
+    recent = r.recent(limit=10)
+    ids = [e.notice_id for e in recent]
+    assert ids == [e3.notice_id, e2.notice_id, e1.notice_id]
+    # e2's status reflects the change
+    assert recent[1].status == "acknowledged"

@@ -1335,21 +1335,27 @@ TOOLS = [
         name="prsm_takedown_notices",
         description=(
             "Foundation takedown-notice intake via MCP. Single "
-            "tool with `action` selector: list | lookup | record. "
-            "Per Vision §14 / R9-SCOPING-1 §8 this surface is "
-            "information distribution only — Foundation records "
-            "notices (DMCA, EU-DSA, etc.) and operators "
-            "VOLUNTARILY act by editing their own ContentFilter "
-            "via prsm_content_filter. Never enforces, never "
+            "tool with `action` selector: list | lookup | record "
+            "| apply_to_filter. Per Vision §14 / R9-SCOPING-1 §8 "
+            "this surface is information distribution only — "
+            "Foundation records notices (DMCA, EU-DSA, etc.); "
+            "operators VOLUNTARILY act. apply_to_filter is the "
+            "operator's one-call bridge: adds the notice's "
+            "target_cid to the local ContentFilterStore + marks "
+            "the notice acknowledged. Never enforces, never "
             "propagates blocklists. Backed by "
-            "/admin/takedown-notice(s)."
+            "/admin/takedown-notice(s) + "
+            "/admin/content-filter/from-notice/{id}."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "lookup", "record"],
+                    "enum": [
+                        "list", "lookup", "record",
+                        "apply_to_filter",
+                    ],
                 },
                 "limit": {
                     "type": "integer",
@@ -5600,7 +5606,9 @@ async def handle_prsm_content_filter(
     )
 
 
-_TAKEDOWN_NOTICE_ACTIONS = {"list", "lookup", "record"}
+_TAKEDOWN_NOTICE_ACTIONS = {
+    "list", "lookup", "record", "apply_to_filter",
+}
 
 
 async def handle_prsm_takedown_notices(
@@ -5704,6 +5712,43 @@ async def handle_prsm_takedown_notices(
             f"  basis:        {result.get('basis', '?')}\n"
             f"  notice_text:\n"
             f"    {result.get('notice_text', '')[:1024]}"
+        )
+
+    if action == "apply_to_filter":
+        notice_id = (arguments.get("notice_id") or "").strip()
+        if not notice_id:
+            return "apply_to_filter requires 'notice_id'."
+        try:
+            result = await _call_node_api(
+                "POST",
+                f"/admin/content-filter/from-notice/{notice_id}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_takedown_notices failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "added" not in result:
+            detail = result.get("detail", "unknown error")
+            if "no notice with id" in str(detail).lower():
+                return f"No notice with id={notice_id!r}."
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Required surface not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"apply_to_filter refused: {detail}"
+        added = result.get("added", 0)
+        target = result.get("target_cid", "?")
+        status = result.get("notice_status", "?")
+        if added == 0:
+            note = f" (already in operator blocklist)"
+        else:
+            note = ""
+        return (
+            f"Notice applied: target_cid={target} added to "
+            f"operator content filter{note}; notice now "
+            f"status={status}."
         )
 
     # action == "record"

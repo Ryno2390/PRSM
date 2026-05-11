@@ -216,3 +216,70 @@ class TestRecord:
         assert body_dict["jurisdiction"] == "US-DMCA"
         assert "new-id-123" in r
         assert "received" in r
+
+
+# Sprint 273 — apply_to_filter bridge action
+
+
+class TestApplyToFilter:
+    @pytest.mark.asyncio
+    async def test_requires_notice_id(self):
+        r = await handle_prsm_takedown_notices(
+            {"action": "apply_to_filter"},
+        )
+        assert "notice_id" in r
+
+    @pytest.mark.asyncio
+    async def test_happy_path(self):
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            new=AsyncMock(return_value={
+                "notice_id": "abc-123",
+                "target_cid": "bafy-blocked",
+                "added": 1,
+                "notice_status": "acknowledged",
+            }),
+        ) as mock_call:
+            r = await handle_prsm_takedown_notices({
+                "action": "apply_to_filter",
+                "notice_id": "abc-123",
+            })
+        call_args = mock_call.await_args[0]
+        assert call_args[0] == "POST"
+        assert call_args[1] == (
+            "/admin/content-filter/from-notice/abc-123"
+        )
+        assert "bafy-blocked" in r
+        assert "acknowledged" in r
+
+    @pytest.mark.asyncio
+    async def test_idempotent_already_blocked(self):
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            new=AsyncMock(return_value={
+                "notice_id": "abc-123",
+                "target_cid": "bafy-blocked",
+                "added": 0,
+                "notice_status": "acknowledged",
+            }),
+        ):
+            r = await handle_prsm_takedown_notices({
+                "action": "apply_to_filter",
+                "notice_id": "abc-123",
+            })
+        assert "already" in r.lower()
+        assert "acknowledged" in r
+
+    @pytest.mark.asyncio
+    async def test_missing_notice_message(self):
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            new=AsyncMock(return_value={
+                "detail": "no notice with id='missing'",
+            }),
+        ):
+            r = await handle_prsm_takedown_notices({
+                "action": "apply_to_filter",
+                "notice_id": "missing",
+            })
+        assert "no notice" in r.lower()

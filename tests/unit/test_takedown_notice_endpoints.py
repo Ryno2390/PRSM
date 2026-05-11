@@ -189,3 +189,92 @@ def test_get_one_404_when_missing():
     r = TakedownNoticeRing()
     resp = _client(r).get("/admin/takedown-notices/nonexistent")
     assert resp.status_code == 404
+
+
+# ── Sprint 273 — bridge from notice → filter ─────────────
+
+
+def _bridge_client(filter_store=None, ring=None):
+    """Bridge endpoint needs BOTH the filter store and the ring."""
+    node = MagicMock()
+    node.identity.node_id = "test-node"
+    node.ftns_ledger = None
+    node._content_filter_store = filter_store
+    node._takedown_notice_ring = ring
+    return TestClient(
+        create_api_app(node, enable_security=False),
+        raise_server_exceptions=False,
+    )
+
+
+def test_apply_notice_happy_path():
+    from prsm.node.content_filter_store import ContentFilterStore
+    s = ContentFilterStore()
+    r = TakedownNoticeRing()
+    e = r.record(
+        target_cid="bafy-blocked", sender="legal@ex.com",
+        jurisdiction="US-DMCA", basis="DMCA §512(c)",
+    )
+    resp = _bridge_client(s, r).post(
+        f"/admin/content-filter/from-notice/{e.notice_id}",
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["target_cid"] == "bafy-blocked"
+    assert body["added"] == 1
+    assert body["notice_status"] == "acknowledged"
+    # Filter store now blocks the cid
+    assert s.is_cid_blocked("bafy-blocked") is True
+    # Notice marked acknowledged
+    refreshed = r.get(e.notice_id)
+    assert refreshed.status == "acknowledged"
+
+
+def test_apply_notice_idempotent_returns_added_zero():
+    from prsm.node.content_filter_store import ContentFilterStore
+    s = ContentFilterStore()
+    s.add_cids(["bafy-blocked"])  # already blocked
+    r = TakedownNoticeRing()
+    e = r.record(
+        target_cid="bafy-blocked", sender="x",
+        jurisdiction="US-DMCA", basis="b",
+    )
+    resp = _bridge_client(s, r).post(
+        f"/admin/content-filter/from-notice/{e.notice_id}",
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["added"] == 0
+    # Still gets acknowledged
+    assert body["notice_status"] == "acknowledged"
+
+
+def test_apply_notice_404_when_notice_missing():
+    from prsm.node.content_filter_store import ContentFilterStore
+    s = ContentFilterStore()
+    r = TakedownNoticeRing()
+    resp = _bridge_client(s, r).post(
+        "/admin/content-filter/from-notice/nonexistent",
+    )
+    assert resp.status_code == 404
+
+
+def test_apply_notice_503_when_ring_unwired():
+    from prsm.node.content_filter_store import ContentFilterStore
+    s = ContentFilterStore()
+    resp = _bridge_client(s, None).post(
+        "/admin/content-filter/from-notice/abc",
+    )
+    assert resp.status_code == 503
+
+
+def test_apply_notice_503_when_filter_unwired():
+    r = TakedownNoticeRing()
+    e = r.record(
+        target_cid="bafy1", sender="x",
+        jurisdiction="j", basis="b",
+    )
+    resp = _bridge_client(None, r).post(
+        f"/admin/content-filter/from-notice/{e.notice_id}",
+    )
+    assert resp.status_code == 503
