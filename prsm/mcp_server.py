@@ -6622,9 +6622,14 @@ async def handle_prsm_jobs_list(arguments: Dict[str, Any]) -> str:
             f"{int(ts) % 3600 // 60:02d}:{int(ts) % 60:02d}"
             if isinstance(ts, (int, float)) else "????"
         )
+        # Sprint 261 — surface route so the unified compute view
+        # (forge / inference / inference_stream / qo_swarm /
+        # direct_llm / swarm) is visually distinguishable.
+        route_disp = (j.get("route") or "?")[:16]
         lines.append(
             f"  {j['job_id']:<16}  "
             f"{j['status']:<12}  "
+            f"route={route_disp:<16}  "
             f"started @ ~{ts_str}  "
             f"{(j.get('query') or '')[:40]}"
         )
