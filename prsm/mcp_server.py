@@ -1121,6 +1121,17 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_ledger_sync",
+        description=(
+            "Render ledger gossip-sync statistics: messages "
+            "broadcast/received, peers in sync, last sync "
+            "timestamp. Backed by GET /ledger/sync/stats. Useful "
+            "for verifying the node is participating in ledger "
+            "gossip."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_node_resources",
         description=(
             "Get or update node resource configuration. Routes to "
@@ -4593,6 +4604,23 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_ledger_sync(arguments: Dict[str, Any]) -> str:
+    """Sprint 233 — render GET /ledger/sync/stats."""
+    try:
+        result = await _call_node_api("GET", "/ledger/sync/stats")
+    except Exception as e:
+        return (
+            f"prsm_ledger_sync failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if not isinstance(result, dict) or not result:
+        return "Ledger sync stats: (empty)"
+    lines = ["PRSM Ledger Sync Stats:"]
+    for k, v in result.items():
+        lines.append(f"  {k:<26} {v}")
+    return "\n".join(lines)
+
+
 _RESOURCE_UPDATE_FIELDS = (
     "cpu_allocation_pct", "memory_allocation_pct",
     "storage_gb", "max_concurrent_jobs",
@@ -6012,6 +6040,7 @@ TOOL_HANDLERS = {
     "prsm_bridge_history": handle_prsm_bridge_history,
     "prsm_settlement_view": handle_prsm_settlement_view,
     "prsm_node_resources": handle_prsm_node_resources,
+    "prsm_ledger_sync": handle_prsm_ledger_sync,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
