@@ -1258,6 +1258,30 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_pinned_stats",
+        description=(
+            "Render per-pinned-content storage challenge stats: "
+            "cid, size, requester, last_verified timestamp, "
+            "successful/failed challenge counts. Backed by GET "
+            "/storage/pinned-stats. Useful for storage operators "
+            "verifying their pinned data is actively being "
+            "challenged + proven."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="prsm_provider_reputations",
+        description=(
+            "Render cross-provider reputation + challenge stats. "
+            "Sorted by reputation desc (most-trusted first). "
+            "Backed by GET /storage/provider-reputations. Useful "
+            "for picking reliable seeding partners or "
+            "investigating why a specific provider is being "
+            "deprioritized."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_bootstrap_status",
         description=(
             "Render bootstrap connection state for operator "
@@ -5164,6 +5188,97 @@ async def handle_prsm_forge_quote(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_pinned_stats(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 267 — render per-pinned-content storage challenge
+    stats. Backed by GET /storage/pinned-stats."""
+    try:
+        result = await _call_node_api("GET", "/storage/pinned-stats")
+    except Exception as e:
+        return (
+            f"prsm_pinned_stats failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "pinned" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Storage provider not wired on this node.\n"
+                f"  Detail: {detail}"
+            )
+        return f"prsm_pinned_stats refused: {detail}"
+    pinned = result.get("pinned") or []
+    count = result.get("count", len(pinned))
+    if not pinned:
+        return f"No pinned content (count={count})."
+    lines = [f"PRSM Pinned Content Stats (count={count}):"]
+    for p in pinned:
+        cid = (p.get("cid") or "?")[:18]
+        succ = p.get("successful_challenges", 0)
+        fail = p.get("failed_challenges", 0)
+        last_ver = p.get("last_verified")
+        verified = (
+            f"verified={last_ver}" if last_ver else "verified=NEVER"
+        )
+        lines.append(
+            f"  {cid:<18}  "
+            f"size={p.get('size_bytes', 0)}B  "
+            f"req={(p.get('requester_id') or '?')[:12]}  "
+            f"challenges={succ}/{succ+fail}  "
+            f"{verified}"
+        )
+    return "\n".join(lines)
+
+
+async def handle_prsm_provider_reputations(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 267 — render cross-provider reputation + challenge
+    counts. Backed by GET /storage/provider-reputations."""
+    try:
+        result = await _call_node_api(
+            "GET", "/storage/provider-reputations",
+        )
+    except Exception as e:
+        return (
+            f"prsm_provider_reputations failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "providers" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Storage provider not wired on this node.\n"
+                f"  Detail: {detail}"
+            )
+        return f"prsm_provider_reputations refused: {detail}"
+    providers = result.get("providers") or {}
+    count = result.get("count", len(providers))
+    if not providers:
+        return f"No provider reputation data yet (count={count})."
+    # Sort by reputation descending so most-trusted first.
+    items = sorted(
+        providers.items(),
+        key=lambda kv: kv[1].get("reputation", 0),
+        reverse=True,
+    )
+    lines = [f"PRSM Provider Reputations (count={count}):"]
+    for pid, stats in items:
+        rep = stats.get("reputation", 0.0)
+        total = stats.get("total_challenges", 0)
+        succ = stats.get("successful_proofs", 0)
+        fail = stats.get("failed_proofs", 0)
+        expired = stats.get("expired_challenges", 0)
+        lines.append(
+            f"  {pid[:16]:<16}  "
+            f"rep={rep:.3f}  "
+            f"challenges={total}  "
+            f"({succ} ok / {fail} fail / {expired} expired)"
+        )
+    return "\n".join(lines)
+
+
 async def handle_prsm_bootstrap_status(
     arguments: Dict[str, Any],
 ) -> str:
@@ -7048,6 +7163,8 @@ TOOL_HANDLERS = {
     "prsm_royalty_dispatch_history": handle_prsm_royalty_dispatch_history,
     "prsm_royalty_dispatch_summary": handle_prsm_royalty_dispatch_summary,
     "prsm_bootstrap_status": handle_prsm_bootstrap_status,
+    "prsm_pinned_stats": handle_prsm_pinned_stats,
+    "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,
     "prsm_inference_quote": handle_prsm_inference_quote,
     "prsm_settler_admin": handle_prsm_settler_admin,

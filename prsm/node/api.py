@@ -7363,6 +7363,55 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             }
         return node.storage_provider.get_stats()
 
+    # Sprint 267 — surface per-content challenge stats for the
+    # storage operator's pinned set. Closes the "is my pinned
+    # data still being challenged?" triage gap.
+    @app.get("/storage/pinned-stats", tags=["storage"])
+    async def get_storage_pinned_stats() -> Dict[str, Any]:
+        """Per-pinned-content storage statistics: size, pinned_at,
+        last_verified, successful/failed challenge counts."""
+        sp = getattr(node, "storage_provider", None)
+        if sp is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Storage provider not initialized.",
+            )
+        try:
+            pinned = sp.get_pinned_content_stats()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"get_pinned_content_stats() raised: {exc}"
+                ),
+            )
+        return {"pinned": pinned, "count": len(pinned)}
+
+    # Sprint 267 — surface cross-provider reputation + challenge
+    # stats so operators can see which OTHER providers in the
+    # network are reliable, before choosing seeding partners.
+    @app.get("/storage/provider-reputations", tags=["storage"])
+    async def get_storage_provider_reputations() -> Dict[str, Any]:
+        """Cross-provider reputation + challenge stats: per-
+        provider reputation score + (total / successful / failed /
+        expired) challenge counts."""
+        sp = getattr(node, "storage_provider", None)
+        if sp is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Storage provider not initialized.",
+            )
+        try:
+            providers = sp.get_provider_stats_summary()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"get_provider_stats_summary() raised: {exc}"
+                ),
+            )
+        return {"providers": providers, "count": len(providers)}
+
     # ── Compute endpoints ────────────────────────────────────────
 
     @app.get("/compute/stats", tags=["compute"])
