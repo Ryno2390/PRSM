@@ -387,6 +387,41 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         response.headers["X-Request-ID"] = request_id
         return response
 
+    # Sprint 187 — HEAD-rewriting middleware. The dashboard sub-app
+    # mount at `""` (see ~line 6753) catches HEAD requests before
+    # FastAPI's auto-HEAD-for-GET path runs, returning 404 for any
+    # HEAD probe — broke Kubernetes liveness, AWS ELB, generic
+    # monitoring (RFC 7231 designates HEAD as the canonical
+    # probe verb). Sprint 186 explicitly registered HEAD on /health
+    # but the gap remained for every other GET route.
+    #
+    # Strategy: intercept HEAD upstream of routing, rewrite to GET,
+    # let the parent's GET route fire, then strip body per RFC 7231.
+    # Failure-soft — exceptions inside dispatch fall back to the
+    # original HEAD path (which still 404s from the mount, matching
+    # pre-fix behavior).
+    from starlette.responses import Response as _StarletteResponse
+    @app.middleware("http")
+    async def head_as_get_middleware(request, call_next):
+        if request.method != "HEAD":
+            return await call_next(request)
+        # Rewrite the request scope to GET so the dispatcher picks
+        # the GET route. Starlette exposes `scope` as a mutable dict.
+        try:
+            request.scope["method"] = "GET"
+            response = await call_next(request)
+        except Exception:  # noqa: BLE001
+            request.scope["method"] = "HEAD"
+            return await call_next(request)
+        # Strip body for HEAD (RFC 7231 §4.3.2). Preserve all
+        # headers including Content-Type + Content-Length so
+        # probe-side tooling sees the same metadata as GET.
+        return _StarletteResponse(
+            content=b"",
+            status_code=response.status_code,
+            headers=dict(response.headers),
+        )
+
     # CORS allowlist (PRSM_ALLOWED_ORIGINS env var, ships 2026-05-09).
     # Production-hardening for nodes serving browser-based clients.
     # Operator declares the explicit list of origins permitted to make
@@ -4770,16 +4805,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return body
 
-    # Sprint 186 — register /health for both GET and HEAD so
-    # infrastructure-side health probes (Kubernetes liveness, AWS
-    # ELB, generic monitoring) that default to HEAD don't see PRSM
-    # nodes as unhealthy. The mount at "" (dashboard sub-app, see
-    # line ~6753) was shadowing FastAPI's auto-HEAD-for-GET path:
-    # HEAD requests fell through to the dashboard's catch-all and
-    # returned 404. Explicit api_route closes that gap.
-    @app.api_route("/health", methods=["GET", "HEAD"])
+    @app.get("/health")
     async def health() -> Dict[str, str]:
-        """Simple health check (GET + HEAD)."""
+        """Simple health check.
+
+        Sprint 186 + 187 — HEAD is supported via the generic
+        head_as_get_middleware near the top of create_api_app.
+        Both methods return 200 with the same headers; HEAD strips
+        the body per RFC 7231.
+        """
         return {"status": "ok", "node_id": node.identity.node_id if node.identity else "unknown"}
 
     @app.get("/metrics")
