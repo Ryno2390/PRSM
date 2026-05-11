@@ -1121,6 +1121,32 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_cancel_job",
+        description=(
+            "Cancel a submitted /compute/forge job by job_id. "
+            "Backed by POST /compute/cancel/{job_id}. Marks the "
+            "JobHistoryStore record CANCELLED and refunds the "
+            "PENDING escrow. v1 caveat: in-flight Python "
+            "coroutines are NOT interrupted — the release-side "
+            "race loses against the now-REFUNDED escrow (correct "
+            "outcome). Useful when prsm_status_stream shows a job "
+            "stuck IN_PROGRESS beyond expected duration."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "description": (
+                        "Job ID returned by prsm_forge_submit or "
+                        "prsm_inference."
+                    ),
+                },
+            },
+            "required": ["job_id"],
+        },
+    ),
+    Tool(
         name="prsm_status_stream",
         description=(
             "Stream live status transitions for a submitted job. "
@@ -3935,6 +3961,40 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_cancel_job(arguments: Dict[str, Any]) -> str:
+    """Sprint 210 — cancel a submitted job by job_id via
+    POST /compute/cancel/{job_id}. Marks history CANCELLED and
+    refunds PENDING escrow (v1 caveat: in-flight Python coroutines
+    not interrupted but their release-side race-loses against the
+    now-REFUNDED escrow)."""
+    job_id = (arguments.get("job_id") or "").strip()
+    if not job_id:
+        return "Missing required 'job_id' (non-empty)."
+    try:
+        result = await _call_node_api(
+            "POST", f"/compute/cancel/{job_id}",
+        )
+    except Exception as e:
+        return (
+            f"prsm_cancel_job failed for job_id={job_id}: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    # 404 path — node returns {"detail": "..."}.
+    if "detail" in result and "status" not in result:
+        return (
+            f"Cancellation refused for job_id={job_id}: "
+            f"{result.get('detail', '?')}"
+        )
+    return (
+        f"Job {job_id} cancellation requested.\n"
+        f"  status: {result.get('status', '?')}\n"
+        f"  history_marked: {result.get('history_marked', '?')}\n"
+        f"  escrow_refunded: {result.get('escrow_refunded', '?')}\n"
+        f"  Note: in-flight Python coroutines are not interrupted; "
+        f"the release-side race loses against the REFUNDED escrow."
+    )
+
+
 async def handle_prsm_jobs_list(arguments: Dict[str, Any]) -> str:
     """Handle prsm_jobs_list tool call: enumerate /compute/forge
     jobs with optional filter + pagination."""
@@ -4199,6 +4259,7 @@ TOOL_HANDLERS = {
     "prsm_escrow_summary": handle_prsm_escrow_summary,
     "prsm_jobs_list": handle_prsm_jobs_list,
     "prsm_status_stream": handle_prsm_status_stream,
+    "prsm_cancel_job": handle_prsm_cancel_job,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
 }
