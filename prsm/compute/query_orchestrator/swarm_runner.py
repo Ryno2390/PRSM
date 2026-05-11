@@ -95,6 +95,13 @@ class PartialResult:
         through to `SignedPartial.privacy_budget_consumed`; the
         aggregator's `sum_privacy_budgets` enforces the per-query
         ceiling. Defaults to 0.0 (no budget consumed reported).
+    pcu_consumed:
+        Sprint 238 — Performance-Compute-Units actually consumed
+        producing this partial. Threaded through to
+        ``ParticipantAttribution.pcu_consumed`` so settlement can
+        weight the per-participant compute share by real work
+        done. Defaults to 0.0 for backward compatibility (uniform
+        split fallback in ``compute_split_amounts``).
     """
     shard_cid: str
     payload: bytes
@@ -103,6 +110,7 @@ class PartialResult:
     dp_noise_applied: bool
     source_agent_pubkey: bytes = b"\x00" * 32
     privacy_budget_consumed: float = 0.0
+    pcu_consumed: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -129,6 +137,10 @@ class ParticipantAttribution:
     shard_cid: str
     source_agent_pubkey: bytes
     creator_id: str
+    # Sprint 238 — per-shard PCU drives PCU-weighted compute
+    # split at settlement (see prsm.economy.split_compute). 0.0
+    # means "unknown / not measured" and triggers uniform fallback.
+    pcu_consumed: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -299,6 +311,7 @@ async def run_swarm(
                 shard_cid=p.shard_cid,
                 source_agent_pubkey=p.source_agent_pubkey,
                 creator_id=p.creator_id,
+                pcu_consumed=p.pcu_consumed,
             )
             for p in partials
         ),

@@ -2039,8 +2039,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 try:
                     qo_participants = result.get("participants") or []
                     if qo_participants:
-                        # Build the split: aggregator share +
-                        # uniform per-participant compute share.
+                        # Sprint 238 — PCU-weighted split (uniform
+                        # fallback when any participant lacks PCU).
+                        # See prsm.economy.split_compute. Per-
+                        # participant compute_share_total share is
+                        # weighted by `pcu_consumed` when telemetry
+                        # is complete, else uniform.
                         import os as _os_for_share_bps
                         try:
                             agg_share_bps = int(_os_for_share_bps.environ.get(
@@ -2050,20 +2054,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                             agg_share_bps = 500
                         if not (0 <= agg_share_bps <= 10000):
                             agg_share_bps = 500
-                        aggregator_share = budget_ftns * (agg_share_bps / 10000.0)
-                        compute_share_total = budget_ftns - aggregator_share
-                        # Uniform split across compute participants;
-                        # PCU-weighted variant deferred to a follow-on
-                        # once partials carry per-shard PCU metrics.
-                        per_participant = (
-                            compute_share_total / len(qo_participants)
+                        from prsm.economy.split_compute import (
+                            compute_split_amounts,
                         )
-                        splits = [
-                            (result["aggregator_node_id"], aggregator_share),
-                        ] + [
-                            (p["source_agent_pubkey_hex"], per_participant)
-                            for p in qo_participants
-                        ]
+                        splits, split_mode = compute_split_amounts(
+                            participants=qo_participants,
+                            aggregator_node_id=result["aggregator_node_id"],
+                            total_budget=budget_ftns,
+                            aggregator_share_bps=agg_share_bps,
+                        )
+                        logger.info(
+                            "forge release split (mode=%s, n=%d, "
+                            "agg_bps=%d) for job %s",
+                            split_mode, len(qo_participants),
+                            agg_share_bps, job_id[:8],
+                        )
                         await node._payment_escrow.release_escrow_split(
                             job_id=job_id,
                             splits=splits,
