@@ -476,11 +476,21 @@ class DashboardServer:
         @self.app.get("/api/ftns/history")
         async def get_transaction_history(limit: int = 50):
             """Get transaction history."""
+            # Sprint 193 — same bounds bug as /transactions had
+            # in sprint 172: `min(limit, 200)` caps upper bound
+            # but accepts negative. `limit=-1` passed through to
+            # ledger.get_transaction_history(limit=-1) returns
+            # entire history. Real DoS / metadata-exfil vector.
+            if limit < 1 or limit > 200:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"limit must be in [1, 200], got {limit}",
+                )
             if not self.node or not self.node.ledger or not self.node.identity:
                 return {"transactions": [], "count": 0}
-            
+
             history = await self.node.ledger.get_transaction_history(
-                self.node.identity.node_id, limit=min(limit, 200)
+                self.node.identity.node_id, limit=limit,
             )
             
             transactions = [
@@ -663,10 +673,26 @@ class DashboardServer:
         @self.app.get("/api/content/search")
         async def search_content(q: str = "", limit: int = 20):
             """Search the network content index."""
+            # Sprint 193 — same bounds-validation pattern as
+            # /api/ftns/history. Also cap query length to defend
+            # against pathological-pattern DoS on the index.
+            if limit < 1 or limit > 100:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"limit must be in [1, 100], got {limit}",
+                )
+            if len(q) > 1024:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"q size {len(q)} chars exceeds cap of 1024. "
+                        f"Trim the query."
+                    ),
+                )
             if not self.node or not self.node.content_index:
                 return {"query": q, "results": [], "count": 0}
-            
-            results = self.node.content_index.search(q, limit=min(limit, 100))
+
+            results = self.node.content_index.search(q, limit=limit)
             
             return {
                 "query": q,
