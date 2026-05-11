@@ -3313,6 +3313,34 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # both the escrow and the signed receipt.
         job_id = "infer-" + _uuid.uuid4().hex[:12]
 
+        # Sprint 251 — record IN_PROGRESS in JobHistoryStore so
+        # inference jobs surface in prsm_jobs_list +
+        # /compute/status/{job_id} alongside forge jobs. Best-
+        # effort: history failures don't block the request.
+        import time as _time_for_history
+        _job_started_at = _time_for_history.time()
+        if (
+            hasattr(node, "_job_history")
+            and node._job_history is not None
+        ):
+            try:
+                from prsm.node.job_history import (
+                    JobHistoryRecord as _JobRec,
+                    JobStatus as _JobStat,
+                )
+                node._job_history.put(_JobRec(
+                    job_id=job_id,
+                    query=prompt[:256],
+                    status=_JobStat.IN_PROGRESS,
+                    started_at=_job_started_at,
+                    route="inference",
+                ))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "JobHistoryStore put(IN_PROGRESS) failed for "
+                    "inference job_id=%s: %s", job_id, exc,
+                )
+
         # Lock escrow up-front (pre-pay billing pattern per Phase 3.x.1
         # design plan §6.2).
         escrow_entry = None
@@ -3431,6 +3459,34 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 except Exception as e:
                     logger.warning(f"Inference escrow release failed: {e}")
 
+            # Sprint 251 — record COMPLETED in JobHistoryStore.
+            # Inference jobs now appear in prsm_jobs_list +
+            # /compute/status/{job_id} alongside forge jobs.
+            # Best-effort: doesn't block response.
+            if (
+                hasattr(node, "_job_history")
+                and node._job_history is not None
+            ):
+                try:
+                    from prsm.node.job_history import (
+                        JobHistoryRecord as _JobRec,
+                        JobStatus as _JobStat,
+                    )
+                    node._job_history.put(_JobRec(
+                        job_id=job_id,
+                        query=prompt[:256],
+                        status=_JobStat.COMPLETED,
+                        started_at=_job_started_at,
+                        completed_at=_time_for_history.time(),
+                        route="inference",
+                        response=result.output,
+                    ))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "JobHistoryStore put(COMPLETED) failed "
+                        "for inference job_id=%s: %s", job_id, exc,
+                    )
+
             # Sprint 242 — persist the signed receipt for post-hoc
             # lookup via /compute/receipt/{job_id}. Best-effort.
             if (
@@ -3463,6 +3519,32 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     await node._payment_escrow.refund_escrow(job_id, str(e))
                 except Exception:
                     pass
+            # Sprint 251 — record FAILED in JobHistoryStore so the
+            # operator can see the inference job failed via
+            # prsm_jobs_list. Best-effort.
+            if (
+                hasattr(node, "_job_history")
+                and node._job_history is not None
+            ):
+                try:
+                    from prsm.node.job_history import (
+                        JobHistoryRecord as _JobRec,
+                        JobStatus as _JobStat,
+                    )
+                    node._job_history.put(_JobRec(
+                        job_id=job_id,
+                        query=prompt[:256],
+                        status=_JobStat.FAILED,
+                        started_at=_job_started_at,
+                        completed_at=_time_for_history.time(),
+                        route="inference",
+                        error=str(e),
+                    ))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "JobHistoryStore put(FAILED) failed for "
+                        "inference job_id=%s: %s", job_id, exc,
+                    )
             logger.error(f"Inference pipeline error: {e}")
             raise HTTPException(
                 status_code=500,
