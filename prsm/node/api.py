@@ -3992,10 +3992,23 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if not node.ledger or not node.identity:
             raise HTTPException(status_code=503, detail="Not initialized")
 
-        revoked = await node.ledger.revoke_agent_allowance(
-            principal_id=node.identity.node_id,
-            agent_id=agent_id,
-        )
+        # Sprint 182 — revoke_agent_allowance() may raise on any
+        # malformed agent_id (the downstream DB rejects non-UUID
+        # input with various DBAPI exception classes that we can't
+        # all enumerate). Catch broadly and map to 404.
+        try:
+            revoked = await node.ledger.revoke_agent_allowance(
+                principal_id=node.identity.node_id,
+                agent_id=agent_id,
+            )
+        except Exception:  # noqa: BLE001
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Agent allowance not found (or agent_id "
+                    f"malformed): {agent_id!r}"
+                ),
+            )
         if not revoked:
             raise HTTPException(status_code=404, detail="Agent allowance not found")
         return {"agent_id": agent_id, "revoked": True}
@@ -5710,8 +5723,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """
         if not node.staking_manager:
             raise HTTPException(status_code=503, detail="Staking manager not initialized")
-        
-        stake = await node.staking_manager.get_stake(stake_id)
+
+        # Sprint 182 — get_stake() raises ValueError on malformed UUID
+        # (sqlalchemy / underlying ORM rejects "nonexistent" as a UUID
+        # before the None-not-found path). Map to 404 so operators see
+        # "not found" instead of a 500.
+        try:
+            stake = await node.staking_manager.get_stake(stake_id)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Stake not found (or stake_id malformed): {stake_id!r}",
+            )
         if not stake:
             raise HTTPException(status_code=404, detail="Stake not found")
         
@@ -5746,8 +5769,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """
         if not node.staking_manager:
             raise HTTPException(status_code=503, detail="Staking manager not initialized")
-        
-        request = await node.staking_manager.get_unstake_request(request_id)
+
+        # Sprint 182 — same malformed-UUID → 404 mapping as get_stake.
+        try:
+            request = await node.staking_manager.get_unstake_request(request_id)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Unstake request not found (or request_id "
+                    f"malformed): {request_id!r}"
+                ),
+            )
         if not request:
             raise HTTPException(status_code=404, detail="Unstake request not found")
         
