@@ -2107,6 +2107,87 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                             job_id=job_id,
                             splits=splits,
                         )
+
+                        # Sprint 248 — on-chain content-access
+                        # royalty leg. Off by default. Operator
+                        # opts in via PRSM_ONCHAIN_CONTENT_ROYALTY_
+                        # ENABLED=1 + sets the per-shard wei
+                        # amount + operator eth address. Best-
+                        # effort: dispatch failures log + don't
+                        # break the forge response.
+                        try:
+                            import os as _os_for_royalty
+                            _en = _os_for_royalty.environ.get(
+                                "PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED",
+                                "0",
+                            ).strip()
+                            if _en == "1":
+                                _client = getattr(
+                                    node, "_royalty_distributor_client",
+                                    None,
+                                )
+                                _op_addr = _os_for_royalty.environ.get(
+                                    "PRSM_CONTENT_ROYALTY_OPERATOR_ADDRESS",
+                                    "",
+                                ).strip()
+                                _wei_raw = _os_for_royalty.environ.get(
+                                    "PRSM_CONTENT_ROYALTY_PER_SHARD_WEI",
+                                    "1000000000000000",  # 0.001 FTNS
+                                ).strip()
+                                try:
+                                    _wei = int(_wei_raw)
+                                except ValueError:
+                                    _wei = 1_000_000_000_000_000
+                                _index = getattr(
+                                    node, "content_index", None,
+                                )
+                                _contributing = list(
+                                    result.get("contributing_shards") or ()
+                                )
+                                if (
+                                    _client is not None
+                                    and _op_addr
+                                    and _wei > 0
+                                    and _index is not None
+                                    and _contributing
+                                ):
+                                    from prsm.economy.onchain_content_royalty import (
+                                        dispatch_content_access_royalties,
+                                    )
+                                    _royalty_results = (
+                                        dispatch_content_access_royalties(
+                                            shards=_contributing,
+                                            content_index=_index,
+                                            royalty_client=_client,
+                                            serving_node_address=_op_addr,
+                                            gross_per_shard_wei=_wei,
+                                        )
+                                    )
+                                    _sent = sum(
+                                        1 for r in _royalty_results
+                                        if r.status == "sent"
+                                    )
+                                    _skipped = sum(
+                                        1 for r in _royalty_results
+                                        if r.status.startswith("skipped")
+                                    )
+                                    _failed = sum(
+                                        1 for r in _royalty_results
+                                        if r.status == "failed"
+                                    )
+                                    logger.info(
+                                        "on-chain content royalty "
+                                        "dispatch for job %s: sent=%d "
+                                        "skipped=%d failed=%d",
+                                        job_id[:8], _sent, _skipped,
+                                        _failed,
+                                    )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning(
+                                "on-chain content royalty dispatch "
+                                "raised (job %s): %s — best-effort, "
+                                "ignored", job_id[:8], exc,
+                            )
                     else:
                         # Legacy path
                         await node._payment_escrow.release_escrow(
