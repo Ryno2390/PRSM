@@ -5755,6 +5755,115 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return {"action_on_match": action}
 
+    # ── Sprint 272 — Foundation takedown notice intake ────────
+    # Per Vision §14 "Content moderation" mitigation: Foundation
+    # operates a takedown process for DMCA / legal notices.
+    # Per R9-SCOPING-1 §8 invariant: this is information
+    # distribution only — never enforcement. Operators read
+    # notices via /admin/takedown-notices and VOLUNTARILY
+    # update their own ContentFilterStore (sprint 269) if they
+    # decide to act on a given notice.
+
+    @app.post("/admin/takedown-notice", tags=["admin"])
+    async def record_takedown_notice(
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, Any]:
+        """Record a received takedown notice.
+
+        Body fields (all required string except notice_text):
+          - target_cid:    CID the notice cites
+          - sender:        email / org / legal entity
+          - jurisdiction:  e.g. "US-DMCA", "EU-DSA"
+          - basis:         short statutory citation
+          - notice_text:   full notice body (optional, capped 8KB)
+
+        Returns the assigned notice_id + timestamp + status.
+        """
+        ring = getattr(node, "_takedown_notice_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Takedown notice ring not initialized.",
+            )
+        required = ("target_cid", "sender", "jurisdiction", "basis")
+        missing = [k for k in required if not body.get(k)]
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"missing required field(s): "
+                    f"{', '.join(missing)}"
+                ),
+            )
+        try:
+            entry = ring.record(
+                target_cid=body["target_cid"],
+                sender=body["sender"],
+                jurisdiction=body["jurisdiction"],
+                basis=body["basis"],
+                notice_text=body.get("notice_text", ""),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return entry.to_dict()
+
+    @app.get("/admin/takedown-notices", tags=["admin"])
+    async def list_takedown_notices(
+        limit: int = 50,
+        offset: int = 0,
+        status: Optional[str] = None,
+        target_cid: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Paginated list of received takedown notices."""
+        if limit <= 0 or limit > 1000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 1000], got {limit}",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0, got {offset}",
+            )
+        ring = getattr(node, "_takedown_notice_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Takedown notice ring not initialized.",
+            )
+        try:
+            entries = ring.recent(
+                limit=limit, offset=offset,
+                status=status, target_cid=target_cid,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {
+            "notices": [e.to_dict() for e in entries],
+            "total": ring.count(),
+            "offset": offset,
+            "limit": limit,
+        }
+
+    @app.get(
+        "/admin/takedown-notices/{notice_id}", tags=["admin"],
+    )
+    async def get_takedown_notice(notice_id: str) -> Dict[str, Any]:
+        """Fetch a single notice by notice_id."""
+        ring = getattr(node, "_takedown_notice_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Takedown notice ring not initialized.",
+            )
+        entry = ring.get(notice_id)
+        if entry is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no notice with id={notice_id!r}",
+            )
+        return entry.to_dict()
+
     @app.get("/admin/royalty-dispatch-summary")
     async def get_royalty_dispatch_summary() -> Dict[str, Any]:
         """Aggregate view over the sprint-249 royalty dispatch

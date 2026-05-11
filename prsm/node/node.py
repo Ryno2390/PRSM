@@ -2120,6 +2120,39 @@ class PRSMNode:
             )
             self._job_history = None
 
+        # Sprint 272 — TakedownNoticeRing for foundation-side
+        # intake of DMCA / legal / content moderation notices.
+        # Per R9-SCOPING-1 §8 invariant: this RING does not
+        # enforce; it logs received notices for distribution.
+        # Each operator runs their own compliance analysis and
+        # voluntarily updates their ContentFilterStore (sprint
+        # 269) if they decide to act on a given notice.
+        # Opt-in disk persistence via PRSM_TAKEDOWN_NOTICE_LOG_DIR.
+        try:
+            import os as _os
+            from pathlib import Path as _Path
+            from prsm.node.takedown_notice_log import (
+                TakedownNoticeRing,
+            )
+            persist_raw = _os.getenv(
+                "PRSM_TAKEDOWN_NOTICE_LOG_DIR", "",
+            ).strip()
+            persist_dir = _Path(persist_raw) if persist_raw else None
+            self._takedown_notice_ring = TakedownNoticeRing(
+                persist_dir=persist_dir,
+            )
+            logger.info(
+                "TakedownNoticeRing wired%s",
+                f", persisted to {persist_dir}" if persist_dir else "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "TakedownNoticeRing construction failed: %s — "
+                "/admin/takedown-notices will 503.",
+                exc,
+            )
+            self._takedown_notice_ring = None
+
         # Sprint 269 — ContentFilterStore for the operator's
         # self-managed content blocklist (Vision §14 "content
         # moderation" mitigation; R9-SCOPING-1 §7-8 operator-side

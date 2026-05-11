@@ -1332,6 +1332,95 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_takedown_notices",
+        description=(
+            "Foundation takedown-notice intake via MCP. Single "
+            "tool with `action` selector: list | lookup | record. "
+            "Per Vision §14 / R9-SCOPING-1 §8 this surface is "
+            "information distribution only — Foundation records "
+            "notices (DMCA, EU-DSA, etc.) and operators "
+            "VOLUNTARILY act by editing their own ContentFilter "
+            "via prsm_content_filter. Never enforces, never "
+            "propagates blocklists. Backed by "
+            "/admin/takedown-notice(s)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "lookup", "record"],
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1, "maximum": 1000,
+                    "description": (
+                        "Page size for action=list "
+                        "(default 50)."
+                    ),
+                },
+                "offset": {
+                    "type": "integer", "minimum": 0,
+                    "description": (
+                        "Page offset for action=list "
+                        "(default 0)."
+                    ),
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "received", "acknowledged",
+                        "disputed", "expired",
+                    ],
+                    "description": (
+                        "Status filter for action=list."
+                    ),
+                },
+                "target_cid": {
+                    "type": "string",
+                    "description": (
+                        "Target-CID filter for action=list, "
+                        "OR target CID for action=record."
+                    ),
+                },
+                "notice_id": {
+                    "type": "string",
+                    "description": (
+                        "Notice id for action=lookup."
+                    ),
+                },
+                "sender": {
+                    "type": "string",
+                    "description": (
+                        "Notice sender for action=record."
+                    ),
+                },
+                "jurisdiction": {
+                    "type": "string",
+                    "description": (
+                        "Jurisdiction tag for action=record "
+                        "(e.g. US-DMCA, EU-DSA)."
+                    ),
+                },
+                "basis": {
+                    "type": "string",
+                    "description": (
+                        "Short statutory basis for "
+                        "action=record."
+                    ),
+                },
+                "notice_text": {
+                    "type": "string",
+                    "description": (
+                        "Full notice body for action=record "
+                        "(capped 8KB server-side)."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_pinned_stats",
         description=(
             "Render per-pinned-content storage challenge stats: "
@@ -5511,6 +5600,159 @@ async def handle_prsm_content_filter(
     )
 
 
+_TAKEDOWN_NOTICE_ACTIONS = {"list", "lookup", "record"}
+
+
+async def handle_prsm_takedown_notices(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 272 — Foundation takedown-notice intake via MCP.
+
+    Per Vision §14 / R9-SCOPING-1 §8: Foundation records
+    notices (information distribution). Operators VOLUNTARILY
+    act on them by editing their own ContentFilterStore
+    (sprint 269) — this surface neither enforces nor
+    propagates."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_TAKEDOWN_NOTICE_ACTIONS)})."
+        )
+    if action not in _TAKEDOWN_NOTICE_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_TAKEDOWN_NOTICE_ACTIONS)}; got {action!r}."
+        )
+
+    if action == "list":
+        limit = arguments.get("limit", 50)
+        offset = arguments.get("offset", 0)
+        status = arguments.get("status")
+        target_cid = arguments.get("target_cid")
+        params = [f"limit={int(limit)}", f"offset={int(offset)}"]
+        if status:
+            params.append(f"status={status}")
+        if target_cid:
+            params.append(f"target_cid={target_cid}")
+        path = "/admin/takedown-notices?" + "&".join(params)
+        try:
+            result = await _call_node_api("GET", path)
+        except Exception as e:
+            return (
+                f"prsm_takedown_notices failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "notices" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Takedown notice ring not wired on this "
+                    f"node.\n  Detail: {detail}\n"
+                    f"  Set PRSM_TAKEDOWN_NOTICE_LOG_DIR for "
+                    f"persistence."
+                )
+            return f"list refused: {detail}"
+        notices = result.get("notices") or []
+        total = result.get("total", 0)
+        lines = [
+            f"PRSM Takedown Notices — {len(notices)} of "
+            f"{total} (offset={result.get('offset', 0)}):",
+        ]
+        if not notices:
+            lines.append("  (none)")
+        for n in notices:
+            lines.append(
+                f"  {n.get('notice_id', '?')[:8]}  "
+                f"{n.get('status', '?'):>12}  "
+                f"target={n.get('target_cid', '?')}  "
+                f"jur={n.get('jurisdiction', '?')}  "
+                f"basis={n.get('basis', '?')}"
+            )
+        return "\n".join(lines)
+
+    if action == "lookup":
+        notice_id = (arguments.get("notice_id") or "").strip()
+        if not notice_id:
+            return "lookup requires 'notice_id'."
+        try:
+            result = await _call_node_api(
+                "GET", f"/admin/takedown-notices/{notice_id}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_takedown_notices failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "notice_id" not in result:
+            detail = result.get("detail", "unknown error")
+            if "no notice with id" in str(detail).lower():
+                return f"No notice with id={notice_id!r}."
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Takedown notice ring not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"lookup refused: {detail}"
+        return (
+            f"Takedown Notice {result['notice_id']}:\n"
+            f"  timestamp:    {result.get('timestamp', '?')}\n"
+            f"  status:       {result.get('status', '?')}\n"
+            f"  target_cid:   {result.get('target_cid', '?')}\n"
+            f"  sender:       {result.get('sender', '?')}\n"
+            f"  jurisdiction: {result.get('jurisdiction', '?')}\n"
+            f"  basis:        {result.get('basis', '?')}\n"
+            f"  notice_text:\n"
+            f"    {result.get('notice_text', '')[:1024]}"
+        )
+
+    # action == "record"
+    target_cid = (arguments.get("target_cid") or "").strip()
+    sender = (arguments.get("sender") or "").strip()
+    jurisdiction = (arguments.get("jurisdiction") or "").strip()
+    basis = (arguments.get("basis") or "").strip()
+    notice_text = arguments.get("notice_text") or ""
+    missing = [
+        k for k, v in (
+            ("target_cid", target_cid),
+            ("sender", sender),
+            ("jurisdiction", jurisdiction),
+            ("basis", basis),
+        ) if not v
+    ]
+    if missing:
+        return (
+            f"record requires: {', '.join(missing)}."
+        )
+    try:
+        result = await _call_node_api(
+            "POST", "/admin/takedown-notice",
+            {
+                "target_cid": target_cid, "sender": sender,
+                "jurisdiction": jurisdiction, "basis": basis,
+                "notice_text": notice_text,
+            },
+        )
+    except Exception as e:
+        return (
+            f"prsm_takedown_notices failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "notice_id" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Takedown notice ring not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"record refused: {detail}"
+    return (
+        f"Takedown notice recorded: id={result['notice_id']}, "
+        f"target={result.get('target_cid', '?')}, "
+        f"status={result.get('status', '?')}."
+    )
+
+
 async def handle_prsm_pinned_stats(
     arguments: Dict[str, Any],
 ) -> str:
@@ -7488,6 +7730,7 @@ TOOL_HANDLERS = {
     "prsm_bootstrap_status": handle_prsm_bootstrap_status,
     "prsm_pinned_stats": handle_prsm_pinned_stats,
     "prsm_content_filter": handle_prsm_content_filter,
+    "prsm_takedown_notices": handle_prsm_takedown_notices,
     "prsm_content_provider_stats": handle_prsm_content_provider_stats,
     "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,
