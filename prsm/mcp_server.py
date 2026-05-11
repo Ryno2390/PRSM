@@ -1121,6 +1121,51 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_agent_admin",
+        description=(
+            "Admin actions on a single agent: set_allowance, "
+            "revoke, pause, resume. Routes to POST "
+            "/agents/{id}/allowance, DELETE /agents/{id}/allowance, "
+            "POST /agents/{id}/pause, or POST /agents/{id}/resume "
+            "based on `action` selector. Useful for operators "
+            "managing agent budgets + lifecycle without curl."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Target agent ID.",
+                },
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "set_allowance", "revoke", "pause", "resume",
+                    ],
+                    "description": "Which admin action to perform.",
+                },
+                "amount": {
+                    "type": "number",
+                    "description": (
+                        "Allowance amount (set_allowance only). "
+                        "Must be positive + finite."
+                    ),
+                    "exclusiveMinimum": 0,
+                },
+                "epoch_hours": {
+                    "type": "number",
+                    "description": (
+                        "Allowance refresh window (set_allowance "
+                        "only). Default 24."
+                    ),
+                    "exclusiveMinimum": 0,
+                    "default": 24,
+                },
+            },
+            "required": ["agent_id", "action"],
+        },
+    ),
+    Tool(
         name="prsm_settlers",
         description=(
             "List active Phase-6 settlers OR look up a specific "
@@ -1612,6 +1657,16 @@ async def _call_node_api(
     async with aiohttp.ClientSession() as session:
         if method == "GET":
             async with session.get(
+                f"{url}{path}",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as resp:
+                if raw_text:
+                    return await resp.text()
+                return await resp.json()
+        elif method == "DELETE":
+            # Sprint 221 — added DELETE for agent allowance revoke.
+            async with session.delete(
                 f"{url}{path}",
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=120),
@@ -4216,6 +4271,83 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_agent_admin(arguments: Dict[str, Any]) -> str:
+    """Sprint 221 — agent admin actions: set allowance / revoke /
+    pause / resume."""
+    import math as _math
+    agent_id = (arguments.get("agent_id") or "").strip()
+    if not agent_id:
+        return "Missing required 'agent_id' (non-empty)."
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            "Missing required 'action' (set_allowance, revoke, "
+            "pause, or resume)."
+        )
+    if action not in ("set_allowance", "revoke", "pause", "resume"):
+        return (
+            f"action must be one of set_allowance / revoke / pause "
+            f"/ resume; got {action!r}."
+        )
+
+    if action == "set_allowance":
+        if "amount" not in arguments or arguments["amount"] is None:
+            return "set_allowance requires 'amount'."
+        try:
+            amount = float(arguments["amount"])
+        except (TypeError, ValueError):
+            return (
+                f"amount must be a finite positive number; "
+                f"got {arguments['amount']!r}."
+            )
+        if not _math.isfinite(amount) or amount <= 0:
+            return f"amount must be a finite positive number; got {amount}."
+        raw_eh = arguments.get("epoch_hours", 24.0)
+        try:
+            epoch_hours = float(raw_eh)
+        except (TypeError, ValueError):
+            return (
+                f"epoch_hours must be a finite positive number; "
+                f"got {raw_eh!r}."
+            )
+        if not _math.isfinite(epoch_hours) or epoch_hours <= 0:
+            return (
+                f"epoch_hours must be a finite positive number; "
+                f"got {epoch_hours}."
+            )
+        path = (
+            f"/agents/{agent_id}/allowance?"
+            f"amount={amount}&epoch_hours={epoch_hours}"
+        )
+        method = "POST"
+    elif action == "revoke":
+        path = f"/agents/{agent_id}/allowance"
+        method = "DELETE"
+    else:
+        path = f"/agents/{agent_id}/{action}"
+        method = "POST"
+
+    try:
+        result = await _call_node_api(method, path)
+    except Exception as e:
+        return (
+            f"prsm_agent_admin failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "agent_id" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"{action} refused for {agent_id}: {detail}"
+    lines = [
+        f"Agent admin action={action} executed on "
+        f"agent_id={result.get('agent_id', agent_id)}:",
+    ]
+    for k, v in result.items():
+        if k == "agent_id":
+            continue
+        lines.append(f"  {k}: {v}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_settlers(arguments: Dict[str, Any]) -> str:
     """Sprint 220 — list active settlers or look up specific by id.
 
@@ -5028,6 +5160,7 @@ TOOL_HANDLERS = {
     "prsm_claim_rewards": handle_prsm_claim_rewards,
     "prsm_unstake_finalize": handle_prsm_unstake_finalize,
     "prsm_settlers": handle_prsm_settlers,
+    "prsm_agent_admin": handle_prsm_agent_admin,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
