@@ -1150,6 +1150,20 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_models",
+        description=(
+            "List inference model_ids the node's executor will "
+            "accept. Backed by GET /compute/models which surfaces "
+            "node.inference_executor.supported_models(). Use any "
+            "returned model_id with prsm_inference or prsm_quote. "
+            "Closes the discoverability gap: pre-fix end-users had "
+            "to read the prsm_inference tool description's sample "
+            "list and hope the operator hadn't customized the "
+            "registry."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_ledger_sync",
         description=(
             "Render ledger gossip-sync statistics: messages "
@@ -4734,6 +4748,31 @@ async def handle_prsm_settler_admin(
     return "\n".join(lines)
 
 
+async def handle_prsm_models(arguments: Dict[str, Any]) -> str:
+    """Sprint 235 — list inference model_ids the executor accepts."""
+    try:
+        result = await _call_node_api("GET", "/compute/models")
+    except Exception as e:
+        return (
+            f"prsm_models failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    models = result.get("models") or []
+    count = result.get("count", len(models))
+    if not models:
+        return (
+            f"No models registered on this node (count={count}).\n"
+            f"  Detail: {result.get('detail', 'executor wired but registry empty')}"
+        )
+    lines = [f"PRSM Available Models (count={count}):"]
+    for m in models:
+        lines.append(f"  • {m}")
+    lines.append(
+        "  Use any model_id above with prsm_inference / prsm_quote."
+    )
+    return "\n".join(lines)
+
+
 async def handle_prsm_ledger_sync(arguments: Dict[str, Any]) -> str:
     """Sprint 233 — render GET /ledger/sync/stats."""
     try:
@@ -6171,6 +6210,7 @@ TOOL_HANDLERS = {
     "prsm_settlement_view": handle_prsm_settlement_view,
     "prsm_node_resources": handle_prsm_node_resources,
     "prsm_ledger_sync": handle_prsm_ledger_sync,
+    "prsm_models": handle_prsm_models,
     "prsm_settler_admin": handle_prsm_settler_admin,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,

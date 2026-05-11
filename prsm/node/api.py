@@ -6593,6 +6593,31 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             }
         return node.compute_provider.get_stats()
 
+    # Sprint 235 — surface the inference executor's registered
+    # model_ids so end-users running prsm_inference can discover
+    # what's available without reading the tool description's
+    # hard-coded sample list.
+    @app.get("/compute/models", tags=["compute"])
+    async def get_compute_models() -> Dict[str, Any]:
+        """List inference model_ids the executor accepts."""
+        executor = getattr(node, "inference_executor", None)
+        if executor is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Inference executor not initialized on this "
+                    "node — no models available."
+                ),
+            )
+        try:
+            models = list(executor.supported_models())
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=f"supported_models() failed: {e}",
+            )
+        return {"models": models, "count": len(models)}
+
     # ── Resource Configuration Endpoints ─────────────────────────────────
 
     @app.get("/node/resources", response_model=ResourceConfigResponse, tags=["resources"])
