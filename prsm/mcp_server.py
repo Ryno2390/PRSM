@@ -1121,6 +1121,36 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_settlement_view",
+        description=(
+            "Batch-settlement read + flush. Routes to GET "
+            "/settlement/pending (un-settled queue), GET "
+            "/settlement/history (recent results), or POST "
+            "/settlement/flush (manually trigger settlement) via "
+            "`action` selector. prsm_settlement_stats covers the "
+            "stats view."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["pending", "history", "flush"],
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        "History page size (1..200). Default 10."
+                    ),
+                    "minimum": 1,
+                    "maximum": 200,
+                    "default": 10,
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_bridge_history",
         description=(
             "Bridge read endpoints in one tool: status (overall "
@@ -4515,6 +4545,76 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_settlement_view(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 231 — settlement views: pending / history / flush."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            "Missing required 'action' (pending, history, or flush)."
+        )
+    if action not in ("pending", "history", "flush"):
+        return (
+            f"action must be pending, history, or flush; "
+            f"got {action!r}."
+        )
+    if action == "pending":
+        method = "GET"
+        path = "/settlement/pending"
+    elif action == "history":
+        raw_limit = arguments.get("limit", 10)
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            return f"limit must be an integer; got {raw_limit!r}."
+        if limit < 1 or limit > 200:
+            return f"limit must be in [1, 200]; got {limit}."
+        method = "GET"
+        path = f"/settlement/history?limit={limit}"
+    else:
+        method = "POST"
+        path = "/settlement/flush"
+    try:
+        result = await _call_node_api(method, path)
+    except Exception as e:
+        return (
+            f"prsm_settlement_view failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if action == "pending":
+        items = result.get("pending") or []
+        count = result.get("count", len(items))
+        if not items:
+            return f"No pending settlement transfers (count={count})."
+        lines = [f"PRSM Pending Settlements (count={count}):"]
+        for it in items:
+            lines.append(f"  {it}")
+        return "\n".join(lines)
+    if action == "history":
+        items = result.get("history") or []
+        count = result.get("count", len(items))
+        if not items:
+            return f"No settlement history (count={count})."
+        lines = [f"PRSM Settlement History (count={count}):"]
+        for it in items:
+            lines.append(f"  {it}")
+        return "\n".join(lines)
+    # flush
+    if "settled_count" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"Settlement flush refused: {detail}"
+    return (
+        f"Settlement flush executed.\n"
+        f"  settled_count:    {result.get('settled_count', 0)}\n"
+        f"  total_amount:     {result.get('total_amount', 0)} FTNS\n"
+        f"  net_transfers:    {result.get('net_transfers', 0)}\n"
+        f"  tx_hashes:        {result.get('tx_hashes', [])}\n"
+        f"  errors:           {result.get('errors', [])}\n"
+        f"  duration_seconds: {result.get('duration_seconds', 0)}"
+    )
+
+
 async def handle_prsm_bridge_history(
     arguments: Dict[str, Any],
 ) -> str:
@@ -5802,6 +5902,7 @@ TOOL_HANDLERS = {
     "prsm_get_agent": handle_prsm_get_agent,
     "prsm_stake_lookup": handle_prsm_stake_lookup,
     "prsm_bridge_history": handle_prsm_bridge_history,
+    "prsm_settlement_view": handle_prsm_settlement_view,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
