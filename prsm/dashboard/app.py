@@ -62,15 +62,29 @@ class JobSubmitRequest(BaseModel):
     """Request body for submitting a compute job."""
     job_type: str = Field(..., description="Type of job: inference, embedding, benchmark")
     payload: Dict[str, Any] = Field(default_factory=dict, description="Job-specific payload")
-    ftns_budget: float = Field(default=1.0, ge=0.01, description="FTNS budget for job")
+    # Sprint 205 — add upper bound + allow_inf_nan=False.
+    # Defense-in-depth alongside sprint-202 body-guard. 1e12 is a
+    # sane garbage-rejection ceiling well above realistic FTNS
+    # supply.
+    ftns_budget: float = Field(
+        default=1.0, ge=0.01, le=1e12, allow_inf_nan=False,
+        description="FTNS budget for job",
+    )
     model_id: Optional[str] = Field(default=None, description="Model ID for inference jobs")
     input_data: Optional[str] = Field(default=None, description="Input data for the job")
 
 
 class StakeRequest(BaseModel):
     """Request body for staking FTNS."""
-    amount: float = Field(..., gt=0, description="Amount to stake")
-    duration_epochs: int = Field(default=10, ge=1, description="Staking duration in epochs")
+    # Sprint 205 — add upper bound + allow_inf_nan=False.
+    amount: float = Field(
+        ..., gt=0, le=1e12, allow_inf_nan=False,
+        description="Amount to stake",
+    )
+    duration_epochs: int = Field(
+        default=10, ge=1, le=10_000,
+        description="Staking duration in epochs",
+    )
 
 
 class TransferRequest(BaseModel):
@@ -83,7 +97,11 @@ class TransferRequest(BaseModel):
         ..., min_length=1, max_length=256,
         description="Destination wallet ID",
     )
-    amount: float = Field(..., gt=0, description="Amount to transfer")
+    # Sprint 205 — add upper bound + allow_inf_nan=False.
+    amount: float = Field(
+        ..., gt=0, le=1e12, allow_inf_nan=False,
+        description="Amount to transfer",
+    )
     description: Optional[str] = Field(
         default=None, max_length=512,
         description="Transfer description",
