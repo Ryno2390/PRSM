@@ -1121,6 +1121,19 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_staking_status",
+        description=(
+            "Render the user's full staking dashboard. Backed by "
+            "GET /staking/status. Shows active stakes (id, amount, "
+            "type, status, rewards earned/claimed), pending unstake "
+            "requests with their available_at timestamps, and "
+            "totals (staked + earned + claimed). Useful for "
+            "stakers tracking positions without grepping the local "
+            "staking manager state."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_agents",
         description=(
             "List or search PRSM agents. Without `capability`, "
@@ -4061,6 +4074,51 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_staking_status(arguments: Dict[str, Any]) -> str:
+    """Sprint 215 — render GET /staking/status user dashboard."""
+    try:
+        result = await _call_node_api("GET", "/staking/status")
+    except Exception as e:
+        return (
+            f"prsm_staking_status failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    user_id = result.get("user_id", "?")
+    total_staked = result.get("total_staked", 0)
+    earned = result.get("total_rewards_earned", 0)
+    claimed = result.get("total_rewards_claimed", 0)
+    stakes = result.get("active_stakes") or []
+    pending = result.get("pending_unstake_requests") or []
+
+    lines = [
+        f"PRSM Staking Status (user={user_id}):",
+        f"  Total staked: {total_staked} FTNS",
+        f"  Rewards earned: {earned} FTNS  "
+        f"(claimed: {claimed}; "
+        f"unclaimed: {float(earned) - float(claimed)})",
+    ]
+    if stakes:
+        lines.append(f"  Active stakes ({len(stakes)}):")
+        for s in stakes:
+            lines.append(
+                f"    {s.get('stake_id', '?'):<12}  "
+                f"{s.get('amount', '?')!s:>10} FTNS  "
+                f"type={s.get('stake_type', '?'):<12}  "
+                f"rewards={s.get('rewards_earned', 0)}"
+            )
+    else:
+        lines.append("  No active stakes.")
+    if pending:
+        lines.append(f"  Pending unstake requests ({len(pending)}):")
+        for r in pending:
+            lines.append(
+                f"    {r.get('request_id', '?'):<12}  "
+                f"amount={r.get('amount', '?')}  "
+                f"available_at={r.get('available_at', '?')}"
+            )
+    return "\n".join(lines)
+
+
 async def handle_prsm_agents(arguments: Dict[str, Any]) -> str:
     """Sprint 214 — list or search agents.
 
@@ -4565,6 +4623,7 @@ TOOL_HANDLERS = {
     "prsm_transactions": handle_prsm_transactions,
     "prsm_peers": handle_prsm_peers,
     "prsm_agents": handle_prsm_agents,
+    "prsm_staking_status": handle_prsm_staking_status,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
     "coinbase_offramp_initiate": handle_coinbase_offramp_initiate,
