@@ -3760,6 +3760,55 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         job_id = "infer-stream-" + _uuid.uuid4().hex[:12]
 
+        # Sprint 252 — JobHistoryStore wiring for the streaming
+        # path. Mirror of sprint 251's /compute/inference write
+        # sites: IN_PROGRESS at entry, COMPLETED on terminal
+        # result success, FAILED on each failure/exhaustion path.
+        # Helper consolidates the write logic so the 5 terminal
+        # sites stay in sync.
+        import time as _time_for_history
+        _job_started_at = _time_for_history.time()
+
+        def _record_history(
+            status_val: str,
+            *,
+            response_text: Optional[str] = None,
+            error_text: Optional[str] = None,
+        ) -> None:
+            if (
+                not hasattr(node, "_job_history")
+                or node._job_history is None
+            ):
+                return
+            try:
+                from prsm.node.job_history import (
+                    JobHistoryRecord as _JobRec,
+                    JobStatus as _JobStat,
+                )
+                completed = (
+                    _time_for_history.time()
+                    if status_val != _JobStat.IN_PROGRESS.value
+                    else None
+                )
+                node._job_history.put(_JobRec(
+                    job_id=job_id,
+                    query=prompt[:256],
+                    status=_JobStat(status_val),
+                    started_at=_job_started_at,
+                    completed_at=completed,
+                    route="inference_stream",
+                    response=response_text,
+                    error=error_text,
+                ))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "JobHistoryStore put(%s) failed for streaming "
+                    "inference job_id=%s: %s",
+                    status_val, job_id, exc,
+                )
+
+        _record_history("in_progress")
+
         # Lock escrow — same pre-pay billing pattern as the unary
         # endpoint. Failure paths refund; success path settles after
         # the terminal result event.
@@ -3833,6 +3882,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                 node, job_id, escrow_entry, request,
                                 item,
                             )
+                            # Sprint 252 — COMPLETED to history.
+                            _record_history(
+                                "completed",
+                                response_text=item.output,
+                            )
                             yield _sse_event(
                                 "result",
                                 _result_to_dict(
@@ -3851,6 +3905,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                 tokens_emitted,
                                 item.error or "inference failed",
                             )
+                            # Sprint 252 — FAILED to history.
+                            _record_history(
+                                "failed",
+                                error_text=(
+                                    item.error or "inference failed"
+                                ),
+                            )
                             yield _sse_event("error", {
                                 "error": item.error or "inference failed",
                                 "code": "EXECUTION_FAILURE",
@@ -3865,6 +3926,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                             node, job_id, escrow_entry,
                             tokens_emitted,
                             f"unexpected event type {type(item).__name__}",
+                        )
+                        _record_history(
+                            "failed",
+                            error_text=(
+                                f"unexpected event type "
+                                f"{type(item).__name__}"
+                            ),
                         )
                         yield _sse_event("error", {
                             "error": (
@@ -3882,6 +3950,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     tokens_emitted,
                     "executor exhausted without terminal result",
                 )
+                _record_history(
+                    "failed",
+                    error_text=(
+                        "executor exhausted without terminal result"
+                    ),
+                )
                 yield _sse_event("error", {
                     "error": (
                         "executor exhausted without yielding a terminal "
@@ -3898,6 +3972,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 await _resolve_post_token_billing(
                     node, job_id, escrow_entry,
                     tokens_emitted, str(exc),
+                )
+                _record_history(
+                    "failed",
+                    error_text=f"{exc.__class__.__name__}: {exc}",
                 )
                 yield _sse_event("error", {
                     "error": f"{exc.__class__.__name__}: {exc}",
