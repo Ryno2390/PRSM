@@ -1121,6 +1121,39 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_bridge_history",
+        description=(
+            "Bridge read endpoints in one tool: status (overall "
+            "health + supported chains), list (recent transactions), "
+            "lookup (single tx by tx_id). Routes to GET /bridge/"
+            "status, GET /bridge/transactions, GET /bridge/"
+            "transactions/{tx_id} via `view` selector."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "view": {
+                    "type": "string",
+                    "enum": ["status", "list", "lookup"],
+                },
+                "tx_id": {
+                    "type": "string",
+                    "description": "Required for view=lookup.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        "List page size (1..200). Default 20."
+                    ),
+                    "minimum": 1,
+                    "maximum": 200,
+                    "default": 20,
+                },
+            },
+            "required": ["view"],
+        },
+    ),
+    Tool(
         name="prsm_stake_lookup",
         description=(
             "Single-record lookup for a stake or an unstake "
@@ -4482,6 +4515,73 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_bridge_history(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 230 — bridge read views: status, list, lookup."""
+    view = (arguments.get("view") or "").strip().lower()
+    if view not in ("status", "list", "lookup"):
+        return (
+            f"view must be one of status/list/lookup; got {view!r}."
+        )
+    if view == "status":
+        path = "/bridge/status"
+    elif view == "list":
+        raw_limit = arguments.get("limit", 20)
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            return f"limit must be an integer; got {raw_limit!r}."
+        if limit < 1 or limit > 200:
+            return f"limit must be in [1, 200]; got {limit}."
+        path = f"/bridge/transactions?limit={limit}"
+    else:
+        tx_id = (arguments.get("tx_id") or "").strip()
+        if not tx_id:
+            return "lookup requires 'tx_id' (non-empty)."
+        path = f"/bridge/transactions/{tx_id}"
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"prsm_bridge_history failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if view == "status":
+        if not isinstance(result, dict):
+            return "Bridge status: (unexpected response shape)"
+        lines = ["PRSM Bridge Status:"]
+        for k, v in result.items():
+            lines.append(f"  {k:<24} {v}")
+        return "\n".join(lines)
+    if view == "list":
+        txs = result.get("transactions") or []
+        count = result.get("count", len(txs))
+        if not txs:
+            return f"No bridge transactions (count={count})."
+        lines = [f"PRSM Bridge Transactions (count={count}):"]
+        for t in txs:
+            lines.append(
+                f"  {t.get('transaction_id', '?')[:16]:<16}  "
+                f"dir={t.get('direction', '?'):<8}  "
+                f"amount={t.get('amount', '?')}  "
+                f"status={t.get('status', '?')}"
+            )
+        return "\n".join(lines)
+    # lookup
+    if "transaction_id" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not found" in str(detail).lower():
+            return f"Bridge transaction {arguments.get('tx_id')} not found."
+        return f"Bridge lookup refused: {detail}"
+    lines = [f"PRSM Bridge Transaction {result.get('transaction_id', '?')}:"]
+    for k, v in result.items():
+        if k == "transaction_id":
+            continue
+        lines.append(f"  {k:<22} {v}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_stake_lookup(
     arguments: Dict[str, Any],
 ) -> str:
@@ -5701,6 +5801,7 @@ TOOL_HANDLERS = {
     "prsm_agent_conversations": handle_prsm_agent_conversations,
     "prsm_get_agent": handle_prsm_get_agent,
     "prsm_stake_lookup": handle_prsm_stake_lookup,
+    "prsm_bridge_history": handle_prsm_bridge_history,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
