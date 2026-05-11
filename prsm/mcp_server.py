@@ -1121,6 +1121,43 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_node_resources",
+        description=(
+            "Get or update node resource configuration. Routes to "
+            "GET /node/resources (view current + effective values) "
+            "or PUT /node/resources (update at runtime). Update "
+            "accepts any subset of: cpu_allocation_pct, memory_"
+            "allocation_pct, storage_gb, max_concurrent_jobs, "
+            "gpu_allocation_pct, upload_mbps_limit, download_mbps_"
+            "limit, active_hours_start/end, active_days. All fields "
+            "are server-side bounded (sprint 207)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["get", "update"],
+                },
+                "cpu_allocation_pct": {"type": "integer", "minimum": 10, "maximum": 90},
+                "memory_allocation_pct": {"type": "integer", "minimum": 10, "maximum": 90},
+                "storage_gb": {"type": "number", "exclusiveMinimum": 0, "maximum": 1_000_000_000},
+                "max_concurrent_jobs": {"type": "integer", "minimum": 1, "maximum": 1_000_000},
+                "gpu_allocation_pct": {"type": "integer", "minimum": 10, "maximum": 100},
+                "upload_mbps_limit": {"type": "number", "minimum": 0, "maximum": 1_000_000},
+                "download_mbps_limit": {"type": "number", "minimum": 0, "maximum": 1_000_000},
+                "active_hours_start": {"type": "integer", "minimum": 0, "maximum": 23},
+                "active_hours_end": {"type": "integer", "minimum": 0, "maximum": 23},
+                "active_days": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 0, "maximum": 6},
+                    "maxItems": 7,
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_settlement_view",
         description=(
             "Batch-settlement read + flush. Routes to GET "
@@ -1942,6 +1979,17 @@ async def _call_node_api(
             # Sprint 221 — added DELETE for agent allowance revoke.
             async with session.delete(
                 f"{url}{path}",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as resp:
+                if raw_text:
+                    return await resp.text()
+                return await resp.json()
+        elif method == "PUT":
+            # Sprint 232 — added PUT for node-resources update.
+            async with session.put(
+                f"{url}{path}",
+                json=data or {},
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=120),
             ) as resp:
@@ -4545,6 +4593,66 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+_RESOURCE_UPDATE_FIELDS = (
+    "cpu_allocation_pct", "memory_allocation_pct",
+    "storage_gb", "max_concurrent_jobs",
+    "gpu_allocation_pct",
+    "upload_mbps_limit", "download_mbps_limit",
+    "active_hours_start", "active_hours_end",
+    "active_days",
+)
+
+
+async def handle_prsm_node_resources(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 232 — get or update node resource configuration."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return "Missing required 'action' (get or update)."
+    if action not in ("get", "update"):
+        return f"action must be get or update; got {action!r}."
+    if action == "get":
+        try:
+            result = await _call_node_api("GET", "/node/resources")
+        except Exception as e:
+            return (
+                f"prsm_node_resources failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if not isinstance(result, dict):
+            return "Node resources: (unexpected response shape)"
+        lines = ["PRSM Node Resources:"]
+        for k, v in result.items():
+            lines.append(f"  {k:<26} {v}")
+        return "\n".join(lines)
+    # update
+    body = {
+        k: arguments[k]
+        for k in _RESOURCE_UPDATE_FIELDS
+        if k in arguments and arguments[k] is not None
+    }
+    if not body:
+        return (
+            "update requires at least one field. Valid: "
+            + ", ".join(_RESOURCE_UPDATE_FIELDS)
+            + "."
+        )
+    try:
+        result = await _call_node_api("PUT", "/node/resources", body)
+    except Exception as e:
+        return (
+            f"prsm_node_resources failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if not isinstance(result, dict):
+        return f"Update returned: {result}"
+    lines = ["PRSM Node Resources Updated:"]
+    for k, v in result.items():
+        lines.append(f"  {k:<26} {v}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_settlement_view(
     arguments: Dict[str, Any],
 ) -> str:
@@ -5903,6 +6011,7 @@ TOOL_HANDLERS = {
     "prsm_stake_lookup": handle_prsm_stake_lookup,
     "prsm_bridge_history": handle_prsm_bridge_history,
     "prsm_settlement_view": handle_prsm_settlement_view,
+    "prsm_node_resources": handle_prsm_node_resources,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
