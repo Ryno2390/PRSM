@@ -1121,6 +1121,36 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_agent_conversations",
+        description=(
+            "Render recent conversation threads for a single "
+            "agent (with last-5-message preview per thread). "
+            "Backed by GET /agents/{agent_id}/conversations. "
+            "Useful for operators monitoring what their agents "
+            "are doing."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Target agent ID.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        "Max conversations to return (1..100). "
+                        "Default 10."
+                    ),
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 10,
+                },
+            },
+            "required": ["agent_id"],
+        },
+    ),
+    Tool(
         name="prsm_index_stats",
         description=(
             "Render content-index statistics: total records, "
@@ -4407,6 +4437,52 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_agent_conversations(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 227 — render recent conversation threads for an
+    agent. Backed by GET /agents/{agent_id}/conversations."""
+    agent_id = (arguments.get("agent_id") or "").strip()
+    if not agent_id:
+        return "Missing required 'agent_id' (non-empty)."
+    raw_limit = arguments.get("limit", 10)
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError):
+        return f"limit must be an integer; got {raw_limit!r}."
+    if limit < 1 or limit > 100:
+        return f"limit must be in [1, 100]; got {limit}."
+    try:
+        result = await _call_node_api(
+            "GET",
+            f"/agents/{agent_id}/conversations?limit={limit}",
+        )
+    except Exception as e:
+        return (
+            f"prsm_agent_conversations failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    convs = result.get("conversations") or []
+    count = result.get("count", len(convs))
+    if not convs:
+        return (
+            f"No conversations for agent_id={agent_id} "
+            f"(count={count})."
+        )
+    lines = [
+        f"PRSM Agent {agent_id} Conversations (count={count}):",
+    ]
+    for c in convs:
+        cid = c.get("conversation_id", "?")
+        n = c.get("message_count", 0)
+        lines.append(f"  conversation_id={cid}  messages={n}")
+        for m in (c.get("messages") or [])[:5]:
+            role = m.get("role", "?")
+            content = (m.get("content") or "")[:60]
+            lines.append(f"    [{role}] {content}")
+    return "\n".join(lines)
+
+
 async def handle_prsm_index_stats(arguments: Dict[str, Any]) -> str:
     """Sprint 226 — render GET /content/index/stats."""
     try:
@@ -5509,6 +5585,7 @@ TOOL_HANDLERS = {
     "prsm_transfer": handle_prsm_transfer,
     "prsm_local_balance": handle_prsm_local_balance,
     "prsm_index_stats": handle_prsm_index_stats,
+    "prsm_agent_conversations": handle_prsm_agent_conversations,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
