@@ -1121,6 +1121,36 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_transfer",
+        description=(
+            "Send FTNS to another wallet via signed gossip-"
+            "broadcast transfer. Backed by POST /ledger/transfer. "
+            "Local-side validates positive + finite amount; server "
+            "rejects NaN/Infinity (sprint 199). Returns tx_id + "
+            "from/to + amount + timestamp on success. Use "
+            "prsm_balance_check first to verify sufficient balance."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "to_wallet": {
+                    "type": "string",
+                    "description": "Destination wallet ID.",
+                    "minLength": 1,
+                },
+                "amount": {
+                    "type": "number",
+                    "description": (
+                        "Amount of FTNS to transfer. Must be "
+                        "positive + finite."
+                    ),
+                    "exclusiveMinimum": 0,
+                },
+            },
+            "required": ["to_wallet", "amount"],
+        },
+    ),
+    Tool(
         name="prsm_faucet",
         description=(
             "Request testnet FTNS from the node faucet. Backed by "
@@ -4354,6 +4384,50 @@ async def handle_prsm_status_stream(
     return "\n".join(lines)
 
 
+async def handle_prsm_transfer(arguments: Dict[str, Any]) -> str:
+    """Sprint 224 — send FTNS to another wallet (signed +
+    gossip-broadcast). Endpoint: POST /ledger/transfer."""
+    import math as _math
+    to_wallet = (arguments.get("to_wallet") or "").strip()
+    if not to_wallet:
+        return "Missing required 'to_wallet'."
+    if "amount" not in arguments or arguments["amount"] is None:
+        return "Missing required 'amount'."
+    try:
+        amount = float(arguments["amount"])
+    except (TypeError, ValueError):
+        return (
+            f"amount must be a finite positive number; "
+            f"got {arguments['amount']!r}."
+        )
+    if not _math.isfinite(amount) or amount <= 0:
+        return f"amount must be a finite positive number; got {amount}."
+    # /ledger/transfer takes query-params per the handler signature.
+    path = (
+        f"/ledger/transfer?to_wallet={to_wallet}&amount={amount}"
+    )
+    try:
+        result = await _call_node_api("POST", path)
+    except Exception as e:
+        return (
+            f"prsm_transfer failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "tx_id" not in result:
+        detail = result.get("detail", "unknown error")
+        if "insufficient" in detail.lower():
+            return f"Transfer refused: {detail}"
+        return f"Transfer refused: {detail}"
+    return (
+        f"Transfer broadcast.\n"
+        f"  tx_id:     {result.get('tx_id', '?')}\n"
+        f"  from:      {result.get('from', '?')}\n"
+        f"  to:        {result.get('to', '?')}\n"
+        f"  amount:    {result.get('amount', '?')} FTNS\n"
+        f"  timestamp: {result.get('timestamp', '?')}"
+    )
+
+
 async def handle_prsm_faucet(arguments: Dict[str, Any]) -> str:
     """Sprint 223 — request testnet FTNS from /ftns/faucet.
 
@@ -5357,6 +5431,7 @@ TOOL_HANDLERS = {
     "prsm_agent_admin": handle_prsm_agent_admin,
     "prsm_bridge": handle_prsm_bridge,
     "prsm_faucet": handle_prsm_faucet,
+    "prsm_transfer": handle_prsm_transfer,
     "prsm_settler_batches": handle_prsm_settler_batches,
     "prsm_agent_spending": handle_prsm_agent_spending,
     "prsm_royalty_claim": handle_prsm_royalty_claim,
