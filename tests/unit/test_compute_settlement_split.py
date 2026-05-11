@@ -417,6 +417,7 @@ class _FakeParticipant:
     shard_cid: str
     source_agent_pubkey: bytes
     creator_id: str
+    pcu_consumed: float = 0.0  # Sprint 239 — threaded through api.py
 
 
 class _FakeOrchestrator:

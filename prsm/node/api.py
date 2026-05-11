@@ -1988,14 +1988,19 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "contributing_shards": list(qo_result.contributing_shards),
                     "response": response_text,
                     # §4 step 6 settlement attribution. List of
-                    # {shard_cid, source_agent_pubkey_hex, creator_id}
-                    # — settlement layer below builds the escrow
-                    # split from this.
+                    # {shard_cid, source_agent_pubkey_hex, creator_id,
+                    #  pcu_consumed} — settlement layer below
+                    # builds the escrow split from this. Sprint 239
+                    # added pcu_consumed: pre-fix the field was on
+                    # ParticipantAttribution but stripped here, so
+                    # compute_split_amounts always saw zero and fell
+                    # back to uniform.
                     "participants": [
                         {
                             "shard_cid": pa.shard_cid,
                             "source_agent_pubkey_hex": pa.source_agent_pubkey.hex(),
                             "creator_id": pa.creator_id,
+                            "pcu_consumed": pa.pcu_consumed,
                         }
                         for pa in qo_result.participants
                     ],
