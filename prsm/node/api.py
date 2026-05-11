@@ -6737,6 +6737,24 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             }
         return node.compute_provider.get_stats()
 
+    # Sprint 241 — surface the node's own Ed25519 public key so
+    # end-users can verify signed InferenceReceipts. Returns
+    # node_id + public_key_b64 for cross-node verification flows.
+    @app.get("/node/identity/pubkey", tags=["identity"])
+    async def get_node_pubkey() -> Dict[str, Any]:
+        """Return this node's Ed25519 public key (base64) for
+        receipt verification."""
+        ident = getattr(node, "identity", None)
+        if ident is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Node identity not initialized.",
+            )
+        return {
+            "node_id": ident.node_id,
+            "public_key_b64": ident.public_key_b64,
+        }
+
     # Sprint 235 — surface the inference executor's registered
     # model_ids so end-users running prsm_inference can discover
     # what's available without reading the tool description's

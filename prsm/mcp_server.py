@@ -1243,6 +1243,51 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_pubkey",
+        description=(
+            "Render the running node's Ed25519 public key for "
+            "receipt verification. Backed by GET /node/identity/"
+            "pubkey. Returns node_id + public_key_b64. Pair with "
+            "prsm_verify_receipt when the receipt's settler_node_"
+            "id matches this node; otherwise query the actual "
+            "settler's /node/identity/pubkey directly."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="prsm_verify_receipt",
+        description=(
+            "Verify the Ed25519 signature on an InferenceReceipt. "
+            "Caller supplies the receipt as a dict (the shape /"
+            "compute/inference returns) plus an optional "
+            "public_key_b64. When public_key_b64 is omitted, the "
+            "tool fetches /node/identity/pubkey from the running "
+            "node — useful when the running node IS the settler. "
+            "Returns SIGNATURE VALID + readable receipt fields on "
+            "success, or a structured failure diagnostic."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "receipt": {
+                    "type": "object",
+                    "description": (
+                        "Full InferenceReceipt dict (e.g. the "
+                        "`receipt` field returned by prsm_inference)."
+                    ),
+                },
+                "public_key_b64": {
+                    "type": "string",
+                    "description": (
+                        "Optional base64-encoded Ed25519 pubkey. "
+                        "Omit to fetch from the running node."
+                    ),
+                },
+            },
+            "required": ["receipt"],
+        },
+    ),
+    Tool(
         name="prsm_models",
         description=(
             "List inference model_ids the node's executor will "
@@ -4942,6 +4987,99 @@ async def handle_prsm_forge_quote(arguments: Dict[str, Any]) -> str:
     )
 
 
+async def handle_prsm_pubkey(arguments: Dict[str, Any]) -> str:
+    """Sprint 241 — render GET /node/identity/pubkey."""
+    try:
+        result = await _call_node_api("GET", "/node/identity/pubkey")
+    except Exception as e:
+        return (
+            f"prsm_pubkey failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "public_key_b64" not in result:
+        return f"Pubkey lookup refused: {result.get('detail', '?')}"
+    return (
+        f"PRSM Node Pubkey:\n"
+        f"  node_id:        {result.get('node_id', '?')}\n"
+        f"  public_key_b64: {result.get('public_key_b64', '?')}"
+    )
+
+
+async def handle_prsm_verify_receipt(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 241 — verify an InferenceReceipt's Ed25519
+    signature. Caller passes the receipt as a dict (the same
+    shape /compute/inference returns). public_key_b64 may be
+    supplied directly OR fetched from /node/identity/pubkey when
+    the running node IS the settler."""
+    receipt = arguments.get("receipt")
+    if not isinstance(receipt, dict):
+        return "Missing required 'receipt' (must be a dict)."
+
+    # Determine pubkey: supplied → use that. Otherwise fetch from
+    # /node/identity/pubkey and compare node_id to receipt
+    # settler_node_id (sanity check).
+    pubkey_b64 = arguments.get("public_key_b64")
+    if not pubkey_b64:
+        try:
+            node_pub = await _call_node_api(
+                "GET", "/node/identity/pubkey",
+            )
+        except Exception as e:
+            return (
+                f"prsm_verify_receipt failed: cannot fetch pubkey: "
+                f"{e}\nSupply public_key_b64 explicitly OR ensure "
+                f"the running node is the settler."
+            )
+        if "public_key_b64" not in node_pub:
+            return (
+                f"Pubkey fetch refused: "
+                f"{node_pub.get('detail', '?')}"
+            )
+        if (
+            node_pub.get("node_id") != receipt.get("settler_node_id")
+        ):
+            return (
+                f"settler_node_id mismatch: receipt settler="
+                f"{receipt.get('settler_node_id', '?')!r} but "
+                f"running node="
+                f"{node_pub.get('node_id', '?')!r}.\n"
+                f"Supply public_key_b64 of the actual settler."
+            )
+        pubkey_b64 = node_pub["public_key_b64"]
+
+    try:
+        from prsm.compute.inference.models import InferenceReceipt
+        from prsm.compute.inference.receipt import verify_receipt
+        rec = InferenceReceipt.from_dict(receipt)
+    except Exception as e:
+        return f"Receipt parse failed: {e}"
+
+    try:
+        ok = verify_receipt(rec, public_key_b64=pubkey_b64)
+    except Exception as e:  # noqa: BLE001
+        return f"Verification error: {e}"
+
+    if not ok:
+        return (
+            f"SIGNATURE INVALID for receipt job_id="
+            f"{rec.job_id!r}.\nReceipt fields may have been "
+            f"tampered, or the pubkey does not match the settler."
+        )
+    return (
+        f"SIGNATURE VALID for receipt:\n"
+        f"  job_id:           {rec.job_id}\n"
+        f"  request_id:       {rec.request_id}\n"
+        f"  model_id:         {rec.model_id}\n"
+        f"  privacy_tier:     {rec.privacy_tier}\n"
+        f"  content_tier:     {rec.content_tier}\n"
+        f"  tee_type:         {rec.tee_type}\n"
+        f"  cost_ftns:        {rec.cost_ftns}\n"
+        f"  settler_node_id:  {rec.settler_node_id}"
+    )
+
+
 async def handle_prsm_models(arguments: Dict[str, Any]) -> str:
     """Sprint 235 — list inference model_ids the executor accepts."""
     try:
@@ -6405,6 +6543,8 @@ TOOL_HANDLERS = {
     "prsm_node_resources": handle_prsm_node_resources,
     "prsm_ledger_sync": handle_prsm_ledger_sync,
     "prsm_models": handle_prsm_models,
+    "prsm_pubkey": handle_prsm_pubkey,
+    "prsm_verify_receipt": handle_prsm_verify_receipt,
     "prsm_forge_quote": handle_prsm_forge_quote,
     "prsm_inference_quote": handle_prsm_inference_quote,
     "prsm_settler_admin": handle_prsm_settler_admin,
