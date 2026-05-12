@@ -2571,6 +2571,31 @@ class PRSMNode:
             self._formal_invariant_checker = None
             self._formal_invariant_addresses = {}
 
+        # Sprint 306 — $CORP authorization capability store
+        # (Vision §7 Enterprise Confidentiality Mode layer 2).
+        # Filesystem-persisted via PRSM_CORP_CAPABILITY_DIR.
+        # NOT the security gate (encryption is, sprint 304;
+        # TEE policy is, sprint 305) — this is the ergonomics
+        # + accounting + audit layer.
+        try:
+            from prsm.enterprise.corp_capability import (
+                CorpCapabilityStore,
+            )
+            self._corp_capability_store = (
+                CorpCapabilityStore.from_env()
+            )
+            logger.info(
+                "$CORP capability store wired "
+                "(issuers=%d)",
+                len(self._corp_capability_store.list_issuers()),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "CorpCapabilityStore construction failed: "
+                "%s — /admin/corp/* will return 503.", exc,
+            )
+            self._corp_capability_store = None
+
         # Sprint 303 — UUPS upgrade orchestrator (Vision §14
         # item 7). Filesystem-persisted via
         # PRSM_UPGRADE_ORCHESTRATOR_DIR. All upgrade +

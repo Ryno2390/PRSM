@@ -1816,6 +1816,49 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_corp_capability",
+        description=(
+            "Vision §7 Enterprise Confidentiality Mode "
+            "layer 2: soulbound $CORP authorization "
+            "capability. Single tool with `action` "
+            "selector: keypair_gen | register_issuer | "
+            "list_issuers | redeem | get_ledger | "
+            "get_consumed. Capabilities are dual-signed "
+            "(issuer Ed25519 grant + subject Ed25519 "
+            "redemption-time signature), making them "
+            "soulbound in practice — a leaked capability "
+            "without the subject's device key is useless. "
+            "Not the security gate (encryption is, sprint "
+            "304; TEE policy is, sprint 305/305a). This is "
+            "the ergonomics + accounting + audit layer. "
+            "keypair_gen runs fully offline. Backed by "
+            "/admin/corp/*."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "keypair_gen", "register_issuer",
+                        "list_issuers", "redeem",
+                        "get_ledger", "get_consumed",
+                    ],
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["issuer", "subject"],
+                },
+                "issuer_id": {"type": "string"},
+                "signing_pubkey_b64": {"type": "string"},
+                "capability_id": {"type": "string"},
+                "capability": {"type": "object"},
+                "request": {"type": "object"},
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_tee_policy",
         description=(
             "Vision §7 Enterprise Confidentiality Mode "
@@ -7880,6 +7923,197 @@ _TEE_POLICY_ACTIONS = {
     "evaluate", "node_status", "list_tiers",
 }
 
+
+_CORP_CAPABILITY_ACTIONS = {
+    "keypair_gen", "register_issuer", "list_issuers",
+    "redeem", "get_ledger", "get_consumed",
+}
+
+
+async def handle_prsm_corp_capability(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 306 — $CORP authorization capability MCP
+    wrapper (Vision §7 Enterprise Confidentiality Mode
+    layer 2)."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_CORP_CAPABILITY_ACTIONS)})."
+        )
+    if action not in _CORP_CAPABILITY_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_CORP_CAPABILITY_ACTIONS)}; got "
+            f"{action!r}."
+        )
+
+    if action == "keypair_gen":
+        from prsm.enterprise.corp_capability import (
+            generate_issuer_keypair,
+            generate_subject_keypair,
+        )
+        kind = (arguments.get("kind") or "issuer").lower()
+        if kind == "subject":
+            priv, pub = generate_subject_keypair()
+            label = "Subject (Device-Bound)"
+        else:
+            priv, pub = generate_issuer_keypair()
+            label = "Issuer (Corporate Signer)"
+        return (
+            f"$CORP {label} Keypair (Ed25519)\n\n"
+            f"  pubkey_b64:   {pub}\n"
+            f"  privkey_b64:  {priv}\n\n"
+            "Issuer privkeys live in the enterprise "
+            "HSM / SSO signer. Subject privkeys are "
+            "device-bound (Secure Enclave, TPM, "
+            "hardware security key). NEVER co-locate the "
+            "two on the same host."
+        )
+
+    if action == "register_issuer":
+        issuer_id = (arguments.get("issuer_id") or "").strip()
+        pub = (
+            arguments.get("signing_pubkey_b64") or ""
+        ).strip()
+        if not issuer_id or not pub:
+            return (
+                "register_issuer requires 'issuer_id' + "
+                "'signing_pubkey_b64'."
+            )
+        try:
+            r = await _call_node_api(
+                "POST", "/admin/corp/issuer",
+                {
+                    "issuer_id": issuer_id,
+                    "signing_pubkey_b64": pub,
+                },
+            )
+        except Exception as e:
+            return f"prsm_corp_capability register_issuer failed: {e}"
+        if "issuer_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"register_issuer refused: {detail}"
+        return (
+            f"Registered $CORP issuer\n"
+            f"  issuer_id:    {r.get('issuer_id')}\n"
+            f"  pubkey_b64:   {r.get('signing_pubkey_b64')}"
+        )
+
+    if action == "list_issuers":
+        try:
+            r = await _call_node_api(
+                "GET", "/admin/corp/issuer",
+            )
+        except Exception as e:
+            return f"prsm_corp_capability list_issuers failed: {e}"
+        if "issuers" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"list_issuers refused: {detail}"
+        issuers = r.get("issuers") or []
+        if not issuers:
+            return "No $CORP issuers registered."
+        lines = [
+            f"PRSM $CORP Issuers — {len(issuers)} registered:",
+            "",
+        ]
+        for i in issuers:
+            pub = i.get("signing_pubkey_b64", "")
+            lines.append(
+                f"  · {i.get('issuer_id', '?'):<20} "
+                f"{pub[:16]}..."
+            )
+        return "\n".join(lines)
+
+    if action == "redeem":
+        cap = arguments.get("capability")
+        req = arguments.get("request")
+        if not isinstance(cap, dict) or not isinstance(
+            req, dict,
+        ):
+            return (
+                "redeem requires 'capability' + 'request' "
+                "objects (both dicts)."
+            )
+        try:
+            r = await _call_node_api(
+                "POST", "/admin/corp/capability/redeem",
+                {"capability": cap, "request": req},
+            )
+        except Exception as e:
+            return f"prsm_corp_capability redeem failed: {e}"
+        if "status" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"redeem refused: {detail}"
+        sym = {
+            "pass": "✅",
+            "fail": "⚠ FAIL",
+        }.get(r.get("status"), "?")
+        return (
+            f"{sym} Redemption — "
+            f"{r.get('status', '?').upper()}\n\n"
+            f"  capability_id:   "
+            f"{r.get('capability_id', '?')}\n"
+            f"  consumed_units:  "
+            f"{r.get('units_consumed_this_request', 0)}\n"
+            f"  remaining_quota: "
+            f"{r.get('remaining_quota', 0)}\n"
+            f"  diagnostic:      "
+            f"{r.get('diagnostic') or '(none)'}"
+        )
+
+    if action == "get_ledger":
+        cap_id = (
+            arguments.get("capability_id") or ""
+        ).strip()
+        if not cap_id:
+            return "get_ledger requires 'capability_id'."
+        try:
+            r = await _call_node_api(
+                "GET",
+                f"/admin/corp/capability/{cap_id}/ledger",
+            )
+        except Exception as e:
+            return f"prsm_corp_capability get_ledger failed: {e}"
+        if "entries" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"get_ledger refused: {detail}"
+        entries = r.get("entries") or []
+        lines = [
+            f"$CORP Audit Ledger — {cap_id} "
+            f"({len(entries)} entries):",
+            "",
+        ]
+        for e in entries:
+            lines.append(
+                f"  · ts={e.get('timestamp', '?')}  "
+                f"{e.get('action', '?'):<22}  "
+                f"units={e.get('units_requested', '?')}  "
+                f"nonce={(e.get('nonce') or '')[:12]}  "
+                f"subject={e.get('subject_id', '?')}"
+            )
+        return "\n".join(lines)
+
+    # get_consumed
+    cap_id = (arguments.get("capability_id") or "").strip()
+    if not cap_id:
+        return "get_consumed requires 'capability_id'."
+    try:
+        r = await _call_node_api(
+            "GET",
+            f"/admin/corp/capability/{cap_id}/consumed",
+        )
+    except Exception as e:
+        return f"prsm_corp_capability get_consumed failed: {e}"
+    if "consumed" not in r:
+        detail = r.get("detail", "unknown error")
+        return f"get_consumed refused: {detail}"
+    return (
+        f"$CORP capability {cap_id}\n"
+        f"  consumed units: {r.get('consumed', 0):,}"
+    )
+
 _TEE_TIER_VALUES = (
     "none",
     "software",
@@ -12026,6 +12260,7 @@ TOOL_HANDLERS = {
     "prsm_upgrade": handle_prsm_upgrade,
     "prsm_enterprise_recipient": handle_prsm_enterprise_recipient,
     "prsm_tee_policy": handle_prsm_tee_policy,
+    "prsm_corp_capability": handle_prsm_corp_capability,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

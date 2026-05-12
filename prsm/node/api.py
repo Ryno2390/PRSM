@@ -7777,6 +7777,113 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    # ── Sprint 306 — $CORP authorization capability ───────
+    # Vision §7 Enterprise Confidentiality Mode layer 2:
+    # ergonomics + accounting + audit. Soulbound capability
+    # via dual-signature (issuer + subject). NOT the security
+    # gate — that's the encryption (304) + TEE policy (305).
+    # Sprint 306a wires header-driven redemption into the
+    # /compute/* dispatch path.
+
+    class _CorpRegisterIssuerRequest(BaseModel):
+        issuer_id: str
+        signing_pubkey_b64: str
+
+    class _CorpRedeemRequest(BaseModel):
+        capability: Dict[str, Any]
+        request: Dict[str, Any]
+
+    def _require_corp_store():
+        s = getattr(node, "_corp_capability_store", None)
+        if s is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "$CORP capability store not initialized."
+                ),
+            )
+        return s
+
+    @app.post("/admin/corp/issuer", tags=["admin"])
+    async def corp_register_issuer(
+        body: _CorpRegisterIssuerRequest,
+    ) -> Dict[str, Any]:
+        from prsm.enterprise.corp_capability import (
+            CorpIssuer,
+        )
+        store = _require_corp_store()
+        try:
+            store.register_issuer(CorpIssuer(
+                issuer_id=body.issuer_id,
+                signing_pubkey_b64=body.signing_pubkey_b64,
+            ))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422, detail=str(e),
+            )
+        return {
+            "issuer_id": body.issuer_id,
+            "signing_pubkey_b64": body.signing_pubkey_b64,
+        }
+
+    @app.get("/admin/corp/issuer", tags=["admin"])
+    async def corp_list_issuers() -> Dict[str, Any]:
+        store = _require_corp_store()
+        return {
+            "issuers": [
+                i.to_dict() for i in store.list_issuers()
+            ],
+        }
+
+    @app.post(
+        "/admin/corp/capability/redeem", tags=["admin"],
+    )
+    async def corp_redeem(
+        body: _CorpRedeemRequest,
+    ) -> Dict[str, Any]:
+        from prsm.enterprise.corp_capability import (
+            CorpCapability, RedemptionRequest,
+        )
+        store = _require_corp_store()
+        try:
+            cap = CorpCapability.from_dict(body.capability)
+            req = RedemptionRequest.from_dict(body.request)
+        except (KeyError, ValueError) as e:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"malformed capability or request: {e}"
+                ),
+            )
+        result = store.redeem(cap, req)
+        return result.to_dict()
+
+    @app.get(
+        "/admin/corp/capability/{capability_id}/ledger",
+        tags=["admin"],
+    )
+    async def corp_get_ledger(
+        capability_id: str,
+    ) -> Dict[str, Any]:
+        store = _require_corp_store()
+        return {
+            "capability_id": capability_id,
+            "entries": store.get_ledger(capability_id),
+        }
+
+    @app.get(
+        "/admin/corp/capability/{capability_id}/consumed",
+        tags=["admin"],
+    )
+    async def corp_get_consumed(
+        capability_id: str,
+    ) -> Dict[str, Any]:
+        store = _require_corp_store()
+        return {
+            "capability_id": capability_id,
+            "consumed": store.get_consumed(capability_id),
+        }
+
     # ── Sprint 305 — TEE-only execution policy ────────────
     # Vision §7 Enterprise Confidentiality Mode layer 3.
     # Declarative attestation-quality gate. Evaluation is
