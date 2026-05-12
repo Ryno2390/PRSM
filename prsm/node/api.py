@@ -7195,6 +7195,80 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return entry.to_dict()
 
+    # ── Sprint 298 — emergency pause composer surface ─────
+    # Vision §14 smart-contract exploit-response engineering.
+    # PRSM never executes pause directly — Foundation Safe
+    # holds the privilege. This endpoint composes the
+    # multi-sig-uploadable tx payload + surfaces per-contract
+    # paused state for operator monitoring.
+
+    class _EmergencyPauseComposeRequest(BaseModel):
+        action: str  # "pause" or "unpause"
+        contract_name: str
+
+    @app.get(
+        "/admin/emergency-pause/status", tags=["admin"],
+    )
+    async def get_emergency_pause_status() -> Dict[str, Any]:
+        pause_client = getattr(
+            node, "_emergency_pause_client", None,
+        )
+        if pause_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Emergency pause client not initialized."
+                ),
+            )
+        statuses = pause_client.status_all()
+        return {
+            "chain_id": getattr(
+                pause_client, "_chain_id", None,
+            ),
+            "contracts": {
+                name: status.to_dict()
+                for name, status in statuses.items()
+            },
+        }
+
+    @app.post(
+        "/admin/emergency-pause/compose", tags=["admin"],
+    )
+    async def compose_emergency_pause(
+        body: _EmergencyPauseComposeRequest,
+    ) -> Dict[str, Any]:
+        pause_client = getattr(
+            node, "_emergency_pause_client", None,
+        )
+        if pause_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Emergency pause client not initialized."
+                ),
+            )
+        action = (body.action or "").strip().lower()
+        if action not in ("pause", "unpause"):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"action must be 'pause' or 'unpause', "
+                    f"got {action!r}"
+                ),
+            )
+        try:
+            if action == "pause":
+                tx = pause_client.compose_pause_tx(
+                    body.contract_name,
+                )
+            else:
+                tx = pause_client.compose_unpause_tx(
+                    body.contract_name,
+                )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return tx
+
     # ── Sprint 292 — privacy-claim verification ───────────
     # Public API for the §7 promise: lets callers verify
     # signature + DP-noise + hardware-attestation quality

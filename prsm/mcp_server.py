@@ -1716,6 +1716,51 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_emergency_pause",
+        description=(
+            "Vision §14 smart-contract exploit response. "
+            "Single tool with `action` selector: status | "
+            "compose_pause | compose_unpause. Status returns "
+            "per-contract paused state for all Foundation-"
+            "Safe-owned OZ Pausable contracts (FTNS token, "
+            "RoyaltyDistributor, EscrowPool, StakeBond, "
+            "EmissionController, etc.). Compose returns a "
+            "Safe-uploadable tx payload for multi-sig "
+            "signing — PRSM never executes pause directly. "
+            "Purpose: SAVE OPERATORS TIME constructing pause "
+            "calldata by hand during an active incident. "
+            "Backed by /admin/emergency-pause/*."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "status", "compose_pause",
+                        "compose_unpause",
+                    ],
+                },
+                "contract_name": {
+                    "type": "string",
+                    "description": (
+                        "Contract registry name "
+                        "(ftns_token / royalty_distributor "
+                        "/ escrow_pool / stake_bond / "
+                        "settlement_registry / "
+                        "signature_verifier / "
+                        "emission_controller / "
+                        "compensation_distributor / "
+                        "storage_slashing / "
+                        "key_distribution). Required for "
+                        "compose_pause + compose_unpause."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_verify_inference_privacy",
         description=(
             "Verify an InferenceReceipt's privacy claims "
@@ -7307,6 +7352,142 @@ async def handle_prsm_waas_wallet(
     )
 
 
+_EMERGENCY_PAUSE_ACTIONS = {
+    "status", "compose_pause", "compose_unpause",
+}
+
+
+async def handle_prsm_emergency_pause(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 298 — emergency pause composer (Vision §14
+    smart-contract exploit response).
+
+    action selector:
+      status         — bulk paused-state query per contract
+      compose_pause  — Safe-uploadable pause tx payload
+      compose_unpause — Safe-uploadable unpause tx payload
+
+    The composer outputs calldata for the Foundation Safe
+    2-of-3 hardware multisig — PRSM never executes pause
+    directly. This MCP surface exists to SAVE OPERATORS TIME
+    constructing pause calldata by hand during an active
+    incident; speed matters when an exploit is ongoing."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_EMERGENCY_PAUSE_ACTIONS)})."
+        )
+    if action not in _EMERGENCY_PAUSE_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_EMERGENCY_PAUSE_ACTIONS)}; "
+            f"got {action!r}."
+        )
+
+    if action == "status":
+        try:
+            result = await _call_node_api(
+                "GET", "/admin/emergency-pause/status",
+            )
+        except Exception as e:
+            return (
+                f"prsm_emergency_pause failed: {e}\n"
+                f"Is your PRSM node running?"
+            )
+        if "contracts" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Emergency pause client not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"status refused: {detail}"
+        contracts = result.get("contracts") or {}
+        chain_id = result.get("chain_id", "?")
+        lines = [
+            f"PRSM Emergency Pause — chain_id={chain_id}",
+            "",
+        ]
+        for name, status in sorted(contracts.items()):
+            paused = status.get("paused")
+            commissioned = status.get("commissioned")
+            err = status.get("error")
+            if not commissioned:
+                marker = "·  uncommissioned"
+            elif err:
+                marker = f"⚠ RPC error: {err[:40]}"
+            elif paused is True:
+                marker = "⚠ PAUSED"
+            elif paused is False:
+                marker = "✅ active"
+            else:
+                marker = "? unknown"
+            addr = status.get("address") or "(unset)"
+            short_addr = (
+                addr[:10] + "…" + addr[-4:]
+                if len(addr) > 14 else addr
+            )
+            lines.append(
+                f"  {marker:30s}  {name:<28}  {short_addr}"
+            )
+        return "\n".join(lines)
+
+    # compose_pause / compose_unpause
+    contract_name = (
+        arguments.get("contract_name") or ""
+    ).strip()
+    if not contract_name:
+        return f"{action} requires 'contract_name'."
+    pause_action = (
+        "pause" if action == "compose_pause" else "unpause"
+    )
+    try:
+        result = await _call_node_api(
+            "POST", "/admin/emergency-pause/compose",
+            {
+                "action": pause_action,
+                "contract_name": contract_name,
+            },
+        )
+    except Exception as e:
+        return (
+            f"prsm_emergency_pause failed: {e}\n"
+            f"Is your PRSM node running?"
+        )
+    if "data" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Emergency pause client not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"compose refused: {detail}"
+
+    explorer = result.get("explorer_url") or "(no explorer)"
+    lines = [
+        f"⚠ EMERGENCY {pause_action.upper()} "
+        f"COMPOSED — Foundation Safe upload required ⚠",
+        "",
+        f"  WARNING: {result.get('warning', '')}",
+        "",
+        "  Transaction payload (paste into Safe UI):",
+        f"    to:        {result.get('to', '?')}",
+        f"    data:      {result.get('data', '?')}",
+        f"    value:     {result.get('value', '0')}",
+        f"    chain_id:  {result.get('chain_id', '?')}",
+        "",
+        f"  Target:      {result.get('contract_name', '?')}",
+        f"  Description: {result.get('description', '?')}",
+        f"  Verify on:   {explorer}",
+        "",
+        f"  Instructions:",
+        f"    {result.get('instructions', '')}",
+    ]
+    return "\n".join(lines)
+
+
 async def handle_prsm_verify_inference_privacy(
     arguments: Dict[str, Any],
 ) -> str:
@@ -10122,6 +10303,7 @@ TOOL_HANDLERS = {
     "prsm_creator_stake": handle_prsm_creator_stake,
     "prsm_content_fingerprint": handle_prsm_content_fingerprint,
     "prsm_verify_inference_privacy": handle_prsm_verify_inference_privacy,
+    "prsm_emergency_pause": handle_prsm_emergency_pause,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

@@ -2327,6 +2327,29 @@ class PRSMNode:
             )
             self._kyc_webhook_replay_ring = None
 
+        # Sprint 298 — emergency pause composer (Vision §14
+        # smart-contract exploit response). Reads pausable-
+        # contract addresses from prsm.config.networks per
+        # PRSM_NETWORK env; backend wires to BASE_RPC_URL.
+        # Composer-only: never executes pause; produces tx
+        # payload for Foundation Safe multi-sig upload.
+        try:
+            from prsm.economy.web3.emergency_pause_client import (
+                EmergencyPauseClient,
+            )
+            self._emergency_pause_client = (
+                EmergencyPauseClient.from_env()
+            )
+            logger.info("EmergencyPauseClient wired")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "EmergencyPauseClient construction failed: "
+                "%s — /admin/emergency-pause/* will return "
+                "503.",
+                exc,
+            )
+            self._emergency_pause_client = None
+
         # Sprint 286 — fiat-surface health check at startup.
         # Loud-but-non-blocking: ERROR findings surface in the
         # log so operators see misconfigs (e.g., KYC
