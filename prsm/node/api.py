@@ -1862,6 +1862,108 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     ),
                 )
 
+            # Sprint 284 — replay defenses (only after
+            # signature verifies).
+            import time as _time
+            from prsm.economy.web3.webhook_replay_defense import (
+                is_timestamp_fresh,
+            )
+
+            # 1. Persona timestamp window check. Pull the
+            # signed timestamp out of the header and reject
+            # if outside tolerance.
+            if _vendor_lower == "persona":
+                persona_sig_header = (
+                    request.headers.get("persona-signature")
+                    or request.headers.get("Persona-Signature")
+                    or ""
+                )
+                ts_value = ""
+                for piece in persona_sig_header.split(","):
+                    piece = piece.strip()
+                    if piece.startswith("t="):
+                        ts_value = piece[2:].strip()
+                        break
+                # Tunable tolerance via env.
+                try:
+                    tolerance_sec = int(os.environ.get(
+                        "PRSM_KYC_WEBHOOK_TIMESTAMP_"
+                        "TOLERANCE_SEC", "300",
+                    ))
+                except (ValueError, TypeError):
+                    tolerance_sec = 300
+                fresh_ok, fresh_reason = is_timestamp_fresh(
+                    ts_str=ts_value,
+                    current_time=_time.time(),
+                    tolerance_sec=tolerance_sec,
+                )
+                if not fresh_ok:
+                    logger.warning(
+                        "KYC webhook timestamp rejected "
+                        "(vendor=%s, reason=%s, client=%s)",
+                        _vendor_lower, fresh_reason,
+                        request.client.host if request.client
+                        else "?",
+                    )
+                    raise HTTPException(
+                        status_code=401,
+                        detail=(
+                            "Webhook timestamp outside "
+                            "freshness window."
+                        ),
+                    )
+
+            # 2. Signature-hash dedup. Vendor-agnostic. The
+            # signature value itself is the perfect replay
+            # token (cryptographically unique per body+ts+
+            # secret). Reject duplicates.
+            replay_ring = getattr(
+                node, "_kyc_webhook_replay_ring", None,
+            )
+            if replay_ring is not None:
+                # Persona: use the v1=<hex> portion as the
+                # replay token (varies per body+ts).
+                # Onfido: signature header IS the hex hmac.
+                if _vendor_lower == "persona":
+                    replay_token = ""
+                    for piece in persona_sig_header.split(","):
+                        piece = piece.strip()
+                        if piece.startswith("v1="):
+                            replay_token = piece[3:].strip()
+                            break
+                else:
+                    replay_token = (
+                        request.headers.get(
+                            "x-sha2-signature",
+                        )
+                        or request.headers.get(
+                            "X-SHA2-Signature",
+                        )
+                        or ""
+                    )
+                if replay_token:
+                    fresh_record = replay_ring.record(
+                        replay_token,
+                    )
+                    if not fresh_record:
+                        logger.warning(
+                            "KYC webhook replay rejected "
+                            "(vendor=%s, client=%s, "
+                            "token=%s…)",
+                            _vendor_lower,
+                            request.client.host
+                            if request.client else "?",
+                            replay_token[:16],
+                        )
+                        raise HTTPException(
+                            status_code=409,
+                            detail=(
+                                "Webhook replay detected: "
+                                "this signature was already "
+                                "processed."
+                            ),
+                        )
+
         # Parse body AFTER signature verification (defense in
         # depth — never trust unsigned input).
         try:

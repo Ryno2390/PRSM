@@ -55,7 +55,13 @@ def _seed_alice(kyc):
     kyc.initiate(user_id="alice", email="a@x.io", level="basic")
 
 
-def _persona_header(body_bytes, secret, ts="1700000000"):
+def _persona_header(body_bytes, secret, ts=None):
+    # Sprint 284 — default to current unix ts so freshness
+    # window check passes. Callers exercising the stale-ts
+    # case must supply ts explicitly.
+    if ts is None:
+        import time as _time
+        ts = str(int(_time.time()))
     payload = f"{ts}.".encode("utf-8") + body_bytes
     sig = hmac.new(
         secret.encode("utf-8"), payload, hashlib.sha256,

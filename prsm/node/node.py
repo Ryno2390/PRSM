@@ -2307,6 +2307,26 @@ class PRSMNode:
             )
             self._fiat_compliance_ring = None
 
+        # Sprint 284 — webhook replay defense ring. Bounded
+        # in-memory set of recently-seen signatures; second
+        # occurrence of the same signature → 409. Survives
+        # process lifetime only (intentionally — restart
+        # = fresh replay window, matching the timestamp
+        # tolerance window).
+        try:
+            from prsm.economy.web3.webhook_replay_defense import (
+                WebhookReplayRing,
+            )
+            self._kyc_webhook_replay_ring = WebhookReplayRing()
+            logger.info("KYC webhook replay ring wired")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "WebhookReplayRing construction failed: %s — "
+                "replay defense disabled.",
+                exc,
+            )
+            self._kyc_webhook_replay_ring = None
+
         # Sprint 249 — RoyaltyDispatchRing for the on-chain
         # content-royalty audit trail (sprint 248). Opt-in
         # filesystem persistence via PRSM_ROYALTY_DISPATCH_LOG_DIR.
