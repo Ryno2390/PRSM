@@ -1926,6 +1926,8 @@ TOOLS = [
                     "enum": [
                         "keypair_gen", "encrypt", "decrypt",
                         "get_manifest",
+                        "encrypt_threshold", "unseal_share",
+                        "combine_decrypt",
                     ],
                 },
                 "plaintext_b64": {"type": "string"},
@@ -1936,6 +1938,11 @@ TOOLS = [
                 },
                 "payload": {"type": "object"},
                 "cid": {"type": "string"},
+                "threshold": {"type": "integer"},
+                "contributions": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                },
             },
             "required": ["action"],
         },
@@ -7916,6 +7923,8 @@ _UPGRADE_ACTIONS = {
 
 _ENTERPRISE_RECIPIENT_ACTIONS = {
     "keypair_gen", "encrypt", "decrypt", "get_manifest",
+    # Sprint 307 — threshold mode
+    "encrypt_threshold", "unseal_share", "combine_decrypt",
 }
 
 
@@ -8341,6 +8350,128 @@ async def handle_prsm_enterprise_recipient(
         except UnicodeDecodeError:
             return (
                 "Decrypted (binary; base64):\n\n"
+                f"{_b64.b64encode(out).decode()}"
+            )
+
+    # ── Sprint 307 — threshold mode actions ──────────
+    if action == "encrypt_threshold":
+        from prsm.enterprise.recipient_encryption import (
+            EnterpriseRecipient,
+            encrypt_for_threshold,
+        )
+        pt_b64 = arguments.get("plaintext_b64") or ""
+        if not pt_b64:
+            return (
+                "encrypt_threshold requires 'plaintext_b64'."
+            )
+        try:
+            plaintext = _b64.b64decode(pt_b64, validate=True)
+        except Exception as e:
+            return f"plaintext_b64 not valid: {e}"
+        recipients_raw = arguments.get("recipients") or []
+        if not recipients_raw:
+            return (
+                "encrypt_threshold requires non-empty "
+                "'recipients'."
+            )
+        threshold = arguments.get("threshold")
+        if threshold is None:
+            return (
+                "encrypt_threshold requires 'threshold' "
+                "(t in [1, n])."
+            )
+        try:
+            recipients = [
+                EnterpriseRecipient(
+                    identifier=r.get("identifier", ""),
+                    x25519_pubkey_b64=r.get(
+                        "x25519_pubkey_b64", "",
+                    ),
+                )
+                for r in recipients_raw
+            ]
+            payload = encrypt_for_threshold(
+                plaintext, recipients,
+                threshold=int(threshold),
+            )
+        except ValueError as e:
+            return f"encrypt_threshold failed: {e}"
+        return (
+            f"Threshold-encrypted payload "
+            f"(t={threshold}, n={len(recipients)}):\n\n"
+            f"{_json.dumps(payload.to_dict())}\n"
+        )
+
+    if action == "unseal_share":
+        from prsm.enterprise.recipient_encryption import (
+            EncryptedPayload, unseal_share_for_recipient,
+        )
+        priv = arguments.get("privkey_b64") or ""
+        if not priv:
+            return "unseal_share requires 'privkey_b64'."
+        payload_dict = arguments.get("payload")
+        if not isinstance(payload_dict, dict):
+            return (
+                "unseal_share requires 'payload' object."
+            )
+        try:
+            payload = EncryptedPayload.from_dict(
+                payload_dict,
+            )
+            contrib = unseal_share_for_recipient(
+                payload, priv,
+            )
+        except ValueError as e:
+            return f"unseal_share failed: {e}"
+        return (
+            f"Unsealed share:\n\n"
+            f'{{"share_index": {contrib.share_index}, '
+            f'"y_values_b64": '
+            f'"{_b64.b64encode(contrib.share_y_values).decode()}"}}'
+        )
+
+    if action == "combine_decrypt":
+        from prsm.enterprise.recipient_encryption import (
+            EncryptedPayload, ShareContribution,
+            combine_shares_and_decrypt,
+        )
+        payload_dict = arguments.get("payload")
+        if not isinstance(payload_dict, dict):
+            return (
+                "combine_decrypt requires 'payload' object."
+            )
+        contribs_raw = arguments.get("contributions") or []
+        if not contribs_raw:
+            return (
+                "combine_decrypt requires non-empty "
+                "'contributions'."
+            )
+        try:
+            payload = EncryptedPayload.from_dict(
+                payload_dict,
+            )
+            contribs = [
+                ShareContribution(
+                    share_index=int(c["share_index"]),
+                    share_y_values=_b64.b64decode(
+                        c["share_y_values_b64"],
+                    ),
+                )
+                for c in contribs_raw
+            ]
+            out = combine_shares_and_decrypt(
+                payload, contribs,
+            )
+        except (ValueError, KeyError) as e:
+            return f"combine_decrypt failed: {e}"
+        try:
+            return (
+                f"Reconstructed plaintext:\n\n"
+                f"{out.decode('utf-8')}"
+            )
+        except UnicodeDecodeError:
+            return (
+                f"Reconstructed (binary; base64):\n\n"
                 f"{_b64.b64encode(out).decode()}"
             )
 

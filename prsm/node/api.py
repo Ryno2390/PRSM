@@ -160,6 +160,21 @@ class ContentUploadRequest(BaseModel):
             "Enterprise Confidentiality Mode)."
         ),
     )
+    # Sprint 307 — threshold (t-of-n) encryption mode.
+    # When set together with `recipients`, the symmetric
+    # key is Shamir-split: any t of the n recipients must
+    # cooperate to decrypt; t-1 reveal nothing.
+    # Composes onto the same EncryptedPayload shape with
+    # manifest.threshold + per-entry share_index.
+    threshold: Optional[int] = Field(
+        default=None, ge=1, le=255,
+        description=(
+            "Optional t-of-n threshold. Requires "
+            "`recipients` to be set. When provided, the "
+            "upload is encrypted in threshold mode: any t "
+            "of the n recipients must cooperate to decrypt."
+        ),
+    )
 
 
 
@@ -5699,6 +5714,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         upload_text = req.text
         upload_filename = req.filename
         encrypted = False
+        if req.threshold is not None and req.recipients is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "`threshold` requires `recipients` to "
+                    "be set; bare threshold on a plaintext "
+                    "upload is operator confusion"
+                ),
+            )
         if req.recipients is not None:
             if not isinstance(req.recipients, list) or len(req.recipients) == 0:
                 raise HTTPException(
@@ -5712,6 +5736,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             from prsm.enterprise.recipient_encryption import (
                 EnterpriseRecipient,
                 encrypt_for_recipients,
+                encrypt_for_threshold,
             )
             try:
                 recipients = [
@@ -5723,10 +5748,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     )
                     for r in req.recipients
                 ]
-                payload = encrypt_for_recipients(
-                    req.text.encode("utf-8"),
-                    recipients,
-                )
+                if req.threshold is not None:
+                    # Sprint 307 — t-of-n mode
+                    payload = encrypt_for_threshold(
+                        req.text.encode("utf-8"),
+                        recipients,
+                        threshold=req.threshold,
+                    )
+                else:
+                    payload = encrypt_for_recipients(
+                        req.text.encode("utf-8"),
+                        recipients,
+                    )
             except ValueError as e:
                 raise HTTPException(
                     status_code=422,
