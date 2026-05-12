@@ -1816,6 +1816,35 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_federated_train",
+        description=(
+            "Vision §7 capstone follow-on (sprint 308b): "
+            "trigger the worker-side training shim for a "
+            "given (job_id, round_index, dataset_cid). The "
+            "worker runs its training strategy, signs the "
+            "resulting gradient + its TEE attestation under "
+            "its Ed25519 privkey, and returns the signed "
+            "GradientUpdate. The caller then submits the "
+            "returned update to /admin/federated/job/.../"
+            "update via the prsm_federated_learning tool. "
+            "Backed by POST /compute/train on this worker "
+            "node (requires PRSM_FEDERATED_WORKER_PRIVKEY)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string"},
+                "round_index": {"type": "integer"},
+                "dataset_cid": {"type": "string"},
+                "sample_count": {"type": "integer"},
+            },
+            "required": [
+                "job_id", "round_index", "dataset_cid",
+                "sample_count",
+            ],
+        },
+    ),
+    Tool(
         name="prsm_federated_learning",
         description=(
             "Vision §7 Enterprise Confidentiality Mode "
@@ -7999,6 +8028,59 @@ _FEDERATED_ACTIONS = {
 }
 
 
+async def handle_prsm_federated_train(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 308b — worker-side training shim. Triggers
+    /compute/train on this worker; the caller then submits
+    the returned signed update via prsm_federated_learning
+    (action=update — TODO 308c wiring)."""
+    required = (
+        "job_id", "round_index", "dataset_cid",
+        "sample_count",
+    )
+    missing = [
+        f for f in required
+        if arguments.get(f) in (None, "")
+    ]
+    if missing:
+        return (
+            f"prsm_federated_train missing required "
+            f"field(s): {missing}"
+        )
+    body = {
+        "job_id": arguments["job_id"],
+        "round_index": int(arguments["round_index"]),
+        "dataset_cid": arguments["dataset_cid"],
+        "sample_count": int(arguments["sample_count"]),
+    }
+    try:
+        r = await _call_node_api(
+            "POST", "/compute/train", body,
+        )
+    except Exception as e:
+        return f"prsm_federated_train failed: {e}"
+    if "worker_signature_b64" not in r:
+        detail = r.get("detail", "unknown error")
+        return f"train refused: {detail}"
+    return (
+        f"Trained + signed gradient update produced\n"
+        f"  job_id:        {r.get('job_id')}\n"
+        f"  round_index:   {r.get('round_index')}\n"
+        f"  worker:        {r.get('worker_node_id')}\n"
+        f"  sample_count:  {r.get('sample_count')}\n"
+        f"  attestation:   "
+        f"{'yes' if r.get('worker_attestation_b64') else 'no'}\n"
+        f"  signature:     "
+        f"{(r.get('worker_signature_b64') or '')[:24]}...\n"
+        f"\n"
+        f"Submit via prsm_federated_learning (or POST the "
+        f"full update to /admin/federated/job/"
+        f"{r.get('job_id')}/update):\n\n"
+        f"{r}"
+    )
+
+
 def _short_job_id(jid: str) -> str:
     return jid[:8] if len(jid) > 8 else jid
 
@@ -12720,6 +12802,7 @@ TOOL_HANDLERS = {
     "prsm_tee_policy": handle_prsm_tee_policy,
     "prsm_corp_capability": handle_prsm_corp_capability,
     "prsm_federated_learning": handle_prsm_federated_learning,
+    "prsm_federated_train": handle_prsm_federated_train,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

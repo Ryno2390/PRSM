@@ -579,8 +579,11 @@ def _canonical_update_bytes(
     u: GradientUpdate,
 ) -> bytes:
     """Stable signing payload for a gradient update.
-    Excludes worker_attestation_b64 + worker_signature_b64
-    so a signed update can carry both."""
+    Excludes worker_signature_b64 (signature can't bind
+    itself); INCLUDES worker_attestation_b64 as of sprint
+    308b so the attestation that produced the gradient is
+    cryptographically bound to the gradient itself. A
+    relabeled / forged attestation breaks the signature."""
     payload = {
         "job_id": u.job_id,
         "round_index": int(u.round_index),
@@ -588,6 +591,9 @@ def _canonical_update_bytes(
         "gradient_b64": u.gradient_b64,
         "sample_count": int(u.sample_count),
         "timestamp": float(u.timestamp),
+        "worker_attestation_b64": (
+            u.worker_attestation_b64
+        ),
     }
     return json.dumps(
         payload, sort_keys=True, separators=(",", ":"),

@@ -7944,6 +7944,85 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    # ── Sprint 308b — worker-side /compute/train shim ─────
+    # Vision §7 Enterprise Confidentiality Mode capstone
+    # follow-on. Workers receive a round assignment from the
+    # orchestrator, run their training strategy here, sign
+    # the gradient + their TEE attestation under their
+    # Ed25519 privkey, and return the signed update. The
+    # caller submits to /admin/federated/job/.../update.
+
+    class _ComputeTrainRequest(BaseModel):
+        job_id: str
+        round_index: int = Field(ge=0)
+        dataset_cid: str
+        sample_count: int = Field(ge=0)
+
+    @app.post("/compute/train")
+    async def compute_train(
+        body: _ComputeTrainRequest,
+    ) -> Dict[str, Any]:
+        privkey = getattr(
+            node, "_federated_worker_privkey_b64", None,
+        )
+        if not privkey:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "worker privkey not configured; set "
+                    "PRSM_FEDERATED_WORKER_PRIVKEY env"
+                ),
+            )
+        # Validate privkey format eagerly (loud-fail on
+        # operator misconfig instead of silent signature
+        # garbage)
+        try:
+            from prsm.enterprise.federated_learning import (
+                _load_ed25519_priv,
+            )
+            _load_ed25519_priv(privkey)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"PRSM_FEDERATED_WORKER_PRIVKEY "
+                    f"malformed: {e}"
+                ),
+            )
+
+        # Surface this node's TEE attestation blob in the
+        # signed payload. Workers without attestation
+        # configured pass empty string — the orchestrator
+        # can decide whether to accept that based on its
+        # own policy.
+        import base64 as _b64
+        attestation_blob = getattr(
+            node, "_tee_node_attestation_blob", None,
+        )
+        attestation_b64 = (
+            _b64.b64encode(bytes(attestation_blob)).decode()
+            if attestation_blob else ""
+        )
+
+        worker_node_id = (
+            node.identity.node_id if node.identity
+            else "unknown"
+        )
+
+        from prsm.compute.train import (
+            compute_signed_gradient_update,
+        )
+        update = compute_signed_gradient_update(
+            job_id=body.job_id,
+            round_index=body.round_index,
+            dataset_cid=body.dataset_cid,
+            sample_count=body.sample_count,
+            worker_node_id=worker_node_id,
+            worker_privkey_b64=privkey,
+            worker_attestation_b64=attestation_b64,
+        )
+        return update.to_dict()
+
     # ── Sprint 308 — federated-learning orchestrator ──────
     # Vision §7 Enterprise Confidentiality Mode capstone.
     # Coordinates round-by-round training across a fleet

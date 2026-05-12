@@ -2624,6 +2624,33 @@ class PRSMNode:
             )
             self._federated_learning_orchestrator = None
 
+        # Sprint 308b — worker-side federated training key.
+        # PRSM_FEDERATED_WORKER_PRIVKEY (Ed25519, b64, 32B)
+        # gates /compute/train. Reading the env directly
+        # keeps the value out of any persisted state — only
+        # in-memory.
+        try:
+            import os as _os
+            raw = (
+                _os.environ.get(
+                    "PRSM_FEDERATED_WORKER_PRIVKEY", "",
+                ).strip()
+            )
+            self._federated_worker_privkey_b64 = (
+                raw or None
+            )
+            if self._federated_worker_privkey_b64:
+                logger.info(
+                    "Federated worker privkey wired "
+                    "(/compute/train enabled)",
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Federated worker privkey wiring failed: "
+                "%s — /compute/train returns 503.", exc,
+            )
+            self._federated_worker_privkey_b64 = None
+
         # Sprint 303 — UUPS upgrade orchestrator (Vision §14
         # item 7). Filesystem-persisted via
         # PRSM_UPGRADE_ORCHESTRATOR_DIR. All upgrade +
