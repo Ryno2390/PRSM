@@ -139,8 +139,16 @@ def detect_vendor(blob: Optional[bytes]) -> str:
         return "intel-sgx"
     if version == 4:
         return "intel-tdx"
-    # Future: version 5+ for AMD SEV-SNP attestation reports,
-    # vendor-specific magic bytes for Apple SEP, etc.
+    # Sprint 294 — AMD SEV-SNP attestation reports use a
+    # uint32 version field (bytes 0-3); current spec is
+    # version=2. Disambiguate from Intel uint16 version=2
+    # (which doesn't exist in SGX/TDX) by requiring the
+    # upper 16 bits of the uint32 to be zero.
+    if len(blob) >= 4:
+        version_u32 = struct.unpack("<I", blob[:4])[0]
+        if version_u32 == 2:
+            return "amd-sev-snp"
+    # Future: vendor-specific magic bytes for Apple SEP, etc.
     return "unknown"
 
 
@@ -250,6 +258,114 @@ class IntelASPBackend:
         )
 
 
+class AMDKDSBackend:
+    """AMD SEV-SNP attestation backend.
+
+    v1 parses SEV-SNP attestation reports structurally
+    (version, guest_svn, MEASUREMENT, REPORT_DATA, chip_id).
+    Cryptographic verification (signing-chain to AMD KDS
+    endorsement key + VEK/VCEK lookup + TCB version recency)
+    is deferred to the sprint-297 production wiring.
+
+    SEV-SNP attestation report layout (subset per AMD's "SEV
+    Secure Nested Paging Firmware ABI Specification"):
+      bytes 0-3:    version (uint32 LE) = 2
+      bytes 4-7:    guest_svn
+      bytes 8-15:   policy
+      bytes 16-31:  family_id
+      bytes 32-47:  image_id
+      bytes 48-51:  vmpl
+      bytes 144-191: MEASUREMENT (48 bytes; sha384 of guest)
+      bytes 320-383: REPORT_DATA (64 bytes; user nonce)
+      bytes 416-479: chip_id (64 bytes)
+
+    Real reports are ~1184 bytes total including the 512-byte
+    ECDSA-P384 signature; v1 structural parsing only needs
+    the report body up through chip_id (offset 480).
+    """
+
+    handles_vendor: str = "amd"
+
+    _VERSION_OFFSET = 0
+    _GUEST_SVN_OFFSET = 4
+    _MEASUREMENT_OFFSET = 144
+    _MEASUREMENT_LEN = 48
+    _REPORT_DATA_OFFSET = 320
+    _REPORT_DATA_LEN = 64
+    _CHIP_ID_OFFSET = 416
+    _CHIP_ID_LEN = 64
+    _MIN_LEN = _CHIP_ID_OFFSET + _CHIP_ID_LEN
+
+    def verify(
+        self, blob: Optional[bytes],
+    ) -> AttestationVerificationResult:
+        if blob is None or not isinstance(blob, bytes):
+            return AttestationVerificationResult(
+                vendor="unknown",
+                error="attestation blob is not bytes",
+            )
+        if len(blob) < 4:
+            return AttestationVerificationResult(
+                vendor="unknown",
+                error=(
+                    "attestation blob too short to "
+                    "identify AMD vendor"
+                ),
+            )
+        version = struct.unpack(
+            "<I", blob[:4],
+        )[0]
+        if version != 2:
+            return AttestationVerificationResult(
+                vendor="unknown",
+                error=(
+                    f"unrecognized SEV-SNP version="
+                    f"{version} (expected 2)"
+                ),
+            )
+        if len(blob) < self._MIN_LEN:
+            return AttestationVerificationResult(
+                vendor="amd-sev-snp",
+                error=(
+                    f"SEV-SNP report truncated: "
+                    f"got {len(blob)} bytes, need "
+                    f">= {self._MIN_LEN}"
+                ),
+            )
+        guest_svn = struct.unpack(
+            "<I", blob[
+                self._GUEST_SVN_OFFSET:
+                self._GUEST_SVN_OFFSET + 4
+            ],
+        )[0]
+        measurement = blob[
+            self._MEASUREMENT_OFFSET:
+            self._MEASUREMENT_OFFSET + self._MEASUREMENT_LEN
+        ]
+        report_data = blob[
+            self._REPORT_DATA_OFFSET:
+            self._REPORT_DATA_OFFSET + self._REPORT_DATA_LEN
+        ]
+        chip_id = blob[
+            self._CHIP_ID_OFFSET:
+            self._CHIP_ID_OFFSET + self._CHIP_ID_LEN
+        ]
+        return AttestationVerificationResult(
+            vendor="amd-sev-snp",
+            vendor_verified=False,  # KDS not wired yet
+            vendor_data={
+                "version": version,
+                "guest_svn": guest_svn,
+                "measurement_hex": measurement.hex(),
+                "report_data_hex": report_data.hex(),
+                "chip_id_hex": chip_id.hex(),
+                "structural_only": True,
+            },
+            signature_chain_ok=False,
+            structural_parse_ok=True,
+        )
+
+
 class DevOnlyBackend:
     """First-class handler for the sprint-292 software-
     fallback attestation prefix. Returns
@@ -310,6 +426,7 @@ class AttestationBackendRegistry:
         if backends is None:
             self.backends: List[AttestationBackend] = [
                 IntelASPBackend(),
+                AMDKDSBackend(),
                 DevOnlyBackend(),
             ]
         else:

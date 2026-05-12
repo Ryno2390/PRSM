@@ -7425,6 +7425,23 @@ async def handle_prsm_verify_inference_privacy(
             f"    RTMR0:     "
             f"{attest_vendor_data.get('rtmr0_hex')}"
         )
+    elif attest_vendor == "amd-sev-snp" and "measurement_hex" in attest_vendor_data:
+        lines.append(
+            f"    MEASUREMENT: "
+            f"{attest_vendor_data.get('measurement_hex')}"
+        )
+        lines.append(
+            f"    REPORT_DATA: "
+            f"{attest_vendor_data.get('report_data_hex')}"
+        )
+        lines.append(
+            f"    CHIP_ID:     "
+            f"{attest_vendor_data.get('chip_id_hex')}"
+        )
+        lines.append(
+            f"    guest_svn:   "
+            f"{attest_vendor_data.get('guest_svn')}"
+        )
     if not hw_attested:
         lines.append(
             "    Truth check: every local-executor receipt "
