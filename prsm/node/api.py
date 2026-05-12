@@ -7957,6 +7957,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         rounds_target: int = Field(ge=1, le=10000)
         min_workers_per_round: int = Field(ge=1)
         aggregation: str
+        # Sprint 308a — opt-in hardening fields
+        require_signed_updates: bool = False
+        dp_policy: Optional[Dict[str, float]] = None
+
+    class _FederatedWorkerKey(BaseModel):
+        node_id: str
+        signing_pubkey_b64: str
 
     class _FederatedGradientUpdate(BaseModel):
         round_index: int = Field(ge=0)
@@ -8002,6 +8009,20 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     f"'fedavg' or 'fedmedian'"
                 ),
             )
+        from prsm.enterprise.federated_learning import (
+            DPPolicy,
+        )
+        dp_policy = None
+        if body.dp_policy is not None:
+            try:
+                dp_policy = DPPolicy.from_dict(
+                    body.dp_policy,
+                )
+            except (KeyError, ValueError) as e:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"invalid dp_policy: {e}",
+                )
         try:
             job = orch.propose_job(
                 model_id=body.model_id,
@@ -8012,12 +8033,52 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     body.min_workers_per_round
                 ),
                 aggregation=agg,
+                require_signed_updates=(
+                    body.require_signed_updates
+                ),
+                dp_policy=dp_policy,
             )
         except ValueError as e:
             raise HTTPException(
                 status_code=422, detail=str(e),
             )
         return job.to_dict()
+
+    @app.post(
+        "/admin/federated/worker-key", tags=["admin"],
+    )
+    async def federated_register_worker_key(
+        body: _FederatedWorkerKey,
+    ) -> Dict[str, Any]:
+        from prsm.enterprise.federated_learning import (
+            WorkerKey,
+        )
+        orch = _require_federated_orchestrator()
+        try:
+            orch.register_worker_key(WorkerKey(
+                node_id=body.node_id,
+                signing_pubkey_b64=body.signing_pubkey_b64,
+            ))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422, detail=str(e),
+            )
+        return {
+            "node_id": body.node_id,
+            "signing_pubkey_b64": body.signing_pubkey_b64,
+        }
+
+    @app.get(
+        "/admin/federated/worker-key", tags=["admin"],
+    )
+    async def federated_list_worker_keys() -> Dict[str, Any]:
+        orch = _require_federated_orchestrator()
+        return {
+            "worker_keys": [
+                k.to_dict()
+                for k in orch.list_worker_keys()
+            ],
+        }
 
     @app.get("/admin/federated/job", tags=["admin"])
     async def federated_list_jobs(

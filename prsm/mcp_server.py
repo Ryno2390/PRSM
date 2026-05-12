@@ -1841,9 +1841,13 @@ TOOLS = [
                     "enum": [
                         "propose", "list", "lookup",
                         "issue_round", "aggregate",
+                        "register_worker_key",
+                        "list_worker_keys",
                     ],
                 },
                 "job_id": {"type": "string"},
+                "node_id": {"type": "string"},
+                "signing_pubkey_b64": {"type": "string"},
                 "model_id": {"type": "string"},
                 "dataset_cids": {
                     "type": "array",
@@ -7990,6 +7994,8 @@ _CORP_CAPABILITY_ACTIONS = {
 
 _FEDERATED_ACTIONS = {
     "propose", "list", "lookup", "issue_round", "aggregate",
+    # Sprint 308a — hardening
+    "register_worker_key", "list_worker_keys",
 }
 
 
@@ -8164,6 +8170,69 @@ async def handle_prsm_federated_learning(
             lines.append(
                 f"    · {a.get('node_id'):<20} "
                 f"dataset={a.get('dataset_cid')}"
+            )
+        return "\n".join(lines)
+
+    if action == "register_worker_key":
+        node_id = (
+            arguments.get("node_id") or ""
+        ).strip()
+        pub = (
+            arguments.get("signing_pubkey_b64") or ""
+        ).strip()
+        if not node_id or not pub:
+            return (
+                "register_worker_key requires 'node_id' "
+                "+ 'signing_pubkey_b64'."
+            )
+        try:
+            r = await _call_node_api(
+                "POST", "/admin/federated/worker-key",
+                {
+                    "node_id": node_id,
+                    "signing_pubkey_b64": pub,
+                },
+            )
+        except Exception as e:
+            return (
+                f"prsm_federated_learning "
+                f"register_worker_key failed: {e}"
+            )
+        if "node_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"register_worker_key refused: {detail}"
+        return (
+            f"Registered worker key\n"
+            f"  node_id:    {r.get('node_id')}\n"
+            f"  pubkey_b64: "
+            f"{r.get('signing_pubkey_b64')[:16]}..."
+        )
+
+    if action == "list_worker_keys":
+        try:
+            r = await _call_node_api(
+                "GET", "/admin/federated/worker-key",
+            )
+        except Exception as e:
+            return (
+                f"prsm_federated_learning "
+                f"list_worker_keys failed: {e}"
+            )
+        if "worker_keys" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"list_worker_keys refused: {detail}"
+        keys = r.get("worker_keys") or []
+        if not keys:
+            return "No registered worker keys."
+        lines = [
+            f"PRSM Federated Worker Keys — {len(keys)}:",
+            "",
+        ]
+        for k in keys:
+            pub = k.get("signing_pubkey_b64") or ""
+            lines.append(
+                f"  · {k.get('node_id'):<20} "
+                f"{pub[:16]}..."
             )
         return "\n".join(lines)
 

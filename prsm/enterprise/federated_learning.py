@@ -40,8 +40,10 @@ dependency.
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import math
 import os
 import random
 import statistics
@@ -52,6 +54,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,9 +206,11 @@ class FederatedRound:
     aggregated_update: bytes = b""
     issued_at: float = 0.0
     completed_at: Optional[float] = None
+    # Sprint 308a — recorded σ of the DP noise actually
+    # applied to the aggregated update (0.0 when no DP).
+    dp_noise_sigma_applied: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
-        import base64 as _b64
         return {
             "job_id": self.job_id,
             "round_index": int(self.round_index),
@@ -211,7 +222,7 @@ class FederatedRound:
                 u.to_dict()
                 for u in self.gradient_updates_received
             ],
-            "aggregated_update_b64": _b64.b64encode(
+            "aggregated_update_b64": base64.b64encode(
                 self.aggregated_update,
             ).decode("ascii"),
             "issued_at": float(self.issued_at),
@@ -219,13 +230,15 @@ class FederatedRound:
                 float(self.completed_at)
                 if self.completed_at is not None else None
             ),
+            "dp_noise_sigma_applied": float(
+                self.dp_noise_sigma_applied,
+            ),
         }
 
     @classmethod
     def from_dict(
         cls, d: Dict[str, Any],
     ) -> "FederatedRound":
-        import base64 as _b64
         return cls(
             job_id=d["job_id"],
             round_index=int(d["round_index"]),
@@ -243,7 +256,7 @@ class FederatedRound:
                     or []
                 )
             ],
-            aggregated_update=_b64.b64decode(
+            aggregated_update=base64.b64decode(
                 d.get("aggregated_update_b64") or "",
             ),
             issued_at=float(d.get("issued_at", 0.0)),
@@ -252,6 +265,87 @@ class FederatedRound:
                 if d.get("completed_at") is not None
                 else None
             ),
+            dp_noise_sigma_applied=float(
+                d.get("dp_noise_sigma_applied", 0.0),
+            ),
+        )
+
+
+@dataclass
+class DPPolicy:
+    """Sprint 308a — central differential privacy policy
+    applied at the aggregator. Each element of the
+    aggregated gradient is clipped to ±clip_norm; Gaussian
+    noise is then added with σ = clip_norm * sqrt(2 *
+    ln(1.25/δ)) / ε (standard Gaussian-mechanism formula
+    for (ε, δ)-DP)."""
+
+    epsilon: float
+    delta: float
+    clip_norm: float
+
+    def __post_init__(self):
+        if self.epsilon <= 0:
+            raise ValueError(
+                f"epsilon must be > 0; got {self.epsilon}"
+            )
+        if not (0.0 < self.delta < 1.0):
+            raise ValueError(
+                f"delta must be in (0, 1); got {self.delta}"
+            )
+        if self.clip_norm <= 0:
+            raise ValueError(
+                f"clip_norm must be > 0; got "
+                f"{self.clip_norm}"
+            )
+
+    def sigma(self) -> float:
+        return (
+            self.clip_norm
+            * math.sqrt(2.0 * math.log(1.25 / self.delta))
+            / self.epsilon
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "epsilon": float(self.epsilon),
+            "delta": float(self.delta),
+            "clip_norm": float(self.clip_norm),
+        }
+
+    @classmethod
+    def from_dict(
+        cls, d: Dict[str, Any],
+    ) -> "DPPolicy":
+        return cls(
+            epsilon=float(d["epsilon"]),
+            delta=float(d["delta"]),
+            clip_norm=float(d["clip_norm"]),
+        )
+
+
+@dataclass
+class WorkerKey:
+    """Sprint 308a — registered worker Ed25519 signing
+    pubkey. Used to verify gradient-update signatures when
+    a job has require_signed_updates=True."""
+
+    node_id: str
+    signing_pubkey_b64: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "signing_pubkey_b64": self.signing_pubkey_b64,
+        }
+
+    @classmethod
+    def from_dict(
+        cls, d: Dict[str, Any],
+    ) -> "WorkerKey":
+        return cls(
+            node_id=d["node_id"],
+            signing_pubkey_b64=d["signing_pubkey_b64"],
         )
 
 
@@ -268,6 +362,9 @@ class FederatedJob:
     current_round: int = 0
     started_at: float = 0.0
     completed_at: Optional[float] = None
+    # Sprint 308a — opt-in hardening
+    require_signed_updates: bool = False
+    dp_policy: Optional[DPPolicy] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -287,12 +384,20 @@ class FederatedJob:
                 float(self.completed_at)
                 if self.completed_at is not None else None
             ),
+            "require_signed_updates": bool(
+                self.require_signed_updates,
+            ),
+            "dp_policy": (
+                self.dp_policy.to_dict()
+                if self.dp_policy is not None else None
+            ),
         }
 
     @classmethod
     def from_dict(
         cls, d: Dict[str, Any],
     ) -> "FederatedJob":
+        dp_raw = d.get("dp_policy")
         return cls(
             job_id=d["job_id"],
             model_id=d["model_id"],
@@ -312,6 +417,13 @@ class FederatedJob:
                 float(d["completed_at"])
                 if d.get("completed_at") is not None
                 else None
+            ),
+            require_signed_updates=bool(
+                d.get("require_signed_updates", False),
+            ),
+            dp_policy=(
+                DPPolicy.from_dict(dp_raw)
+                if dp_raw is not None else None
             ),
         )
 
@@ -407,6 +519,137 @@ _AGGREGATORS = {
 }
 
 
+# ── Sprint 308a — worker signatures + central DP ─────
+
+
+def _ed25519_b64e(raw: bytes) -> str:
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _ed25519_b64d(s: str) -> bytes:
+    if not isinstance(s, str):
+        raise ValueError(
+            f"expected base64 string, got {type(s).__name__}"
+        )
+    try:
+        return base64.b64decode(s, validate=True)
+    except Exception as e:
+        raise ValueError(f"invalid base64: {e}")
+
+
+def _load_ed25519_priv(b64: str) -> Ed25519PrivateKey:
+    raw = _ed25519_b64d(b64)
+    if len(raw) != 32:
+        raise ValueError(
+            f"Ed25519 privkey must be 32 bytes, got "
+            f"{len(raw)}"
+        )
+    return Ed25519PrivateKey.from_private_bytes(raw)
+
+
+def _load_ed25519_pub(b64: str) -> Ed25519PublicKey:
+    raw = _ed25519_b64d(b64)
+    if len(raw) != 32:
+        raise ValueError(
+            f"Ed25519 pubkey must be 32 bytes, got "
+            f"{len(raw)}"
+        )
+    return Ed25519PublicKey.from_public_bytes(raw)
+
+
+def generate_worker_keypair() -> tuple[str, str]:
+    """Generate a fresh Ed25519 keypair for a worker.
+    Returns (privkey_b64, pubkey_b64). The privkey stays
+    device-bound on the worker; the pubkey is registered
+    on the orchestrator."""
+    priv = Ed25519PrivateKey.generate()
+    priv_raw = priv.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    pub_raw = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return _ed25519_b64e(priv_raw), _ed25519_b64e(pub_raw)
+
+
+def _canonical_update_bytes(
+    u: GradientUpdate,
+) -> bytes:
+    """Stable signing payload for a gradient update.
+    Excludes worker_attestation_b64 + worker_signature_b64
+    so a signed update can carry both."""
+    payload = {
+        "job_id": u.job_id,
+        "round_index": int(u.round_index),
+        "worker_node_id": u.worker_node_id,
+        "gradient_b64": u.gradient_b64,
+        "sample_count": int(u.sample_count),
+        "timestamp": float(u.timestamp),
+    }
+    return json.dumps(
+        payload, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def sign_gradient_update(
+    update: GradientUpdate,
+    *,
+    worker_privkey_b64: str,
+) -> GradientUpdate:
+    """Sign a gradient update with the worker's Ed25519
+    private key. Returns the same update with
+    `worker_signature_b64` populated."""
+    priv = _load_ed25519_priv(worker_privkey_b64)
+    sig = priv.sign(_canonical_update_bytes(update))
+    update.worker_signature_b64 = _ed25519_b64e(sig)
+    return update
+
+
+def verify_gradient_update_signature(
+    update: GradientUpdate, pubkey_b64: str,
+) -> bool:
+    """Verify the worker signature on a gradient update."""
+    if not update.worker_signature_b64:
+        return False
+    try:
+        pub = _load_ed25519_pub(pubkey_b64)
+        sig = _ed25519_b64d(update.worker_signature_b64)
+    except ValueError:
+        return False
+    try:
+        pub.verify(sig, _canonical_update_bytes(update))
+        return True
+    except InvalidSignature:
+        return False
+
+
+def _apply_central_dp(
+    aggregated: bytes,
+    policy: DPPolicy,
+    rng: random.Random,
+) -> bytes:
+    """Clip each element of the aggregated gradient to
+    ±clip_norm and add Gaussian noise N(0, σ²) where
+    σ = clip_norm * sqrt(2 * ln(1.25/δ)) / ε.
+
+    Pure Python; uses random.gauss for noise sampling so
+    tests can pin the RNG for reproducibility."""
+    values = decode_gradient(aggregated)
+    sigma = policy.sigma()
+    out = []
+    for v in values:
+        clipped = max(
+            -policy.clip_norm,
+            min(policy.clip_norm, v),
+        )
+        noised = clipped + rng.gauss(0.0, sigma)
+        out.append(noised)
+    return encode_gradient(out)
+
+
 # ── Orchestrator ─────────────────────────────────────
 
 
@@ -426,6 +669,11 @@ class FederatedLearningOrchestrator:
         self._rounds: Dict[
             tuple[str, int], FederatedRound,
         ] = {}
+        # Sprint 308a — worker key registry (node_id →
+        # WorkerKey). Used to verify gradient-update
+        # signatures when a job has
+        # require_signed_updates=True.
+        self._worker_keys: Dict[str, WorkerKey] = {}
         self._persist_dir: Optional[Path] = (
             Path(persist_dir)
             if persist_dir is not None else None
@@ -436,6 +684,30 @@ class FederatedLearningOrchestrator:
                 parents=True, exist_ok=True,
             )
             self._load_from_disk()
+
+    # ── Sprint 308a — worker key registry ─────────────
+
+    def register_worker_key(
+        self, key: WorkerKey,
+    ) -> None:
+        # Validate pubkey eagerly
+        try:
+            _load_ed25519_pub(key.signing_pubkey_b64)
+        except ValueError as e:
+            raise ValueError(
+                f"invalid signing_pubkey_b64 for worker "
+                f"{key.node_id!r}: {e}"
+            )
+        self._worker_keys[key.node_id] = key
+        self._persist_worker_keys()
+
+    def get_worker_key(
+        self, node_id: str,
+    ) -> Optional[WorkerKey]:
+        return self._worker_keys.get(node_id)
+
+    def list_worker_keys(self) -> List[WorkerKey]:
+        return list(self._worker_keys.values())
 
     @classmethod
     def from_env(
@@ -456,6 +728,8 @@ class FederatedLearningOrchestrator:
         rounds_target: int,
         min_workers_per_round: int,
         aggregation: AggregationStrategy,
+        require_signed_updates: bool = False,
+        dp_policy: Optional[DPPolicy] = None,
     ) -> FederatedJob:
         if not worker_pool:
             raise ValueError(
@@ -489,6 +763,10 @@ class FederatedLearningOrchestrator:
             aggregation=aggregation,
             status=JobStatus.PROPOSED,
             started_at=time.time(),
+            require_signed_updates=bool(
+                require_signed_updates,
+            ),
+            dp_policy=dp_policy,
         )
         self._jobs[job.job_id] = job
         self._persist_job(job)
@@ -611,6 +889,32 @@ class FederatedLearningOrchestrator:
                     f"already submitted an update for "
                     f"this round (duplicate)"
                 )
+        # Sprint 308a — signature gate
+        if job.require_signed_updates:
+            worker_key = self._worker_keys.get(
+                update.worker_node_id,
+            )
+            if worker_key is None:
+                raise ValueError(
+                    f"worker {update.worker_node_id!r} "
+                    f"has no registered signing key; "
+                    f"register a key before submitting "
+                    f"updates"
+                )
+            if not update.worker_signature_b64:
+                raise ValueError(
+                    f"job {job.job_id!r} requires signed "
+                    f"updates but this submission carries "
+                    f"no signature"
+                )
+            if not verify_gradient_update_signature(
+                update, worker_key.signing_pubkey_b64,
+            ):
+                raise ValueError(
+                    f"worker {update.worker_node_id!r} "
+                    f"signature does not verify against "
+                    f"the registered pubkey"
+                )
         rnd.gradient_updates_received.append(update)
         if rnd.status == RoundStatus.ISSUED:
             rnd.status = RoundStatus.COLLECTING
@@ -657,6 +961,16 @@ class FederatedLearningOrchestrator:
             raise ValueError(
                 f"aggregation failed for round "
                 f"{round_index}: {e}"
+            )
+        # Sprint 308a — central DP: clip + Gaussian noise
+        if job.dp_policy is not None:
+            rnd.aggregated_update = _apply_central_dp(
+                rnd.aggregated_update,
+                job.dp_policy,
+                self._rng,
+            )
+            rnd.dp_noise_sigma_applied = (
+                job.dp_policy.sigma()
             )
         rnd.status = RoundStatus.AGGREGATED
         rnd.completed_at = time.time()
@@ -710,6 +1024,23 @@ class FederatedLearningOrchestrator:
                 job.job_id, exc,
             )
 
+    def _persist_worker_keys(self) -> None:
+        if self._persist_dir is None:
+            return
+        path = self._persist_dir / "worker-keys.json"
+        tmp = path.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(json.dumps([
+                k.to_dict()
+                for k in self._worker_keys.values()
+            ]))
+            tmp.replace(path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FederatedLearningOrchestrator: "
+                "worker-keys persist failed: %s", exc,
+            )
+
     def _persist_round(self, rnd: FederatedRound) -> None:
         if self._persist_dir is None:
             return
@@ -727,6 +1058,19 @@ class FederatedLearningOrchestrator:
 
     def _load_from_disk(self) -> None:
         assert self._persist_dir is not None
+        # Worker keys
+        wk_path = self._persist_dir / "worker-keys.json"
+        if wk_path.exists():
+            try:
+                for r in json.loads(wk_path.read_text()):
+                    k = WorkerKey.from_dict(r)
+                    self._worker_keys[k.node_id] = k
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "FederatedLearningOrchestrator: "
+                    "skipping corrupt worker-keys.json: %s",
+                    exc,
+                )
         # Jobs first so rounds find their parent
         for path in self._persist_dir.glob("job-*.json"):
             try:
