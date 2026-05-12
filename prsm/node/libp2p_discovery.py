@@ -27,6 +27,21 @@ from prsm.node.discovery import PeerInfo
 logger = logging.getLogger(__name__)
 
 
+class _DeadBootstrapSentinel:
+    """Sprint 321 — placeholder installed in `_bootstrap_client`
+    when a reconnect attempt fails so the poll loop's
+    `while getattr(self, "_bootstrap_client", None) is not None`
+    condition stays truthy and the next tick retries.
+
+    Carries `is_connected=False` so the reconnect-on-drop branch
+    keeps firing instead of treating the sentinel as a live
+    client. Has no other surface — touching anything on it
+    raises AttributeError, which the surrounding try/except
+    catches as a reconnect trigger.
+    """
+    is_connected = False
+
+
 class Libp2pDiscovery:
     """DHT-backed peer discovery layer for ``Libp2pTransport``.
 
@@ -342,17 +357,102 @@ class Libp2pDiscovery:
                 interval = 60.0
         except (TypeError, ValueError):
             interval = 60.0
-        client = getattr(self, "_bootstrap_client", None)
-        while client is not None:
+        # Sprint 321 — re-read _bootstrap_client every tick so
+        # reconnect-on-drop can swap a fresh client in without
+        # the loop holding a stale local reference.
+        while getattr(self, "_bootstrap_client", None) is not None:
             try:
                 await asyncio.sleep(interval)
-                peers = await client.get_peers()
-                self._hydrate_peers_from_bootstrap(peers)
-                # Sprint 320 — drain announcements buffered by
-                # _recv_typed during the get_peers exchange so
-                # peer_leave events evict departed peers and
-                # peer_join eagerly hydrates new ones.
-                self._consume_bootstrap_announcements(client)
+                client = getattr(self, "_bootstrap_client", None)
+                if client is None:
+                    break
+                try:
+                    peers = await client.get_peers()
+                    self._hydrate_peers_from_bootstrap(peers)
+                    # Sprint 320 — drain announcements buffered
+                    # by _recv_typed during the get_peers
+                    # exchange so peer_leave evicts departed
+                    # peers and peer_join eagerly hydrates new
+                    # ones.
+                    self._consume_bootstrap_announcements(client)
+                except Exception as exc:  # noqa: BLE001
+                    # Sprint 321 — reconnect on a dropped
+                    # WebSocket. If the client is still marked
+                    # connected, this is a non-network error
+                    # (parse / logic) — leave the client alone
+                    # and retry on the next tick. Otherwise
+                    # tear down + rebuild via the existing
+                    # _try_bootstrap_client path so
+                    # heartbeat/poll resume against a fresh
+                    # socket.
+                    if not getattr(client, "is_connected", True):
+                        logger.warning(
+                            "Libp2pDiscovery: bootstrap client "
+                            "dropped (%s); attempting reconnect",
+                            exc,
+                        )
+                        wsocket_addrs = [
+                            a for a in self.bootstrap_nodes
+                            if a.startswith(("ws://", "wss://"))
+                        ]
+                        # Detach the dead client so
+                        # _try_bootstrap_client's success path
+                        # can install the fresh one. Failure
+                        # to reconnect leaves the slot empty;
+                        # the outer-while condition then exits
+                        # cleanly unless we re-arm it. We
+                        # always re-arm with the (possibly
+                        # failed) attempt's result so the loop
+                        # keeps retrying.
+                        self._bootstrap_client = None
+                        if wsocket_addrs:
+                            await self._try_bootstrap_client(
+                                wsocket_addrs,
+                            )
+                        # If reconnect succeeded, retry
+                        # get_peers immediately so the next-
+                        # poll wait doesn't add latency on top
+                        # of the drop.
+                        client = getattr(
+                            self, "_bootstrap_client", None,
+                        )
+                        if client is not None and getattr(
+                            client, "is_connected", False,
+                        ):
+                            try:
+                                peers = await client.get_peers()
+                                self._hydrate_peers_from_bootstrap(peers)
+                                self._consume_bootstrap_announcements(client)
+                            except Exception as retry_exc:  # noqa: BLE001
+                                logger.debug(
+                                    "Libp2pDiscovery: post-"
+                                    "reconnect get_peers "
+                                    "raised: %s", retry_exc,
+                                )
+                        else:
+                            # Reconnect failed — keep the loop
+                            # alive by re-arming the slot with
+                            # the dead client so the outer
+                            # while condition stays truthy.
+                            # Next tick will try again.
+                            self._bootstrap_client = client or (
+                                # dead client object isn't
+                                # discoverable here; we rely
+                                # on _try_bootstrap_client's
+                                # contract that it either
+                                # installs a working client or
+                                # leaves the slot empty. Put a
+                                # sentinel marker that
+                                # is_connected=False so we
+                                # keep retrying.
+                                _DeadBootstrapSentinel()
+                            )
+                    else:
+                        logger.debug(
+                            "Libp2pDiscovery: bootstrap poll "
+                            "tick raised on connected client: "
+                            "%s", exc,
+                        )
             except asyncio.CancelledError:
                 break
             except Exception as exc:  # noqa: BLE001
