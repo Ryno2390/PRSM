@@ -2596,6 +2596,34 @@ class PRSMNode:
             )
             self._corp_capability_store = None
 
+        # Sprint 308 — federated-learning orchestrator
+        # (Vision §7 Enterprise Confidentiality Mode
+        # capstone). Coordinates round-by-round training
+        # across TEE-attested workers that see only
+        # gradients, never plaintext. Filesystem-persisted
+        # via PRSM_FEDERATED_LEARNING_DIR.
+        try:
+            from prsm.enterprise.federated_learning import (
+                FederatedLearningOrchestrator,
+            )
+            self._federated_learning_orchestrator = (
+                FederatedLearningOrchestrator.from_env()
+            )
+            logger.info(
+                "FederatedLearningOrchestrator wired "
+                "(jobs=%d)",
+                len(
+                    self._federated_learning_orchestrator.list_jobs(),
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FederatedLearningOrchestrator construction "
+                "failed: %s — /admin/federated/* will return "
+                "503.", exc,
+            )
+            self._federated_learning_orchestrator = None
+
         # Sprint 303 — UUPS upgrade orchestrator (Vision §14
         # item 7). Filesystem-persisted via
         # PRSM_UPGRADE_ORCHESTRATOR_DIR. All upgrade +

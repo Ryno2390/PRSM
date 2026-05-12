@@ -7944,6 +7944,215 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    # ── Sprint 308 — federated-learning orchestrator ──────
+    # Vision §7 Enterprise Confidentiality Mode capstone.
+    # Coordinates round-by-round training across a fleet
+    # of TEE-attested workers that see only gradients,
+    # never plaintext.
+
+    class _FederatedProposeJob(BaseModel):
+        model_id: str
+        dataset_cids: List[str] = []
+        worker_pool: List[str]
+        rounds_target: int = Field(ge=1, le=10000)
+        min_workers_per_round: int = Field(ge=1)
+        aggregation: str
+
+    class _FederatedGradientUpdate(BaseModel):
+        round_index: int = Field(ge=0)
+        worker_node_id: str
+        gradient_b64: str
+        sample_count: int = Field(ge=0)
+        worker_attestation_b64: str = ""
+        worker_signature_b64: str = ""
+        timestamp: float = 0.0
+
+    def _require_federated_orchestrator():
+        o = getattr(
+            node, "_federated_learning_orchestrator", None,
+        )
+        if o is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "FederatedLearningOrchestrator not "
+                    "initialized."
+                ),
+            )
+        return o
+
+    @app.post("/admin/federated/job", tags=["admin"])
+    async def federated_propose_job(
+        body: _FederatedProposeJob,
+    ) -> Dict[str, Any]:
+        from prsm.enterprise.federated_learning import (
+            AggregationStrategy,
+        )
+        orch = _require_federated_orchestrator()
+        try:
+            agg = AggregationStrategy(
+                (body.aggregation or "").lower(),
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"invalid aggregation "
+                    f"{body.aggregation!r}; expected "
+                    f"'fedavg' or 'fedmedian'"
+                ),
+            )
+        try:
+            job = orch.propose_job(
+                model_id=body.model_id,
+                dataset_cids=body.dataset_cids,
+                worker_pool=body.worker_pool,
+                rounds_target=body.rounds_target,
+                min_workers_per_round=(
+                    body.min_workers_per_round
+                ),
+                aggregation=agg,
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422, detail=str(e),
+            )
+        return job.to_dict()
+
+    @app.get("/admin/federated/job", tags=["admin"])
+    async def federated_list_jobs(
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from prsm.enterprise.federated_learning import (
+            JobStatus,
+        )
+        orch = _require_federated_orchestrator()
+        status_obj = None
+        if status:
+            try:
+                status_obj = JobStatus(status.lower())
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"invalid status {status!r}",
+                )
+        jobs = orch.list_jobs(status=status_obj)
+        return {"jobs": [j.to_dict() for j in jobs]}
+
+    @app.get(
+        "/admin/federated/job/{job_id}", tags=["admin"],
+    )
+    async def federated_get_job(
+        job_id: str,
+    ) -> Dict[str, Any]:
+        orch = _require_federated_orchestrator()
+        job = orch.get_job(job_id)
+        if job is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"job {job_id!r} not found",
+            )
+        return job.to_dict()
+
+    @app.post(
+        "/admin/federated/job/{job_id}/issue-round",
+        tags=["admin"],
+    )
+    async def federated_issue_round(
+        job_id: str,
+    ) -> Dict[str, Any]:
+        orch = _require_federated_orchestrator()
+        if orch.get_job(job_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"job {job_id!r} not found",
+            )
+        try:
+            rnd = orch.issue_round(job_id)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422, detail=str(e),
+            )
+        return rnd.to_dict()
+
+    @app.post(
+        "/admin/federated/job/{job_id}/update",
+        tags=["admin"],
+    )
+    async def federated_accept_update(
+        job_id: str, body: _FederatedGradientUpdate,
+    ) -> Dict[str, Any]:
+        from prsm.enterprise.federated_learning import (
+            GradientUpdate,
+        )
+        orch = _require_federated_orchestrator()
+        if orch.get_job(job_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"job {job_id!r} not found",
+            )
+        u = GradientUpdate(
+            job_id=job_id,
+            round_index=body.round_index,
+            worker_node_id=body.worker_node_id,
+            gradient_b64=body.gradient_b64,
+            sample_count=body.sample_count,
+            worker_attestation_b64=(
+                body.worker_attestation_b64
+            ),
+            worker_signature_b64=body.worker_signature_b64,
+            timestamp=body.timestamp,
+        )
+        try:
+            orch.accept_gradient_update(u)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422, detail=str(e),
+            )
+        return {"status": "accepted"}
+
+    @app.post(
+        "/admin/federated/job/{job_id}/aggregate/{round_index}",
+        tags=["admin"],
+    )
+    async def federated_aggregate(
+        job_id: str, round_index: int,
+    ) -> Dict[str, Any]:
+        orch = _require_federated_orchestrator()
+        if orch.get_job(job_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"job {job_id!r} not found",
+            )
+        try:
+            rnd = orch.aggregate_round(
+                job_id, round_index,
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422, detail=str(e),
+            )
+        return rnd.to_dict()
+
+    @app.get(
+        "/admin/federated/job/{job_id}/round/{round_index}",
+        tags=["admin"],
+    )
+    async def federated_get_round(
+        job_id: str, round_index: int,
+    ) -> Dict[str, Any]:
+        orch = _require_federated_orchestrator()
+        rnd = orch.get_round(job_id, round_index)
+        if rnd is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"round {round_index} not found for "
+                    f"job {job_id!r}"
+                ),
+            )
+        return rnd.to_dict()
+
     # ── Sprint 306 — $CORP authorization capability ───────
     # Vision §7 Enterprise Confidentiality Mode layer 2:
     # ergonomics + accounting + audit. Soulbound capability

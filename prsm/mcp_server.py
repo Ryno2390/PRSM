@@ -1816,6 +1816,55 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_federated_learning",
+        description=(
+            "Vision §7 Enterprise Confidentiality Mode "
+            "capstone: federated-learning orchestrator. "
+            "Coordinates round-by-round training across a "
+            "fleet of TEE-attested PRSM workers that see "
+            "only gradient updates, never plaintext. "
+            "Single tool with `action` selector: propose | "
+            "list | lookup | issue_round | aggregate. "
+            "Aggregation strategies: 'fedavg' (weighted "
+            "average by sample_count) or 'fedmedian' "
+            "(element-wise median; Byzantine-robust). "
+            "Composes onto sprint 304/307 (recipient + "
+            "threshold encryption), 305/305a (TEE policy), "
+            "306/306a ($CORP capability). Backed by "
+            "/admin/federated/*."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "propose", "list", "lookup",
+                        "issue_round", "aggregate",
+                    ],
+                },
+                "job_id": {"type": "string"},
+                "model_id": {"type": "string"},
+                "dataset_cids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "worker_pool": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "rounds_target": {"type": "integer"},
+                "min_workers_per_round": {
+                    "type": "integer",
+                },
+                "aggregation": {"type": "string"},
+                "round_index": {"type": "integer"},
+                "status": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_corp_capability",
         description=(
             "Vision §7 Enterprise Confidentiality Mode "
@@ -7939,6 +7988,215 @@ _CORP_CAPABILITY_ACTIONS = {
 }
 
 
+_FEDERATED_ACTIONS = {
+    "propose", "list", "lookup", "issue_round", "aggregate",
+}
+
+
+def _short_job_id(jid: str) -> str:
+    return jid[:8] if len(jid) > 8 else jid
+
+
+async def handle_prsm_federated_learning(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 308 — federated-learning orchestrator MCP
+    wrapper (Vision §7 Enterprise Confidentiality Mode
+    capstone)."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_FEDERATED_ACTIONS)})."
+        )
+    if action not in _FEDERATED_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_FEDERATED_ACTIONS)}; got {action!r}."
+        )
+
+    if action == "propose":
+        required = (
+            "model_id", "worker_pool", "rounds_target",
+            "min_workers_per_round", "aggregation",
+        )
+        missing = [
+            f for f in required
+            if arguments.get(f) in (None, "", [])
+        ]
+        if missing:
+            return (
+                f"propose missing required field(s): "
+                f"{missing}"
+            )
+        body = {
+            "model_id": arguments["model_id"],
+            "dataset_cids": (
+                arguments.get("dataset_cids") or []
+            ),
+            "worker_pool": arguments["worker_pool"],
+            "rounds_target": int(
+                arguments["rounds_target"],
+            ),
+            "min_workers_per_round": int(
+                arguments["min_workers_per_round"],
+            ),
+            "aggregation": arguments["aggregation"],
+        }
+        try:
+            r = await _call_node_api(
+                "POST", "/admin/federated/job", body,
+            )
+        except Exception as e:
+            return (
+                f"prsm_federated_learning propose failed: {e}"
+            )
+        if "job_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"propose refused: {detail}"
+        return (
+            f"Federated job proposed\n"
+            f"  job_id:        {r.get('job_id')}\n"
+            f"  status:        {r.get('status')}\n"
+            f"  model_id:      {r.get('model_id')}\n"
+            f"  rounds:        "
+            f"{r.get('current_round', 0)}/"
+            f"{r.get('rounds_target')}\n"
+            f"  aggregation:   {r.get('aggregation')}\n"
+            f"  worker_pool:   "
+            f"{len(r.get('worker_pool') or [])} nodes"
+        )
+
+    if action == "list":
+        path = "/admin/federated/job"
+        st = (
+            arguments.get("status") or ""
+        ).strip().lower()
+        if st:
+            path = f"{path}?status={st}"
+        try:
+            r = await _call_node_api("GET", path)
+        except Exception as e:
+            return (
+                f"prsm_federated_learning list failed: {e}"
+            )
+        if "jobs" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"list refused: {detail}"
+        jobs = r.get("jobs") or []
+        if not jobs:
+            return "No federated jobs."
+        lines = [
+            f"PRSM Federated Jobs — {len(jobs)}:",
+            "",
+            f"  {'id':<10} {'status':<12} {'rounds':<10}  "
+            f"model_id",
+        ]
+        for j in jobs:
+            jid = _short_job_id(j.get("job_id", ""))
+            rounds = (
+                f"{j.get('current_round', 0)}/"
+                f"{j.get('rounds_target', 0)}"
+            )
+            lines.append(
+                f"  {jid:<10} "
+                f"{j.get('status', '?'):<12} "
+                f"{rounds:<10}  {j.get('model_id', '?')}"
+            )
+        return "\n".join(lines)
+
+    if action == "lookup":
+        jid = (arguments.get("job_id") or "").strip()
+        if not jid:
+            return "lookup requires 'job_id'."
+        try:
+            r = await _call_node_api(
+                "GET", f"/admin/federated/job/{jid}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_federated_learning lookup failed: {e}"
+            )
+        if "job_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"lookup refused: {detail}"
+        return (
+            f"Federated job {r.get('job_id')}\n"
+            f"  status:        {r.get('status')}\n"
+            f"  model_id:      {r.get('model_id')}\n"
+            f"  rounds:        "
+            f"{r.get('current_round', 0)}/"
+            f"{r.get('rounds_target')}\n"
+            f"  aggregation:   {r.get('aggregation')}\n"
+            f"  worker_pool:   "
+            f"{len(r.get('worker_pool') or [])} nodes\n"
+            f"  min_per_round: "
+            f"{r.get('min_workers_per_round')}\n"
+            f"  datasets:      "
+            f"{len(r.get('dataset_cids') or [])}"
+        )
+
+    if action == "issue_round":
+        jid = (arguments.get("job_id") or "").strip()
+        if not jid:
+            return "issue_round requires 'job_id'."
+        try:
+            r = await _call_node_api(
+                "POST",
+                f"/admin/federated/job/{jid}/issue-round",
+            )
+        except Exception as e:
+            return (
+                f"prsm_federated_learning issue_round "
+                f"failed: {e}"
+            )
+        if "round_index" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"issue_round refused: {detail}"
+        assigns = r.get("worker_assignments") or []
+        lines = [
+            f"Round {r.get('round_index')} issued "
+            f"(status={r.get('status')})",
+            "",
+            f"  Assignments ({len(assigns)} workers):",
+        ]
+        for a in assigns:
+            lines.append(
+                f"    · {a.get('node_id'):<20} "
+                f"dataset={a.get('dataset_cid')}"
+            )
+        return "\n".join(lines)
+
+    # aggregate
+    jid = (arguments.get("job_id") or "").strip()
+    if not jid:
+        return "aggregate requires 'job_id'."
+    ridx = arguments.get("round_index")
+    if ridx is None:
+        return "aggregate requires 'round_index'."
+    try:
+        r = await _call_node_api(
+            "POST",
+            f"/admin/federated/job/{jid}/aggregate/"
+            f"{int(ridx)}",
+        )
+    except Exception as e:
+        return (
+            f"prsm_federated_learning aggregate failed: {e}"
+        )
+    if "status" not in r:
+        detail = r.get("detail", "unknown error")
+        return f"aggregate refused: {detail}"
+    updates = r.get("gradient_updates_received") or []
+    return (
+        f"Round {r.get('round_index')} aggregated\n"
+        f"  status:           {r.get('status')}\n"
+        f"  updates_pooled:   {len(updates)}\n"
+        f"  aggregated_bytes: "
+        f"{len(r.get('aggregated_update_b64') or '')} (b64)"
+    )
+
+
 async def handle_prsm_corp_capability(
     arguments: Dict[str, Any],
 ) -> str:
@@ -12392,6 +12650,7 @@ TOOL_HANDLERS = {
     "prsm_enterprise_recipient": handle_prsm_enterprise_recipient,
     "prsm_tee_policy": handle_prsm_tee_policy,
     "prsm_corp_capability": handle_prsm_corp_capability,
+    "prsm_federated_learning": handle_prsm_federated_learning,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,
