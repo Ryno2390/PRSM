@@ -1816,6 +1816,59 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_upgrade",
+        description=(
+            "Vision §14 mitigation item 7: UUPS upgrade "
+            "orchestrator with pre-committed rollback "
+            "escape. Single tool with `action` selector: "
+            "propose | list | lookup | update | "
+            "compose_upgrade | compose_rollback. propose "
+            "captures rationale + target proxy + new and "
+            "PREVIOUS implementations (the rollback "
+            "destination is locked at propose time). "
+            "Workflow: proposed → reviewed → safe_uploaded "
+            "→ executed → rolled_back | rejected. "
+            "compose_upgrade returns a Safe-uploadable "
+            "upgradeToAndCall(newImpl, initData) payload "
+            "(requires REVIEWED+); compose_rollback returns "
+            "the equivalent payload but with the recorded "
+            "previous_implementation as the target — "
+            "requires EXECUTED status. Composer-only — "
+            "Foundation Safe 2-of-3 hardware multisig gates "
+            "all execution. Backed by /admin/upgrade/*."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "propose", "list", "lookup",
+                        "update", "compose_upgrade",
+                        "compose_rollback",
+                    ],
+                },
+                "proposal_id": {"type": "string"},
+                "target_proxy": {"type": "string"},
+                "new_implementation": {"type": "string"},
+                "previous_implementation": {
+                    "type": "string",
+                },
+                "severity": {"type": "string"},
+                "rationale": {"type": "string"},
+                "init_calldata_hex": {"type": "string"},
+                "reviewer_assignments": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "status": {"type": "string"},
+                "new_status": {"type": "string"},
+                "safe_tx_hash": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_formal_verification",
         description=(
             "Vision §14 mitigation item 4: pinned formal-"
@@ -7730,6 +7783,237 @@ _FORMAL_VERIFICATION_ACTIONS = {
 }
 
 
+_UPGRADE_ACTIONS = {
+    "propose", "list", "lookup", "update",
+    "compose_upgrade", "compose_rollback",
+}
+
+
+def _short_proposal_id(pid: str) -> str:
+    return pid[:8] if len(pid) > 8 else pid
+
+
+async def handle_prsm_upgrade(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 303 — UUPS upgrade orchestrator MCP wrapper
+    (Vision §14 item 7). Composer-only — Foundation Safe is
+    the execution gate."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_UPGRADE_ACTIONS)})."
+        )
+    if action not in _UPGRADE_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_UPGRADE_ACTIONS)}; got {action!r}."
+        )
+
+    if action == "propose":
+        required = [
+            "target_proxy", "new_implementation",
+            "previous_implementation", "severity",
+            "rationale",
+        ]
+        missing = [
+            f for f in required if not arguments.get(f)
+        ]
+        if missing:
+            return (
+                f"propose missing required field(s): "
+                f"{missing}"
+            )
+        body = {
+            "target_proxy": arguments["target_proxy"],
+            "new_implementation": arguments[
+                "new_implementation"
+            ],
+            "previous_implementation": arguments[
+                "previous_implementation"
+            ],
+            "severity": arguments["severity"],
+            "rationale": arguments["rationale"],
+            "init_calldata_hex": (
+                arguments.get("init_calldata_hex") or "0x"
+            ),
+            "reviewer_assignments": (
+                arguments.get("reviewer_assignments") or []
+            ),
+        }
+        try:
+            r = await _call_node_api(
+                "POST", "/admin/upgrade/propose", body,
+            )
+        except Exception as e:
+            return f"prsm_upgrade propose failed: {e}"
+        if "proposal_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"propose refused: {detail}"
+        return (
+            f"Upgrade proposed\n"
+            f"  id:       {r.get('proposal_id')}\n"
+            f"  severity: {r.get('severity')}\n"
+            f"  status:   {r.get('status')}\n"
+            f"  proxy:    {r.get('target_proxy')}"
+        )
+
+    if action == "list":
+        path = "/admin/upgrade"
+        params = []
+        st = (arguments.get("status") or "").strip().lower()
+        if st:
+            params.append(f"status={st}")
+        sv = (arguments.get("severity") or "").strip().lower()
+        if sv:
+            params.append(f"severity={sv}")
+        if params:
+            path = f"{path}?{'&'.join(params)}"
+        try:
+            r = await _call_node_api("GET", path)
+        except Exception as e:
+            return f"prsm_upgrade list failed: {e}"
+        if "records" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"list refused: {detail}"
+        records = r.get("records") or []
+        if not records:
+            return "No upgrade proposals."
+        lines = [
+            f"PRSM Upgrade Proposals — {r.get('count', 0)}",
+            "",
+            f"  {'id':<10} {'sev':<11} {'status':<14}  proxy",
+        ]
+        for rec in records:
+            pid = _short_proposal_id(
+                rec.get("proposal_id", ""),
+            )
+            lines.append(
+                f"  {pid:<10} "
+                f"{rec.get('severity', '?'):<11} "
+                f"{rec.get('status', '?'):<14}  "
+                f"{rec.get('target_proxy', '?')}"
+            )
+        return "\n".join(lines)
+
+    if action == "lookup":
+        pid = (arguments.get("proposal_id") or "").strip()
+        if not pid:
+            return "lookup requires 'proposal_id'."
+        try:
+            r = await _call_node_api(
+                "GET", f"/admin/upgrade/{pid}",
+            )
+        except Exception as e:
+            return f"prsm_upgrade lookup failed: {e}"
+        if "proposal_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"lookup refused: {detail}"
+        lines = [
+            f"Upgrade {r.get('proposal_id')}",
+            "",
+            f"  severity: {r.get('severity')}",
+            f"  status:   {r.get('status')}",
+            f"  proxy:    {r.get('target_proxy')}",
+            f"  new_impl: {r.get('new_implementation')}",
+            f"  prev_impl: "
+            f"{r.get('previous_implementation')}",
+            f"  rationale: {r.get('rationale')}",
+            f"  safe_tx:   "
+            f"{r.get('safe_tx_hash') or '(none)'}",
+        ]
+        return "\n".join(lines)
+
+    if action == "update":
+        pid = (arguments.get("proposal_id") or "").strip()
+        if not pid:
+            return "update requires 'proposal_id'."
+        new_status = (
+            arguments.get("new_status") or ""
+        ).strip().lower()
+        if not new_status:
+            return "update requires 'new_status'."
+        body = {"new_status": new_status}
+        if arguments.get("safe_tx_hash"):
+            body["safe_tx_hash"] = arguments["safe_tx_hash"]
+        try:
+            r = await _call_node_api(
+                "POST", f"/admin/upgrade/{pid}/update",
+                body,
+            )
+        except Exception as e:
+            return f"prsm_upgrade update failed: {e}"
+        if "proposal_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"update refused: {detail}"
+        return (
+            f"Upgrade {r.get('proposal_id')} updated\n"
+            f"  status:  {r.get('status')}\n"
+            f"  safe_tx: "
+            f"{r.get('safe_tx_hash') or '(none)'}"
+        )
+
+    # compose_upgrade / compose_rollback share render
+    pid = (arguments.get("proposal_id") or "").strip()
+    if not pid:
+        return f"{action} requires 'proposal_id'."
+    suffix = (
+        "compose-upgrade"
+        if action == "compose_upgrade"
+        else "compose-rollback"
+    )
+    label = (
+        "UPGRADE" if action == "compose_upgrade"
+        else "ROLLBACK"
+    )
+    try:
+        r = await _call_node_api(
+            "POST", f"/admin/upgrade/{pid}/{suffix}",
+        )
+    except Exception as e:
+        return f"prsm_upgrade {action} failed: {e}"
+    if "data" not in r:
+        detail = r.get("detail", "unknown error")
+        return f"{action} refused: {detail}"
+    explorer = r.get("explorer_url") or "(no explorer)"
+    lines = [
+        f"⚠ {label} COMPOSED — Foundation Safe upload "
+        f"required ⚠",
+        "",
+        f"  WARNING: {r.get('warning', '')}",
+        "",
+        "  Transaction payload (paste into Safe UI):",
+        f"    to:        {r.get('to', '?')}",
+        f"    data:      {r.get('data', '?')}",
+        f"    value:     {r.get('value', '0')}",
+        f"    chain_id:  {r.get('chain_id', '?')}",
+        "",
+        f"  Proposal:    {r.get('proposal_id', '?')}",
+        f"  Severity:    {r.get('severity', '?')}",
+    ]
+    if action == "compose_upgrade":
+        lines.extend([
+            f"  Rationale:   {r.get('rationale', '?')}",
+            f"  New impl:    "
+            f"{r.get('new_implementation', '?')}",
+        ])
+    else:
+        lines.extend([
+            f"  Rollback to: "
+            f"{r.get('rollback_target_implementation', '?')}",
+            f"  Was on:      "
+            f"{r.get('originally_upgraded_to', '?')}",
+        ])
+    lines.extend([
+        f"  Verify on:   {explorer}",
+        "",
+        f"  Instructions:",
+        f"    {r.get('instructions', '')}",
+    ])
+    return "\n".join(lines)
+
+
 async def handle_prsm_formal_verification(
     arguments: Dict[str, Any],
 ) -> str:
@@ -11390,6 +11674,7 @@ TOOL_HANDLERS = {
     "prsm_disclosure": handle_prsm_disclosure,
     "prsm_incident": handle_prsm_incident,
     "prsm_formal_verification": handle_prsm_formal_verification,
+    "prsm_upgrade": handle_prsm_upgrade,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

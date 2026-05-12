@@ -7563,6 +7563,223 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    # ── Sprint 303 — UUPS upgrade orchestrator ────────────
+    # Vision §14 mitigation item 7: UUPS upgrade pattern
+    # with pre-committed rollback escape. Composer-only —
+    # Foundation Safe is the execution gate.
+
+    class _UpgradeProposeRequest(BaseModel):
+        target_proxy: str
+        new_implementation: str
+        previous_implementation: str
+        severity: str
+        rationale: str
+        init_calldata_hex: str = "0x"
+        reviewer_assignments: List[str] = []
+
+    class _UpgradeUpdateRequest(BaseModel):
+        new_status: str
+        safe_tx_hash: Optional[str] = None
+
+    def _require_upgrade_orchestrator():
+        o = getattr(node, "_upgrade_orchestrator", None)
+        if o is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Upgrade orchestrator not initialized."
+                ),
+            )
+        return o
+
+    @app.post("/admin/upgrade/propose", tags=["admin"])
+    async def upgrade_propose(
+        body: _UpgradeProposeRequest,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.upgrade_orchestrator import (
+            UpgradeSeverity,
+        )
+        o = _require_upgrade_orchestrator()
+        try:
+            severity = UpgradeSeverity(
+                (body.severity or "").lower(),
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"invalid severity {body.severity!r}"
+                ),
+            )
+        try:
+            record = o.propose(
+                target_proxy=body.target_proxy,
+                new_implementation=body.new_implementation,
+                previous_implementation=(
+                    body.previous_implementation
+                ),
+                severity=severity,
+                rationale=body.rationale,
+                init_calldata_hex=body.init_calldata_hex,
+                reviewer_assignments=(
+                    body.reviewer_assignments
+                ),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return record.to_dict()
+
+    @app.get("/admin/upgrade", tags=["admin"])
+    async def upgrade_list(
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.upgrade_orchestrator import (
+            UpgradeSeverity, UpgradeStatus,
+        )
+        o = _require_upgrade_orchestrator()
+        status_obj = None
+        sev_obj = None
+        if status:
+            try:
+                status_obj = UpgradeStatus(status.lower())
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"invalid status {status!r}",
+                )
+        if severity:
+            try:
+                sev_obj = UpgradeSeverity(severity.lower())
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"invalid severity {severity!r}",
+                )
+        records = o.list(
+            status=status_obj, severity=sev_obj,
+        )
+        return {
+            "records": [r.to_dict() for r in records],
+            "count": len(records),
+        }
+
+    @app.get(
+        "/admin/upgrade/{proposal_id}", tags=["admin"],
+    )
+    async def upgrade_get(
+        proposal_id: str,
+    ) -> Dict[str, Any]:
+        o = _require_upgrade_orchestrator()
+        record = o.get(proposal_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"proposal {proposal_id!r} not found"
+                ),
+            )
+        return record.to_dict()
+
+    @app.post(
+        "/admin/upgrade/{proposal_id}/update",
+        tags=["admin"],
+    )
+    async def upgrade_update(
+        proposal_id: str,
+        body: _UpgradeUpdateRequest,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.upgrade_orchestrator import (
+            UpgradeStatus,
+        )
+        o = _require_upgrade_orchestrator()
+        if o.get(proposal_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"proposal {proposal_id!r} not found"
+                ),
+            )
+        try:
+            new_status = UpgradeStatus(
+                (body.new_status or "").lower(),
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"invalid new_status {body.new_status!r}"
+                ),
+            )
+        try:
+            record = o.update_status(
+                proposal_id, new_status,
+                safe_tx_hash=body.safe_tx_hash,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return record.to_dict()
+
+    @app.post(
+        "/admin/upgrade/{proposal_id}/compose-upgrade",
+        tags=["admin"],
+    )
+    async def upgrade_compose_upgrade(
+        proposal_id: str,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.upgrade_orchestrator import (
+            compose_upgrade_tx,
+        )
+        o = _require_upgrade_orchestrator()
+        if o.get(proposal_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"proposal {proposal_id!r} not found"
+                ),
+            )
+        try:
+            tx = compose_upgrade_tx(
+                orchestrator=o,
+                proposal_id=proposal_id,
+                chain_id=getattr(
+                    node, "_upgrade_chain_id", None,
+                ),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return tx
+
+    @app.post(
+        "/admin/upgrade/{proposal_id}/compose-rollback",
+        tags=["admin"],
+    )
+    async def upgrade_compose_rollback(
+        proposal_id: str,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.upgrade_orchestrator import (
+            compose_rollback_tx,
+        )
+        o = _require_upgrade_orchestrator()
+        if o.get(proposal_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"proposal {proposal_id!r} not found"
+                ),
+            )
+        try:
+            tx = compose_rollback_tx(
+                orchestrator=o,
+                proposal_id=proposal_id,
+                chain_id=getattr(
+                    node, "_upgrade_chain_id", None,
+                ),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return tx
+
     # ── Sprint 302 — formal-invariant harness ─────────────
     # Vision §14 mitigation item 4: pinned formal-spec
     # registry + runtime probe. /invariants is PUBLIC (the

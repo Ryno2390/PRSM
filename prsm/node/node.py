@@ -2571,6 +2571,37 @@ class PRSMNode:
             self._formal_invariant_checker = None
             self._formal_invariant_addresses = {}
 
+        # Sprint 303 — UUPS upgrade orchestrator (Vision §14
+        # item 7). Filesystem-persisted via
+        # PRSM_UPGRADE_ORCHESTRATOR_DIR. All upgrade +
+        # rollback execution is composer-only (Foundation
+        # Safe gates).
+        try:
+            from prsm.economy.web3.upgrade_orchestrator import (
+                UpgradeOrchestrator,
+            )
+            from prsm.config.networks import resolve_endpoints
+            self._upgrade_orchestrator = (
+                UpgradeOrchestrator.from_env()
+            )
+            self._upgrade_chain_id = (
+                resolve_endpoints().chain_id
+            )
+            logger.info(
+                "UpgradeOrchestrator wired "
+                "(proposals=%d, chain_id=%s)",
+                self._upgrade_orchestrator.count(),
+                self._upgrade_chain_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "UpgradeOrchestrator construction failed: "
+                "%s — /admin/upgrade/* will return 503.",
+                exc,
+            )
+            self._upgrade_orchestrator = None
+            self._upgrade_chain_id = None
+
         # Sprint 286 — fiat-surface health check at startup.
         # Loud-but-non-blocking: ERROR findings surface in the
         # log so operators see misconfigs (e.g., KYC
