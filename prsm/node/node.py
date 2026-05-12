@@ -2651,6 +2651,34 @@ class PRSMNode:
             )
             self._federated_worker_privkey_b64 = None
 
+        # Sprint 308c — orchestrator transport privkey for
+        # unsealing worker gradients. X25519, b64, 32B.
+        # Read from PRSM_FEDERATED_ORCHESTRATOR_TRANSPORT_PRIVKEY
+        # env; in-memory only, never persisted.
+        try:
+            import os as _os
+            raw = (
+                _os.environ.get(
+                    "PRSM_FEDERATED_ORCHESTRATOR_"
+                    "TRANSPORT_PRIVKEY", "",
+                ).strip()
+            )
+            self._federated_orchestrator_transport_privkey_b64 = (
+                raw or None
+            )
+            if raw:
+                logger.info(
+                    "Federated orchestrator transport "
+                    "privkey wired (encrypted-gradient "
+                    "transport enabled)",
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Federated transport privkey wiring "
+                "failed: %s", exc,
+            )
+            self._federated_orchestrator_transport_privkey_b64 = None
+
         # Sprint 303 — UUPS upgrade orchestrator (Vision §14
         # item 7). Filesystem-persisted via
         # PRSM_UPGRADE_ORCHESTRATOR_DIR. All upgrade +

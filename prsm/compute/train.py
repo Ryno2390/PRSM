@@ -32,6 +32,7 @@ from typing import Callable, List, Optional, Protocol
 from prsm.enterprise.federated_learning import (
     GradientUpdate,
     encode_gradient,
+    seal_gradient_for_orchestrator,
     sign_gradient_update,
 )
 
@@ -112,12 +113,24 @@ def compute_signed_gradient_update(
     worker_attestation_b64: str,
     train_fn: Optional[TrainingFn] = None,
     timestamp: Optional[float] = None,
+    transport_pubkey_b64: Optional[str] = None,
 ) -> GradientUpdate:
     """Run the training strategy, wrap the gradient in a
     GradientUpdate, sign it under the worker's Ed25519
-    privkey, and return it. The signed payload binds the
-    worker_attestation_b64 (sprint 308b) so a tampered
-    attestation breaks verification."""
+    privkey, and return it.
+
+    Sprint 308b: the signed payload binds the
+    worker_attestation_b64 so a tampered attestation breaks
+    verification.
+
+    Sprint 308c: when transport_pubkey_b64 is provided, the
+    gradient bytes are sealed (X25519 ECDH +
+    ChaCha20-Poly1305) to that pubkey BEFORE signing. The
+    signed payload also binds gradient_envelope_b64 so a
+    MITM can't strip or replace the envelope without
+    breaking the signature. When transport_pubkey_b64 is
+    None, the gradient is plaintext (sprint 308b
+    backwards-compat)."""
     fn = train_fn or deterministic_stub_train_fn
     grad = fn(
         job_id=job_id,
@@ -125,13 +138,26 @@ def compute_signed_gradient_update(
         dataset_cid=dataset_cid,
         sample_count=sample_count,
     )
+    plaintext = encode_gradient(grad)
+
+    if transport_pubkey_b64 is not None:
+        sealed_b64, envelope_b64 = (
+            seal_gradient_for_orchestrator(
+                plaintext, transport_pubkey_b64,
+            )
+        )
+        gradient_b64 = sealed_b64
+    else:
+        gradient_b64 = _b64.b64encode(
+            plaintext,
+        ).decode("ascii")
+        envelope_b64 = None
+
     update = GradientUpdate(
         job_id=job_id,
         round_index=int(round_index),
         worker_node_id=worker_node_id,
-        gradient_b64=_b64.b64encode(
-            encode_gradient(grad),
-        ).decode("ascii"),
+        gradient_b64=gradient_b64,
         sample_count=int(sample_count),
         worker_attestation_b64=worker_attestation_b64,
         worker_signature_b64="",
@@ -139,6 +165,7 @@ def compute_signed_gradient_update(
             timestamp if timestamp is not None
             else time.time()
         ),
+        gradient_envelope_b64=envelope_b64,
     )
     return sign_gradient_update(
         update,

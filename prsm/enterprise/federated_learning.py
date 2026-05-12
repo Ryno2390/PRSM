@@ -56,11 +56,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
+from cryptography.hazmat.primitives.asymmetric.x25519 import (
+    X25519PrivateKey,
+    X25519PublicKey,
+)
+from cryptography.hazmat.primitives.ciphers.aead import (
+    ChaCha20Poly1305,
+)
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +163,11 @@ class GradientUpdate:
     worker_attestation_b64: str
     worker_signature_b64: str
     timestamp: float
+    # Sprint 308c — encrypted-gradient transport. When
+    # non-None, gradient_b64 is sealed ciphertext + this
+    # field holds the seal envelope (ephemeral pubkey +
+    # nonce). When None, gradient_b64 is plaintext.
+    gradient_envelope_b64: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -170,6 +183,9 @@ class GradientUpdate:
                 self.worker_signature_b64
             ),
             "timestamp": float(self.timestamp),
+            "gradient_envelope_b64": (
+                self.gradient_envelope_b64
+            ),
         }
 
     @classmethod
@@ -189,6 +205,9 @@ class GradientUpdate:
                 "worker_signature_b64", "",
             ),
             timestamp=float(d["timestamp"]),
+            gradient_envelope_b64=d.get(
+                "gradient_envelope_b64",
+            ),
         )
 
 
@@ -365,6 +384,11 @@ class FederatedJob:
     # Sprint 308a — opt-in hardening
     require_signed_updates: bool = False
     dp_policy: Optional[DPPolicy] = None
+    # Sprint 308c — encrypted-gradient transport. When
+    # non-None, workers must seal their gradient to this
+    # X25519 pubkey before submitting. Orchestrator unseals
+    # via PRSM_FEDERATED_ORCHESTRATOR_TRANSPORT_PRIVKEY env.
+    transport_pubkey_b64: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -390,6 +414,9 @@ class FederatedJob:
             "dp_policy": (
                 self.dp_policy.to_dict()
                 if self.dp_policy is not None else None
+            ),
+            "transport_pubkey_b64": (
+                self.transport_pubkey_b64
             ),
         }
 
@@ -424,6 +451,9 @@ class FederatedJob:
             dp_policy=(
                 DPPolicy.from_dict(dp_raw)
                 if dp_raw is not None else None
+            ),
+            transport_pubkey_b64=d.get(
+                "transport_pubkey_b64",
             ),
         )
 
@@ -575,6 +605,116 @@ def generate_worker_keypair() -> tuple[str, str]:
     return _ed25519_b64e(priv_raw), _ed25519_b64e(pub_raw)
 
 
+# ── Sprint 308c — encrypted-gradient transport ───────
+
+
+_TRANSPORT_HKDF_INFO = b"prsm-fl-transport-seal-v1"
+_TRANSPORT_NONCE_LEN = 12
+
+
+def generate_transport_keypair() -> tuple[str, str]:
+    """X25519 keypair for orchestrator gradient transport.
+    Privkey lives ONLY on the orchestrator (loaded from
+    PRSM_FEDERATED_ORCHESTRATOR_TRANSPORT_PRIVKEY env);
+    pubkey is pinned on each FederatedJob.transport_pubkey_b64
+    and distributed to workers."""
+    priv = X25519PrivateKey.generate()
+    priv_raw = priv.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    pub_raw = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return _ed25519_b64e(priv_raw), _ed25519_b64e(pub_raw)
+
+
+def _load_x25519_pub(b64: str) -> X25519PublicKey:
+    raw = _ed25519_b64d(b64)
+    if len(raw) != 32:
+        raise ValueError(
+            f"x25519 pubkey must be 32 bytes, got {len(raw)}"
+        )
+    return X25519PublicKey.from_public_bytes(raw)
+
+
+def _load_x25519_priv(b64: str) -> X25519PrivateKey:
+    raw = _ed25519_b64d(b64)
+    if len(raw) != 32:
+        raise ValueError(
+            f"x25519 privkey must be 32 bytes, got "
+            f"{len(raw)}"
+        )
+    return X25519PrivateKey.from_private_bytes(raw)
+
+
+def _derive_transport_key(shared_secret: bytes) -> bytes:
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32, salt=None,
+        info=_TRANSPORT_HKDF_INFO,
+    ).derive(shared_secret)
+
+
+def seal_gradient_for_orchestrator(
+    gradient_bytes: bytes,
+    orchestrator_pubkey_b64: str,
+) -> tuple[str, str]:
+    """Seal a gradient to the orchestrator's transport
+    pubkey. Returns (sealed_b64, envelope_b64).
+
+    Envelope = ephemeral X25519 pubkey || nonce (44 bytes
+    total raw; base64 ~60 chars). Sealed = ChaCha20-Poly1305
+    AEAD ciphertext over the gradient bytes."""
+    pub = _load_x25519_pub(orchestrator_pubkey_b64)
+    ephemeral_priv = X25519PrivateKey.generate()
+    ephemeral_pub = ephemeral_priv.public_key()
+    shared = ephemeral_priv.exchange(pub)
+    sealing_key = _derive_transport_key(shared)
+    nonce = os.urandom(_TRANSPORT_NONCE_LEN)
+    sealed = ChaCha20Poly1305(sealing_key).encrypt(
+        nonce, gradient_bytes, None,
+    )
+    eph_pub_raw = ephemeral_pub.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    envelope_raw = eph_pub_raw + nonce
+    return (
+        _ed25519_b64e(sealed),
+        _ed25519_b64e(envelope_raw),
+    )
+
+
+def unseal_gradient_from_worker(
+    sealed_b64: str,
+    envelope_b64: str,
+    orchestrator_privkey_b64: str,
+) -> bytes:
+    """Unseal a gradient. Raises on tamper / wrong key /
+    malformed envelope."""
+    priv = _load_x25519_priv(orchestrator_privkey_b64)
+    envelope = _ed25519_b64d(envelope_b64)
+    if len(envelope) != 32 + _TRANSPORT_NONCE_LEN:
+        raise ValueError(
+            f"envelope must be {32 + _TRANSPORT_NONCE_LEN} "
+            f"bytes (32 pubkey + 12 nonce); got "
+            f"{len(envelope)}"
+        )
+    ephemeral_pub = X25519PublicKey.from_public_bytes(
+        envelope[:32],
+    )
+    nonce = envelope[32:]
+    shared = priv.exchange(ephemeral_pub)
+    sealing_key = _derive_transport_key(shared)
+    sealed = _ed25519_b64d(sealed_b64)
+    return ChaCha20Poly1305(sealing_key).decrypt(
+        nonce, sealed, None,
+    )
+
+
 def _canonical_update_bytes(
     u: GradientUpdate,
 ) -> bytes:
@@ -593,6 +733,12 @@ def _canonical_update_bytes(
         "timestamp": float(u.timestamp),
         "worker_attestation_b64": (
             u.worker_attestation_b64
+        ),
+        # Sprint 308c — bind envelope so a MITM can't
+        # strip or replace it without breaking the
+        # signature
+        "gradient_envelope_b64": (
+            u.gradient_envelope_b64
         ),
     }
     return json.dumps(
@@ -736,6 +882,7 @@ class FederatedLearningOrchestrator:
         aggregation: AggregationStrategy,
         require_signed_updates: bool = False,
         dp_policy: Optional[DPPolicy] = None,
+        transport_pubkey_b64: Optional[str] = None,
     ) -> FederatedJob:
         if not worker_pool:
             raise ValueError(
@@ -757,6 +904,15 @@ class FederatedLearningOrchestrator:
                 f"({min_workers_per_round}) exceeds pool "
                 f"size ({len(worker_pool)})"
             )
+        # Sprint 308c — validate transport pubkey format
+        # eagerly so propose-job fails loud on misconfig.
+        if transport_pubkey_b64 is not None:
+            try:
+                _load_x25519_pub(transport_pubkey_b64)
+            except ValueError as e:
+                raise ValueError(
+                    f"invalid transport_pubkey_b64: {e}"
+                )
         job = FederatedJob(
             job_id=str(uuid.uuid4()),
             model_id=model_id,
@@ -773,6 +929,7 @@ class FederatedLearningOrchestrator:
                 require_signed_updates,
             ),
             dp_policy=dp_policy,
+            transport_pubkey_b64=transport_pubkey_b64,
         )
         self._jobs[job.job_id] = job
         self._persist_job(job)
@@ -956,10 +1113,76 @@ class FederatedLearningOrchestrator:
                 f"{job.min_workers_per_round} "
                 f"(min_workers_per_round)"
             )
+        # Sprint 308c — if the job has transport encryption,
+        # unseal each gradient before aggregation. The
+        # received updates are preserved verbatim (sealed)
+        # so the signed-bytes audit trail stays intact; we
+        # produce plaintext copies just for aggregation.
+        updates_for_aggregation = rnd.gradient_updates_received
+        if job.transport_pubkey_b64 is not None:
+            orchestrator_priv = os.environ.get(
+                "PRSM_FEDERATED_ORCHESTRATOR_TRANSPORT_PRIVKEY",
+                "",
+            ).strip()
+            if not orchestrator_priv:
+                raise ValueError(
+                    f"job {job_id!r} has transport "
+                    f"encryption but orchestrator "
+                    f"transport privkey is not configured "
+                    f"(set PRSM_FEDERATED_ORCHESTRATOR_"
+                    f"TRANSPORT_PRIVKEY env)"
+                )
+            unsealed_updates = []
+            for u in rnd.gradient_updates_received:
+                if u.gradient_envelope_b64 is None:
+                    rnd.status = RoundStatus.FAILED
+                    self._persist_round(rnd)
+                    raise ValueError(
+                        f"job {job_id!r} requires "
+                        f"transport encryption but update "
+                        f"from worker "
+                        f"{u.worker_node_id!r} has no "
+                        f"envelope"
+                    )
+                try:
+                    plaintext = unseal_gradient_from_worker(
+                        u.gradient_b64,
+                        u.gradient_envelope_b64,
+                        orchestrator_priv,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    rnd.status = RoundStatus.FAILED
+                    self._persist_round(rnd)
+                    raise ValueError(
+                        f"unsealing gradient from worker "
+                        f"{u.worker_node_id!r} failed: "
+                        f"{exc}"
+                    )
+                # Build a sibling unsealed update (don't
+                # mutate the stored signed one)
+                unsealed_updates.append(GradientUpdate(
+                    job_id=u.job_id,
+                    round_index=u.round_index,
+                    worker_node_id=u.worker_node_id,
+                    gradient_b64=base64.b64encode(
+                        plaintext,
+                    ).decode("ascii"),
+                    sample_count=u.sample_count,
+                    worker_attestation_b64=(
+                        u.worker_attestation_b64
+                    ),
+                    worker_signature_b64=(
+                        u.worker_signature_b64
+                    ),
+                    timestamp=u.timestamp,
+                    gradient_envelope_b64=None,
+                ))
+            updates_for_aggregation = unsealed_updates
+
         aggregator = _AGGREGATORS[job.aggregation]
         try:
             rnd.aggregated_update = aggregator(
-                rnd.gradient_updates_received,
+                updates_for_aggregation,
             )
         except ValueError as e:
             rnd.status = RoundStatus.FAILED

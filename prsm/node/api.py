@@ -7957,6 +7957,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         round_index: int = Field(ge=0)
         dataset_cid: str
         sample_count: int = Field(ge=0)
+        # Sprint 308c — when set, the worker seals the
+        # gradient to this orchestrator X25519 pubkey
+        # before signing.
+        transport_pubkey_b64: Optional[str] = None
 
     @app.post("/compute/train")
     async def compute_train(
@@ -8012,15 +8016,23 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         from prsm.compute.train import (
             compute_signed_gradient_update,
         )
-        update = compute_signed_gradient_update(
-            job_id=body.job_id,
-            round_index=body.round_index,
-            dataset_cid=body.dataset_cid,
-            sample_count=body.sample_count,
-            worker_node_id=worker_node_id,
-            worker_privkey_b64=privkey,
-            worker_attestation_b64=attestation_b64,
-        )
+        try:
+            update = compute_signed_gradient_update(
+                job_id=body.job_id,
+                round_index=body.round_index,
+                dataset_cid=body.dataset_cid,
+                sample_count=body.sample_count,
+                worker_node_id=worker_node_id,
+                worker_privkey_b64=privkey,
+                worker_attestation_b64=attestation_b64,
+                transport_pubkey_b64=(
+                    body.transport_pubkey_b64
+                ),
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422, detail=str(e),
+            )
         return update.to_dict()
 
     # ── Sprint 308 — federated-learning orchestrator ──────
@@ -8039,6 +8051,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # Sprint 308a — opt-in hardening fields
         require_signed_updates: bool = False
         dp_policy: Optional[Dict[str, float]] = None
+        # Sprint 308c — opt-in transport encryption
+        transport_pubkey_b64: Optional[str] = None
 
     class _FederatedWorkerKey(BaseModel):
         node_id: str
@@ -8116,12 +8130,66 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     body.require_signed_updates
                 ),
                 dp_policy=dp_policy,
+                transport_pubkey_b64=(
+                    body.transport_pubkey_b64
+                ),
             )
         except ValueError as e:
             raise HTTPException(
                 status_code=422, detail=str(e),
             )
         return job.to_dict()
+
+    @app.get(
+        "/admin/federated/transport-pubkey",
+        tags=["admin"],
+    )
+    async def federated_transport_pubkey() -> Dict[str, Any]:
+        """Sprint 308c — derive + surface the orchestrator's
+        transport pubkey from its in-memory privkey.
+        Operators distribute this pubkey to enterprises;
+        enterprises pin it on each FederatedJob."""
+        priv = getattr(
+            node,
+            "_federated_orchestrator_transport_privkey_b64",
+            None,
+        )
+        if not priv:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "orchestrator transport privkey not "
+                    "configured; set "
+                    "PRSM_FEDERATED_ORCHESTRATOR_"
+                    "TRANSPORT_PRIVKEY env"
+                ),
+            )
+        try:
+            from prsm.enterprise.federated_learning import (
+                _load_x25519_priv,
+            )
+            from cryptography.hazmat.primitives import (
+                serialization as _ser,
+            )
+            import base64 as _b64
+            x_priv = _load_x25519_priv(priv)
+            pub_raw = x_priv.public_key().public_bytes(
+                encoding=_ser.Encoding.Raw,
+                format=_ser.PublicFormat.Raw,
+            )
+            return {
+                "transport_pubkey_b64": _b64.b64encode(
+                    pub_raw,
+                ).decode("ascii"),
+            }
+        except ValueError as e:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"orchestrator transport privkey "
+                    f"malformed: {e}"
+                ),
+            )
 
     @app.post(
         "/admin/federated/worker-key", tags=["admin"],
