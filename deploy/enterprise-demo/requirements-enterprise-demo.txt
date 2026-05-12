@@ -1,0 +1,29 @@
+# Sprint 318a — minimal Docker requirements for the §7
+# enterprise + federated inference demo runnable.
+#
+# This is a deliberately tight subset of the full PRSM
+# requirements.txt. The demo (prsm/enterprise/demo.py)
+# runs entirely in-process with filesystem persistence;
+# it does not need Postgres / Redis / IPFS / web3 /
+# libtorrent.
+#
+# Pin versions to avoid surprise upgrades during cold
+# rebuilds.
+
+# Cryptographic primitives (sprint 304/306/308a/308c/312)
+cryptography>=42.0,<46.0
+
+# HTTP + async (sprint 313 + sprint 316a)
+fastapi>=0.110,<1.0
+pydantic>=2.0,<3.0
+httpx>=0.27,<1.0
+uvicorn>=0.30,<1.0
+
+# Test client used by demo path (in-process FastAPI)
+starlette>=0.37,<1.0
+
+# PyTorch for sprints 309 (FL training) + 314 (pipeline
+# stage forward). CPU-only is plenty for the demo;
+# production deploys override with the GPU wheel.
+torch>=2.0,<3.0
+numpy>=1.24,<3.0

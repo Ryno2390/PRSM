@@ -1,0 +1,52 @@
+# Sprint 318a — keep the Docker build context tight.
+# Only files under `prsm/{compute,enterprise}` actually
+# get copied into the runtime image (see Dockerfile).
+
+# VCS + editor
+.git/
+.gitignore
+.editorconfig
+.vscode/
+.idea/
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Test artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Local venvs
+.venv/
+venv/
+env/
+
+# Docker / k8s noise (these live in /deploy/ but we
+# don't want to copy them INTO the image)
+deploy/
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Other repos in this monorepo we don't need
+contracts/
+docs/
+sdks/
+node_modules/
+
+# Logs + data
+*.log
+data/
+prsm-data/
