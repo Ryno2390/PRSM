@@ -1716,6 +1716,65 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_verify_inference_privacy",
+        description=(
+            "Verify an InferenceReceipt's privacy claims "
+            "(Vision §7 zero-trust compute layer). "
+            "Independently checks the signature, the "
+            "differential-privacy noise application "
+            "(ε>0 iff privacy_tier != none), AND the "
+            "hardware-attestation quality. Surfaces the "
+            "truth about whether a receipt carries a real "
+            "hardware-TEE attestation (Intel ASP / AMD KDS "
+            "/ Apple SEP) or the current DEV-ONLY software "
+            "fallback. Default posture is permissive; pass "
+            "require_hardware_attestation=true to reject "
+            "software-fallback receipts. Backed by "
+            "POST /compute/receipt/verify."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "receipt": {
+                    "type": "object",
+                    "description": (
+                        "Full InferenceReceipt payload from "
+                        "POST /compute/inference."
+                    ),
+                },
+                "public_key_b64": {
+                    "type": "string",
+                    "description": (
+                        "Base64-encoded Ed25519 public key "
+                        "of the settler node that signed "
+                        "the receipt (fetch via GET "
+                        "/node/identity/pubkey)."
+                    ),
+                },
+                "require_hardware_attestation": {
+                    "type": "boolean",
+                    "description": (
+                        "When true, fail (ok=false) on "
+                        "DEV-ONLY software-fallback "
+                        "attestations. Default false."
+                    ),
+                    "default": False,
+                },
+                "require_dp_noise": {
+                    "type": "boolean",
+                    "description": (
+                        "When true, fail if the receipt's "
+                        "epsilon_spent is 0 while "
+                        "privacy_tier claims privacy. "
+                        "Default false."
+                    ),
+                    "default": False,
+                },
+            },
+            "required": ["receipt", "public_key_b64"],
+        },
+    ),
+    Tool(
         name="prsm_content_fingerprint",
         description=(
             "Content fingerprint registry inspection "
@@ -7248,6 +7307,106 @@ async def handle_prsm_waas_wallet(
     )
 
 
+async def handle_prsm_verify_inference_privacy(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 292 — verify an InferenceReceipt's privacy
+    claims (Vision §7). Wraps POST /compute/receipt/verify.
+
+    Surfaces the truth about hardware-attestation quality
+    even when the default permissive posture returns ok=True
+    — every receipt produced by the local executor today
+    carries a DEV-ONLY software-fallback attestation, and
+    callers should know that.
+    """
+    receipt = arguments.get("receipt")
+    if not isinstance(receipt, dict):
+        return (
+            "Missing required argument: receipt (dict). "
+            "Pass the full InferenceReceipt payload returned "
+            "by /compute/inference."
+        )
+    public_key_b64 = (
+        arguments.get("public_key_b64") or ""
+    ).strip()
+    if not public_key_b64:
+        return (
+            "Missing required argument: public_key_b64. "
+            "Fetch via GET /node/identity/pubkey on the "
+            "node that signed the receipt."
+        )
+    body = {
+        "receipt": receipt,
+        "public_key_b64": public_key_b64,
+        "require_hardware_attestation": bool(
+            arguments.get("require_hardware_attestation", False),
+        ),
+        "require_dp_noise": bool(
+            arguments.get("require_dp_noise", False),
+        ),
+    }
+    try:
+        result = await _call_node_api(
+            "POST", "/compute/receipt/verify", body,
+        )
+    except Exception as e:
+        return (
+            f"prsm_verify_inference_privacy failed: {e}\n"
+            f"Is your PRSM node running?"
+        )
+    if "ok" not in result:
+        detail = result.get("detail", "unknown error")
+        return (
+            f"Verify refused: {detail}"
+        )
+
+    ok = result.get("ok")
+    sig_valid = result.get("signature_valid")
+    dp_applied = result.get("dp_noise_applied")
+    hw_attested = result.get("hardware_attested")
+    multi_stage = result.get(
+        "multi_stage_envelope_present", False,
+    )
+    tier = result.get("privacy_tier", "?")
+    eps_spent = result.get("epsilon_spent", 0)
+    eps_expected = result.get("expected_epsilon", 0)
+    reasons = result.get("reasons") or []
+
+    verdict = (
+        "✅ VALID" if ok
+        else "❌ REJECTED (failed required check)"
+    )
+    lines = [
+        f"Receipt privacy verdict: {verdict}",
+        "",
+        f"  Signature:        "
+        f"{'✅ valid' if sig_valid else '❌ INVALID'}",
+        f"  DP noise applied: "
+        f"{'✅ yes' if dp_applied else '⚠ no'}  "
+        f"(ε={eps_spent}; tier={tier}; "
+        f"expected ε={eps_expected})",
+        f"  Hardware TEE:     "
+        f"{'✅ hardware-attested' if hw_attested else '⚠ SOFTWARE FALLBACK (DEV-ONLY)'}",
+        f"  Multi-stage env:  "
+        f"{'present' if multi_stage else 'single-host'}",
+    ]
+    if not hw_attested:
+        lines.append(
+            "    Truth check: every local-executor receipt "
+            "today carries a DEV-ONLY software-fallback "
+            "attestation. Hardware TEE (Intel ASP, AMD KDS, "
+            "Apple SEP) backends ship in a future sprint. "
+            "Pass require_hardware_attestation=true to fail "
+            "loudly on this until then."
+        )
+    if reasons:
+        lines.append("")
+        lines.append("  Reasons:")
+        for r in reasons:
+            lines.append(f"    • {r}")
+    return "\n".join(lines)
+
+
 _CONTENT_FINGERPRINT_ACTIONS = {"list", "lookup"}
 
 
@@ -9910,6 +10069,7 @@ TOOL_HANDLERS = {
     "prsm_creator_reputation": handle_prsm_creator_reputation,
     "prsm_creator_stake": handle_prsm_creator_stake,
     "prsm_content_fingerprint": handle_prsm_content_fingerprint,
+    "prsm_verify_inference_privacy": handle_prsm_verify_inference_privacy,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

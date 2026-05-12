@@ -7195,6 +7195,127 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return entry.to_dict()
 
+    # ── Sprint 292 — privacy-claim verification ───────────
+    # Public API for the §7 promise: lets callers verify
+    # signature + DP-noise + hardware-attestation quality
+    # of an InferenceReceipt without trusting the executor's
+    # claims. Defaults are permissive (returns ok=True with
+    # diagnostic flags); strict callers pass
+    # require_hardware_attestation=true to gate on real TEE
+    # (currently every local executor uses DEV-ONLY software
+    # fallback, so this gate currently fails — by design,
+    # until hardware-attestation backends ship).
+
+    @app.post(
+        "/compute/receipt/verify", tags=["compute"],
+    )
+    async def verify_receipt_privacy(
+        body: Dict[str, Any] = {},
+    ) -> Dict[str, Any]:
+        import base64
+        import dataclasses as _dc
+        from prsm.compute.inference.models import (
+            ContentTier, InferenceReceipt,
+        )
+        from prsm.compute.inference.privacy_verification import (
+            verify_receipt_privacy_claim,
+        )
+        from prsm.compute.tee.models import (
+            PrivacyLevel as _PL, TEEType as _TT,
+        )
+
+        receipt_payload = body.get("receipt")
+        if not isinstance(receipt_payload, dict):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "missing required field: receipt "
+                    "(must be a JSON object)"
+                ),
+            )
+        public_key_b64 = body.get("public_key_b64")
+        if not public_key_b64:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "missing required field: public_key_b64 "
+                    "(base64 Ed25519 public key of the "
+                    "settler that signed the receipt)"
+                ),
+            )
+        require_hw = bool(
+            body.get("require_hardware_attestation", False),
+        )
+        require_dp = bool(
+            body.get("require_dp_noise", False),
+        )
+
+        # Reconstruct InferenceReceipt from JSON payload.
+        # Fields containing bytes are base64-encoded on the
+        # wire; decode upfront. Surface 422 on malformed
+        # input rather than 500.
+        try:
+            tee_attestation = base64.b64decode(
+                receipt_payload.get(
+                    "tee_attestation_b64", "",
+                ) or b""
+            )
+            output_hash = base64.b64decode(
+                receipt_payload.get("output_hash_b64", "")
+                or b""
+            )
+            settler_signature = base64.b64decode(
+                receipt_payload.get(
+                    "settler_signature_b64", "",
+                ) or b""
+            )
+            receipt = InferenceReceipt(
+                job_id=receipt_payload["job_id"],
+                request_id=receipt_payload["request_id"],
+                model_id=receipt_payload["model_id"],
+                content_tier=_PL(
+                    receipt_payload["content_tier"]
+                ) if False else ContentTier(
+                    receipt_payload["content_tier"]
+                ),
+                privacy_tier=_PL(
+                    receipt_payload["privacy_tier"]
+                ),
+                epsilon_spent=float(
+                    receipt_payload.get("epsilon_spent", 0)
+                ),
+                tee_type=_TT(
+                    receipt_payload.get("tee_type", "software")
+                ),
+                tee_attestation=tee_attestation,
+                output_hash=output_hash,
+                duration_seconds=float(
+                    receipt_payload.get("duration_seconds", 0)
+                ),
+                cost_ftns=str(
+                    receipt_payload.get("cost_ftns", "0")
+                ),
+                settler_signature=settler_signature,
+                settler_node_id=receipt_payload.get(
+                    "settler_node_id", "",
+                ),
+            )
+        except (KeyError, ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"malformed receipt: {exc}"
+                ),
+            )
+
+        result = verify_receipt_privacy_claim(
+            receipt,
+            require_hardware_attestation=require_hw,
+            require_dp_noise=require_dp,
+            public_key_b64=public_key_b64,
+        )
+        return result.to_dict()
+
     # ── Sprint 287 — creator reputation operator surface ─
     # Per Vision §14 "Data quality and Sybil resistance"
     # mitigation item (1). Read paths surface aggregates

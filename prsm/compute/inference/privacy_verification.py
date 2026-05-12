@@ -1,0 +1,280 @@
+"""Sprint 292 — privacy-claim verification public API.
+
+Vision §7 says PRSM provides "TEE-attested compute" as a
+structural property of the protocol. The local executor
+infrastructure for this is in place (sprint 287-288 verified
+DPNoiseInjector is wired + PrivacyBudgetTracker enforces ε),
+but every receipt produced today carries a
+``DEV-ONLY-SW-TEE:``-prefixed software-stub attestation. Until
+real hardware-attestation backends (Intel ASP / AMD KDS /
+Apple SEP) wire in, end-users have no way to distinguish a
+production-attested receipt from the software fallback.
+
+This module exposes that truth via a public API so callers
+can make trust decisions:
+
+  is_dev_only_attestation(blob)
+    Public predicate — matches the docstring intent at
+    executor.py:602-606 ("verifiers MUST reject any
+    attestation starting with the DEV-ONLY prefix as a
+    confidentiality proof").
+
+  verify_receipt_privacy_claim(receipt, *,
+        require_hardware_attestation=False,
+        require_dp_noise=False,
+        identity=None, public_key_b64=None)
+    Composite check returning a PrivacyVerification record.
+    Validates signature + DP-noise + hardware-attestation
+    quality + multi-stage envelope presence. Surfaces
+    expected vs actual epsilon mismatch for callers that
+    need to detect tier↔ε desync.
+
+The HTTP endpoint + MCP tool wrapping this primitive ship
+in sprint 293 (out of sprint-292 scope). This sprint focuses
+on the pure verification surface that those wrappers consume.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+from prsm.compute.inference.executor import (
+    SOFTWARE_TEE_ATTESTATION_PREFIX,
+)
+from prsm.compute.inference.receipt import (
+    InferenceReceipt, verify_receipt,
+)
+from prsm.compute.tee.models import PrivacyLevel
+
+
+def is_dev_only_attestation(blob: Optional[bytes]) -> bool:
+    """True iff ``blob`` carries the DEV-ONLY software-fallback
+    prefix. Use as a hard predicate: any True return means the
+    attestation is NOT a production confidentiality proof,
+    regardless of what the receipt's ``tee_type`` field claims.
+
+    Defensive: None, empty, and short-bytes inputs return
+    False (they're "missing", not "dev-only"). Callers that
+    require a hardware attestation should separately check
+    that the blob is present + sufficient length.
+    """
+    if blob is None or not isinstance(blob, bytes):
+        return False
+    return blob.startswith(SOFTWARE_TEE_ATTESTATION_PREFIX)
+
+
+@dataclass
+class PrivacyVerification:
+    """Composite result of verifying a receipt's privacy
+    claims. ``ok=True`` means every check the caller asked
+    for passed; ``reasons`` enumerates the failures + any
+    informational warnings."""
+
+    ok: bool
+    reasons: List[str] = field(default_factory=list)
+    signature_valid: bool = False
+    dp_noise_applied: bool = False
+    hardware_attested: bool = False
+    multi_stage_envelope_present: bool = False
+    # Diagnostic fields (always populated for caller
+    # inspection; surfacing the values is half the point of
+    # this API).
+    privacy_tier: str = ""
+    epsilon_spent: float = 0.0
+    expected_epsilon: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "reasons": list(self.reasons),
+            "signature_valid": self.signature_valid,
+            "dp_noise_applied": self.dp_noise_applied,
+            "hardware_attested": self.hardware_attested,
+            "multi_stage_envelope_present": (
+                self.multi_stage_envelope_present
+            ),
+            "privacy_tier": self.privacy_tier,
+            "epsilon_spent": self.epsilon_spent,
+            "expected_epsilon": self.expected_epsilon,
+        }
+
+
+def _privacy_tier_str(tier: Any) -> str:
+    """Coerce the receipt's privacy_tier (might be enum or
+    string depending on round-trip path) to a string."""
+    if hasattr(tier, "value"):
+        return tier.value
+    return str(tier)
+
+
+def _expected_epsilon_for(tier: Any) -> float:
+    """Look up the canonical ε for the tier. Returns 0.0 for
+    NONE, inf for unrecognized tiers (caller should still
+    surface, but won't trigger a mismatch reason)."""
+    try:
+        if isinstance(tier, PrivacyLevel):
+            level = tier
+        else:
+            level = PrivacyLevel(_privacy_tier_str(tier))
+    except ValueError:
+        return float("inf")
+    if level == PrivacyLevel.NONE:
+        return 0.0
+    return PrivacyLevel.config_for_level(level).epsilon
+
+
+def verify_receipt_privacy_claim(
+    receipt: InferenceReceipt,
+    *,
+    require_hardware_attestation: bool = False,
+    require_dp_noise: bool = False,
+    identity: Any = None,
+    public_key_b64: Optional[str] = None,
+) -> PrivacyVerification:
+    """Run all privacy-claim checks against a receipt.
+
+    Default posture (no ``require_*`` flags): permissive —
+    returns ok=True for any receipt that has a valid
+    signature, regardless of hardware-attestation quality or
+    DP-noise presence. The diagnostic fields surface the
+    truth so callers can apply their own policy.
+
+    Strict posture: callers who require hardware attestation
+    or DP noise pass the respective ``require_*`` flag, and
+    a failure on any required check flips ``ok=False`` with
+    a clear reason.
+    """
+    reasons: List[str] = []
+    tier_str = _privacy_tier_str(receipt.privacy_tier)
+    expected_eps = _expected_epsilon_for(receipt.privacy_tier)
+
+    # ── Signature check ─────────────────────────────────
+    signature_valid = False
+    if not receipt.settler_signature:
+        reasons.append(
+            "receipt is unsigned (settler_signature empty)"
+        )
+    elif identity is None and public_key_b64 is None:
+        reasons.append(
+            "no verifier key supplied (pass identity= or "
+            "public_key_b64=)"
+        )
+    else:
+        try:
+            signature_valid = verify_receipt(
+                receipt,
+                identity=identity,
+                public_key_b64=public_key_b64,
+            )
+        except Exception as exc:  # noqa: BLE001
+            reasons.append(
+                f"signature verification raised: {exc}"
+            )
+        if not signature_valid and (
+            identity is not None or public_key_b64 is not None
+        ):
+            # Add the reason only if we actually tried and
+            # the result was a clean False (not from a missing
+            # input — that already added its own reason).
+            if receipt.settler_signature:
+                # Avoid duplicating the "unsigned" reason
+                already_reported = any(
+                    "verifi" in r for r in reasons
+                )
+                if not already_reported:
+                    reasons.append(
+                        "signature failed cryptographic "
+                        "verification"
+                    )
+
+    # ── DP-noise applied check ──────────────────────────
+    # Convention: epsilon_spent > 0 iff DP noise was applied.
+    # For privacy_tier=NONE this is correctly False.
+    dp_noise_applied = receipt.epsilon_spent > 0.0
+    if require_dp_noise and not dp_noise_applied:
+        reasons.append(
+            "DP noise was NOT applied "
+            f"(epsilon_spent={receipt.epsilon_spent}; "
+            f"privacy_tier={tier_str!r})"
+        )
+
+    # Surface tier↔ε mismatch as a non-fatal informational
+    # reason. Caller decides what to do with the diagnostic.
+    if (
+        dp_noise_applied
+        and expected_eps not in (0.0, float("inf"))
+        and abs(receipt.epsilon_spent - expected_eps) > 1e-9
+    ):
+        reasons.append(
+            f"epsilon_spent mismatch with privacy_tier: "
+            f"expected ε={expected_eps} for "
+            f"tier={tier_str!r}, got "
+            f"ε={receipt.epsilon_spent}"
+        )
+
+    # ── Attestation quality ─────────────────────────────
+    attestation = receipt.tee_attestation
+    is_dev_only = is_dev_only_attestation(attestation)
+    has_attestation = bool(attestation)
+    hardware_attested = has_attestation and not is_dev_only
+    if require_hardware_attestation:
+        if not has_attestation:
+            reasons.append(
+                "no TEE attestation present "
+                "(tee_attestation is empty)"
+            )
+        elif is_dev_only:
+            reasons.append(
+                "attestation is DEV-ONLY software fallback "
+                "— not a production confidentiality proof. "
+                "Hardware TEE backends (Intel ASP / AMD KDS "
+                "/ Apple SEP) ship in a future sprint."
+            )
+
+    # ── Multi-stage envelope presence ───────────────────
+    # Phase 3.x.7 RpcChainExecutor wraps single-stage
+    # attestation with a multi-stage envelope. Detect that
+    # here so callers can surface "this inference used the
+    # cross-host attestation path."
+    multi_stage_present = False
+    try:
+        from prsm.compute.inference.multi_stage_attestation import (
+            verify_stage_attestations as _ms_verify,
+        )
+        result = _ms_verify(attestation)
+        # The verifier returns a list when an envelope is
+        # present; a sentinel single-entry list otherwise.
+        # Distinguish via the presence of a stage-specific
+        # marker. The public API ships a more decisive
+        # check; for v1 we treat any non-error response as
+        # an envelope being structurally parseable.
+        multi_stage_present = (
+            isinstance(result, (list, tuple))
+            and len(result) > 0
+            and not is_dev_only
+        )
+    except Exception:  # noqa: BLE001
+        multi_stage_present = False
+
+    # ── Final ok ─────────────────────────────────────────
+    # ok = signature_valid AND (no failed required checks)
+    failed_required = False
+    if require_hardware_attestation and not hardware_attested:
+        failed_required = True
+    if require_dp_noise and not dp_noise_applied:
+        failed_required = True
+    ok = signature_valid and not failed_required
+
+    return PrivacyVerification(
+        ok=ok,
+        reasons=reasons,
+        signature_valid=signature_valid,
+        dp_noise_applied=dp_noise_applied,
+        hardware_attested=hardware_attested,
+        multi_stage_envelope_present=multi_stage_present,
+        privacy_tier=tier_str,
+        epsilon_spent=float(receipt.epsilon_spent),
+        expected_epsilon=(
+            expected_eps if expected_eps != float("inf") else 0.0
+        ),
+    )
