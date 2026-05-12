@@ -1816,6 +1816,54 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_incident",
+        description=(
+            "Vision §14 mitigation item 5: public exploit-"
+            "response playbook + code hooks. Single tool "
+            "with `action` selector: open | list | lookup | "
+            "advance | event | recommend | comms | playbook. "
+            "Severity tiers: s0 (catastrophic active drain) "
+            "/ s1 (critical confirmed) / s2 (high suspected) "
+            "/ s3 (low / informational). Phase machine: "
+            "detected → triaged → contained → mitigated → "
+            "postmortem_published → closed (one-way). The "
+            "decision tree + comms templates are PRE-"
+            "COMMITTED and PUBLIC — that's the §14 promise. "
+            "recommend returns operator imperatives at "
+            "current (severity, phase); comms returns a "
+            "pre-committed markdown comms template with the "
+            "summary interpolated. playbook returns the full "
+            "decision tree + all comms templates (public "
+            "transparency). Backed by /admin/incident/*."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "open", "list", "lookup",
+                        "advance", "event",
+                        "recommend", "comms", "playbook",
+                    ],
+                },
+                "incident_id": {"type": "string"},
+                "severity": {"type": "string"},
+                "summary": {"type": "string"},
+                "affected_contracts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "related_disclosure_id": {"type": "string"},
+                "phase": {"type": "string"},
+                "new_phase": {"type": "string"},
+                "note": {"type": "string"},
+                "actor": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_disclosure",
         description=(
             "Vision §14 mitigation item 3: responsible-"
@@ -7635,6 +7683,312 @@ _DISCLOSURE_ACTIONS = {
     "compose_payout", "record_payout_tx",
 }
 
+
+_INCIDENT_ACTIONS = {
+    "open", "list", "lookup", "advance", "event",
+    "recommend", "comms", "playbook",
+}
+
+_INCIDENT_SEVERITY_VALUES = {"s0", "s1", "s2", "s3"}
+
+
+def _short_incident_id(iid: str) -> str:
+    return iid[:8] if len(iid) > 8 else iid
+
+
+async def handle_prsm_incident(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 301 — public exploit-response playbook +
+    incident lifecycle tracker (Vision §14 item 5).
+
+    Wraps /admin/incident/*. The decision tree + comms
+    templates are PUBLIC by design — anyone may read what
+    PRSM has pre-committed to in an incident."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_INCIDENT_ACTIONS)})."
+        )
+    if action not in _INCIDENT_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_INCIDENT_ACTIONS)}; got {action!r}."
+        )
+
+    if action == "open":
+        severity = (
+            arguments.get("severity") or ""
+        ).strip().lower()
+        if not severity:
+            return (
+                f"open requires 'severity' (one of "
+                f"{sorted(_INCIDENT_SEVERITY_VALUES)})."
+            )
+        body = {
+            "severity": severity,
+            "summary": arguments.get("summary") or "",
+            "affected_contracts": (
+                arguments.get("affected_contracts") or []
+            ),
+            "related_disclosure_id": arguments.get(
+                "related_disclosure_id",
+            ),
+            "actor": arguments.get("actor") or "",
+        }
+        try:
+            r = await _call_node_api(
+                "POST", "/admin/incident/open", body,
+            )
+        except Exception as e:
+            return f"prsm_incident open failed: {e}"
+        if "incident_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"open refused: {detail}"
+        return (
+            f"Incident opened\n"
+            f"  id:       {r.get('incident_id')}\n"
+            f"  severity: {r.get('severity')}\n"
+            f"  phase:    {r.get('current_phase')}\n"
+            f"  summary:  {r.get('summary')}"
+        )
+
+    if action == "list":
+        params = []
+        sev = (
+            arguments.get("severity") or ""
+        ).strip().lower()
+        if sev:
+            params.append(f"severity={sev}")
+        phase = (
+            arguments.get("phase") or ""
+        ).strip().lower()
+        if phase:
+            params.append(f"phase={phase}")
+        path = "/admin/incident"
+        if params:
+            path = f"{path}?{'&'.join(params)}"
+        try:
+            r = await _call_node_api("GET", path)
+        except Exception as e:
+            return f"prsm_incident list failed: {e}"
+        if "records" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"list refused: {detail}"
+        records = r.get("records") or []
+        if not records:
+            return "No incidents recorded."
+        lines = [
+            f"PRSM Incidents — {r.get('count', 0)} record"
+            f"{'s' if r.get('count', 0) != 1 else ''}",
+            "",
+            f"  {'id':<10} {'sev':<5} {'phase':<22}  summary",
+        ]
+        for rec in records:
+            iid = _short_incident_id(
+                rec.get("incident_id", ""),
+            )
+            sev_v = rec.get("severity", "?")
+            phase_v = rec.get("current_phase", "?")
+            summary = (rec.get("summary") or "")[:60]
+            lines.append(
+                f"  {iid:<10} {sev_v:<5} {phase_v:<22}  "
+                f"{summary}"
+            )
+        return "\n".join(lines)
+
+    if action == "lookup":
+        iid = (
+            arguments.get("incident_id") or ""
+        ).strip()
+        if not iid:
+            return "lookup requires 'incident_id'."
+        try:
+            r = await _call_node_api(
+                "GET", f"/admin/incident/{iid}",
+            )
+        except Exception as e:
+            return f"prsm_incident lookup failed: {e}"
+        if "incident_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"lookup refused: {detail}"
+        timeline = r.get("timeline") or []
+        lines = [
+            f"Incident {r.get('incident_id')}",
+            "",
+            f"  severity: {r.get('severity')}",
+            f"  phase:    {r.get('current_phase')}",
+            f"  summary:  {r.get('summary')}",
+            f"  affected: "
+            f"{', '.join(r.get('affected_contracts') or []) or '(none)'}",
+            "",
+            f"  Timeline ({len(timeline)} events):",
+        ]
+        for ev in timeline:
+            lines.append(
+                f"    [{ev.get('phase'):<22}] "
+                f"{ev.get('note') or '(no note)'}"
+                + (
+                    f"  by {ev['actor']}"
+                    if ev.get("actor") else ""
+                )
+            )
+        return "\n".join(lines)
+
+    if action == "advance":
+        iid = (
+            arguments.get("incident_id") or ""
+        ).strip()
+        if not iid:
+            return "advance requires 'incident_id'."
+        new_phase = (
+            arguments.get("new_phase") or ""
+        ).strip().lower()
+        if not new_phase:
+            return "advance requires 'new_phase'."
+        body = {
+            "new_phase": new_phase,
+            "note": arguments.get("note") or "",
+            "actor": arguments.get("actor") or "",
+        }
+        try:
+            r = await _call_node_api(
+                "POST", f"/admin/incident/{iid}/advance",
+                body,
+            )
+        except Exception as e:
+            return f"prsm_incident advance failed: {e}"
+        if "incident_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"advance refused: {detail}"
+        return (
+            f"Incident {r.get('incident_id')} advanced\n"
+            f"  phase: {r.get('current_phase')}"
+        )
+
+    if action == "event":
+        iid = (
+            arguments.get("incident_id") or ""
+        ).strip()
+        if not iid:
+            return "event requires 'incident_id'."
+        note = arguments.get("note") or ""
+        if not note:
+            return "event requires 'note'."
+        body = {
+            "note": note,
+            "actor": arguments.get("actor") or "",
+        }
+        try:
+            r = await _call_node_api(
+                "POST", f"/admin/incident/{iid}/event",
+                body,
+            )
+        except Exception as e:
+            return f"prsm_incident event failed: {e}"
+        if "incident_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"event refused: {detail}"
+        last = (r.get("timeline") or [])[-1:]
+        last_note = (
+            last[0].get("note") if last else "(none)"
+        )
+        return (
+            f"Event recorded on "
+            f"{r.get('incident_id')}\n"
+            f"  phase: {r.get('current_phase')}\n"
+            f"  note:  {last_note}"
+        )
+
+    if action == "recommend":
+        iid = (
+            arguments.get("incident_id") or ""
+        ).strip()
+        if not iid:
+            return "recommend requires 'incident_id'."
+        try:
+            r = await _call_node_api(
+                "GET",
+                f"/admin/incident/{iid}/recommendations",
+            )
+        except Exception as e:
+            return f"prsm_incident recommend failed: {e}"
+        if "recommendations" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"recommend refused: {detail}"
+        recs = r.get("recommendations") or []
+        if not recs:
+            return (
+                f"No pre-committed recommendations for "
+                f"({r.get('severity')}, "
+                f"{r.get('current_phase')})."
+            )
+        lines = [
+            f"Playbook recommendations — "
+            f"{r.get('severity')} / "
+            f"{r.get('current_phase')}:",
+            "",
+        ]
+        for i, rec in enumerate(recs, 1):
+            lines.append(f"  {i}. {rec}")
+        return "\n".join(lines)
+
+    if action == "comms":
+        iid = (
+            arguments.get("incident_id") or ""
+        ).strip()
+        if not iid:
+            return "comms requires 'incident_id'."
+        try:
+            r = await _call_node_api(
+                "GET",
+                f"/admin/incident/{iid}/comms-template",
+            )
+        except Exception as e:
+            return f"prsm_incident comms failed: {e}"
+        if "text" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"comms refused: {detail}"
+        text = r.get("text") or ""
+        if not text.strip():
+            return (
+                f"No pre-committed comms template for "
+                f"({r.get('severity')}, "
+                f"{r.get('current_phase')})."
+            )
+        return (
+            f"Comms template — {r.get('severity')} / "
+            f"{r.get('current_phase')}:\n\n"
+            f"{text}"
+        )
+
+    # playbook
+    try:
+        r = await _call_node_api(
+            "GET", "/admin/incident/playbook",
+        )
+    except Exception as e:
+        return f"prsm_incident playbook failed: {e}"
+    if "decision_tree" not in r:
+        detail = r.get("detail", "unknown error")
+        return f"playbook refused: {detail}"
+    tree = r.get("decision_tree") or []
+    lines = [
+        "PRSM Exploit-Response Playbook "
+        "(Vision §14 — pre-committed, public)",
+        "",
+    ]
+    for entry in tree:
+        sev = entry.get("severity", "?")
+        phase = entry.get("phase", "?")
+        recs = entry.get("recommendations") or []
+        lines.append(f"  [{sev} / {phase}]")
+        for rec in recs:
+            lines.append(f"    • {rec}")
+        lines.append("")
+    return "\n".join(lines)
+
 _DISCLOSURE_SEVERITY_VALUES = {
     "critical", "high", "medium", "low", "informational",
 }
@@ -10837,6 +11191,7 @@ TOOL_HANDLERS = {
     "prsm_emergency_pause": handle_prsm_emergency_pause,
     "prsm_insurance_fund": handle_prsm_insurance_fund,
     "prsm_disclosure": handle_prsm_disclosure,
+    "prsm_incident": handle_prsm_incident,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

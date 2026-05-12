@@ -2410,6 +2410,32 @@ class PRSMNode:
             self._disclosure_ftns_token_address = None
             self._disclosure_chain_id = None
 
+        # Sprint 301 — incident response playbook (Vision
+        # §14 item 5). Filesystem-persisted via
+        # PRSM_INCIDENT_RESPONSE_DIR. Pre-committed decision-
+        # tree + comms templates live in the module itself
+        # (public). The /admin/incident/playbook endpoint
+        # surfaces the playbook unauthenticated for §14
+        # transparency promise.
+        try:
+            from prsm.economy.web3.incident_response import (
+                IncidentResponse,
+            )
+            self._incident_response = (
+                IncidentResponse.from_env()
+            )
+            logger.info(
+                "IncidentResponse wired (records=%d)",
+                self._incident_response.count(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "IncidentResponse construction failed: "
+                "%s — /admin/incident/* will return 503.",
+                exc,
+            )
+            self._incident_response = None
+
         # Sprint 286 — fiat-surface health check at startup.
         # Loud-but-non-blocking: ERROR findings surface in the
         # log so operators see misconfigs (e.g., KYC

@@ -7563,6 +7563,266 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    # ── Sprint 301 — incident response playbook ───────────
+    # Vision §14 mitigation item 5: public exploit-response
+    # playbook + code hooks. /playbook is intentionally
+    # accessible (public per §14 transparency promise). All
+    # other paths are admin (mutations + per-incident reads).
+
+    class _IncidentOpenRequest(BaseModel):
+        severity: str
+        summary: str
+        affected_contracts: List[str] = []
+        related_disclosure_id: Optional[str] = None
+        actor: str = ""
+
+    class _IncidentAdvanceRequest(BaseModel):
+        new_phase: str
+        note: str = ""
+        actor: str = ""
+
+    class _IncidentEventRequest(BaseModel):
+        note: str
+        actor: str = ""
+
+    def _require_incident_response():
+        ir = getattr(node, "_incident_response", None)
+        if ir is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Incident response not initialized.",
+            )
+        return ir
+
+    @app.post("/admin/incident/open", tags=["admin"])
+    async def incident_open(
+        body: _IncidentOpenRequest,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.incident_response import (
+            IncidentSeverity,
+        )
+        ir = _require_incident_response()
+        sev_raw = (body.severity or "").strip().lower()
+        try:
+            severity = IncidentSeverity(sev_raw)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"severity must be one of "
+                    f"{[s.value for s in IncidentSeverity]}"
+                ),
+            )
+        try:
+            record = ir.open(
+                severity=severity,
+                summary=body.summary,
+                affected_contracts=body.affected_contracts,
+                related_disclosure_id=(
+                    body.related_disclosure_id
+                ),
+                actor=body.actor,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return record.to_dict()
+
+    @app.get("/admin/incident/playbook", tags=["admin"])
+    async def incident_playbook() -> Dict[str, Any]:
+        """Public playbook surface — Vision §14 promise that
+        the response plan is published BEFORE any incident.
+        Returns decision tree + comms templates."""
+        from prsm.economy.web3.incident_response import (
+            COMMS_TEMPLATES, DECISION_TREE,
+            IncidentPhase, IncidentSeverity,
+        )
+        decision_tree = []
+        for sev in IncidentSeverity:
+            for phase in IncidentPhase:
+                recs = DECISION_TREE.get((sev, phase))
+                if recs:
+                    decision_tree.append({
+                        "severity": sev.value,
+                        "phase": phase.value,
+                        "recommendations": list(recs),
+                    })
+        comms = []
+        for sev in IncidentSeverity:
+            for phase in IncidentPhase:
+                text = COMMS_TEMPLATES.get((sev, phase))
+                if text:
+                    comms.append({
+                        "severity": sev.value,
+                        "phase": phase.value,
+                        "text": text,
+                    })
+        return {
+            "decision_tree": decision_tree,
+            "comms_templates": comms,
+        }
+
+    @app.get("/admin/incident", tags=["admin"])
+    async def incident_list(
+        severity: Optional[str] = None,
+        phase: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.incident_response import (
+            IncidentPhase, IncidentSeverity,
+        )
+        ir = _require_incident_response()
+        sev_obj = None
+        phase_obj = None
+        if severity:
+            try:
+                sev_obj = IncidentSeverity(severity.lower())
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"invalid severity {severity!r}",
+                )
+        if phase:
+            try:
+                phase_obj = IncidentPhase(phase.lower())
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"invalid phase {phase!r}",
+                )
+        records = ir.list(
+            severity=sev_obj, phase=phase_obj,
+        )
+        return {
+            "records": [r.to_dict() for r in records],
+            "count": len(records),
+        }
+
+    @app.get(
+        "/admin/incident/{incident_id}", tags=["admin"],
+    )
+    async def incident_get(
+        incident_id: str,
+    ) -> Dict[str, Any]:
+        ir = _require_incident_response()
+        record = ir.get(incident_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"incident {incident_id!r} not found",
+            )
+        return record.to_dict()
+
+    @app.post(
+        "/admin/incident/{incident_id}/advance",
+        tags=["admin"],
+    )
+    async def incident_advance(
+        incident_id: str,
+        body: _IncidentAdvanceRequest,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.incident_response import (
+            IncidentPhase,
+        )
+        ir = _require_incident_response()
+        if ir.get(incident_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"incident {incident_id!r} not found",
+            )
+        try:
+            new_phase = IncidentPhase(
+                (body.new_phase or "").lower(),
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"invalid new_phase {body.new_phase!r}"
+                ),
+            )
+        try:
+            record = ir.advance_phase(
+                incident_id, new_phase,
+                note=body.note, actor=body.actor,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return record.to_dict()
+
+    @app.post(
+        "/admin/incident/{incident_id}/event",
+        tags=["admin"],
+    )
+    async def incident_event(
+        incident_id: str,
+        body: _IncidentEventRequest,
+    ) -> Dict[str, Any]:
+        ir = _require_incident_response()
+        if ir.get(incident_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"incident {incident_id!r} not found",
+            )
+        try:
+            record = ir.record_event(
+                incident_id, note=body.note, actor=body.actor,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return record.to_dict()
+
+    @app.get(
+        "/admin/incident/{incident_id}/recommendations",
+        tags=["admin"],
+    )
+    async def incident_recommendations(
+        incident_id: str,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.incident_response import (
+            get_recommendations,
+        )
+        ir = _require_incident_response()
+        record = ir.get(incident_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"incident {incident_id!r} not found",
+            )
+        return {
+            "incident_id": record.incident_id,
+            "severity": record.severity.value,
+            "current_phase": record.current_phase.value,
+            "recommendations": get_recommendations(
+                record.severity, record.current_phase,
+            ),
+        }
+
+    @app.get(
+        "/admin/incident/{incident_id}/comms-template",
+        tags=["admin"],
+    )
+    async def incident_comms_template(
+        incident_id: str,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.incident_response import (
+            get_comms_template,
+        )
+        ir = _require_incident_response()
+        record = ir.get(incident_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"incident {incident_id!r} not found",
+            )
+        return {
+            "incident_id": record.incident_id,
+            "severity": record.severity.value,
+            "current_phase": record.current_phase.value,
+            "text": get_comms_template(
+                record.severity, record.current_phase,
+                summary=record.summary,
+            ),
+        }
+
     # ── Sprint 292 — privacy-claim verification ───────────
     # Public API for the §7 promise: lets callers verify
     # signature + DP-noise + hardware-attestation quality
