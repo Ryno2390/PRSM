@@ -7944,6 +7944,82 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    # ── Sprint 313 — pipeline stage worker endpoint ───────
+    # Each "remote" stage node exposes this; the orchestrator
+    # uses http_stage_runner (sprint 313) to call it. v1 is
+    # orchestrator-driven (no worker-to-worker chaining).
+
+    class _PipelineStageRequest(BaseModel):
+        job_id: str
+        round_id: str
+        stage_id: int = Field(ge=0)
+        layer_indices: List[int]
+        input_activations_b64: str
+
+    @app.post("/compute/inference/pipeline/stage")
+    async def pipeline_stage_run(
+        body: _PipelineStageRequest,
+    ) -> Dict[str, Any]:
+        runner = getattr(
+            node, "_pipeline_stage_runner", None,
+        )
+        if runner is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "pipeline stage runner not configured "
+                    "on this node (set "
+                    "PRSM_PIPELINE_STAGE_RUNNER_ENABLED=1 "
+                    "to enable default stub runner)"
+                ),
+            )
+        if not body.layer_indices:
+            raise HTTPException(
+                status_code=422,
+                detail="layer_indices must be non-empty",
+            )
+        import base64 as _b64
+        try:
+            input_bytes = _b64.b64decode(
+                body.input_activations_b64, validate=True,
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"input_activations_b64 not valid: {e}"
+                ),
+            )
+        try:
+            output_bytes = runner(
+                input_activations=input_bytes,
+                stage_id=body.stage_id,
+                layer_indices=list(body.layer_indices),
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"stage runner raised: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            )
+        worker_node_id = (
+            node.identity.node_id if node.identity
+            else "unknown"
+        )
+        return {
+            "job_id": body.job_id,
+            "round_id": body.round_id,
+            "stage_id": body.stage_id,
+            "worker_node_id": worker_node_id,
+            "output_activations_b64": _b64.b64encode(
+                output_bytes,
+            ).decode("ascii"),
+        }
+
     # ── Sprint 312 — pipeline inference orchestrator ──────
     # Coordinates multi-stage TEE-attested inference across
     # a partitioned model. Each stage runs in-process for

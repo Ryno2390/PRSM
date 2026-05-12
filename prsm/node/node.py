@@ -2729,6 +2729,41 @@ class PRSMNode:
             )
             self._pipeline_inference_orchestrator = None
 
+        # Sprint 313 — pipeline stage runner. Enables this
+        # node to serve as a REMOTE STAGE WORKER for some
+        # other node's PipelineInferenceOrchestrator. Set
+        # PRSM_PIPELINE_STAGE_RUNNER_ENABLED=1 to enable
+        # with the default stub runner. Real PyTorch
+        # per-stage runner = sprint 314 via the same hook.
+        try:
+            import os as _os
+            enabled = (
+                _os.environ.get(
+                    "PRSM_PIPELINE_STAGE_RUNNER_ENABLED",
+                    "",
+                ).strip().lower()
+                in ("1", "true", "yes")
+            )
+            if enabled:
+                from prsm.compute.inference.pipeline_stage import (
+                    deterministic_stub_stage_runner,
+                )
+                self._pipeline_stage_runner = (
+                    deterministic_stub_stage_runner()
+                )
+                logger.info(
+                    "Pipeline stage runner wired "
+                    "(default stub)",
+                )
+            else:
+                self._pipeline_stage_runner = None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Pipeline stage runner wiring failed: %s",
+                exc,
+            )
+            self._pipeline_stage_runner = None
+
         # Sprint 303 — UUPS upgrade orchestrator (Vision §14
         # item 7). Filesystem-persisted via
         # PRSM_UPGRADE_ORCHESTRATOR_DIR. All upgrade +
