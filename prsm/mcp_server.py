@@ -10963,8 +10963,21 @@ async def handle_prsm_provider_reputations(
 async def handle_prsm_bootstrap_status(
     arguments: Dict[str, Any],
 ) -> str:
-    """Sprint 266 — render PeerDiscovery bootstrap status for
-    triage. Pairs with prsm_peers for full network visibility."""
+    """Sprint 266 / Sprint 325 — render bootstrap status for triage.
+
+    Auto-detects payload shape:
+      - Libp2pDiscovery (sprint 164 canonical default) — uses
+        `connected`/`degraded`/`client_state` + sprint-324
+        cumulative counters
+      - Legacy PeerDiscovery — uses `connected_count` /
+        `degraded_mode` / `success_node` etc.
+
+    Pre-sprint-325 the handler hit `"connected_count" not in
+    result` and emitted "Peer discovery not wired" — confusingly
+    wrong on a healthy canonical-wired node.
+
+    Pairs with prsm_peers for full network visibility.
+    """
     try:
         result = await _call_node_api("GET", "/bootstrap/status")
     except Exception as e:
@@ -10972,13 +10985,71 @@ async def handle_prsm_bootstrap_status(
             f"prsm_bootstrap_status failed: {e}\n"
             f"Is your PRSM node running? (prsm node start)"
         )
-    if "connected_count" not in result:
+
+    # Sprint 325 — detect not-initialized state first
+    if "detail" in result and not (
+        "connected_count" in result or "client_state" in result
+        or "peer_join_events" in result
+    ):
         detail = result.get("detail", "unknown error")
         if "not initialized" in str(detail).lower():
             return (
                 f"Peer discovery not wired on this node.\n"
                 f"  Detail: {detail}"
             )
+        return f"prsm_bootstrap_status refused: {detail}"
+
+    # Sprint 325 — Libp2pDiscovery shape detection. The
+    # canonical default since sprint 164. Recognizes by
+    # presence of `client_state` (sprint 324) or any of the
+    # cumulative counters.
+    is_libp2p_shape = (
+        "client_state" in result
+        or "peer_join_events" in result
+        or "stale_evictions" in result
+    )
+    if is_libp2p_shape:
+        connected = int(result.get("connected", 0) or 0)
+        degraded = bool(result.get("degraded", False))
+        client_state = result.get("client_state", "?")
+        if connected > 0 and not degraded and (
+            client_state == "connected"
+        ):
+            health_marker = "✓ healthy"
+        elif degraded or client_state == "dead":
+            health_marker = "⚠ degraded"
+        else:
+            health_marker = "⚠ disconnected"
+        lines = [
+            f"PRSM Bootstrap Status — {health_marker}",
+            f"  client_state:           {client_state}",
+            f"  connected:              {connected}",
+            f"  degraded:               {degraded}",
+            f"  attempted:              "
+            f"{result.get('attempted', 0)}",
+            f"  discovered_peer_count:  "
+            f"{result.get('discovered_peer_count', 0)}",
+            f"  peer_join_events:       "
+            f"{result.get('peer_join_events', 0)}",
+            f"  peer_leave_events:      "
+            f"{result.get('peer_leave_events', 0)}",
+            f"  stale_evictions:        "
+            f"{result.get('stale_evictions', 0)}",
+            f"  reconnect_attempts:     "
+            f"{result.get('reconnect_attempts', 0)}",
+            f"  reconnect_successes:    "
+            f"{result.get('reconnect_successes', 0)}",
+        ]
+        bnodes = result.get("bootstrap_nodes") or []
+        if bnodes:
+            lines.append(f"  bootstrap_nodes ({len(bnodes)}):")
+            for n in bnodes:
+                lines.append(f"    {n}")
+        return "\n".join(lines)
+
+    # Legacy PeerDiscovery shape
+    if "connected_count" not in result:
+        detail = result.get("detail", "unknown error")
         return f"prsm_bootstrap_status refused: {detail}"
     connected = result.get("connected_count", 0)
     degraded = result.get("degraded_mode", False)
