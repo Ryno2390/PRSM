@@ -272,6 +272,58 @@ class Libp2pDiscovery:
         # _capability_index size, which monotonically grows.
         self._bootstrap_status["discovered_peer_count"] = hydrated
 
+    def _consume_bootstrap_announcements(self, client: Any) -> None:
+        """Sprint 320 — process buffered server-pushed announcements
+        from the BootstrapClient (sprint 319 wired the buffer).
+
+        Handled announcement_types:
+          - ``peer_join``: hydrate _capability_index eagerly so we
+            see the peer at announcement cadence rather than waiting
+            for the next bootstrap poll's peer_list.
+          - ``peer_leave``: REMOVE the peer from _capability_index.
+            Pre-sprint-320 the index only grew — peer_leave was a
+            no-op, accumulating dead entries that downstream
+            consumers would surface as live candidates.
+
+        Forward-compat: unknown announcement_type values are
+        ignored (do not raise).
+
+        After processing, ``client._observed_announcements`` is
+        cleared so the next poll tick doesn't re-process old
+        events. Malformed entries are skipped per-item — one bad
+        entry must not poison the whole batch.
+        """
+        buf = getattr(client, "_observed_announcements", None)
+        if not buf:
+            return
+        own_id = self.transport.identity.node_id
+        # Snapshot + clear up front so we don't race with new
+        # announcements arriving while we process this batch
+        snapshot = list(buf)
+        buf.clear()
+        for ann in snapshot:
+            try:
+                atype = ann.get("announcement_type")
+                pid = ann.get("peer_id")
+                if not pid or pid == own_id:
+                    continue
+                if atype == "peer_join":
+                    endpoint = ann.get("peer_endpoint", "")
+                    self._capability_index[pid] = PeerInfo(
+                        node_id=pid,
+                        address=endpoint,
+                        last_seen=time.time(),
+                        last_capability_update=time.time(),
+                    )
+                elif atype == "peer_leave":
+                    self._capability_index.pop(pid, None)
+                # Unknown announcement_type: ignore (forward-compat)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "Libp2pDiscovery: skipped malformed "
+                    "announcement %r: %s", ann, exc,
+                )
+
     async def _bootstrap_poll_loop(self) -> None:
         """Sprint 165 — periodic poll of bootstrap server for new
         peer registrations.
@@ -296,6 +348,11 @@ class Libp2pDiscovery:
                 await asyncio.sleep(interval)
                 peers = await client.get_peers()
                 self._hydrate_peers_from_bootstrap(peers)
+                # Sprint 320 — drain announcements buffered by
+                # _recv_typed during the get_peers exchange so
+                # peer_leave events evict departed peers and
+                # peer_join eagerly hydrates new ones.
+                self._consume_bootstrap_announcements(client)
             except asyncio.CancelledError:
                 break
             except Exception as exc:  # noqa: BLE001
