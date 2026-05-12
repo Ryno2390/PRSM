@@ -3535,15 +3535,41 @@ async def handle_prsm_agent_status(arguments: Dict[str, Any]) -> str:
 
 
 async def handle_prsm_search_shards(arguments: Dict[str, Any]) -> str:
-    """Handle prsm_search_shards by querying the node's content index."""
+    """Handle prsm_search_shards by querying the node's content index.
+
+    Sprint 289 forwards optional creator-tier filters:
+      min_tier    — "low" | "medium" | "high"
+      exclude_new — bool (hide cold-start creators)
+    """
     query = (arguments.get("query") or "").strip()
     top_k = int(arguments.get("top_k") or 5)
 
     if not query:
         return "Search requires a 'query' string."
 
+    # Sprint 289 — defense-in-depth: validate min_tier client-
+    # side so we don't waste an RPC roundtrip on bogus input.
+    min_tier_raw = arguments.get("min_tier")
+    if min_tier_raw is not None:
+        min_tier_norm = str(min_tier_raw).strip().lower()
+        if min_tier_norm not in {"low", "medium", "high"}:
+            return (
+                f"min_tier must be one of "
+                f"['low', 'medium', 'high'], "
+                f"got {min_tier_raw!r}."
+            )
+    else:
+        min_tier_norm = None
+    exclude_new = bool(arguments.get("exclude_new", False))
+
+    path = f"/content/search?q={query}&limit={top_k}"
+    if min_tier_norm:
+        path += f"&min_tier={min_tier_norm}"
+    if exclude_new:
+        path += "&exclude_new=true"
+
     try:
-        result = await _call_node_api("GET", f"/content/search?q={query}&limit={top_k}")
+        result = await _call_node_api("GET", path)
     except Exception as e:
         return f"Shard search requires a running PRSM node ({e}). Start with: prsm node start"
 
@@ -3555,14 +3581,27 @@ async def handle_prsm_search_shards(arguments: Dict[str, Any]) -> str:
             f"prsm_list_datasets."
         )
 
-    lines = [f"Shard search results for '{query}' (top {len(records)}):"]
+    filter_note = ""
+    if min_tier_norm or exclude_new:
+        bits = []
+        if min_tier_norm:
+            bits.append(f"min_tier={min_tier_norm}")
+        if exclude_new:
+            bits.append("exclude_new")
+        filter_note = f" [filtered: {', '.join(bits)}]"
+    lines = [
+        f"Shard search results for '{query}' "
+        f"(top {len(records)}){filter_note}:"
+    ]
     for r in records:
         providers = r.get("providers") or []
         size_mb = (r.get("size_bytes") or 0) / (1024 * 1024)
+        tier = r.get("creator_tier") or "?"
         lines.append(
             f"  • CID {r.get('cid', '?')}\n"
             f"      file={r.get('filename', '(unnamed)')}  size={size_mb:.2f} MB  "
-            f"providers={len(providers)}  creator={r.get('creator_id', '?')[:12]}"
+            f"providers={len(providers)}  creator={r.get('creator_id', '?')[:12]}  "
+            f"tier={tier}"
         )
     return "\n".join(lines)
 

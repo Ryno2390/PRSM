@@ -5752,8 +5752,23 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         }
 
     @app.get("/content/search")
-    async def search_content(q: str = "", limit: int = 20) -> Dict[str, Any]:
-        """Search the network content index by keyword."""
+    async def search_content(
+        q: str = "",
+        limit: int = 20,
+        min_tier: Optional[str] = None,
+        exclude_new: bool = False,
+    ) -> Dict[str, Any]:
+        """Search the network content index by keyword.
+
+        Sprint 289 added optional tier filtering:
+          min_tier=low|medium|high  filter to creators ≥ tier
+          exclude_new=true          hide cold-start creators
+
+        Each result row carries `creator_tier` so callers see
+        the tier even when not filtering. Default behavior
+        (no filter args) returns everything — including
+        TIER_NEW — preserving pre-sprint-289 contract.
+        """
         # Sprint 194 — same bounds-validation as sprint 193 fixed
         # on the dashboard duplicate. Pre-fix `min(limit, 100)`
         # capped upper but accepted negative — limit=-1 returned
@@ -5771,28 +5786,73 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     f"Trim the query."
                 ),
             )
+        # Sprint 289 — validate min_tier
+        from prsm.marketplace.creator_reputation import (
+            TIER_NEW, TIER_LOW, TIER_MEDIUM, TIER_HIGH,
+        )
+        _TIER_RANK = {
+            TIER_NEW: -1,
+            TIER_LOW: 1,
+            TIER_MEDIUM: 2,
+            TIER_HIGH: 3,
+        }
+        if min_tier is not None:
+            min_tier = min_tier.strip().lower()
+            if min_tier not in (TIER_LOW, TIER_MEDIUM, TIER_HIGH):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"min_tier must be one of "
+                        f"{[TIER_LOW, TIER_MEDIUM, TIER_HIGH]}, "
+                        f"got {min_tier!r}"
+                    ),
+                )
+
         if not node.content_index:
             raise HTTPException(status_code=503, detail="Content index not initialized")
 
         results = node.content_index.search(q, limit=limit)
+
+        # Sprint 289 — decorate with tier + apply filters.
+        tracker = getattr(
+            node, "_creator_reputation_tracker", None,
+        )
+        min_rank = (
+            _TIER_RANK[min_tier] if min_tier else None
+        )
+
+        rendered = []
+        for r in results:
+            if tracker is not None and r.creator_id:
+                try:
+                    tier = tracker.tier_for(r.creator_id)
+                except Exception:  # noqa: BLE001
+                    tier = TIER_NEW
+            else:
+                tier = TIER_NEW
+            if exclude_new and tier == TIER_NEW:
+                continue
+            if min_rank is not None:
+                if _TIER_RANK.get(tier, -1) < min_rank:
+                    continue
+            rendered.append({
+                "cid": r.cid,
+                "filename": r.filename,
+                "size_bytes": r.size_bytes,
+                "content_hash": r.content_hash,
+                "creator_id": r.creator_id,
+                "creator_tier": tier,
+                "providers": list(r.providers),
+                "created_at": r.created_at,
+                "metadata": r.metadata,
+                "royalty_rate": r.royalty_rate,
+                "parent_cids": r.parent_cids,
+            })
+
         return {
             "query": q,
-            "results": [
-                {
-                    "cid": r.cid,
-                    "filename": r.filename,
-                    "size_bytes": r.size_bytes,
-                    "content_hash": r.content_hash,
-                    "creator_id": r.creator_id,
-                    "providers": list(r.providers),
-                    "created_at": r.created_at,
-                    "metadata": r.metadata,
-                    "royalty_rate": r.royalty_rate,
-                    "parent_cids": r.parent_cids,
-                }
-                for r in results
-            ],
-            "count": len(results),
+            "results": rendered,
+            "count": len(rendered),
         }
 
     @app.get("/content/index/stats")
