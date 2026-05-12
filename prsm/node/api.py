@@ -2873,6 +2873,107 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     ),
                 )
 
+    def _enforce_corp_capability(
+        cap_header: Optional[str],
+        red_header: Optional[str],
+    ) -> None:
+        """Sprint 306a — Vision §7 Enterprise Confidentiality
+        Mode layer-2 LIVE redemption.
+
+        When BOTH `X-CORP-Capability` + `X-CORP-Redemption`
+        headers are present (base64-JSON each), verify the
+        dual-signature capability + redemption against this
+        node's `_corp_capability_store` BEFORE doing any
+        work. Refusal: 402 Payment Required (semantically:
+        "this authorization isn't valid against your
+        quota"). Distinct from 412 (TEE policy) and 451
+        (content filter).
+
+        Headers absent → no gating (opt-in for enterprises;
+        existing inference requests unaffected). Either
+        header alone → 422 (operator confusion).
+        """
+        import base64 as _b64
+        import json as _json
+
+        if cap_header is None and red_header is None:
+            return
+        if cap_header is None or red_header is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "X-CORP-Capability and X-CORP-Redemption "
+                    "must both be present together; either "
+                    "alone is operator confusion"
+                ),
+            )
+
+        store = getattr(
+            node, "_corp_capability_store", None,
+        )
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "node received $CORP capability headers "
+                    "but no capability store is wired; set "
+                    "PRSM_CORP_CAPABILITY_DIR and restart"
+                ),
+            )
+
+        from prsm.enterprise.corp_capability import (
+            CorpCapability, RedemptionRequest,
+        )
+
+        # Decode both headers — base64 → JSON → dataclass.
+        # Any decode/parse failure is 422 (the requester
+        # gave us malformed input).
+        try:
+            cap_blob = _b64.b64decode(
+                cap_header, validate=True,
+            )
+            red_blob = _b64.b64decode(
+                red_header, validate=True,
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"X-CORP-* header not valid base64: {e}"
+                ),
+            )
+        try:
+            cap_dict = _json.loads(cap_blob)
+            red_dict = _json.loads(red_blob)
+        except _json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"X-CORP-* header not valid JSON: {e}"
+                ),
+            )
+        try:
+            cap = CorpCapability.from_dict(cap_dict)
+            req = RedemptionRequest.from_dict(red_dict)
+        except (KeyError, ValueError, TypeError) as e:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"X-CORP-* header malformed: {e}"
+                ),
+            )
+
+        # Redeem — pure verification + record-keeping.
+        result = store.redeem(cap, req)
+        if result.status.value != "pass":
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"$CORP capability redemption refused: "
+                    f"{result.diagnostic}"
+                ),
+            )
+
     def _enforce_tee_policy(body: Dict[str, Any]) -> None:
         """Sprint 305a — Vision §7 Enterprise Confidentiality
         Mode layer-3 LIVE dispatch enforcement.
@@ -4490,7 +4591,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         }
 
     @app.post("/compute/inference")
-    async def compute_inference(body: Dict[str, Any] = {}) -> Dict[str, Any]:
+    async def compute_inference(
+        body: Dict[str, Any] = {},
+        x_corp_capability: Optional[str] = Header(
+            default=None, alias="X-CORP-Capability",
+        ),
+        x_corp_redemption: Optional[str] = Header(
+            default=None, alias="X-CORP-Redemption",
+        ),
+    ) -> Dict[str, Any]:
         """Run TEE-attested model inference with verifiable signed receipts.
 
         Phase 3.x.1 Task 5 — wires the prsm.compute.inference module
@@ -4600,6 +4709,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # not satisfied by this node's own attestation.
         # Absent field = no gating, fully backwards-compat.
         _enforce_tee_policy(body)
+
+        # Sprint 306a — $CORP capability redemption
+        # (Vision §7 Enterprise Confidentiality Mode layer
+        # 2). Refuses with 402 Payment Required if the
+        # X-CORP-* headers carry an invalid / over-quota /
+        # expired / replayed capability. Headers absent =
+        # no gating (opt-in for enterprises).
+        _enforce_corp_capability(
+            x_corp_capability, x_corp_redemption,
+        )
 
         # Validate budget_ftns FIELD type/value upfront (422 for
         # well-formed body that fails semantic validation).
@@ -4935,7 +5054,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
 
     @app.post("/compute/inference/stream")
-    async def compute_inference_stream(body: Dict[str, Any] = {}):
+    async def compute_inference_stream(
+        body: Dict[str, Any] = {},
+        x_corp_capability: Optional[str] = Header(
+            default=None, alias="X-CORP-Capability",
+        ),
+        x_corp_redemption: Optional[str] = Header(
+            default=None, alias="X-CORP-Redemption",
+        ),
+    ):
         """SSE-streaming sibling of ``/compute/inference``.
 
         Phase 3.x.8.1 Task 2 — wires
@@ -5051,6 +5178,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # the /compute/inference gate so streamed inference
         # honors the same policy.
         _enforce_tee_policy(body)
+
+        # Sprint 306a — $CORP capability redemption.
+        # Mirrors the /compute/inference gate so streamed
+        # inference honors the same authorization layer.
+        _enforce_corp_capability(
+            x_corp_capability, x_corp_redemption,
+        )
 
         if "budget_ftns" in body:
             _raw_b = body["budget_ftns"]
