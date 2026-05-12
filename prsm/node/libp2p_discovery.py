@@ -102,6 +102,15 @@ class Libp2pDiscovery:
             "connected": 0,
             "degraded": False,
             "discovered_peer_count": 0,
+            # Sprint 324 — operator-facing cumulative counters
+            # for the new sprint-319-through-323 behaviors.
+            # Never reset within process lifetime (process
+            # restart is the natural reset boundary).
+            "peer_join_events": 0,
+            "peer_leave_events": 0,
+            "stale_evictions": 0,
+            "reconnect_attempts": 0,
+            "reconnect_successes": 0,
         }
 
     # ── Lifecycle ────────────────────────────────────────────────
@@ -343,6 +352,8 @@ class Libp2pDiscovery:
         ]
         for pid in stale_ids:
             self._capability_index.pop(pid, None)
+        # Sprint 324 — surface to operators via /bootstrap/status
+        self._bootstrap_status["stale_evictions"] += len(stale_ids)
         return len(stale_ids)
 
     def _consume_bootstrap_announcements(self, client: Any) -> None:
@@ -400,8 +411,10 @@ class Libp2pDiscovery:
                             last_capability_update=time.time(),
                         ),
                     )
+                    self._bootstrap_status["peer_join_events"] += 1
                 elif atype == "peer_leave":
                     self._capability_index.pop(pid, None)
+                    self._bootstrap_status["peer_leave_events"] += 1
                 # Unknown announcement_type: ignore (forward-compat)
             except Exception as exc:  # noqa: BLE001
                 logger.debug(
@@ -490,9 +503,18 @@ class Libp2pDiscovery:
                         # keeps retrying.
                         self._bootstrap_client = None
                         if wsocket_addrs:
-                            await self._try_bootstrap_client(
+                            # Sprint 324 — operator-facing
+                            # cumulative reconnect telemetry
+                            self._bootstrap_status[
+                                "reconnect_attempts"
+                            ] += 1
+                            ok = await self._try_bootstrap_client(
                                 wsocket_addrs,
                             )
+                            if ok:
+                                self._bootstrap_status[
+                                    "reconnect_successes"
+                                ] += 1
                         # If reconnect succeeded, retry
                         # get_peers immediately so the next-
                         # poll wait doesn't add latency on top
@@ -727,7 +749,28 @@ class Libp2pDiscovery:
     # ── Status / telemetry ───────────────────────────────────────
 
     def get_bootstrap_status(self) -> Dict[str, Any]:
-        """Return bootstrap connectivity status."""
+        """Return bootstrap connectivity status.
+
+        Sprint 324 — extends with cumulative counters for the
+        sprint-319-through-323 behaviors and a `client_state`
+        field summarizing the BootstrapClient slot for fast
+        operator triage.
+        """
+        # Sprint 324 — derive client_state for operator triage
+        # without exposing the raw client object:
+        #   - "none"          : no client installed
+        #   - "dead"          : sentinel from a failed reconnect
+        #   - "disconnected"  : client present but is_connected=False
+        #   - "connected"     : client present and is_connected=True
+        client = getattr(self, "_bootstrap_client", None)
+        if client is None:
+            client_state = "none"
+        elif isinstance(client, _DeadBootstrapSentinel):
+            client_state = "dead"
+        elif getattr(client, "is_connected", False):
+            client_state = "connected"
+        else:
+            client_state = "disconnected"
         return {
             "attempted": self._bootstrap_status["attempted"],
             "connected": self._bootstrap_status["connected"],
@@ -738,6 +781,23 @@ class Libp2pDiscovery:
             "discovered_peer_count": self._bootstrap_status.get(
                 "discovered_peer_count", 0,
             ),
+            # Sprint 324 — operator-facing cumulative counters
+            "peer_join_events": self._bootstrap_status[
+                "peer_join_events"
+            ],
+            "peer_leave_events": self._bootstrap_status[
+                "peer_leave_events"
+            ],
+            "stale_evictions": self._bootstrap_status[
+                "stale_evictions"
+            ],
+            "reconnect_attempts": self._bootstrap_status[
+                "reconnect_attempts"
+            ],
+            "reconnect_successes": self._bootstrap_status[
+                "reconnect_successes"
+            ],
+            "client_state": client_state,
         }
 
     def get_bootstrap_telemetry(self) -> Dict[str, Any]:
