@@ -1816,6 +1816,49 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_enterprise_recipient",
+        description=(
+            "Vision §7 Enterprise Confidentiality Mode "
+            "primitives. Single tool with `action` selector: "
+            "keypair_gen | encrypt | decrypt | get_manifest. "
+            "keypair_gen produces a fresh X25519 recipient "
+            "keypair (purely client-side, no network call). "
+            "encrypt seals a plaintext under a list of "
+            "recipient public keys via hybrid X25519 + "
+            "ChaCha20-Poly1305 — OR-decrypt semantics, any "
+            "one designated recipient can decrypt. decrypt "
+            "unseals an encrypted payload with a private "
+            "key. get_manifest fetches the per-recipient "
+            "sealed-key manifest for an encrypted CID. The "
+            "security claim is rooted in math, not in "
+            "token-balance gating — FTNS balance is "
+            "irrelevant to the encryption. Backed by "
+            "/content/recipient-manifest/* for get_manifest; "
+            "other actions are pure client-side."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "keypair_gen", "encrypt", "decrypt",
+                        "get_manifest",
+                    ],
+                },
+                "plaintext_b64": {"type": "string"},
+                "privkey_b64": {"type": "string"},
+                "recipients": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                },
+                "payload": {"type": "object"},
+                "cid": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_upgrade",
         description=(
             "Vision §14 mitigation item 7: UUPS upgrade "
@@ -7789,6 +7832,144 @@ _UPGRADE_ACTIONS = {
 }
 
 
+_ENTERPRISE_RECIPIENT_ACTIONS = {
+    "keypair_gen", "encrypt", "decrypt", "get_manifest",
+}
+
+
+async def handle_prsm_enterprise_recipient(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 304 — recipient-encryption primitives MCP
+    wrapper (Vision §7 Enterprise Confidentiality Mode).
+
+    Most actions are pure client-side (no network call); only
+    get_manifest hits the node. This deliberate split lets
+    enterprises encrypt offline + air-gap + then upload, and
+    decrypt without exposing the privkey to any service."""
+    import base64 as _b64
+    import json as _json
+
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_ENTERPRISE_RECIPIENT_ACTIONS)})."
+        )
+    if action not in _ENTERPRISE_RECIPIENT_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_ENTERPRISE_RECIPIENT_ACTIONS)}; "
+            f"got {action!r}."
+        )
+
+    if action == "keypair_gen":
+        from prsm.enterprise.recipient_encryption import (
+            generate_recipient_keypair,
+        )
+        priv, pub = generate_recipient_keypair()
+        return (
+            "PRSM Enterprise Recipient Keypair "
+            "(X25519)\n\n"
+            f"  pubkey_b64  (share with PRSM): {pub}\n"
+            f"  privkey_b64 (KEEP SECRET):    {priv}\n\n"
+            "Distribute the pubkey to the data uploader; "
+            "keep the privkey in a hardware wallet / HSM / "
+            "secrets manager. Loss of the privkey "
+            "permanently revokes this recipient's access "
+            "to encrypted content; no recovery is possible."
+        )
+
+    if action == "encrypt":
+        from prsm.enterprise.recipient_encryption import (
+            EnterpriseRecipient,
+            encrypt_for_recipients,
+        )
+        pt_b64 = arguments.get("plaintext_b64") or ""
+        if not pt_b64:
+            return "encrypt requires 'plaintext_b64'."
+        try:
+            plaintext = _b64.b64decode(pt_b64, validate=True)
+        except Exception as e:
+            return f"encrypt: plaintext_b64 not valid: {e}"
+        recipients_raw = arguments.get("recipients") or []
+        if not recipients_raw:
+            return "encrypt requires non-empty 'recipients'."
+        try:
+            recipients = [
+                EnterpriseRecipient(
+                    identifier=r.get("identifier", ""),
+                    x25519_pubkey_b64=r.get(
+                        "x25519_pubkey_b64", "",
+                    ),
+                )
+                for r in recipients_raw
+            ]
+            payload = encrypt_for_recipients(
+                plaintext, recipients,
+            )
+        except ValueError as e:
+            return f"encrypt failed: {e}"
+        return (
+            f"Encrypted payload for "
+            f"{len(recipients)} recipient(s):\n\n"
+            f"{_json.dumps(payload.to_dict())}\n"
+        )
+
+    if action == "decrypt":
+        from prsm.enterprise.recipient_encryption import (
+            EncryptedPayload, decrypt_for_recipient,
+        )
+        priv = arguments.get("privkey_b64") or ""
+        if not priv:
+            return "decrypt requires 'privkey_b64'."
+        payload_dict = arguments.get("payload")
+        if not isinstance(payload_dict, dict):
+            return "decrypt requires 'payload' object."
+        try:
+            payload = EncryptedPayload.from_dict(
+                payload_dict,
+            )
+            out = decrypt_for_recipient(payload, priv)
+        except ValueError as e:
+            return f"decrypt failed: {e}"
+        try:
+            decoded = out.decode("utf-8")
+            return f"Decrypted plaintext:\n\n{decoded}"
+        except UnicodeDecodeError:
+            return (
+                "Decrypted (binary; base64):\n\n"
+                f"{_b64.b64encode(out).decode()}"
+            )
+
+    # get_manifest
+    cid = (arguments.get("cid") or "").strip()
+    if not cid:
+        return "get_manifest requires 'cid'."
+    try:
+        r = await _call_node_api(
+            "GET", f"/content/recipient-manifest/{cid}",
+        )
+    except Exception as e:
+        return f"prsm_enterprise_recipient get_manifest failed: {e}"
+    if "entries" not in r:
+        detail = r.get("detail", "unknown error")
+        return f"get_manifest refused: {detail}"
+    entries = r.get("entries") or []
+    lines = [
+        f"Recipient manifest for {cid} "
+        f"(version {r.get('version', '?')}, "
+        f"{len(entries)} entries):",
+        "",
+    ]
+    for e in entries:
+        lines.append(
+            f"  · {e.get('identifier', '?')}  "
+            f"(eph_pub: {(e.get('ephemeral_pubkey_b64') or '')[:16]}...)"
+        )
+    return "\n".join(lines)
+
+
 def _short_proposal_id(pid: str) -> str:
     return pid[:8] if len(pid) > 8 else pid
 
@@ -11675,6 +11856,7 @@ TOOL_HANDLERS = {
     "prsm_incident": handle_prsm_incident,
     "prsm_formal_verification": handle_prsm_formal_verification,
     "prsm_upgrade": handle_prsm_upgrade,
+    "prsm_enterprise_recipient": handle_prsm_enterprise_recipient,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

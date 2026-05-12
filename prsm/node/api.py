@@ -145,6 +145,21 @@ class ContentUploadRequest(BaseModel):
             "the leg is wired."
         ),
     )
+    # Sprint 304 — Enterprise Confidentiality Mode.
+    # Optional. When present, `text` is encrypted with
+    # X25519+ChaCha20-Poly1305 hybrid before sharding; only
+    # the listed recipients can decrypt. FTNS balance is
+    # irrelevant to the cryptography — encryption is the
+    # security primitive, the payment gate is orthogonal.
+    recipients: Optional[List[Dict[str, str]]] = Field(
+        default=None,
+        description=(
+            "Optional list of {identifier, x25519_pubkey_b64}"
+            " dicts. When provided, the text is "
+            "recipient-encrypted before sharding (Vision §7 "
+            "Enterprise Confidentiality Mode)."
+        ),
+    )
 
 
 
@@ -5464,10 +5479,64 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             )
 
+        # Sprint 304 — Enterprise Confidentiality Mode.
+        # When recipients are specified, encrypt the text
+        # client-style before handing off to the sharding
+        # layer. The ciphertext bundle (with manifest) is
+        # uploaded as the payload; only the listed recipients
+        # can decrypt. FTNS balance is orthogonal — encryption
+        # is the security primitive.
+        upload_text = req.text
+        upload_filename = req.filename
+        encrypted = False
+        if req.recipients is not None:
+            if not isinstance(req.recipients, list) or len(req.recipients) == 0:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "recipients must be a non-empty list "
+                        "when provided (Vision §7 Enterprise "
+                        "Confidentiality Mode)"
+                    ),
+                )
+            from prsm.enterprise.recipient_encryption import (
+                EnterpriseRecipient,
+                encrypt_for_recipients,
+            )
+            try:
+                recipients = [
+                    EnterpriseRecipient(
+                        identifier=r.get("identifier", ""),
+                        x25519_pubkey_b64=r.get(
+                            "x25519_pubkey_b64", "",
+                        ),
+                    )
+                    for r in req.recipients
+                ]
+                payload = encrypt_for_recipients(
+                    req.text.encode("utf-8"),
+                    recipients,
+                )
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"recipient encryption failed: {e}",
+                )
+            import json as _json
+            upload_text = _json.dumps(payload.to_dict())
+            # Tag the filename so the manifest endpoint and
+            # retrieve consumers can identify encrypted blobs
+            # without re-parsing — small ergonomics win.
+            if not upload_filename.endswith(".enc.json"):
+                upload_filename = (
+                    f"{upload_filename}.enc.json"
+                )
+            encrypted = True
+
         try:
             result = await node.content_uploader.upload_text(
-                text=req.text,
-                filename=req.filename,
+                text=upload_text,
+                filename=upload_filename,
                 replicas=req.replicas,
                 royalty_rate=req.royalty_rate,
                 parent_cids=req.parent_cids if req.parent_cids else None,
@@ -5541,7 +5610,76 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "parent_cids": result.parent_cids,
             "duplicate_of_creator": duplicate_of_creator,
             "canonical_creator": canonical_creator,
+            "encrypted": encrypted,
         }
+
+    # ── Sprint 304 — recipient-manifest endpoint ─────────
+    # Vision §7 Enterprise Confidentiality Mode. Lets a
+    # recipient check what sealed-key entries exist for a
+    # given encrypted CID before they fetch + decrypt the
+    # full ciphertext. Reads the same content blob the
+    # /content/retrieve path does — no separate storage.
+
+    @app.get("/content/recipient-manifest/{cid}")
+    async def get_recipient_manifest(
+        cid: str, timeout: float = 30.0,
+    ) -> Dict[str, Any]:
+        if not node.content_provider:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Content provider not initialized."
+                ),
+            )
+        try:
+            content_bytes = await (
+                node.content_provider.request_content(
+                    cid=cid, timeout=timeout,
+                    verify_hash=True,
+                )
+            )
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"cid {cid!r} not found",
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"retrieve failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            )
+        if content_bytes is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"cid {cid!r} not found",
+            )
+        import json as _json
+        try:
+            parsed = _json.loads(content_bytes)
+            if (
+                not isinstance(parsed, dict)
+                or "manifest" not in parsed
+            ):
+                raise ValueError("no manifest field")
+            manifest = parsed["manifest"]
+            if (
+                not isinstance(manifest, dict)
+                or "version" not in manifest
+                or "entries" not in manifest
+            ):
+                raise ValueError("malformed manifest")
+        except (ValueError, _json.JSONDecodeError) as e:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"cid {cid!r} is not an encrypted "
+                    f"recipient bundle: {e}"
+                ),
+            )
+        return manifest
 
     @app.post("/content/upload/shard")
     async def upload_shard_dataset(body: Dict[str, Any] = {}) -> Dict[str, Any]:
