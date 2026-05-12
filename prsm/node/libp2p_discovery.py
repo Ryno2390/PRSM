@@ -274,10 +274,18 @@ class Libp2pDiscovery:
             pid = getattr(bp, "peer_id", None)
             if not pid or pid == own_id:
                 continue
+            # Sprint 322 — thread bootstrap-reported capabilities
+            # into PeerInfo so find_peers_with_capability /
+            # find_peers_by_capability /
+            # QueryOrchestrator-style selectors see the right
+            # candidate set. Pre-fix this list was dropped and
+            # every bootstrap-discovered peer appeared
+            # capability-less to consumers.
             self._capability_index[pid] = PeerInfo(
                 node_id=pid,
                 address=f"{getattr(bp, 'address', '')}:"
                         f"{getattr(bp, 'port', 0)}",
+                capabilities=list(getattr(bp, "capabilities", []) or []),
                 last_seen=time.time(),
                 last_capability_update=time.time(),
             )
@@ -323,12 +331,24 @@ class Libp2pDiscovery:
                 if not pid or pid == own_id:
                     continue
                 if atype == "peer_join":
+                    # Sprint 322 — don't overwrite an existing
+                    # entry. The bootstrap server's peer_list
+                    # response is authoritative for capabilities;
+                    # peer_join announcements only carry id +
+                    # endpoint. A naive overwrite here would
+                    # clobber the caps that
+                    # _hydrate_peers_from_bootstrap filled in on
+                    # the same poll tick. setdefault preserves
+                    # the canonical entry + only adds new peers.
                     endpoint = ann.get("peer_endpoint", "")
-                    self._capability_index[pid] = PeerInfo(
-                        node_id=pid,
-                        address=endpoint,
-                        last_seen=time.time(),
-                        last_capability_update=time.time(),
+                    self._capability_index.setdefault(
+                        pid,
+                        PeerInfo(
+                            node_id=pid,
+                            address=endpoint,
+                            last_seen=time.time(),
+                            last_capability_update=time.time(),
+                        ),
                     )
                 elif atype == "peer_leave":
                     self._capability_index.pop(pid, None)
