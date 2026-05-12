@@ -2679,6 +2679,56 @@ class PRSMNode:
             )
             self._federated_orchestrator_transport_privkey_b64 = None
 
+        # Sprint 312 — pipeline inference orchestrator.
+        # Coordinates multi-stage TEE-attested inference.
+        # Privkey from PRSM_PIPELINE_ORCHESTRATOR_PRIVKEY
+        # (Ed25519, b64, 32B); in-memory only, never
+        # persisted. Filesystem state via
+        # PRSM_PIPELINE_ORCHESTRATOR_DIR.
+        try:
+            import os as _os
+            raw = (
+                _os.environ.get(
+                    "PRSM_PIPELINE_ORCHESTRATOR_PRIVKEY",
+                    "",
+                ).strip()
+            )
+            if raw:
+                from pathlib import Path as _Path
+                from prsm.compute.inference.pipeline_orchestrator import (
+                    PipelineInferenceOrchestrator,
+                )
+                pdir = (
+                    _os.environ.get(
+                        "PRSM_PIPELINE_ORCHESTRATOR_DIR",
+                        "",
+                    ).strip()
+                )
+                self._pipeline_inference_orchestrator = (
+                    PipelineInferenceOrchestrator(
+                        orchestrator_privkey_b64=raw,
+                        persist_dir=(
+                            _Path(pdir) if pdir else None
+                        ),
+                    )
+                )
+                logger.info(
+                    "Pipeline inference orchestrator wired"
+                    " (jobs=%d)",
+                    len(
+                        self._pipeline_inference_orchestrator.list_jobs(),
+                    ),
+                )
+            else:
+                self._pipeline_inference_orchestrator = None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "PipelineInferenceOrchestrator construction "
+                "failed: %s — /admin/inference/pipeline/* "
+                "will return 503.", exc,
+            )
+            self._pipeline_inference_orchestrator = None
+
         # Sprint 303 — UUPS upgrade orchestrator (Vision §14
         # item 7). Filesystem-persisted via
         # PRSM_UPGRADE_ORCHESTRATOR_DIR. All upgrade +

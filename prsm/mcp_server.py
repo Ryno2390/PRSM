@@ -1816,6 +1816,46 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_pipeline_inference",
+        description=(
+            "Sprint 312 — federated/pipeline inference "
+            "orchestrator. Coordinates multi-stage "
+            "TEE-attested inference across a partitioned "
+            "model. Each stage runs a subset of the model's "
+            "layers; activations flow through stages with "
+            "hash-chain integrity. Output is a "
+            "verifiable PipelineInferenceReceipt — anyone "
+            "with the orchestrator's pubkey can confirm "
+            "the inference ran end-to-end without trusting "
+            "any single stage operator. Single tool with "
+            "`action` selector: propose | list | lookup | "
+            "execute | get_round. v1 uses default stub "
+            "stage runners; real PyTorch per-stage forward "
+            "pass lands in sprint 314."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "propose", "list", "lookup",
+                        "execute", "get_round",
+                    ],
+                },
+                "job_id": {"type": "string"},
+                "model_id": {"type": "string"},
+                "total_layers": {"type": "integer"},
+                "node_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "prompt_b64": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_federated_train",
         description=(
             "Vision §7 capstone follow-on (sprint 308b): "
@@ -8028,6 +8068,218 @@ _FEDERATED_ACTIONS = {
 }
 
 
+_PIPELINE_INFERENCE_ACTIONS = {
+    "propose", "list", "lookup", "execute", "get_round",
+}
+
+
+async def handle_prsm_pipeline_inference(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 312 — pipeline inference orchestrator MCP
+    wrapper. Wraps /admin/inference/pipeline/*."""
+    action = (
+        arguments.get("action") or ""
+    ).strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_PIPELINE_INFERENCE_ACTIONS)})."
+        )
+    if action not in _PIPELINE_INFERENCE_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_PIPELINE_INFERENCE_ACTIONS)}; got "
+            f"{action!r}."
+        )
+
+    if action == "propose":
+        required = ("model_id", "total_layers", "node_ids")
+        missing = [
+            f for f in required
+            if arguments.get(f) in (None, "", [])
+        ]
+        if missing:
+            return (
+                f"propose missing required field(s): "
+                f"{missing}"
+            )
+        # Build an even partition by convention; operators
+        # who want custom layer splits hit the HTTP
+        # endpoint directly with their own partition.
+        from prsm.compute.inference.pipeline_partition import (
+            even_layer_partition,
+        )
+        try:
+            partition = even_layer_partition(
+                total_layers=int(
+                    arguments["total_layers"],
+                ),
+                node_ids=list(arguments["node_ids"]),
+            )
+        except ValueError as e:
+            return f"propose refused: {e}"
+        body = {
+            "model_id": arguments["model_id"],
+            "partition": partition.to_dict(),
+        }
+        try:
+            r = await _call_node_api(
+                "POST", "/admin/inference/pipeline/job",
+                body,
+            )
+        except Exception as e:
+            return (
+                f"prsm_pipeline_inference propose failed: "
+                f"{e}"
+            )
+        if "job_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"propose refused: {detail}"
+        return (
+            f"Pipeline job proposed\n"
+            f"  job_id:        {r.get('job_id')}\n"
+            f"  model_id:      {r.get('model_id')}\n"
+            f"  status:        {r.get('status')}\n"
+            f"  n_stages:      "
+            f"{len((r.get('partition') or {}).get('stage_layer_ranges', []))}\n"
+            f"  total_layers:  "
+            f"{(r.get('partition') or {}).get('total_layers')}"
+        )
+
+    if action == "list":
+        try:
+            r = await _call_node_api(
+                "GET", "/admin/inference/pipeline/job",
+            )
+        except Exception as e:
+            return (
+                f"prsm_pipeline_inference list failed: {e}"
+            )
+        if "jobs" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"list refused: {detail}"
+        jobs = r.get("jobs") or []
+        if not jobs:
+            return "No pipeline jobs."
+        lines = [
+            f"PRSM Pipeline Inference Jobs — {len(jobs)}:",
+            "",
+            f"  {'id':<10} {'status':<11} {'stages':<7}  "
+            f"model_id",
+        ]
+        for j in jobs:
+            jid = (j.get("job_id") or "")[:8]
+            part = j.get("partition") or {}
+            stages = len(
+                part.get("stage_layer_ranges") or [],
+            )
+            lines.append(
+                f"  {jid:<10} "
+                f"{j.get('status', '?'):<11} "
+                f"{stages:<7}  "
+                f"{j.get('model_id', '?')}"
+            )
+        return "\n".join(lines)
+
+    if action == "lookup":
+        jid = (arguments.get("job_id") or "").strip()
+        if not jid:
+            return "lookup requires 'job_id'."
+        try:
+            r = await _call_node_api(
+                "GET",
+                f"/admin/inference/pipeline/job/{jid}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_pipeline_inference lookup failed: "
+                f"{e}"
+            )
+        if "job_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"lookup refused: {detail}"
+        part = r.get("partition") or {}
+        return (
+            f"Pipeline job {r.get('job_id')}\n"
+            f"  model_id:      {r.get('model_id')}\n"
+            f"  status:        {r.get('status')}\n"
+            f"  total_layers:  {part.get('total_layers')}\n"
+            f"  stages:        "
+            f"{len(part.get('stage_layer_ranges') or [])}\n"
+            f"  nodes:         "
+            f"{', '.join(part.get('stage_node_ids') or [])}"
+        )
+
+    if action == "execute":
+        jid = (arguments.get("job_id") or "").strip()
+        if not jid:
+            return "execute requires 'job_id'."
+        prompt_b64 = arguments.get("prompt_b64") or ""
+        if not prompt_b64:
+            return "execute requires 'prompt_b64'."
+        try:
+            r = await _call_node_api(
+                "POST",
+                f"/admin/inference/pipeline/job/{jid}"
+                f"/execute",
+                {"prompt_b64": prompt_b64},
+            )
+        except Exception as e:
+            return (
+                f"prsm_pipeline_inference execute failed: "
+                f"{e}"
+            )
+        if "status" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"execute refused: {detail}"
+        receipt = r.get("receipt") or {}
+        return (
+            f"Pipeline execution {r.get('status')}\n"
+            f"  job_id:           "
+            f"{r.get('job_id', '?')}\n"
+            f"  round_id:         "
+            f"{r.get('round_id', '?')}\n"
+            f"  prompt_hash:      "
+            f"{(receipt.get('prompt_hash') or '')[:24]}\n"
+            f"  output_hash:      "
+            f"{(receipt.get('output_hash') or '')[:24]}\n"
+            f"  partition_hash:   "
+            f"{(receipt.get('partition_hash') or '')[:24]}\n"
+            f"  stages_recorded:  "
+            f"{len(receipt.get('stage_receipts') or [])}\n"
+            f"  signature:        "
+            f"{(receipt.get('orchestrator_signature_b64') or '')[:24]}"
+        )
+
+    # get_round
+    jid = (arguments.get("job_id") or "").strip()
+    if not jid:
+        return "get_round requires 'job_id'."
+    try:
+        r = await _call_node_api(
+            "GET",
+            f"/admin/inference/pipeline/job/{jid}/round",
+        )
+    except Exception as e:
+        return (
+            f"prsm_pipeline_inference get_round failed: {e}"
+        )
+    if "status" not in r:
+        detail = r.get("detail", "unknown error")
+        return f"get_round refused: {detail}"
+    receipt = r.get("receipt") or {}
+    return (
+        f"Pipeline round\n"
+        f"  job_id:       {r.get('job_id')}\n"
+        f"  round_id:     {r.get('round_id')}\n"
+        f"  status:       {r.get('status')}\n"
+        f"  error:        {r.get('error') or '(none)'}\n"
+        f"  receipt:      "
+        f"{'present' if receipt else '(none)'}"
+    )
+
+
 async def handle_prsm_federated_train(
     arguments: Dict[str, Any],
 ) -> str:
@@ -12803,6 +13055,7 @@ TOOL_HANDLERS = {
     "prsm_corp_capability": handle_prsm_corp_capability,
     "prsm_federated_learning": handle_prsm_federated_learning,
     "prsm_federated_train": handle_prsm_federated_train,
+    "prsm_pipeline_inference": handle_prsm_pipeline_inference,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

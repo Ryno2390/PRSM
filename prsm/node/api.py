@@ -7944,6 +7944,163 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    # ── Sprint 312 — pipeline inference orchestrator ──────
+    # Coordinates multi-stage TEE-attested inference across
+    # a partitioned model. Each stage runs in-process for
+    # v1 (cross-node activation streaming = sprint 313).
+
+    class _PipelineProposeRequest(BaseModel):
+        model_id: str
+        partition: Dict[str, Any]
+
+    class _PipelineExecuteRequest(BaseModel):
+        prompt_b64: str
+
+    def _require_pipeline_orchestrator():
+        o = getattr(
+            node,
+            "_pipeline_inference_orchestrator",
+            None,
+        )
+        if o is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Pipeline inference orchestrator not "
+                    "initialized (set "
+                    "PRSM_PIPELINE_ORCHESTRATOR_PRIVKEY env)"
+                ),
+            )
+        return o
+
+    @app.post(
+        "/admin/inference/pipeline/job", tags=["admin"],
+    )
+    async def pipeline_propose_job(
+        body: _PipelineProposeRequest,
+    ) -> Dict[str, Any]:
+        from prsm.compute.inference.pipeline_partition import (
+            PipelinePartition,
+        )
+        orch = _require_pipeline_orchestrator()
+        try:
+            partition = PipelinePartition.from_dict(
+                body.partition,
+            )
+        except (KeyError, ValueError, TypeError) as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"malformed partition: {e}",
+            )
+        try:
+            job = orch.propose_job(
+                model_id=body.model_id, partition=partition,
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422, detail=str(e),
+            )
+        return job.to_dict()
+
+    @app.get(
+        "/admin/inference/pipeline/job", tags=["admin"],
+    )
+    async def pipeline_list_jobs() -> Dict[str, Any]:
+        orch = _require_pipeline_orchestrator()
+        return {
+            "jobs": [j.to_dict() for j in orch.list_jobs()],
+        }
+
+    @app.get(
+        "/admin/inference/pipeline/job/{job_id}",
+        tags=["admin"],
+    )
+    async def pipeline_get_job(
+        job_id: str,
+    ) -> Dict[str, Any]:
+        orch = _require_pipeline_orchestrator()
+        job = orch.get_job(job_id)
+        if job is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"job {job_id!r} not found",
+            )
+        return job.to_dict()
+
+    @app.post(
+        "/admin/inference/pipeline/job/{job_id}/execute",
+        tags=["admin"],
+    )
+    async def pipeline_execute(
+        job_id: str, body: _PipelineExecuteRequest,
+    ) -> Dict[str, Any]:
+        from prsm.compute.inference.pipeline_stage import (
+            deterministic_stub_stage_runner,
+        )
+        import base64 as _b64
+        orch = _require_pipeline_orchestrator()
+        if orch.get_job(job_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"job {job_id!r} not found",
+            )
+        try:
+            prompt = _b64.b64decode(
+                body.prompt_b64, validate=True,
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"prompt_b64 not valid: {e}",
+            )
+        job = orch.get_job(job_id)
+        n_stages = job.partition.n_stages
+        # v1: API uses default stub runners. Operators
+        # wiring real runners do so by calling the
+        # orchestrator's execute() directly from a
+        # privileged code path.
+        runners = [
+            deterministic_stub_stage_runner()
+            for _ in range(n_stages)
+        ]
+        try:
+            rnd = orch.execute(
+                job_id, prompt=prompt,
+                stage_runners=runners,
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422, detail=str(e),
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"pipeline execution failed: "
+                    f"{type(e).__name__}: {e}"
+                ),
+            )
+        return rnd.to_dict()
+
+    @app.get(
+        "/admin/inference/pipeline/job/{job_id}/round",
+        tags=["admin"],
+    )
+    async def pipeline_get_round(
+        job_id: str,
+    ) -> Dict[str, Any]:
+        orch = _require_pipeline_orchestrator()
+        rnd = orch.get_round(job_id)
+        if rnd is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"no round for job {job_id!r} (not "
+                    f"executed yet?)"
+                ),
+            )
+        return rnd.to_dict()
+
     # ── Sprint 308b — worker-side /compute/train shim ─────
     # Vision §7 Enterprise Confidentiality Mode capstone
     # follow-on. Workers receive a round assignment from the
