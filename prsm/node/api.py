@@ -2873,6 +2873,69 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     ),
                 )
 
+    def _enforce_tee_policy(body: Dict[str, Any]) -> None:
+        """Sprint 305a — Vision §7 Enterprise Confidentiality
+        Mode layer-3 LIVE dispatch enforcement.
+
+        If the request carries an optional `tee_policy`
+        field, evaluate it against THIS node's attestation
+        blob BEFORE doing any work. Refuse with 412
+        Precondition Failed when the policy is not
+        satisfied. Absent field → no gating (backwards-
+        compatible). Malformed shape → 422.
+
+        Composer-only on the operator side: we refuse, we
+        don't decrypt or execute anything risky. The
+        enterprise requester learns from the 412 detail
+        which tier the node provides and which they asked
+        for, then either reroutes to a compliant node or
+        loosens the policy.
+        """
+        raw_policy = body.get("tee_policy")
+        if raw_policy is None:
+            return
+        if not isinstance(raw_policy, dict):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "tee_policy must be a JSON object with "
+                    "at least 'min_attestation_tier'"
+                ),
+            )
+        from prsm.enterprise.tee_policy import (
+            TEEPolicy, evaluate_attestation_blob,
+        )
+        try:
+            policy = TEEPolicy.from_dict(raw_policy)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"invalid tee_policy: {e}",
+            )
+        blob = getattr(
+            node, "_tee_node_attestation_blob", None,
+        )
+        if blob is not None and not isinstance(
+            blob, (bytes, bytearray),
+        ):
+            blob = None
+        result = evaluate_attestation_blob(
+            bytes(blob) if blob else None, policy,
+        )
+        if result.status.value != "pass":
+            raise HTTPException(
+                status_code=412,
+                detail=(
+                    f"node refuses dispatch: TEE policy "
+                    f"not satisfied. effective_tier="
+                    f"{result.effective_tier.value}, "
+                    f"required="
+                    f"{result.min_required_tier.value}, "
+                    f"vendor={result.vendor or '(none)'}. "
+                    f"{result.diagnostic}"
+                ),
+            )
+
     @app.post("/compute/forge")
     async def compute_forge(
         body: Dict[str, Any] = {},
@@ -4531,6 +4594,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # OR model_id is in blocked_model_tags.
         _enforce_content_filter(prompt=prompt, model_id=model_id)
 
+        # Sprint 305a — TEE policy enforcement (Vision §7
+        # Enterprise Confidentiality Mode layer 3). Refuses
+        # with 412 if the request's optional tee_policy is
+        # not satisfied by this node's own attestation.
+        # Absent field = no gating, fully backwards-compat.
+        _enforce_tee_policy(body)
+
         # Validate budget_ftns FIELD type/value upfront (422 for
         # well-formed body that fails semantic validation).
         if "budget_ftns" in body:
@@ -4975,6 +5045,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # Sprint 271 — operator content filter (BEFORE budget
         # validation / escrow / privacy budget / executor stream).
         _enforce_content_filter(prompt=prompt, model_id=model_id)
+
+        # Sprint 305a — TEE policy enforcement (Vision §7
+        # Enterprise Confidentiality Mode layer 3). Mirrors
+        # the /compute/inference gate so streamed inference
+        # honors the same policy.
+        _enforce_tee_policy(body)
 
         if "budget_ftns" in body:
             _raw_b = body["budget_ftns"]
