@@ -7371,6 +7371,16 @@ async def handle_prsm_verify_inference_privacy(
     eps_spent = result.get("epsilon_spent", 0)
     eps_expected = result.get("expected_epsilon", 0)
     reasons = result.get("reasons") or []
+    # Sprint 293 — backend-supplied attestation detail
+    attest_vendor = result.get(
+        "attestation_vendor", "unknown",
+    )
+    attest_vendor_data = result.get(
+        "attestation_vendor_data", {}
+    ) or {}
+    attest_vendor_verified = result.get(
+        "attestation_vendor_verified", False,
+    )
 
     verdict = (
         "✅ VALID" if ok
@@ -7389,7 +7399,32 @@ async def handle_prsm_verify_inference_privacy(
         f"{'✅ hardware-attested' if hw_attested else '⚠ SOFTWARE FALLBACK (DEV-ONLY)'}",
         f"  Multi-stage env:  "
         f"{'present' if multi_stage else 'single-host'}",
+        f"  Vendor:           "
+        f"{attest_vendor}  "
+        f"({'cryptographically verified' if attest_vendor_verified else 'structural-parse only'})",
     ]
+    # Surface parsed measurements when present (sprint 293
+    # backends fill these for Intel SGX/TDX). Callers can
+    # pin against expected MRENCLAVE / MRSIGNER values
+    # out-of-band.
+    if attest_vendor.startswith("intel-sgx") and "mrenclave_hex" in attest_vendor_data:
+        lines.append(
+            f"    MRENCLAVE: "
+            f"{attest_vendor_data.get('mrenclave_hex')}"
+        )
+        lines.append(
+            f"    MRSIGNER:  "
+            f"{attest_vendor_data.get('mrsigner_hex')}"
+        )
+    elif attest_vendor == "intel-tdx" and "mrtd_hex" in attest_vendor_data:
+        lines.append(
+            f"    MRTD:      "
+            f"{attest_vendor_data.get('mrtd_hex')}"
+        )
+        lines.append(
+            f"    RTMR0:     "
+            f"{attest_vendor_data.get('rtmr0_hex')}"
+        )
     if not hw_attested:
         lines.append(
             "    Truth check: every local-executor receipt "

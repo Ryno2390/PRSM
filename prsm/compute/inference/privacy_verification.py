@@ -82,6 +82,19 @@ class PrivacyVerification:
     privacy_tier: str = ""
     epsilon_spent: float = 0.0
     expected_epsilon: float = 0.0
+    # Sprint 293 — backend-supplied attestation detail.
+    # `attestation_vendor` is the result of running the
+    # attestation blob through the sprint-293 backend
+    # registry (intel-sgx / intel-tdx / amd-sev-snp /
+    # software-fallback / unknown). `attestation_vendor_data`
+    # carries vendor-specific parsed fields (MRENCLAVE_hex,
+    # MRSIGNER_hex, TCB level, etc.) so callers can pin
+    # against expected values out-of-band.
+    attestation_vendor: str = "unknown"
+    attestation_vendor_data: Dict[str, Any] = field(
+        default_factory=dict,
+    )
+    attestation_vendor_verified: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -96,6 +109,13 @@ class PrivacyVerification:
             "privacy_tier": self.privacy_tier,
             "epsilon_spent": self.epsilon_spent,
             "expected_epsilon": self.expected_epsilon,
+            "attestation_vendor": self.attestation_vendor,
+            "attestation_vendor_data": dict(
+                self.attestation_vendor_data,
+            ),
+            "attestation_vendor_verified": (
+                self.attestation_vendor_verified
+            ),
         }
 
 
@@ -231,6 +251,41 @@ def verify_receipt_privacy_claim(
                 "/ Apple SEP) ship in a future sprint."
             )
 
+    # Sprint 293 — run the attestation through the backend
+    # registry to get vendor + parsed fields. Defensive: any
+    # backend failure surfaces as vendor="unknown" with an
+    # error reason but doesn't crash the primary
+    # verification.
+    attestation_vendor = "unknown"
+    attestation_vendor_data: Dict[str, Any] = {}
+    attestation_vendor_verified = False
+    if has_attestation:
+        try:
+            from prsm.compute.inference.attestation_backends import (  # noqa: E501
+                verify_attestation as _verify_attest,
+            )
+            backend_result = _verify_attest(attestation)
+            attestation_vendor = backend_result.vendor
+            attestation_vendor_data = (
+                backend_result.vendor_data
+            )
+            attestation_vendor_verified = (
+                backend_result.vendor_verified
+            )
+            if backend_result.error and (
+                require_hardware_attestation
+            ):
+                reasons.append(
+                    f"attestation backend: "
+                    f"{backend_result.error}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            attestation_vendor = "unknown"
+            if require_hardware_attestation:
+                reasons.append(
+                    f"attestation backend raised: {exc}"
+                )
+
     # ── Multi-stage envelope presence ───────────────────
     # Phase 3.x.7 RpcChainExecutor wraps single-stage
     # attestation with a multi-stage envelope. Detect that
@@ -276,5 +331,10 @@ def verify_receipt_privacy_claim(
         epsilon_spent=float(receipt.epsilon_spent),
         expected_epsilon=(
             expected_eps if expected_eps != float("inf") else 0.0
+        ),
+        attestation_vendor=attestation_vendor,
+        attestation_vendor_data=attestation_vendor_data,
+        attestation_vendor_verified=(
+            attestation_vendor_verified
         ),
     )
