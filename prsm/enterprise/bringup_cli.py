@@ -53,6 +53,34 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_demo(args: argparse.Namespace) -> int:
+    """Sprint 318b — run the end-to-end demo against a
+    fresh in-process deployment. Useful as a post-deploy
+    smoke test."""
+    import tempfile
+    from pathlib import Path as _Path
+
+    from prsm.enterprise.demo import (
+        run_full_demo,
+        setup_demo_environment,
+    )
+
+    persist_root = (
+        _Path(args.persist_root)
+        if args.persist_root is not None
+        else _Path(tempfile.mkdtemp(prefix="prsm-demo-"))
+    )
+    sys.stdout.write(
+        f"PRSM Enterprise end-to-end demo — "
+        f"persist_root={persist_root}\n\n"
+    )
+    env = setup_demo_environment(
+        persist_root=persist_root,
+    )
+    results = run_full_demo(env)
+    return 0 if all(r.ok for _, r in results) else 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="prsm-enterprise-bringup",
@@ -91,6 +119,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
 
+    demo = sub.add_parser(
+        "demo",
+        help=(
+            "Run the §7 enterprise FL + federated "
+            "inference demo against a fresh in-process "
+            "deployment. Useful as a post-deploy smoke "
+            "test."
+        ),
+    )
+    demo.add_argument(
+        "--persist-root", default=None,
+        help=(
+            "Base filesystem path for demo persistence "
+            "(default: fresh temp dir per run)."
+        ),
+    )
+
     try:
         args = parser.parse_args(argv)
     except SystemExit as e:
@@ -101,6 +146,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _cmd_status(args)
     if args.command == "generate":
         return _cmd_generate(args)
+    if args.command == "demo":
+        return _cmd_demo(args)
     parser.print_help()
     return 2
 
