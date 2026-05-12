@@ -3426,6 +3426,25 @@ class PRSMNode:
             # endpoints (/marketplace/reputation/*) can read it.
             # Lifetime is tied to the QO instance.
             self.reputation_tracker = reputation_tracker
+            # Sprint 287 — creator-side reputation tracker
+            # (Vision §14 data quality / Sybil resistance).
+            # Built alongside the provider-side tracker; same
+            # lifetime semantics.
+            try:
+                from prsm.marketplace.creator_reputation import (
+                    CreatorReputationTracker,
+                )
+                self._creator_reputation_tracker = (
+                    CreatorReputationTracker()
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "CreatorReputationTracker construction "
+                    "failed: %s — /marketplace/creator-"
+                    "reputation/* will return 503.",
+                    exc,
+                )
+                self._creator_reputation_tracker = None
 
             semantic_index = SemanticIndexAdapter(
                 embedder=SentenceTransformerEmbedder(),

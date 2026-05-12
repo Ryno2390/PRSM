@@ -7047,6 +7047,127 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return entry.to_dict()
 
+    # ── Sprint 287 — creator reputation operator surface ─
+    # Per Vision §14 "Data quality and Sybil resistance"
+    # mitigation item (1). Read paths surface aggregates
+    # (no purchaser_counts — privacy + payload size); write
+    # path is operator-internal (called by ContentStore
+    # retrieve paths when a piece of content is accessed).
+
+    def _creator_row(tracker, creator_id: str) -> Dict[str, Any]:
+        e = tracker.get_entry(creator_id)
+        if e is None:
+            return {
+                "creator_id": creator_id,
+                "known": False,
+                "score": tracker.score_for(creator_id),
+                "total_accesses": 0,
+                "distinct_purchasers": 0,
+                "repeat_purchaser_count": 0,
+                "first_seen_unix": 0,
+                "last_seen_unix": 0,
+            }
+        d = e.to_dict()
+        d["known"] = True
+        d["score"] = tracker.score_for(creator_id)
+        return d
+
+    @app.get(
+        "/marketplace/creator-reputation",
+        tags=["marketplace"],
+    )
+    async def list_creator_reputation(
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        if limit <= 0 or limit > 10000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 10000], got {limit}",
+            )
+        tracker = getattr(
+            node, "_creator_reputation_tracker", None,
+        )
+        if tracker is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Creator reputation tracker not "
+                    "initialized."
+                ),
+            )
+        creator_ids = tracker.known_creators()
+        rows = [
+            _creator_row(tracker, cid) for cid in creator_ids
+        ]
+        rows.sort(
+            key=lambda r: (r["score"], r["total_accesses"]),
+            reverse=True,
+        )
+        return {
+            "creators": rows[:limit],
+            "count": len(creator_ids),
+            "limit": limit,
+        }
+
+    @app.get(
+        "/marketplace/creator-reputation/{creator_id}",
+        tags=["marketplace"],
+    )
+    async def get_creator_reputation(
+        creator_id: str,
+    ) -> Dict[str, Any]:
+        tracker = getattr(
+            node, "_creator_reputation_tracker", None,
+        )
+        if tracker is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Creator reputation tracker not "
+                    "initialized."
+                ),
+            )
+        return _creator_row(tracker, creator_id)
+
+    class _CreatorAccessRequest(BaseModel):
+        creator_id: str
+        purchaser_id: str
+        content_id: str
+
+    @app.post(
+        "/marketplace/creator-reputation/access",
+        tags=["marketplace"],
+    )
+    async def record_creator_access(
+        body: _CreatorAccessRequest,
+    ) -> Dict[str, Any]:
+        tracker = getattr(
+            node, "_creator_reputation_tracker", None,
+        )
+        if tracker is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Creator reputation tracker not "
+                    "initialized."
+                ),
+            )
+        try:
+            tracker.record_access(
+                creator_id=body.creator_id,
+                purchaser_id=body.purchaser_id,
+                content_id=body.content_id,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {
+            "creator_id": body.creator_id,
+            "total_accesses": tracker.access_count(
+                body.creator_id,
+            ),
+            "score": tracker.score_for(body.creator_id),
+        }
+
     # ── Sprint 275 — marketplace reputation operator surface ─
     # ReputationTracker has informed the marketplace candidate
     # pool since Phase 3 Task 6, but operators had no surface

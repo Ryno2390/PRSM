@@ -1716,6 +1716,45 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_creator_reputation",
+        description=(
+            "Creator-side reputation visibility (Vision §14 "
+            "data quality / Sybil resistance). Distinct from "
+            "prsm_marketplace_reputation which scores compute "
+            "providers — this scores content uploaders based "
+            "on access frequency + distinct-purchaser breadth "
+            "+ repeat-purchase rate. Spam pattern (many "
+            "uploads, no repeats) is discriminated from real "
+            "value (return visits). Single tool with `action` "
+            "selector: list | lookup. Score is 0..1 with "
+            "cold-start neutral 0.5. Backed by "
+            "/marketplace/creator-reputation(/{id})."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "lookup"],
+                },
+                "creator_id": {
+                    "type": "string",
+                    "description": (
+                        "Creator id for action=lookup."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1, "maximum": 10000,
+                    "description": (
+                        "Row cap for action=list (default 100)."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_marketplace_reputation",
         description=(
             "Operator visibility into marketplace "
@@ -7083,6 +7122,119 @@ async def handle_prsm_waas_wallet(
     )
 
 
+_CREATOR_REPUTATION_ACTIONS = {"list", "lookup"}
+
+
+async def handle_prsm_creator_reputation(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 287 — operator visibility into creator-side
+    reputation (Vision §14 data quality / Sybil resistance).
+    action selector: list | lookup. Read-only; recording is
+    automatic from ContentStore retrieve paths (sprint 288
+    wiring)."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_CREATOR_REPUTATION_ACTIONS)})."
+        )
+    if action not in _CREATOR_REPUTATION_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_CREATOR_REPUTATION_ACTIONS)}; "
+            f"got {action!r}."
+        )
+
+    if action == "list":
+        limit = int(arguments.get("limit", 100))
+        path = (
+            f"/marketplace/creator-reputation?limit={limit}"
+        )
+        try:
+            result = await _call_node_api("GET", path)
+        except Exception as e:
+            return (
+                f"prsm_creator_reputation failed: {e}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+        if "creators" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Creator reputation tracker not wired.\n"
+                    f"  Detail: {detail}\n"
+                    f"  Tracker is built when "
+                    f"QueryOrchestrator wires."
+                )
+            return f"list refused: {detail}"
+        creators = result.get("creators") or []
+        total = result.get("count", 0)
+        lines = [
+            f"PRSM Creator Reputation — {len(creators)} of "
+            f"{total} known creators (score desc):",
+        ]
+        if not creators:
+            lines.append("  (none)")
+        for c in creators:
+            score = c.get("score", 0.0)
+            lines.append(
+                f"  {c.get('creator_id', '?')}  "
+                f"score={score:.3f}  "
+                f"accesses={c.get('total_accesses', 0)}  "
+                f"distinct={c.get('distinct_purchasers', 0)}  "
+                f"repeats="
+                f"{c.get('repeat_purchaser_count', 0)}"
+            )
+        return "\n".join(lines)
+
+    # action == "lookup"
+    creator_id = (arguments.get("creator_id") or "").strip()
+    if not creator_id:
+        return "lookup requires 'creator_id'."
+    try:
+        result = await _call_node_api(
+            "GET",
+            f"/marketplace/creator-reputation/{creator_id}",
+        )
+    except Exception as e:
+        return (
+            f"prsm_creator_reputation failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "creator_id" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Creator reputation tracker not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"lookup refused: {detail}"
+    known = result.get("known", False)
+    total = result.get("total_accesses", 0)
+    cold_start = (
+        " (cold-start — < 10 access events)"
+        if not known or total < 10
+        else ""
+    )
+    return "\n".join([
+        f"Creator Reputation — {result['creator_id']}:",
+        f"  known:                  {known}",
+        f"  score:                  "
+        f"{result.get('score', 0.0):.3f}{cold_start}",
+        f"  total_accesses:         "
+        f"{result.get('total_accesses', 0)}",
+        f"  distinct_purchasers:    "
+        f"{result.get('distinct_purchasers', 0)}",
+        f"  repeat_purchaser_count: "
+        f"{result.get('repeat_purchaser_count', 0)}",
+        f"  first_seen_unix:        "
+        f"{result.get('first_seen_unix', 0)}",
+        f"  last_seen_unix:         "
+        f"{result.get('last_seen_unix', 0)}",
+    ])
+
+
 _MARKETPLACE_REPUTATION_ACTIONS = {"list", "lookup"}
 
 
@@ -9380,6 +9532,7 @@ TOOL_HANDLERS = {
     "prsm_content_filter": handle_prsm_content_filter,
     "prsm_takedown_notices": handle_prsm_takedown_notices,
     "prsm_marketplace_reputation": handle_prsm_marketplace_reputation,
+    "prsm_creator_reputation": handle_prsm_creator_reputation,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,
