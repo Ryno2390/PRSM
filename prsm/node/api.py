@@ -7323,6 +7323,246 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return tx
 
+    # ── Sprint 300 — responsible-disclosure intake ────────
+    # Vision §14 mitigation item 3: bug bounty / coordinated
+    # disclosure surface. /submit is intentionally open (no
+    # auth) — security researchers may be anonymous. Workflow
+    # transitions + payout composer are admin paths (gated by
+    # the same security middleware as other /admin/* routes).
+    # Payout itself is composer-only — Foundation Safe.
+
+    class _DisclosureSubmitRequest(BaseModel):
+        severity: str
+        summary: str
+        affected_contracts: List[str] = []
+        researcher_contact: str
+        details: str = ""
+
+    class _DisclosureUpdateRequest(BaseModel):
+        new_status: str
+        triage_notes: Optional[str] = None
+        payout_ftns: Optional[int] = None
+
+    class _DisclosureComposePayoutRequest(BaseModel):
+        recipient: str
+
+    class _DisclosureRecordTxRequest(BaseModel):
+        tx_hash: str
+
+    def _require_disclosure_intake():
+        intake = getattr(node, "_disclosure_intake", None)
+        if intake is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Disclosure intake not initialized.",
+            )
+        return intake
+
+    @app.post("/admin/disclosure/submit", tags=["admin"])
+    async def disclosure_submit(
+        body: _DisclosureSubmitRequest,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.disclosure_intake import (
+            DisclosureSeverity,
+        )
+        intake = _require_disclosure_intake()
+        sev_raw = (body.severity or "").strip().lower()
+        try:
+            severity = DisclosureSeverity(sev_raw)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"severity must be one of "
+                    f"{[s.value for s in DisclosureSeverity]}"
+                ),
+            )
+        try:
+            record = intake.submit(
+                severity=severity,
+                summary=body.summary,
+                affected_contracts=body.affected_contracts,
+                researcher_contact=body.researcher_contact,
+                details=body.details,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return record.to_dict()
+
+    @app.get("/admin/disclosure", tags=["admin"])
+    async def disclosure_list(
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.disclosure_intake import (
+            DisclosureSeverity, DisclosureStatus,
+        )
+        intake = _require_disclosure_intake()
+        sev_obj = None
+        status_obj = None
+        if severity:
+            try:
+                sev_obj = DisclosureSeverity(severity.lower())
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"invalid severity {severity!r}",
+                )
+        if status:
+            try:
+                status_obj = DisclosureStatus(status.lower())
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"invalid status {status!r}",
+                )
+        records = intake.list(
+            severity=sev_obj, status=status_obj,
+        )
+        return {
+            "records": [r.to_dict() for r in records],
+            "count": len(records),
+        }
+
+    @app.get(
+        "/admin/disclosure/{disclosure_id}", tags=["admin"],
+    )
+    async def disclosure_get(
+        disclosure_id: str,
+    ) -> Dict[str, Any]:
+        intake = _require_disclosure_intake()
+        record = intake.get(disclosure_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"disclosure {disclosure_id!r} not found"
+                ),
+            )
+        return record.to_dict()
+
+    @app.post(
+        "/admin/disclosure/{disclosure_id}/update",
+        tags=["admin"],
+    )
+    async def disclosure_update(
+        disclosure_id: str,
+        body: _DisclosureUpdateRequest,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.disclosure_intake import (
+            DisclosureStatus,
+        )
+        intake = _require_disclosure_intake()
+        if intake.get(disclosure_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"disclosure {disclosure_id!r} not found"
+                ),
+            )
+        try:
+            new_status = DisclosureStatus(
+                (body.new_status or "").lower(),
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"invalid new_status {body.new_status!r}"
+                ),
+            )
+        try:
+            record = intake.update_status(
+                disclosure_id, new_status,
+                triage_notes=body.triage_notes,
+                payout_ftns=body.payout_ftns,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return record.to_dict()
+
+    @app.post(
+        "/admin/disclosure/{disclosure_id}/compose-payout",
+        tags=["admin"],
+    )
+    async def disclosure_compose_payout(
+        disclosure_id: str,
+        body: _DisclosureComposePayoutRequest,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.disclosure_intake import (
+            compose_bounty_payout_tx,
+        )
+        intake = _require_disclosure_intake()
+        if intake.get(disclosure_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"disclosure {disclosure_id!r} not found"
+                ),
+            )
+        ftns_token = getattr(
+            node, "_disclosure_ftns_token_address", None,
+        )
+        if not ftns_token:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "FTNS token address not configured "
+                    "(set PRSM_NETWORK or "
+                    "FTNS_TOKEN_ADDRESS env)."
+                ),
+            )
+        import re
+        if not re.fullmatch(
+            r"0x[0-9a-fA-F]{40}", body.recipient or "",
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="invalid recipient address format",
+            )
+        try:
+            tx = compose_bounty_payout_tx(
+                intake=intake,
+                disclosure_id=disclosure_id,
+                recipient=body.recipient,
+                ftns_token_address=ftns_token,
+                chain_id=getattr(
+                    node, "_disclosure_chain_id", None,
+                ),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return tx
+
+    @app.post(
+        "/admin/disclosure/{disclosure_id}/record-payout-tx",
+        tags=["admin"],
+    )
+    async def disclosure_record_tx(
+        disclosure_id: str,
+        body: _DisclosureRecordTxRequest,
+    ) -> Dict[str, Any]:
+        intake = _require_disclosure_intake()
+        if intake.get(disclosure_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"disclosure {disclosure_id!r} not found"
+                ),
+            )
+        if not body.tx_hash:
+            raise HTTPException(
+                status_code=422,
+                detail="tx_hash must be non-empty",
+            )
+        try:
+            record = intake.record_payout_tx(
+                disclosure_id, tx_hash=body.tx_hash,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return record.to_dict()
+
     # ── Sprint 292 — privacy-claim verification ───────────
     # Public API for the §7 promise: lets callers verify
     # signature + DP-noise + hardware-attestation quality

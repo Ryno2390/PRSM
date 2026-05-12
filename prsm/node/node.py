@@ -2377,6 +2377,39 @@ class PRSMNode:
             )
             self._emergency_pause_client = None
 
+        # Sprint 300 — responsible-disclosure intake (Vision
+        # §14 mitigation item 3). Filesystem-persisted via
+        # PRSM_DISCLOSURE_INTAKE_DIR; bounty payouts are
+        # composer-only (Foundation Safe multisig gates
+        # execution). Also pins FTNS token address + chain_id
+        # for the payout composer.
+        try:
+            from prsm.economy.web3.disclosure_intake import (
+                DisclosureIntake,
+            )
+            from prsm.config.networks import resolve_endpoints
+            self._disclosure_intake = DisclosureIntake.from_env()
+            endpoints = resolve_endpoints()
+            self._disclosure_ftns_token_address = (
+                endpoints.ftns_token
+            )
+            self._disclosure_chain_id = endpoints.chain_id
+            logger.info(
+                "DisclosureIntake wired "
+                "(records=%d, ftns_token=%s, chain_id=%s)",
+                self._disclosure_intake.count(),
+                self._disclosure_ftns_token_address,
+                self._disclosure_chain_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "DisclosureIntake construction failed: %s — "
+                "/admin/disclosure/* will return 503.", exc,
+            )
+            self._disclosure_intake = None
+            self._disclosure_ftns_token_address = None
+            self._disclosure_chain_id = None
+
         # Sprint 286 — fiat-surface health check at startup.
         # Loud-but-non-blocking: ERROR findings surface in the
         # log so operators see misconfigs (e.g., KYC

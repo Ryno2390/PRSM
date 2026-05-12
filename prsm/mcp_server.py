@@ -1816,6 +1816,57 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_disclosure",
+        description=(
+            "Vision §14 mitigation item 3: responsible-"
+            "disclosure intake + bounty payout composer. "
+            "Single tool with `action` selector: "
+            "submit | list | lookup | update | "
+            "compose_payout | record_payout_tx. submit takes "
+            "severity (critical/high/medium/low/informational) "
+            "+ summary + affected_contracts + "
+            "researcher_contact + details (anonymous OK). "
+            "list paginates; lookup detail-views one record. "
+            "update transitions workflow status (received → "
+            "triaged → confirmed → awarded | rejected | "
+            "duplicate | out_of_scope). compose_payout returns "
+            "a Safe-uploadable ERC-20 transfer payload for "
+            "an AWARDED disclosure — composer-only, "
+            "Foundation Safe 2-of-3 hardware multisig gates "
+            "execution. record_payout_tx closes the audit "
+            "trail after Safe-executed payout. Backed by "
+            "/admin/disclosure/*."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "submit", "list", "lookup", "update",
+                        "compose_payout", "record_payout_tx",
+                    ],
+                },
+                "disclosure_id": {"type": "string"},
+                "severity": {"type": "string"},
+                "summary": {"type": "string"},
+                "affected_contracts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "researcher_contact": {"type": "string"},
+                "details": {"type": "string"},
+                "status": {"type": "string"},
+                "new_status": {"type": "string"},
+                "triage_notes": {"type": "string"},
+                "payout_ftns": {"type": "integer"},
+                "recipient": {"type": "string"},
+                "tx_hash": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_verify_inference_privacy",
         description=(
             "Verify an InferenceReceipt's privacy claims "
@@ -7579,6 +7630,264 @@ _EMERGENCY_PAUSE_ACTIONS = {
 }
 
 
+_DISCLOSURE_ACTIONS = {
+    "submit", "list", "lookup", "update",
+    "compose_payout", "record_payout_tx",
+}
+
+_DISCLOSURE_SEVERITY_VALUES = {
+    "critical", "high", "medium", "low", "informational",
+}
+
+
+def _short_disclosure_id(did: str) -> str:
+    return did[:8] if len(did) > 8 else did
+
+
+async def handle_prsm_disclosure(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 300 — responsible-disclosure intake + bounty
+    payout composer (Vision §14 mitigation item 3).
+
+    Wraps /admin/disclosure/* endpoints. The compose_payout
+    action returns a Foundation-Safe-uploadable ERC-20
+    transfer payload — PRSM never executes the bounty
+    payment; the multisig is the gate."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_DISCLOSURE_ACTIONS)})."
+        )
+    if action not in _DISCLOSURE_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_DISCLOSURE_ACTIONS)}; got {action!r}."
+        )
+
+    if action == "submit":
+        severity = (
+            arguments.get("severity") or ""
+        ).strip().lower()
+        if not severity:
+            return (
+                f"submit requires 'severity' (one of "
+                f"{sorted(_DISCLOSURE_SEVERITY_VALUES)})."
+            )
+        body = {
+            "severity": severity,
+            "summary": arguments.get("summary") or "",
+            "affected_contracts": (
+                arguments.get("affected_contracts") or []
+            ),
+            "researcher_contact": (
+                arguments.get("researcher_contact") or ""
+            ),
+            "details": arguments.get("details") or "",
+        }
+        try:
+            r = await _call_node_api(
+                "POST", "/admin/disclosure/submit", body,
+            )
+        except Exception as e:
+            return f"prsm_disclosure submit failed: {e}"
+        if "disclosure_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"submit refused: {detail}"
+        return (
+            f"Disclosure received\n"
+            f"  id:        {r.get('disclosure_id')}\n"
+            f"  severity:  {r.get('severity')}\n"
+            f"  status:    {r.get('status')}\n"
+            f"  summary:   {r.get('summary')}"
+        )
+
+    if action == "list":
+        path = "/admin/disclosure"
+        params = []
+        sev = (
+            arguments.get("severity") or ""
+        ).strip().lower()
+        if sev:
+            params.append(f"severity={sev}")
+        status_filter = (
+            arguments.get("status") or ""
+        ).strip().lower()
+        if status_filter:
+            params.append(f"status={status_filter}")
+        if params:
+            path = f"{path}?{'&'.join(params)}"
+        try:
+            r = await _call_node_api("GET", path)
+        except Exception as e:
+            return f"prsm_disclosure list failed: {e}"
+        if "records" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"list refused: {detail}"
+        records = r.get("records") or []
+        if not records:
+            return "No disclosures recorded."
+        lines = [
+            f"PRSM Disclosures — {r.get('count', 0)} record"
+            f"{'s' if r.get('count', 0) != 1 else ''}",
+            "",
+            f"  {'id':<10} {'sev':<14} {'status':<14}  summary",
+        ]
+        for rec in records:
+            did = _short_disclosure_id(
+                rec.get("disclosure_id", ""),
+            )
+            sev = rec.get("severity", "?")
+            status_v = rec.get("status", "?")
+            summary = (rec.get("summary") or "")[:60]
+            lines.append(
+                f"  {did:<10} {sev:<14} {status_v:<14}  "
+                f"{summary}"
+            )
+        return "\n".join(lines)
+
+    if action == "lookup":
+        did = (
+            arguments.get("disclosure_id") or ""
+        ).strip()
+        if not did:
+            return "lookup requires 'disclosure_id'."
+        try:
+            r = await _call_node_api(
+                "GET", f"/admin/disclosure/{did}",
+            )
+        except Exception as e:
+            return f"prsm_disclosure lookup failed: {e}"
+        if "disclosure_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"lookup refused: {detail}"
+        lines = [
+            f"Disclosure {r.get('disclosure_id')}",
+            "",
+            f"  severity:           {r.get('severity')}",
+            f"  status:             {r.get('status')}",
+            f"  summary:            {r.get('summary')}",
+            f"  affected_contracts: "
+            f"{', '.join(r.get('affected_contracts') or []) or '(none)'}",
+            f"  researcher_contact: "
+            f"{r.get('researcher_contact')}",
+            f"  triage_notes:       "
+            f"{r.get('triage_notes') or '(none)'}",
+            f"  payout_ftns:        "
+            f"{r.get('payout_ftns') or 0:,}",
+            f"  payout_tx_hash:     "
+            f"{r.get('payout_tx_hash') or '(none)'}",
+        ]
+        return "\n".join(lines)
+
+    if action == "update":
+        did = (
+            arguments.get("disclosure_id") or ""
+        ).strip()
+        if not did:
+            return "update requires 'disclosure_id'."
+        new_status = (
+            arguments.get("new_status") or ""
+        ).strip().lower()
+        if not new_status:
+            return "update requires 'new_status'."
+        body = {"new_status": new_status}
+        if arguments.get("triage_notes") is not None:
+            body["triage_notes"] = arguments["triage_notes"]
+        if arguments.get("payout_ftns") is not None:
+            body["payout_ftns"] = arguments["payout_ftns"]
+        try:
+            r = await _call_node_api(
+                "POST",
+                f"/admin/disclosure/{did}/update", body,
+            )
+        except Exception as e:
+            return f"prsm_disclosure update failed: {e}"
+        if "disclosure_id" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"update refused: {detail}"
+        return (
+            f"Disclosure {r.get('disclosure_id')} updated\n"
+            f"  status:       {r.get('status')}\n"
+            f"  triage_notes: {r.get('triage_notes') or '(none)'}\n"
+            f"  payout_ftns:  {r.get('payout_ftns') or 0:,}"
+        )
+
+    if action == "compose_payout":
+        did = (
+            arguments.get("disclosure_id") or ""
+        ).strip()
+        if not did:
+            return "compose_payout requires 'disclosure_id'."
+        recipient = (
+            arguments.get("recipient") or ""
+        ).strip()
+        if not recipient:
+            return "compose_payout requires 'recipient'."
+        try:
+            r = await _call_node_api(
+                "POST",
+                f"/admin/disclosure/{did}/compose-payout",
+                {"recipient": recipient},
+            )
+        except Exception as e:
+            return f"prsm_disclosure compose_payout failed: {e}"
+        if "data" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"compose_payout refused: {detail}"
+        explorer = r.get("explorer_url") or "(no explorer)"
+        amt_ftns = r.get("amount_ftns", 0)
+        lines = [
+            f"⚠ BOUNTY PAYOUT COMPOSED — Foundation Safe "
+            f"upload required ⚠",
+            "",
+            f"  WARNING: {r.get('warning', '')}",
+            "",
+            "  Transaction payload (paste into Safe UI):",
+            f"    to:        {r.get('to', '?')}",
+            f"    data:      {r.get('data', '?')}",
+            f"    value:     {r.get('value', '0')}",
+            f"    chain_id:  {r.get('chain_id', '?')}",
+            "",
+            f"  Disclosure:  {r.get('disclosure_id', '?')}",
+            f"  Severity:    {r.get('severity', '?')}",
+            f"  Summary:     {r.get('summary', '?')}",
+            f"  Recipient:   {r.get('recipient', '?')}",
+            f"  Amount:      {amt_ftns:,} FTNS",
+            f"  Verify on:   {explorer}",
+            "",
+            f"  Instructions:",
+            f"    {r.get('instructions', '')}",
+        ]
+        return "\n".join(lines)
+
+    # record_payout_tx
+    did = (arguments.get("disclosure_id") or "").strip()
+    if not did:
+        return "record_payout_tx requires 'disclosure_id'."
+    tx_hash = (arguments.get("tx_hash") or "").strip()
+    if not tx_hash:
+        return "record_payout_tx requires 'tx_hash'."
+    try:
+        r = await _call_node_api(
+            "POST",
+            f"/admin/disclosure/{did}/record-payout-tx",
+            {"tx_hash": tx_hash},
+        )
+    except Exception as e:
+        return f"prsm_disclosure record_payout_tx failed: {e}"
+    if "disclosure_id" not in r:
+        detail = r.get("detail", "unknown error")
+        return f"record_payout_tx refused: {detail}"
+    return (
+        f"Audit trail closed for "
+        f"{r.get('disclosure_id')}\n"
+        f"  payout_tx_hash: {r.get('payout_tx_hash')}\n"
+        f"  status:         {r.get('status')}"
+    )
+
+
 async def handle_prsm_emergency_pause(
     arguments: Dict[str, Any],
 ) -> str:
@@ -10527,6 +10836,7 @@ TOOL_HANDLERS = {
     "prsm_verify_inference_privacy": handle_prsm_verify_inference_privacy,
     "prsm_emergency_pause": handle_prsm_emergency_pause,
     "prsm_insurance_fund": handle_prsm_insurance_fund,
+    "prsm_disclosure": handle_prsm_disclosure,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,
