@@ -27,6 +27,20 @@ from prsm.node.discovery import PeerInfo
 logger = logging.getLogger(__name__)
 
 
+def _resolve_stale_threshold() -> float:
+    """Sprint 323 — read PRSM_PEER_STALE_SECONDS env (default
+    600s). Fail-soft on garbage values: non-numeric or
+    non-positive → return default.
+    """
+    try:
+        val = float(os.getenv("PRSM_PEER_STALE_SECONDS", "600"))
+        if val <= 0:
+            return 600.0
+        return val
+    except (TypeError, ValueError):
+        return 600.0
+
+
 class _DeadBootstrapSentinel:
     """Sprint 321 — placeholder installed in `_bootstrap_client`
     when a reconnect attempt fails so the poll loop's
@@ -295,6 +309,42 @@ class Libp2pDiscovery:
         # _capability_index size, which monotonically grows.
         self._bootstrap_status["discovered_peer_count"] = hydrated
 
+    def _sweep_stale_peers(
+        self, threshold_seconds: float,
+    ) -> int:
+        """Sprint 323 — evict peers whose `last_seen` is older
+        than ``threshold_seconds``.
+
+        Bootstrap-sourced peers get last_seen bumped on every
+        successful peer_list poll; gossip-sourced peers get
+        theirs bumped on every capability_announce. So any peer
+        whose last_seen exceeds the threshold has been silent
+        across all channels and is effectively gone — typically
+        a hard crash with no peer_leave announcement.
+
+        Defense in depth against:
+          - Peer crashed hard (kernel panic / SIGKILL / network
+            unplug): server eventually emits peer_leave but we
+            may miss it if our bootstrap WebSocket was dropped
+            during the announcement window.
+          - Gossip-sourced peers that go silent (no peer_leave
+            path at all).
+
+        threshold_seconds=0 (or negative) evicts EVERY peer —
+        useful as a forced cache reset.
+
+        Returns: number of peers evicted (for logging /
+        observability).
+        """
+        cutoff = time.time() - threshold_seconds
+        stale_ids = [
+            pid for pid, peer in self._capability_index.items()
+            if peer.last_seen < cutoff
+        ]
+        for pid in stale_ids:
+            self._capability_index.pop(pid, None)
+        return len(stale_ids)
+
     def _consume_bootstrap_announcements(self, client: Any) -> None:
         """Sprint 320 — process buffered server-pushed announcements
         from the BootstrapClient (sprint 319 wired the buffer).
@@ -395,6 +445,20 @@ class Libp2pDiscovery:
                     # peers and peer_join eagerly hydrates new
                     # ones.
                     self._consume_bootstrap_announcements(client)
+                    # Sprint 323 — sweep stale entries for
+                    # crashed peers that never sent
+                    # peer_leave (kernel panic / SIGKILL /
+                    # network unplug). Threshold defaults to
+                    # 10 min via PRSM_PEER_STALE_SECONDS env.
+                    evicted = self._sweep_stale_peers(
+                        _resolve_stale_threshold(),
+                    )
+                    if evicted:
+                        logger.info(
+                            "Libp2pDiscovery: evicted %d stale "
+                            "peer(s) past staleness threshold",
+                            evicted,
+                        )
                 except Exception as exc:  # noqa: BLE001
                     # Sprint 321 — reconnect on a dropped
                     # WebSocket. If the client is still marked
