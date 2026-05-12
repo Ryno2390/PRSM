@@ -3469,6 +3469,33 @@ class PRSMNode:
                     exc,
                 )
                 self._creator_stake_client = None
+            # Sprint 291 — content fingerprint registry
+            # (Vision §14 item 3). First-creator-wins dedup
+            # for content_hash. Opt-in disk persistence via
+            # PRSM_FINGERPRINT_REGISTRY_DIR.
+            try:
+                from prsm.marketplace.content_fingerprint_registry import (  # noqa: E501
+                    ContentFingerprintRegistry,
+                )
+                self._content_fingerprint_registry = (
+                    ContentFingerprintRegistry.from_env()
+                )
+                logger.info(
+                    "ContentFingerprintRegistry wired "
+                    "(persist_dir=%s)",
+                    getattr(
+                        self._content_fingerprint_registry,
+                        "_persist_dir", None,
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ContentFingerprintRegistry "
+                    "construction failed: %s — fingerprint "
+                    "dedup will not be enforced.",
+                    exc,
+                )
+                self._content_fingerprint_registry = None
 
             semantic_index = SemanticIndexAdapter(
                 embedder=SentenceTransformerEmbedder(),

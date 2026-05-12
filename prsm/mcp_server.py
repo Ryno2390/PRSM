@@ -1716,6 +1716,45 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_content_fingerprint",
+        description=(
+            "Content fingerprint registry inspection "
+            "(Vision §14 item 3 cryptographic dedup). "
+            "Single tool with `action` selector: list | "
+            "lookup. First-creator-wins semantics — a "
+            "creator who re-uploads someone else's content "
+            "doesn't get to claim royalties; canonical "
+            "creator is whoever registered the SHA-256 "
+            "fingerprint first. Backed by "
+            "/marketplace/fingerprint(/{content_hash})."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "lookup"],
+                },
+                "content_hash": {
+                    "type": "string",
+                    "description": (
+                        "SHA-256 content hash for "
+                        "action=lookup."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1, "maximum": 10000,
+                    "description": (
+                        "Row cap for action=list "
+                        "(default 100)."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_creator_stake",
         description=(
             "Creator stake management (Vision §14 item 2). "
@@ -7209,6 +7248,109 @@ async def handle_prsm_waas_wallet(
     )
 
 
+_CONTENT_FINGERPRINT_ACTIONS = {"list", "lookup"}
+
+
+async def handle_prsm_content_fingerprint(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 291 — content fingerprint inspection (Vision
+    §14 item 3 cryptographic deduplication). action: list |
+    lookup. First-creator-wins dedup; duplicate attempts are
+    counted but don't reassign the canonical creator."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_CONTENT_FINGERPRINT_ACTIONS)})."
+        )
+    if action not in _CONTENT_FINGERPRINT_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_CONTENT_FINGERPRINT_ACTIONS)}; "
+            f"got {action!r}."
+        )
+
+    if action == "lookup":
+        content_hash = (
+            arguments.get("content_hash") or ""
+        ).strip()
+        if not content_hash:
+            return "lookup requires 'content_hash'."
+        try:
+            result = await _call_node_api(
+                "GET",
+                f"/marketplace/fingerprint/{content_hash}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_content_fingerprint failed: {e}\n"
+                f"Is your PRSM node running?"
+            )
+        if "content_hash" not in result:
+            detail = result.get("detail", "unknown error")
+            if "no fingerprint" in str(detail).lower():
+                return (
+                    f"Unknown fingerprint {content_hash!r} — "
+                    f"either no upload has registered this "
+                    f"content_hash yet, or the registry was "
+                    f"reset."
+                )
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Fingerprint registry not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"lookup refused: {detail}"
+        return "\n".join([
+            f"Content Fingerprint — {result['content_hash']}:",
+            f"  canonical_creator:       "
+            f"{result.get('canonical_creator', '?')}",
+            f"  first_seen_unix:         "
+            f"{result.get('first_seen_unix', 0)}",
+            f"  duplicate_attempt_count: "
+            f"{result.get('duplicate_attempt_count', 0)}",
+        ])
+
+    # action == "list"
+    limit = int(arguments.get("limit", 100))
+    path = f"/marketplace/fingerprint?limit={limit}"
+    try:
+        result = await _call_node_api("GET", path)
+    except Exception as e:
+        return (
+            f"prsm_content_fingerprint failed: {e}"
+        )
+    if "fingerprints" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Fingerprint registry not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"list refused: {detail}"
+    fps = result.get("fingerprints") or []
+    total = result.get("count", 0)
+    lines = [
+        f"Content Fingerprints — {len(fps)} of {total} "
+        f"(newest first):"
+    ]
+    if not fps:
+        lines.append("  (registry empty)")
+    for f in fps:
+        dup_count = f.get("duplicate_attempt_count", 0)
+        dup_marker = (
+            f" ⚠ {dup_count} dup attempts"
+            if dup_count > 0 else ""
+        )
+        lines.append(
+            f"  {f.get('content_hash', '?')[:24]}  "
+            f"creator={f.get('canonical_creator', '?')[:16]}"
+            f"{dup_marker}"
+        )
+    return "\n".join(lines)
+
+
 _CREATOR_STAKE_ACTIONS = {"balance", "stake", "slash"}
 
 
@@ -9767,6 +9909,7 @@ TOOL_HANDLERS = {
     "prsm_marketplace_reputation": handle_prsm_marketplace_reputation,
     "prsm_creator_reputation": handle_prsm_creator_reputation,
     "prsm_creator_stake": handle_prsm_creator_stake,
+    "prsm_content_fingerprint": handle_prsm_content_fingerprint,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

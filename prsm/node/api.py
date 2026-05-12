@@ -5496,6 +5496,41 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             )
 
+        # Sprint 291 — fingerprint dedup. Decorate response
+        # with canonical_creator + duplicate_of_creator so
+        # the caller sees whether they're the original or a
+        # duplicate-upload attempt. Bytes still get cached
+        # for serving; royalty routing to the canonical
+        # creator is enforced at the distribution layer.
+        duplicate_of_creator = None
+        canonical_creator = None
+        _reg = getattr(
+            node, "_content_fingerprint_registry", None,
+        )
+        if (
+            _reg is not None
+            and result.content_hash
+            and req.creator_eth_address
+        ):
+            try:
+                canonical_creator, is_new = _reg.register(
+                    content_hash=result.content_hash,
+                    creator_eth_address=req.creator_eth_address,
+                )
+                if (
+                    not is_new
+                    and canonical_creator
+                    != req.creator_eth_address
+                ):
+                    duplicate_of_creator = canonical_creator
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ContentFingerprintRegistry.register "
+                    "failed: %s (hash=%s)",
+                    exc,
+                    (result.content_hash or "?")[:16],
+                )
+
         return {
             "cid": result.cid,
             "filename": result.filename,
@@ -5504,6 +5539,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "creator_id": result.creator_id,
             "royalty_rate": result.royalty_rate,
             "parent_cids": result.parent_cids,
+            "duplicate_of_creator": duplicate_of_creator,
+            "canonical_creator": canonical_creator,
         }
 
     @app.post("/content/upload/shard")
@@ -7295,6 +7332,65 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 body.creator_id,
             ),
             "score": tracker.score_for(body.creator_id),
+        }
+
+    # ── Sprint 291 — fingerprint registry inspection ──────
+    @app.get(
+        "/marketplace/fingerprint/{content_hash}",
+        tags=["marketplace"],
+    )
+    async def get_fingerprint(
+        content_hash: str,
+    ) -> Dict[str, Any]:
+        reg = getattr(
+            node, "_content_fingerprint_registry", None,
+        )
+        if reg is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Content fingerprint registry not "
+                    "initialized."
+                ),
+            )
+        entry = reg.get_entry(content_hash)
+        if entry is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"no fingerprint for {content_hash!r}"
+                ),
+            )
+        return entry.to_dict()
+
+    @app.get(
+        "/marketplace/fingerprint",
+        tags=["marketplace"],
+    )
+    async def list_fingerprints(
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        if limit <= 0 or limit > 10000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 10000], got {limit}",
+            )
+        reg = getattr(
+            node, "_content_fingerprint_registry", None,
+        )
+        if reg is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Content fingerprint registry not "
+                    "initialized."
+                ),
+            )
+        entries = reg.recent(limit=limit)
+        return {
+            "fingerprints": [e.to_dict() for e in entries],
+            "count": reg.count(),
+            "limit": limit,
         }
 
     # ── Sprint 290 — creator stake operator surface ────────
