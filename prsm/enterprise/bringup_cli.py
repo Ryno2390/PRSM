@@ -53,6 +53,17 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_metrics_snapshot(
+    _args: argparse.Namespace,
+) -> int:
+    """Sprint 318d — print the current enterprise metrics
+    registry in Prometheus text format. One-shot debug
+    tool when ops doesn't have Prometheus configured yet."""
+    from prsm.enterprise.metrics import REGISTRY
+    sys.stdout.write(REGISTRY.to_prometheus_text())
+    return 0
+
+
 def _cmd_health(_args: argparse.Namespace) -> int:
     """Sprint 318c — runtime health check. Wraps
     `run_health_checks()` to print the summary + return
@@ -134,6 +145,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     sub.add_parser(
+        "metrics-snapshot",
+        help=(
+            "Print the current enterprise metrics "
+            "registry in Prometheus text format. "
+            "Useful for one-shot debug when ops "
+            "doesn't have a scrape configured yet."
+        ),
+    )
+
+    sub.add_parser(
         "health",
         help=(
             "Runtime health check: persistence dirs "
@@ -170,6 +191,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _cmd_status(args)
     if args.command == "generate":
         return _cmd_generate(args)
+    if args.command == "metrics-snapshot":
+        return _cmd_metrics_snapshot(args)
     if args.command == "health":
         return _cmd_health(args)
     if args.command == "demo":

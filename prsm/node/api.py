@@ -21,7 +21,7 @@ from typing import Annotated, Any, Dict, List, Optional
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Header, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, StringConstraints
 
 from prsm.node.api_hardening import (
@@ -7943,6 +7943,61 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
+
+    # ── Sprint 318d — enterprise metrics endpoint ────────
+    # Prometheus text exposition of the
+    # prsm.enterprise.metrics REGISTRY. Operators scrape
+    # for dashboards + alerts.
+
+    @app.get(
+        "/admin/enterprise/metrics",
+        response_class=Response,
+    )
+    async def enterprise_metrics() -> Response:
+        from prsm.enterprise.metrics import REGISTRY
+        # Update gauges that snapshot live state on read
+        # (if the orchestrators are wired into the node)
+        try:
+            from prsm.enterprise.metrics import (
+                FL_JOBS_PENDING,
+                PIPELINE_JOBS_PENDING,
+            )
+            fl_orch = getattr(
+                node,
+                "_federated_learning_orchestrator", None,
+            )
+            if fl_orch is not None:
+                from prsm.enterprise.federated_learning import (
+                    JobStatus,
+                )
+                FL_JOBS_PENDING.set(len(
+                    fl_orch.list_jobs(
+                        status=JobStatus.PROPOSED,
+                    ),
+                ))
+            pipeline_orch = getattr(
+                node,
+                "_pipeline_inference_orchestrator", None,
+            )
+            if pipeline_orch is not None:
+                from prsm.compute.inference.pipeline_orchestrator import (
+                    PipelineJobStatus,
+                )
+                PIPELINE_JOBS_PENDING.set(sum(
+                    1 for j in pipeline_orch.list_jobs()
+                    if j.status == PipelineJobStatus.PROPOSED
+                ))
+        except Exception:  # noqa: BLE001
+            # Snapshot is best-effort — counters from
+            # observed events are authoritative
+            pass
+        return Response(
+            content=REGISTRY.to_prometheus_text(),
+            media_type=(
+                "text/plain; version=0.0.4; "
+                "charset=utf-8"
+            ),
+        )
 
     # ── Sprint 316a — TP worker shard endpoint ───────────
     # Each TP worker node holds its own weight shard

@@ -293,7 +293,67 @@ full traceback.
 
 ---
 
-## 6. CLI reference
+## 6. Metrics + structured logging
+
+### Prometheus scrape
+
+The deployed image exposes
+`GET /admin/enterprise/metrics` in Prometheus text
+exposition format. Scrape with a standard Prometheus
+config:
+
+```yaml
+scrape_configs:
+  - job_name: 'prsm-enterprise'
+    metrics_path: /admin/enterprise/metrics
+    static_configs:
+      - targets: ['prsm-enterprise-demo:8000']
+```
+
+Exposed metrics (sprint 318d catalog):
+
+- `fl_jobs_proposed_total` — counter
+- `fl_rounds_aggregated_total` — counter
+- `fl_worker_updates_accepted_total` — counter
+- `fl_worker_updates_rejected_total` — counter (bad sig
+  / unregistered worker / wrong round / duplicate)
+- `pipeline_inference_jobs_proposed_total` — counter
+- `pipeline_inference_completed_total` — counter
+- `pipeline_inference_failed_total` — counter
+- `corp_capabilities_redeemed_total` — counter
+- `corp_capabilities_rejected_total` — counter
+- `content_uploads_encrypted_total` — counter
+- `incident_opened_total` — counter
+- `fl_jobs_pending` — gauge (live snapshot)
+- `pipeline_jobs_pending` — gauge (live snapshot)
+
+For one-shot debug without setting up Prometheus:
+
+```bash
+python -m prsm.enterprise.bringup_cli metrics-snapshot
+```
+
+### Structured JSON logging
+
+For production deploys piping logs to an aggregator
+(Loki / Datadog / ELK / OTEL), enable JSON logging at
+process startup:
+
+```python
+from prsm.enterprise.structured_logging import (
+    configure_json_logging,
+)
+configure_json_logging()
+```
+
+This installs a JSON formatter on the root logger that
+emits one parseable line per record with standard ops
+fields (timestamp, level, logger, msg) plus any `extra=`
+kwargs the calling code passed. Loggers calling
+`logger.info("event", extra={"job_id": "..."})` get the
+job_id as a top-level structured field.
+
+## 7. CLI reference
 
 | Subcommand              | Purpose                            |
 |-------------------------|------------------------------------|
@@ -303,6 +363,9 @@ full traceback.
 |                         | required vars missing/malformed.   |
 | `health`                | Run dynamic runtime checks; rc=1   |
 |                         | if any subsystem won't wire.       |
+| `metrics-snapshot`      | Print current metrics in           |
+|                         | Prometheus text format             |
+|                         | (one-shot debug).                  |
 | `demo`                  | Run the end-to-end §7 FL +         |
 |                         | pipeline inference demo;           |
 |                         | post-deploy proof-of-life.         |
@@ -314,7 +377,7 @@ directories under env-configured paths.
 
 ---
 
-## 7. Related sprints
+## 8. Related sprints
 
 The deployment stack was assembled in this order:
 
@@ -324,6 +387,9 @@ The deployment stack was assembled in this order:
 - **Sprint 318a** — Docker artifacts + live boot
   validation
 - **Sprint 318c** — health subcommand + this runbook
+- **Sprint 318d** — metrics registry + Prometheus
+  endpoint + structured JSON logging + metrics-snapshot
+  CLI
 
 See `prsm/enterprise/bringup.py` for the canonical env-var
 catalog; each spec carries the sprint of origin so you can
