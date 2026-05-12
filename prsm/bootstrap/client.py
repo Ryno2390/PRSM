@@ -92,6 +92,11 @@ class BootstrapClient:
         self._peers: List[BootstrapPeer] = []
         self._server_time: Optional[str] = None
         self._connect_time: Optional[float] = None
+        # Sprint 319 — server-pushed announcements (peer_join /
+        # peer_leave / system_notice / ...) get drained off the
+        # socket during typed request/response cycles. Buffered
+        # here for tests + future async-peer-update consumers.
+        self._observed_announcements: List[Dict[str, Any]] = []
 
     @property
     def is_connected(self) -> bool:
@@ -163,11 +168,13 @@ class BootstrapClient:
             await self._ws.send(json.dumps(register_msg))
             logger.debug("Sent register message for node %s", self.node_id)
 
-            # Wait for ack
-            raw = await asyncio.wait_for(
-                self._ws.recv(), timeout=self.connect_timeout
+            # Wait for ack — sprint 319 — must filter by `type`
+            # so a server pushing an announcement before the ack
+            # doesn't get mis-parsed as the ack itself.
+            data = await self._recv_typed(
+                {"register_ack", "error"},
+                timeout=self.connect_timeout,
             )
-            data = json.loads(raw)
 
             if data.get("type") == "register_ack":
                 self._registered = True
@@ -254,15 +261,28 @@ class BootstrapClient:
                 break
 
     async def get_peers(self) -> List[BootstrapPeer]:
-        """Request an updated peer list from the bootstrap server."""
+        """Request an updated peer list from the bootstrap server.
+
+        Sprint 319 — filter recv'd messages by `type == peer_list`
+        so server-pushed announcements (peer_join/peer_leave)
+        queued ahead of the response don't get mis-parsed as an
+        empty peer list. Pre-fix `data.get("peers", [])` on a
+        peer_join announcement silently returned [] and left the
+        real peer_list response queued, misaligning every
+        subsequent request/response.
+        """
         if not self.is_connected or not self._ws:
             raise ConnectionError("Not connected to bootstrap server")
 
         await self._ws.send(json.dumps({"type": "get_peers"}))
-        raw = await asyncio.wait_for(
-            self._ws.recv(), timeout=self.connect_timeout
+        data = await self._recv_typed(
+            {"peer_list", "error"},
+            timeout=self.connect_timeout,
         )
-        data = json.loads(raw)
+        if data.get("type") == "error":
+            raise ConnectionError(
+                f"Bootstrap get_peers rejected: {data.get('message')}"
+            )
 
         peers = []
         for p in data.get("peers", []):
@@ -280,6 +300,48 @@ class BootstrapClient:
             self.on_peers_discovered(peers)
 
         return peers
+
+    async def _recv_typed(
+        self,
+        expected_types: set,
+        timeout: float,
+        max_drain: int = 32,
+    ) -> Dict[str, Any]:
+        """Sprint 319 — recv until a message whose `type` field
+        matches one of ``expected_types`` arrives.
+
+        Drains any messages whose `type` is not in the expected
+        set into ``self._observed_announcements`` so they're not
+        lost (peer_join/peer_leave announcements are valuable for
+        future async-peer-update consumers).
+
+        Bounded by ``max_drain`` to fail loud on pathological
+        servers that never send the expected type — operators see
+        a clear error instead of a silent hang.
+
+        Raises:
+            ConnectionError: if ``max_drain`` messages drained
+                without a match.
+            asyncio.TimeoutError: if recv exceeds ``timeout``.
+        """
+        if self._ws is None:
+            raise ConnectionError("Not connected to bootstrap server")
+        for _ in range(max_drain):
+            raw = await asyncio.wait_for(
+                self._ws.recv(), timeout=timeout,
+            )
+            data = json.loads(raw)
+            if data.get("type") in expected_types:
+                return data
+            # Non-matching message — buffer (best-effort, capped)
+            # so tests + future consumers can see what arrived
+            self._observed_announcements.append(data)
+            if len(self._observed_announcements) > 256:
+                self._observed_announcements.pop(0)
+        raise ConnectionError(
+            f"Bootstrap server emitted {max_drain} messages "
+            f"without one of {sorted(expected_types)}; aborting"
+        )
 
     async def disconnect(self) -> None:
         """Cleanly disconnect from the bootstrap server."""
