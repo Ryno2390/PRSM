@@ -1597,6 +1597,48 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         out["status"] = "OK"
         return out
 
+    # ── Sprint 286 — fiat-surface health check ────────────
+    # Enumerates dangerous-combination env-var configs
+    # (e.g., KYC commissioned without webhook secret) so
+    # operators see safety issues before vendor traffic
+    # arrives. Read-only; reads current process env.
+
+    @app.get(
+        "/admin/fiat-surface/health", tags=["admin"],
+    )
+    async def get_fiat_surface_health() -> Dict[str, Any]:
+        from prsm.economy.web3.fiat_surface_health import (
+            check_fiat_surface_health, FindingSeverity,
+        )
+        findings = check_fiat_surface_health(env=os.environ)
+        error_count = sum(
+            1 for f in findings
+            if f.severity == FindingSeverity.ERROR
+        )
+        warn_count = sum(
+            1 for f in findings
+            if f.severity == FindingSeverity.WARN
+        )
+        info_count = sum(
+            1 for f in findings
+            if f.severity == FindingSeverity.INFO
+        )
+        if error_count > 0:
+            overall = "ERROR"
+        elif warn_count > 0:
+            overall = "WARN"
+        elif info_count > 0:
+            overall = "INFO"
+        else:
+            overall = "OK"
+        return {
+            "overall": overall,
+            "error_count": error_count,
+            "warn_count": warn_count,
+            "info_count": info_count,
+            "findings": [f.to_dict() for f in findings],
+        }
+
     # ── Sprint 285 — KYC-tier rolling-total enforcement ───
     # Per-tier USD/day limits. Defaults match FinCEN MSB +
     # vendor convention; tunable via env vars. Tier comes

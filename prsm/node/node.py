@@ -2327,6 +2327,41 @@ class PRSMNode:
             )
             self._kyc_webhook_replay_ring = None
 
+        # Sprint 286 — fiat-surface health check at startup.
+        # Loud-but-non-blocking: ERROR findings surface in the
+        # log so operators see misconfigs (e.g., KYC
+        # commissioned without webhook secret) before vendor
+        # traffic arrives. Does not refuse to start — operator
+        # may be mid-deploy. The /admin/fiat-surface/health
+        # endpoint + prsm_fiat_surface_health MCP tool give
+        # the same data on demand.
+        try:
+            import os as _os
+            from prsm.economy.web3.fiat_surface_health import (
+                check_fiat_surface_health, FindingSeverity,
+            )
+            _findings = check_fiat_surface_health(_os.environ)
+            for _f in _findings:
+                if _f.severity == FindingSeverity.ERROR:
+                    logger.error(
+                        "FIAT-SURFACE HEALTH ⚠ ERROR  "
+                        "%s — %s",
+                        _f.cause, _f.remediation,
+                    )
+                elif _f.severity == FindingSeverity.WARN:
+                    logger.warning(
+                        "FIAT-SURFACE HEALTH △ WARN  "
+                        "%s — %s",
+                        _f.cause, _f.remediation,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FiatSurfaceHealth check failed: %s — "
+                "/admin/fiat-surface/health will still run "
+                "if endpoint is hit.",
+                exc,
+            )
+
         # Sprint 249 — RoyaltyDispatchRing for the on-chain
         # content-royalty audit trail (sprint 248). Opt-in
         # filesystem persistence via PRSM_ROYALTY_DISPATCH_LOG_DIR.

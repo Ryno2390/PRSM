@@ -1437,6 +1437,22 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_fiat_surface_health",
+        description=(
+            "Operator safety check for the Phase 5 fiat "
+            "surface. Returns findings keyed by severity "
+            "(ERROR / WARN / INFO) for dangerous env-var "
+            "combinations — e.g., KYC commissioned without "
+            "PERSONA_WEBHOOK_SECRET (sprint-283 pass-through "
+            "lets any HTTP caller flip status to VERIFIED). "
+            "Each finding ships a remediation hint. "
+            "PRSM_FIAT_HEALTH_CHECK_BYPASS=1 demotes ERRORs "
+            "to INFO for dev/staging. Backed by GET "
+            "/admin/fiat-surface/health."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="prsm_fiat_compliance",
         description=(
             "Fiat compliance audit log query surface. Single "
@@ -6214,6 +6230,64 @@ async def handle_prsm_takedown_notices(
     )
 
 
+async def handle_prsm_fiat_surface_health(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 286 — operator inspection of fiat-surface
+    health findings. No actions — single read-only endpoint
+    hit. Renders ERROR/WARN findings with remediation hints
+    so operators see dangerous combos before vendor traffic
+    arrives."""
+    try:
+        result = await _call_node_api(
+            "GET", "/admin/fiat-surface/health",
+        )
+    except Exception as e:
+        return (
+            f"prsm_fiat_surface_health failed: {e}\n"
+            f"Is your PRSM node running? (prsm node start)"
+        )
+    if "overall" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"health check refused: {detail}"
+    overall = result.get("overall", "?")
+    error_count = result.get("error_count", 0)
+    warn_count = result.get("warn_count", 0)
+    info_count = result.get("info_count", 0)
+    lines = [
+        f"PRSM Fiat-Surface Health — overall={overall}",
+        f"  ERROR={error_count}  WARN={warn_count}  "
+        f"INFO={info_count}",
+    ]
+    findings = result.get("findings") or []
+    if not findings:
+        lines.append("  (no findings — surface is clean)")
+        return "\n".join(lines)
+    # Render in severity order: ERROR → WARN → INFO
+    severity_order = {"ERROR": 0, "WARN": 1, "INFO": 2}
+    findings_sorted = sorted(
+        findings,
+        key=lambda f: severity_order.get(
+            f.get("severity", "INFO"), 9,
+        ),
+    )
+    for f in findings_sorted:
+        sev = f.get("severity", "?")
+        cause = f.get("cause", "?")
+        remediation = f.get("remediation", "")
+        marker = (
+            "⚠ ERROR" if sev == "ERROR"
+            else "△ WARN" if sev == "WARN"
+            else "· INFO"
+        )
+        lines.append("")
+        lines.append(f"  {marker}  {cause}")
+        # Indent remediation text
+        for line in remediation.split("\n"):
+            lines.append(f"      {line}")
+    return "\n".join(lines)
+
+
 _FIAT_COMPLIANCE_ACTIONS = {"list", "summary", "lookup"}
 
 
@@ -9311,6 +9385,7 @@ TOOL_HANDLERS = {
     "prsm_pool_quote": handle_prsm_pool_quote,
     "prsm_kyc": handle_prsm_kyc,
     "prsm_fiat_compliance": handle_prsm_fiat_compliance,
+    "prsm_fiat_surface_health": handle_prsm_fiat_surface_health,
     "prsm_content_provider_stats": handle_prsm_content_provider_stats,
     "prsm_provider_reputations": handle_prsm_provider_reputations,
     "prsm_forge_quote": handle_prsm_forge_quote,
