@@ -1789,31 +1789,123 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     )
     async def post_kyc_webhook(
         vendor: str,
-        body: _KYCWebhookRequest,
+        request: Request,
     ) -> Dict[str, Any]:
-        """Vendor webhook callback. v1 routes every vendor's
-        webhook through the same handler — the configured
-        client + the {vendor} URL segment must agree (TODO:
-        signature verification per vendor in a follow-on
-        sprint)."""
+        """Vendor webhook callback with signature verification.
+
+        Sprint 283: reads raw body bytes so the HMAC signature
+        can be verified against the exact payload the vendor
+        signed. When a vendor-specific webhook secret env var
+        is set (PERSONA_WEBHOOK_SECRET / ONFIDO_WEBHOOK_TOKEN),
+        signature verification is mandatory; without it,
+        sprint-280 behavior is preserved (pass-through) so
+        operators still wiring secrets aren't broken.
+
+        PRSM_KYC_WEBHOOK_VERIFY_DISABLED=1 forces bypass for
+        dev/staging.
+        """
+        from prsm.economy.web3.kyc_webhook_verifier import (
+            KYCWebhookVerifier,
+        )
+
         kyc = getattr(node, "_kyc_client", None)
         if kyc is None:
             raise HTTPException(
                 status_code=503,
                 detail="KYC client not initialized.",
             )
+
+        raw_body = await request.body()
+
+        # Resolve vendor-specific webhook secret. Sprint 283
+        # ships env vars for Persona + Onfido; Plaid deferred.
+        _vendor_lower = (vendor or "").strip().lower()
+        secret_env = {
+            "persona": "PERSONA_WEBHOOK_SECRET",
+            "onfido": "ONFIDO_WEBHOOK_TOKEN",
+            "plaid": "PLAID_WEBHOOK_SECRET",
+        }.get(_vendor_lower)
+        secret = (
+            os.environ.get(secret_env) if secret_env else None
+        )
+
+        disable_raw = (
+            os.environ.get(
+                "PRSM_KYC_WEBHOOK_VERIFY_DISABLED", "",
+            ).strip().lower()
+        )
+        verify_disabled = disable_raw in {"1", "true", "yes"}
+
+        # Enforce verification iff a secret is configured AND
+        # the disable flag isn't set. Operators who haven't yet
+        # wired secrets keep sprint-280 pass-through behavior.
+        if secret and not verify_disabled:
+            ok, reason = KYCWebhookVerifier.verify(
+                vendor=_vendor_lower,
+                body=raw_body,
+                headers=dict(request.headers),
+                secret=secret,
+            )
+            if not ok:
+                logger.warning(
+                    "KYC webhook signature rejected "
+                    "(vendor=%s, reason=%s, client=%s)",
+                    _vendor_lower, reason,
+                    request.client.host if request.client
+                    else "?",
+                )
+                raise HTTPException(
+                    status_code=401,
+                    detail=(
+                        "Webhook signature verification "
+                        "failed."
+                    ),
+                )
+
+        # Parse body AFTER signature verification (defense in
+        # depth — never trust unsigned input).
+        try:
+            payload_json = (
+                json.loads(raw_body) if raw_body else {}
+            )
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422,
+                detail="invalid JSON body",
+            )
+        if not isinstance(payload_json, dict):
+            raise HTTPException(
+                status_code=422,
+                detail="webhook body must be a JSON object",
+            )
+        user_id_raw = payload_json.get("user_id")
+        status_raw = payload_json.get("status")
+        vendor_ref_raw = payload_json.get("vendor_ref")
+        if not isinstance(user_id_raw, str) or not user_id_raw:
+            raise HTTPException(
+                status_code=422,
+                detail="missing required field: user_id",
+            )
+        if not isinstance(status_raw, str) or not status_raw:
+            raise HTTPException(
+                status_code=422,
+                detail="missing required field: status",
+            )
+
         try:
             updated = kyc.update_status(
-                user_id=body.user_id,
-                new_status=body.status,
-                vendor_ref_update=body.vendor_ref,
+                user_id=user_id_raw,
+                new_status=status_raw,
+                vendor_ref_update=vendor_ref_raw,
             )
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         if updated is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"no KYC record for user_id={body.user_id!r}",
+                detail=(
+                    f"no KYC record for user_id={user_id_raw!r}"
+                ),
             )
         return updated.to_dict()
 
