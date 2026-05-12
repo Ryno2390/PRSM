@@ -147,9 +147,16 @@ class InferenceReceipt:
     # False preserves byte-equivalence with pre-3.x.8 receipts so
     # existing callers + verifiers keep working unchanged.
     streamed_output: bool = False
+    # Sprint 297 — §7 capstone fields. Optional + default None
+    # to preserve byte-equivalence with pre-sprint-297 signed
+    # receipts (conditional encoding in signing_payload). When
+    # populated, they're cryptographically bound: tampering
+    # either field flips the signing bytes → signature fails.
+    activation_noise_trace: Optional[Any] = None
+    topology_assignment: Optional[Any] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "job_id": self.job_id,
             "request_id": self.request_id,
             "model_id": self.model_id,
@@ -165,6 +172,17 @@ class InferenceReceipt:
             "settler_node_id": self.settler_node_id,
             "streamed_output": self.streamed_output,
         }
+        # Sprint 297 — only include new fields when populated
+        # so pre-sprint-297 to_dict output is byte-identical.
+        if self.activation_noise_trace is not None:
+            d["activation_noise_trace"] = (
+                self.activation_noise_trace.to_dict()
+            )
+        if self.topology_assignment is not None:
+            d["topology_assignment"] = (
+                self.topology_assignment.to_dict()
+            )
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "InferenceReceipt":
@@ -198,6 +216,35 @@ class InferenceReceipt:
             raise TypeError(
                 f"streamed_output must be bool, got "
                 f"{type(d['streamed_output']).__name__}"
+            )
+        # Sprint 297 — parse the new Optional fields into
+        # their dataclass types. Lazy import to keep
+        # models.py free of activation_dp / topology_rotation
+        # dependencies when callers don't use those features.
+        if d.get("activation_noise_trace") is not None and not isinstance(
+            d["activation_noise_trace"], dict,
+        ) is False:
+            # Already a dict — parse it. If it's already an
+            # ActivationNoiseTrace pass through.
+            if isinstance(d["activation_noise_trace"], dict):
+                from prsm.compute.inference.activation_dp import (
+                    ActivationNoiseTrace,
+                )
+                d["activation_noise_trace"] = (
+                    ActivationNoiseTrace.from_dict(
+                        d["activation_noise_trace"],
+                    )
+                )
+        if d.get("topology_assignment") is not None and isinstance(
+            d["topology_assignment"], dict,
+        ):
+            from prsm.compute.inference.topology_rotation import (
+                TopologyAssignment,
+            )
+            d["topology_assignment"] = (
+                TopologyAssignment.from_dict(
+                    d["topology_assignment"],
+                )
             )
         accepted = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in d.items() if k in accepted})
@@ -234,6 +281,29 @@ class InferenceReceipt:
         ]
         if self.streamed_output:
             parts.append("streamed_output:true")
+        # Sprint 297 — conditional append for new fields.
+        # Encoding uses a canonical hash of the field's
+        # serialization so byte-equivalence is preserved
+        # for pre-sprint-297 receipts (field absent →
+        # nothing appended → bytes match exactly).
+        if self.activation_noise_trace is not None:
+            import hashlib as _h
+            import json as _j
+            trace_canon = _j.dumps(
+                self.activation_noise_trace.to_dict(),
+                sort_keys=True,
+            )
+            trace_hash = _h.sha256(
+                trace_canon.encode("utf-8"),
+            ).hexdigest()
+            parts.append(
+                f"activation_noise_trace:{trace_hash}"
+            )
+        if self.topology_assignment is not None:
+            parts.append(
+                f"topology_assignment:"
+                f"{self.topology_assignment.stable_hash()}"
+            )
         return "\n".join(parts).encode("utf-8")
 
 

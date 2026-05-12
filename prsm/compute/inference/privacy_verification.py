@@ -95,6 +95,15 @@ class PrivacyVerification:
         default_factory=dict,
     )
     attestation_vendor_verified: bool = False
+    # Sprint 297 — §7 capstone integrity fields. True iff
+    # the receipt carried a structurally + semantically valid
+    # ActivationNoiseTrace / TopologyAssignment. Absent
+    # field → True by default (nothing to check); strict
+    # callers pass require_* flags to flip ok=False when the
+    # field is required but missing/invalid.
+    activation_noise_trace_valid: bool = True
+    topology_structurally_valid: bool = True
+    topology_distinct_from_history: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -115,6 +124,15 @@ class PrivacyVerification:
             ),
             "attestation_vendor_verified": (
                 self.attestation_vendor_verified
+            ),
+            "activation_noise_trace_valid": (
+                self.activation_noise_trace_valid
+            ),
+            "topology_structurally_valid": (
+                self.topology_structurally_valid
+            ),
+            "topology_distinct_from_history": (
+                self.topology_distinct_from_history
             ),
         }
 
@@ -148,8 +166,12 @@ def verify_receipt_privacy_claim(
     *,
     require_hardware_attestation: bool = False,
     require_dp_noise: bool = False,
+    require_activation_dp_trace: bool = False,
+    require_topology_rotation: bool = False,
     identity: Any = None,
     public_key_b64: Optional[str] = None,
+    topology_history: Any = None,
+    expected_anti_repeat_window: int = 3,
 ) -> PrivacyVerification:
     """Run all privacy-claim checks against a receipt.
 
@@ -311,12 +333,123 @@ def verify_receipt_privacy_claim(
     except Exception:  # noqa: BLE001
         multi_stage_present = False
 
+    # ── Sprint 297: activation_noise_trace integrity ────
+    activation_noise_trace_valid = True  # default-true when absent
+    trace = getattr(
+        receipt, "activation_noise_trace", None,
+    )
+    tier_enum: Any = receipt.privacy_tier
+    if not hasattr(tier_enum, "value"):
+        # Coerce string back to enum for the verifier
+        try:
+            from prsm.compute.tee.models import (
+                PrivacyLevel as _PL,
+            )
+            tier_enum = _PL(str(tier_enum))
+        except Exception:  # noqa: BLE001
+            tier_enum = None
+    if trace is not None:
+        try:
+            from prsm.compute.inference.activation_dp import (
+                verify_activation_noise_trace,
+            )
+            if tier_enum is None:
+                trace_ok, trace_reason = (
+                    False, "could not resolve tier enum"
+                )
+            else:
+                trace_ok, trace_reason = (
+                    verify_activation_noise_trace(
+                        trace, expected_tier=tier_enum,
+                    )
+                )
+            activation_noise_trace_valid = trace_ok
+            if not trace_ok:
+                reasons.append(
+                    f"activation_noise_trace invalid: "
+                    f"{trace_reason}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            activation_noise_trace_valid = False
+            reasons.append(
+                f"activation_noise_trace check raised: "
+                f"{exc}"
+            )
+    elif require_activation_dp_trace:
+        activation_noise_trace_valid = False
+        reasons.append(
+            "activation_noise_trace missing on receipt "
+            "(require_activation_dp_trace=True)"
+        )
+
+    # ── Sprint 297: topology_assignment integrity ───────
+    topology_structurally_valid = True  # default-true when absent
+    topology_distinct_from_history = True
+    topo = getattr(receipt, "topology_assignment", None)
+    if topo is not None:
+        try:
+            from prsm.compute.inference.topology_rotation import (
+                verify_topology_sequence,
+            )
+            # Structural check: a single-element sequence,
+            # zero rotation window. Catches dup nodes +
+            # missing positions.
+            struct_ok, struct_reason = (
+                verify_topology_sequence(
+                    [topo],
+                    expected_anti_repeat_window=0,
+                )
+            )
+            topology_structurally_valid = struct_ok
+            if not struct_ok:
+                reasons.append(
+                    f"topology structurally invalid: "
+                    f"{struct_reason}"
+                )
+            # History distinctness check (if history supplied)
+            if topology_history is not None:
+                try:
+                    in_history = topology_history.contains(
+                        topo,
+                    )
+                except Exception:  # noqa: BLE001
+                    in_history = False
+                topology_distinct_from_history = (
+                    not in_history
+                )
+                if in_history:
+                    reasons.append(
+                        "topology repeats an entry in "
+                        "supplied history (rotation violated)"
+                    )
+        except Exception as exc:  # noqa: BLE001
+            topology_structurally_valid = False
+            reasons.append(
+                f"topology check raised: {exc}"
+            )
+    elif require_topology_rotation:
+        topology_structurally_valid = False
+        reasons.append(
+            "topology_assignment missing on receipt "
+            "(require_topology_rotation=True)"
+        )
+
     # ── Final ok ─────────────────────────────────────────
     # ok = signature_valid AND (no failed required checks)
     failed_required = False
     if require_hardware_attestation and not hardware_attested:
         failed_required = True
     if require_dp_noise and not dp_noise_applied:
+        failed_required = True
+    if (
+        require_activation_dp_trace
+        and not activation_noise_trace_valid
+    ):
+        failed_required = True
+    if require_topology_rotation and (
+        not topology_structurally_valid
+        or not topology_distinct_from_history
+    ):
         failed_required = True
     ok = signature_valid and not failed_required
 
@@ -336,5 +469,14 @@ def verify_receipt_privacy_claim(
         attestation_vendor_data=attestation_vendor_data,
         attestation_vendor_verified=(
             attestation_vendor_verified
+        ),
+        activation_noise_trace_valid=(
+            activation_noise_trace_valid
+        ),
+        topology_structurally_valid=(
+            topology_structurally_valid
+        ),
+        topology_distinct_from_history=(
+            topology_distinct_from_history
         ),
     )
