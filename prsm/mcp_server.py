@@ -12458,7 +12458,20 @@ async def handle_prsm_agent_spending(
 
 
 async def handle_prsm_peers(arguments: Dict[str, Any]) -> str:
-    """Sprint 213 — render GET /peers connected-peer list."""
+    """Sprint 213 / Sprint 326 — render /peers connected + known
+    peer lists. Pre-sprint-326 the handler only rendered the
+    `connected` list (transport-layer outbound/inbound peers)
+    and silently dropped the `known` list (bootstrap-discovered
+    peers with capabilities). On canonical wss:// bootstrap-wired
+    nodes the connected list is typically empty (libp2p direct
+    dialing isn't wired to the bootstrap server), so operators
+    saw "No peers connected" and missed the actual discovered
+    peer set.
+
+    Sprint 326 renders both lists. Known peers show
+    capabilities — pairs with sprint 322's threading of caps
+    from bootstrap into PeerInfo.
+    """
     try:
         result = await _call_node_api("GET", "/peers")
     except Exception as e:
@@ -12466,22 +12479,47 @@ async def handle_prsm_peers(arguments: Dict[str, Any]) -> str:
             f"prsm_peers failed: {e}\n"
             f"Is your PRSM node running? (prsm node start)"
         )
-    peers = result.get("connected") or []
-    count = result.get("connected_count", len(peers))
-    if not peers:
+    connected = result.get("connected") or []
+    connected_count = result.get("connected_count", len(connected))
+    known = result.get("known") or []
+    known_count = result.get("known_count", len(known))
+
+    if not connected and not known:
         return (
-            f"No peers connected (count={count}). If degraded, check "
+            f"No peers (connected={connected_count}, "
+            f"known={known_count}). If degraded, check "
             f"PRSM_BOOTSTRAP_ENDPOINT + /info network."
         )
-    lines = [f"PRSM Connected Peers (count={count}):"]
-    for p in peers:
-        direction = "outbound" if p.get("outbound") else "inbound "
-        peer_id = (p.get("peer_id") or "?")[:14]
-        addr = (p.get("address") or "?")[:60]
-        name = p.get("display_name") or ""
+
+    lines: List[str] = []
+    if connected:
         lines.append(
-            f"  [{direction}] {peer_id:<14}  {addr}  {name}"
+            f"PRSM Connected Peers (count={connected_count}):"
         )
+        for p in connected:
+            direction = (
+                "outbound" if p.get("outbound") else "inbound "
+            )
+            peer_id = (p.get("peer_id") or "?")[:14]
+            addr = (p.get("address") or "?")[:60]
+            name = p.get("display_name") or ""
+            lines.append(
+                f"  [{direction}] {peer_id:<14}  {addr}  {name}"
+            )
+    if known:
+        if lines:
+            lines.append("")
+        lines.append(
+            f"PRSM Known Peers (count={known_count}):"
+        )
+        for p in known:
+            pid = (p.get("node_id") or "?")[:20]
+            addr = (p.get("address") or "?")[:30]
+            caps = p.get("capabilities") or []
+            caps_str = ", ".join(caps) if caps else "—"
+            lines.append(
+                f"  {pid:<20}  {addr:<30}  caps=[{caps_str}]"
+            )
     return "\n".join(lines)
 
 

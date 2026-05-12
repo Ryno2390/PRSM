@@ -751,11 +751,19 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         known = []
         if node.discovery:
             for info in node.discovery.get_known_peers():
+                # Sprint 326 — surface capabilities so operators
+                # find compute / gpu / storage peers via /peers
+                # without having to hit /bootstrap/status. Pairs
+                # with sprint 322's threading of caps from
+                # bootstrap-server peer_list into PeerInfo.
                 known.append({
                     "node_id": info.node_id,
                     "address": info.address,
                     "display_name": info.display_name,
                     "last_seen": info.last_seen,
+                    "capabilities": list(
+                        getattr(info, "capabilities", []) or []
+                    ),
                 })
 
         # Truth count from the libp2p host (matches /status). The
