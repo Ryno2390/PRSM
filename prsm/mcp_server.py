@@ -1716,6 +1716,61 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_insurance_fund",
+        description=(
+            "Vision §14 mitigation item 2: Foundation "
+            "reserves 5% of treasury as a dedicated "
+            "insurance fund for exploit recovery. Single "
+            "tool with `action` selector: status | "
+            "compose_recovery. Status returns reserve ratio "
+            "(actual vs target), fund + treasury balances, "
+            "target_met flag — public, on-chain "
+            "verification per the §14 promise. "
+            "compose_recovery returns a Safe-uploadable "
+            "ERC-20 transfer payload that moves insurance "
+            "funds to a recovery wallet during post-exploit "
+            "response. Composer-only — Foundation Safe "
+            "multisig gates execution. Backed by "
+            "/admin/insurance-fund/*."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "status", "compose_recovery",
+                    ],
+                },
+                "recipient": {
+                    "type": "string",
+                    "description": (
+                        "0x-prefixed 40-hex Ethereum "
+                        "recovery wallet address (required "
+                        "for compose_recovery)."
+                    ),
+                },
+                "amount_wei": {
+                    "type": "integer",
+                    "description": (
+                        "Recovery amount in FTNS wei "
+                        "(required for compose_recovery; "
+                        "must be > 0)."
+                    ),
+                },
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "Short statement of recovery "
+                        "rationale for audit trail (required "
+                        "for compose_recovery)."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_emergency_pause",
         description=(
             "Vision §14 smart-contract exploit response. "
@@ -7352,6 +7407,173 @@ async def handle_prsm_waas_wallet(
     )
 
 
+_INSURANCE_FUND_ACTIONS = {
+    "status", "compose_recovery",
+}
+
+
+async def handle_prsm_insurance_fund(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 299 — insurance fund tracker (Vision §14
+    mitigation item 2).
+
+    action selector:
+      status            — bulk reserve ratio + balances
+      compose_recovery  — Safe-uploadable ERC-20 transfer
+                          payload for exploit-recovery
+                          disbursement (composer-only;
+                          Foundation Safe multisig gates
+                          execution)
+    """
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_INSURANCE_FUND_ACTIONS)})."
+        )
+    if action not in _INSURANCE_FUND_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_INSURANCE_FUND_ACTIONS)}; "
+            f"got {action!r}."
+        )
+
+    if action == "status":
+        try:
+            result = await _call_node_api(
+                "GET", "/admin/insurance-fund/status",
+            )
+        except Exception as e:
+            return (
+                f"prsm_insurance_fund failed: {e}\n"
+                f"Is your PRSM node running?"
+            )
+        if "target_bps" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Insurance fund tracker not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"status refused: {detail}"
+        if not result.get("commissioned"):
+            return (
+                "PRSM Insurance Fund — not configured\n"
+                "  Set PRSM_INSURANCE_FUND_ADDRESS to a "
+                "designated insurance-fund wallet to enable "
+                "monitoring per Vision §14 mitigation item 2."
+            )
+        ratio_bps = result.get("reserve_ratio_bps")
+        target_bps = result.get("target_bps", 500)
+        target_met = result.get("target_met", False)
+        marker = "✅ at/above target" if target_met else "⚠ BELOW target"
+        ratio_pct = (
+            f"{ratio_bps / 100:.2f}%"
+            if ratio_bps is not None else "unknown"
+        )
+        target_pct = f"{target_bps / 100:.2f}%"
+        # Render FTNS amounts as whole tokens (wei / 1e18)
+        def _fmt_wei(w):
+            if w is None:
+                return "unknown"
+            return f"{w / (10 ** 18):,.2f} FTNS"
+        lines = [
+            f"PRSM Insurance Fund — {marker}",
+            "",
+            f"  Reserve ratio:   {ratio_pct}  "
+            f"(target: {target_pct})",
+            f"  Fund balance:    "
+            f"{_fmt_wei(result.get('fund_balance_wei'))}",
+            f"  Treasury total:  "
+            f"{_fmt_wei(result.get('treasury_balance_wei'))}",
+            f"  Fund address:    "
+            f"{result.get('fund_address', '?')}",
+            f"  Treasury addr:   "
+            f"{result.get('treasury_address', '?')}",
+        ]
+        if result.get("error"):
+            lines.append(f"  ⚠ RPC error: {result['error']}")
+        if not target_met and ratio_bps is not None:
+            shortfall_bps = max(0, target_bps - ratio_bps)
+            lines.append(
+                f"  Shortfall:       "
+                f"{shortfall_bps / 100:.2f}% below target — "
+                f"top up to restore §14 promise."
+            )
+        return "\n".join(lines)
+
+    # compose_recovery
+    recipient = (arguments.get("recipient") or "").strip()
+    if not recipient:
+        return "compose_recovery requires 'recipient'."
+    amount_wei = arguments.get("amount_wei")
+    if amount_wei is None:
+        return "compose_recovery requires 'amount_wei'."
+    try:
+        amount_int = int(amount_wei)
+    except (ValueError, TypeError):
+        return (
+            f"amount_wei must be an integer, "
+            f"got {amount_wei!r}."
+        )
+    if amount_int <= 0:
+        return "amount_wei must be > 0."
+    reason = (arguments.get("reason") or "").strip()
+    if not reason:
+        return (
+            "compose_recovery requires 'reason' "
+            "(short statement of recovery rationale for "
+            "audit trail)."
+        )
+    try:
+        result = await _call_node_api(
+            "POST", "/admin/insurance-fund/compose-recovery",
+            {
+                "recipient": recipient,
+                "amount_wei": amount_int,
+                "reason": reason,
+            },
+        )
+    except Exception as e:
+        return f"prsm_insurance_fund failed: {e}"
+    if "data" not in result:
+        detail = result.get("detail", "unknown error")
+        if "not initialized" in str(detail).lower():
+            return (
+                f"Insurance fund tracker not wired.\n"
+                f"  Detail: {detail}"
+            )
+        return f"compose refused: {detail}"
+
+    explorer = result.get("explorer_url") or "(no explorer)"
+    amount_ftns = (
+        f"{int(result.get('amount_wei', '0')) / (10 ** 18):,.2f}"
+    )
+    lines = [
+        "⚠ INSURANCE FUND RECOVERY TRANSFER COMPOSED — "
+        "Foundation Safe upload required ⚠",
+        "",
+        f"  WARNING: {result.get('warning', '')}",
+        "",
+        "  Transaction payload (paste into Safe UI):",
+        f"    to:        {result.get('to', '?')}",
+        f"    data:      {result.get('data', '?')}",
+        f"    value:     {result.get('value', '0')}",
+        f"    chain_id:  {result.get('chain_id', '?')}",
+        "",
+        f"  Recipient:   {result.get('recipient', '?')}",
+        f"  Amount:      {amount_ftns} FTNS",
+        f"  From fund:   {result.get('from_fund', '?')}",
+        f"  Reason:      {result.get('reason', '?')}",
+        f"  Verify on:   {explorer}",
+        "",
+        "  Instructions:",
+        f"    {result.get('instructions', '')}",
+    ]
+    return "\n".join(lines)
+
+
 _EMERGENCY_PAUSE_ACTIONS = {
     "status", "compose_pause", "compose_unpause",
 }
@@ -10304,6 +10526,7 @@ TOOL_HANDLERS = {
     "prsm_content_fingerprint": handle_prsm_content_fingerprint,
     "prsm_verify_inference_privacy": handle_prsm_verify_inference_privacy,
     "prsm_emergency_pause": handle_prsm_emergency_pause,
+    "prsm_insurance_fund": handle_prsm_insurance_fund,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

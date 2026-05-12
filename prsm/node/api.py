@@ -7195,6 +7195,60 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return entry.to_dict()
 
+    # ── Sprint 299 — insurance fund tracker + recovery ────
+    # Vision §14 mitigation item 2: 5% treasury reserve for
+    # exploit recovery; public on-chain verification.
+    # Recovery transfer composer-only — Safe-uploaded.
+
+    class _InsuranceRecoveryRequest(BaseModel):
+        recipient: str
+        amount_wei: int
+        reason: str
+
+    @app.get(
+        "/admin/insurance-fund/status", tags=["admin"],
+    )
+    async def get_insurance_fund_status() -> Dict[str, Any]:
+        tracker = getattr(
+            node, "_insurance_fund_tracker", None,
+        )
+        if tracker is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Insurance fund tracker not initialized."
+                ),
+            )
+        status = tracker.status()
+        return status.to_dict()
+
+    @app.post(
+        "/admin/insurance-fund/compose-recovery",
+        tags=["admin"],
+    )
+    async def compose_insurance_recovery(
+        body: _InsuranceRecoveryRequest,
+    ) -> Dict[str, Any]:
+        tracker = getattr(
+            node, "_insurance_fund_tracker", None,
+        )
+        if tracker is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Insurance fund tracker not initialized."
+                ),
+            )
+        try:
+            tx = tracker.compose_recovery_transfer_tx(
+                recipient=body.recipient,
+                amount_wei=body.amount_wei,
+                reason=body.reason,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return tx
+
     # ── Sprint 298 — emergency pause composer surface ─────
     # Vision §14 smart-contract exploit-response engineering.
     # PRSM never executes pause directly — Foundation Safe

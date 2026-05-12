@@ -2327,6 +2327,33 @@ class PRSMNode:
             )
             self._kyc_webhook_replay_ring = None
 
+        # Sprint 299 — insurance fund tracker (Vision §14
+        # mitigation item 2). Public read surface for the
+        # "5% treasury reserve for exploit recovery" promise.
+        # Recovery transfer composer-only — Foundation Safe
+        # 2-of-3 multisig gates execution.
+        try:
+            from prsm.economy.web3.insurance_fund_tracker import (
+                InsuranceFundTracker,
+            )
+            self._insurance_fund_tracker = (
+                InsuranceFundTracker.from_env()
+            )
+            logger.info(
+                "InsuranceFundTracker wired "
+                "(fund_addr=%s, target_bps=%d)",
+                self._insurance_fund_tracker.fund_address,
+                self._insurance_fund_tracker.target_bps,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "InsuranceFundTracker construction failed: "
+                "%s — /admin/insurance-fund/* will return "
+                "503.",
+                exc,
+            )
+            self._insurance_fund_tracker = None
+
         # Sprint 298 — emergency pause composer (Vision §14
         # smart-contract exploit response). Reads pausable-
         # contract addresses from prsm.config.networks per
