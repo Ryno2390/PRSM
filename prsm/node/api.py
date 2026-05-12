@@ -1048,6 +1048,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 else:
                     kyc_status = "VERIFIED"
 
+        # Sprint 285 — tier-limit check. Surface limit fields
+        # in the artifact (neutral when no user_id / unverified).
+        tier_block = _tier_check(
+            user_id=destination_user_id,
+            requested_usd=float(body.usd_amount),
+            kyc_status=kyc_status,
+        )
+
         # Sprint 282 — record to fiat compliance audit ring.
         # Best-effort; failures don't break the primary
         # surface.
@@ -1074,6 +1082,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "kyc_required": kyc_required,
             "kyc_status": kyc_status,
             "kyc_session_url": kyc_session_url,
+            **tier_block,
             "quote": {
                 "usd_in": body.usd_amount,
                 "usdc_acquired": body.usd_amount,
@@ -1586,6 +1595,75 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             }
         out = quote.to_dict()
         out["status"] = "OK"
+        return out
+
+    # ── Sprint 285 — KYC-tier rolling-total enforcement ───
+    # Per-tier USD/day limits. Defaults match FinCEN MSB +
+    # vendor convention; tunable via env vars. Tier comes
+    # from KYC record level (basic/enhanced); rolling total
+    # comes from the sprint-282 FiatComplianceRing.
+
+    _DEFAULT_TIER_LIMIT_USD = {
+        "basic": 1000.0,
+        "enhanced": 10000.0,
+    }
+
+    def _tier_limit_for_level(level: str) -> float:
+        env_var = f"PRSM_KYC_TIER_LIMIT_{level.upper()}_USD"
+        raw = os.environ.get(env_var)
+        if raw:
+            try:
+                v = float(raw)
+                if v > 0:
+                    return v
+            except (ValueError, TypeError):
+                pass
+        return _DEFAULT_TIER_LIMIT_USD.get(level, 1000.0)
+
+    def _tier_check(
+        user_id: Optional[str],
+        requested_usd: float,
+        kyc_status: Optional[str],
+    ) -> Dict[str, Any]:
+        """Compute tier_level, tier_limit_usd, remaining, and
+        exceeded flag for the requested USD amount. Returns a
+        neutral block when no user_id, no KYC client, or KYC
+        not VERIFIED — those cases are gated elsewhere."""
+        out = {
+            "tier_level": None,
+            "tier_limit_usd": 0.0,
+            "tier_limit_remaining_usd": 0.0,
+            "tier_limit_exceeded": False,
+        }
+        if not user_id:
+            return out
+        kyc = getattr(node, "_kyc_client", None)
+        if kyc is None:
+            return out
+        rec = kyc.get_status(user_id)
+        if rec is None or rec.status != "VERIFIED":
+            return out
+        level = rec.level
+        limit_usd = _tier_limit_for_level(level)
+        ring = getattr(node, "_fiat_compliance_ring", None)
+        rolling = 0.0
+        if ring is not None:
+            try:
+                rolling = float(
+                    ring.total_usd_for_user(user_id),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "tier_check: total_usd_for_user raised: %s",
+                    exc,
+                )
+                rolling = 0.0
+        remaining = max(0.0, limit_usd - rolling)
+        exceeded = (rolling + float(requested_usd)) > limit_usd
+        out["tier_level"] = level
+        out["tier_limit_usd"] = limit_usd
+        out["tier_limit_remaining_usd"] = remaining
+        out["tier_limit_exceeded"] = exceeded
         return out
 
     # ── Sprint 282 — Fiat compliance audit ring ───────────
@@ -2254,6 +2332,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 else:
                     offramp_kyc_status = "VERIFIED"
 
+        # Sprint 285 — tier-limit check (symmetric with
+        # onramp side; gates on source_user_id).
+        offramp_tier_block = _tier_check(
+            user_id=body.source_user_id,
+            requested_usd=float(body.usd_amount),
+            kyc_status=offramp_kyc_status,
+        )
+
         # Sprint 282 — record to fiat compliance audit ring.
         _record_fiat_compliance(
             kind="offramp_quote",
@@ -2273,6 +2359,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "requested_usd": body.usd_amount,
             "source_address": target,
             "source_user_id": body.source_user_id,
+            **offramp_tier_block,
             "source_balance_ftns": balance_ftns,
             "source_balance_usd": balance_usd,
             # Aggregate-source mirror (additive — clients reading

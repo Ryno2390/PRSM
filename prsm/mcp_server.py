@@ -9046,6 +9046,25 @@ async def handle_coinbase_onramp_initiate(
                 "    Start a session with "
                 "prsm_kyc?action=initiate"
             )
+    # Sprint 285 — tier-limit prerequisite block.
+    if result.get("tier_limit_exceeded"):
+        tier_level = result.get("tier_level", "?")
+        tier_limit = result.get("tier_limit_usd", 0.0)
+        tier_remaining = result.get(
+            "tier_limit_remaining_usd", 0.0,
+        )
+        lines += [
+            "",
+            f"  Prerequisite: Tier limit exceeded "
+            f"(tier={tier_level}).",
+            f"    Tier daily cap:    ${tier_limit:,.2f}",
+            f"    Remaining today:   ${tier_remaining:,.2f}",
+        ]
+        if tier_level == "basic":
+            lines.append(
+                "    Upgrade to enhanced KYC to raise the "
+                "limit: prsm_kyc?action=initiate&level=enhanced"
+            )
     lines += [
         "",
         f"  Payment method:    {quote.get('payment_method_alias', 'primary')}",
@@ -9158,6 +9177,28 @@ async def handle_coinbase_offramp_initiate(arguments: Dict[str, Any]) -> str:
             )
         kyc_block = "\n".join(kyc_lines) + "\n"
 
+    # Sprint 285 — tier-limit prerequisite block.
+    tier_block = ""
+    if result.get("tier_limit_exceeded"):
+        tier_level = result.get("tier_level", "?")
+        tier_limit = result.get("tier_limit_usd", 0.0)
+        tier_remaining = result.get(
+            "tier_limit_remaining_usd", 0.0,
+        )
+        tier_lines = [
+            "",
+            f"  Prerequisite: Tier limit exceeded "
+            f"(tier={tier_level}).",
+            f"    Tier daily cap:    ${tier_limit:,.2f}",
+            f"    Remaining today:   ${tier_remaining:,.2f}",
+        ]
+        if tier_level == "basic":
+            tier_lines.append(
+                "    Upgrade to enhanced KYC to raise the "
+                "limit: prsm_kyc?action=initiate&level=enhanced"
+            )
+        tier_block = "\n".join(tier_lines) + "\n"
+
     return (
         f"PRSM Cash-Out Pre-Flight\n"
         f"  Requested:    ${result['requested_usd']:,.2f} USD\n"
@@ -9167,6 +9208,7 @@ async def handle_coinbase_offramp_initiate(arguments: Dict[str, Any]) -> str:
         f"{result['usd_rate']} USD/FTNS)\n"
         f"{prereq_block}"
         f"{kyc_block}"
+        f"{tier_block}"
         f"\n"
         f"  Quote:\n"
         f"    Swap:       {quote['ftns_to_swap']:.6f} FTNS  "

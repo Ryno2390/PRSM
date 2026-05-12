@@ -216,6 +216,39 @@ class FiatComplianceRing:
     def count(self) -> int:
         return len(self._entries)
 
+    # Sprint 285 — sum USD volume per user over a rolling
+    # window. Backs the tier-limit-enforcement check on
+    # onramp/offramp quote endpoints. Gasless transfers +
+    # KYC events excluded (gasless is FTNS-denominated; KYC
+    # is zero-amount metadata).
+    _FIAT_USD_KINDS = frozenset({
+        "onramp_quote", "onramp_execute",
+        "offramp_quote", "offramp_execute",
+    })
+
+    def total_usd_for_user(
+        self,
+        user_id: str,
+        window_sec: int = 86400,  # 24h default
+    ) -> float:
+        """Sum usd_amount across fiat-surface events for this
+        user_id within the rolling window. Empty user_id
+        returns 0.0 (explicit-address flows aren't aggregated
+        — there's no stable identity to aggregate against)."""
+        if not user_id:
+            return 0.0
+        cutoff = time.time() - window_sec
+        total = 0.0
+        for e in self._entries:
+            if e.user_id != user_id:
+                continue
+            if e.kind not in self._FIAT_USD_KINDS:
+                continue
+            if e.timestamp < cutoff:
+                continue
+            total += e.usd_amount
+        return total
+
     def summary_by_kind(self) -> Dict[str, Dict[str, float]]:
         """Aggregate count + total USD volume per kind. Empty
         ring → empty dict."""
