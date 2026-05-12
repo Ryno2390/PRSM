@@ -1716,6 +1716,54 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_creator_stake",
+        description=(
+            "Creator stake management (Vision §14 item 2). "
+            "Single tool with `action` selector: balance | "
+            "stake | slash. High-tier creator status requires "
+            "bonded FTNS collateral that can be slashed on "
+            "misbehavior — economic disincentive for spam. "
+            "PENDING_COMMISSION pattern: in-memory mirror "
+            "until CREATOR_STAKE_REGISTRY_ADDRESS + "
+            "BASE_RPC_URL are set; real contract delegation "
+            "post-deploy. Backed by "
+            "/marketplace/creator-stake/*."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["balance", "stake", "slash"],
+                },
+                "creator_id": {
+                    "type": "string",
+                    "description": (
+                        "Creator id (required for all "
+                        "actions)."
+                    ),
+                },
+                "amount_wei": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Amount in FTNS wei "
+                        "(stake/slash actions)."
+                    ),
+                },
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "Audit-trail reason for action=slash "
+                        "(e.g. 'confirmed spam', "
+                        "'CSAM detection')."
+                    ),
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_creator_reputation",
         description=(
             "Creator-side reputation visibility (Vision §14 "
@@ -7161,6 +7209,152 @@ async def handle_prsm_waas_wallet(
     )
 
 
+_CREATOR_STAKE_ACTIONS = {"balance", "stake", "slash"}
+
+
+async def handle_prsm_creator_stake(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 290 — creator-stake operator surface
+    (Vision §14 item 2). action selector: balance | stake |
+    slash. Defends spam pattern by making high-tier status
+    require bonded FTNS that gets slashed on misbehavior."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_CREATOR_STAKE_ACTIONS)})."
+        )
+    if action not in _CREATOR_STAKE_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_CREATOR_STAKE_ACTIONS)}; "
+            f"got {action!r}."
+        )
+
+    if action == "balance":
+        creator_id = (
+            arguments.get("creator_id") or ""
+        ).strip()
+        if not creator_id:
+            return "balance requires 'creator_id'."
+        try:
+            result = await _call_node_api(
+                "GET",
+                f"/marketplace/creator-stake/{creator_id}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_creator_stake failed: {e}\n"
+                f"Is your PRSM node running?"
+            )
+        if "balance_wei" not in result:
+            detail = result.get("detail", "unknown error")
+            if "not initialized" in str(detail).lower():
+                return (
+                    f"Creator stake client not wired.\n"
+                    f"  Detail: {detail}"
+                )
+            return f"balance refused: {detail}"
+        return "\n".join([
+            f"Creator Stake — {result['creator_id']}:",
+            f"  balance_wei:             "
+            f"{result.get('balance_wei', 0)}",
+            f"  min_high_tier_stake_wei: "
+            f"{result.get('min_high_tier_stake_wei', 0)}",
+            f"  high_tier_eligible:      "
+            f"{result.get('high_tier_eligible', False)}",
+            f"  commissioned:            "
+            f"{result.get('commissioned', False)}",
+        ])
+
+    if action == "stake":
+        creator_id = (
+            arguments.get("creator_id") or ""
+        ).strip()
+        if not creator_id:
+            return "stake requires 'creator_id'."
+        amount_wei = arguments.get("amount_wei")
+        if amount_wei is None:
+            return "stake requires 'amount_wei'."
+        try:
+            amount_wei = int(amount_wei)
+        except (ValueError, TypeError):
+            return (
+                f"amount_wei must be an integer, "
+                f"got {amount_wei!r}."
+            )
+        if amount_wei <= 0:
+            return "amount_wei must be > 0."
+        try:
+            result = await _call_node_api(
+                "POST",
+                "/marketplace/creator-stake/stake",
+                {
+                    "creator_id": creator_id,
+                    "amount_wei": amount_wei,
+                },
+            )
+        except Exception as e:
+            return (
+                f"prsm_creator_stake failed: {e}"
+            )
+        if "balance_wei" not in result:
+            detail = result.get("detail", "unknown error")
+            return f"stake refused: {detail}"
+        return (
+            f"Staked {amount_wei} wei for {creator_id}.\n"
+            f"  new balance:        "
+            f"{result.get('balance_wei', 0)} wei\n"
+            f"  high_tier_eligible: "
+            f"{result.get('high_tier_eligible', False)}"
+        )
+
+    # action == "slash"
+    creator_id = (arguments.get("creator_id") or "").strip()
+    if not creator_id:
+        return "slash requires 'creator_id'."
+    amount_wei = arguments.get("amount_wei")
+    if amount_wei is None:
+        return "slash requires 'amount_wei'."
+    try:
+        amount_wei = int(amount_wei)
+    except (ValueError, TypeError):
+        return (
+            f"amount_wei must be an integer, "
+            f"got {amount_wei!r}."
+        )
+    if amount_wei <= 0:
+        return "amount_wei must be > 0."
+    reason = (arguments.get("reason") or "").strip()
+    if not reason:
+        return (
+            "slash requires 'reason' "
+            "(short description for audit trail)."
+        )
+    try:
+        result = await _call_node_api(
+            "POST",
+            "/marketplace/creator-stake/slash",
+            {
+                "creator_id": creator_id,
+                "amount_wei": amount_wei,
+                "reason": reason,
+            },
+        )
+    except Exception as e:
+        return f"prsm_creator_stake failed: {e}"
+    if "slashed_wei" not in result:
+        detail = result.get("detail", "unknown error")
+        return f"slash refused: {detail}"
+    return (
+        f"Slashed {amount_wei} wei from {creator_id} "
+        f"(reason: {reason}).\n"
+        f"  new balance: "
+        f"{result.get('balance_wei', 0)} wei"
+    )
+
+
 _CREATOR_REPUTATION_ACTIONS = {"list", "lookup"}
 
 
@@ -9572,6 +9766,7 @@ TOOL_HANDLERS = {
     "prsm_takedown_notices": handle_prsm_takedown_notices,
     "prsm_marketplace_reputation": handle_prsm_marketplace_reputation,
     "prsm_creator_reputation": handle_prsm_creator_reputation,
+    "prsm_creator_stake": handle_prsm_creator_stake,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

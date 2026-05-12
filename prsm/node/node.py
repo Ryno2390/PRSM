@@ -3445,6 +3445,30 @@ class PRSMNode:
                     exc,
                 )
                 self._creator_reputation_tracker = None
+            # Sprint 290 — creator stake client (Vision §14
+            # item 2). PENDING_COMMISSION pattern: in-memory
+            # mirror when no contract address configured;
+            # real contract delegation post-deploy.
+            try:
+                from prsm.marketplace.creator_stake_client import (
+                    CreatorStakeClient,
+                )
+                self._creator_stake_client = (
+                    CreatorStakeClient.from_env()
+                )
+                logger.info(
+                    "CreatorStakeClient wired "
+                    "(commissioned=%s)",
+                    self._creator_stake_client.is_commissioned(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "CreatorStakeClient construction "
+                    "failed: %s — /marketplace/creator-"
+                    "stake/* will return 503.",
+                    exc,
+                )
+                self._creator_stake_client = None
 
             semantic_index = SemanticIndexAdapter(
                 embedder=SentenceTransformerEmbedder(),

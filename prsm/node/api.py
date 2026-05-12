@@ -5814,8 +5814,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         results = node.content_index.search(q, limit=limit)
 
         # Sprint 289 — decorate with tier + apply filters.
+        # Sprint 290 — composed with stake-eligibility gate.
+        from prsm.marketplace.creator_stake_client import (
+            apply_stake_gate,
+        )
         tracker = getattr(
             node, "_creator_reputation_tracker", None,
+        )
+        stake_client = getattr(
+            node, "_creator_stake_client", None,
         )
         min_rank = (
             _TIER_RANK[min_tier] if min_tier else None
@@ -5825,9 +5832,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         for r in results:
             if tracker is not None and r.creator_id:
                 try:
-                    tier = tracker.tier_for(r.creator_id)
+                    raw_tier = tracker.tier_for(r.creator_id)
                 except Exception:  # noqa: BLE001
-                    tier = TIER_NEW
+                    raw_tier = TIER_NEW
+                tier = apply_stake_gate(
+                    raw_tier, r.creator_id, stake_client,
+                )
             else:
                 tier = TIER_NEW
             if exclude_new and tier == TIER_NEW:
@@ -7156,10 +7166,23 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     # retrieve paths when a piece of content is accessed).
 
     def _creator_row(tracker, creator_id: str) -> Dict[str, Any]:
+        from prsm.marketplace.creator_stake_client import (
+            apply_stake_gate,
+        )
         e = tracker.get_entry(creator_id)
         # Sprint 288 — tier always surfaces. Cold-start /
         # unknown → TIER_NEW.
-        tier = tracker.tier_for(creator_id)
+        # Sprint 290 — apply stake-eligibility gate. Demotes
+        # HIGH → MEDIUM when stake client wired AND creator
+        # hasn't bonded the minimum stake. Pre-sprint-290
+        # behavior preserved when stake_client is None.
+        raw_tier = tracker.tier_for(creator_id)
+        stake_client = getattr(
+            node, "_creator_stake_client", None,
+        )
+        tier = apply_stake_gate(
+            raw_tier, creator_id, stake_client,
+        )
         if e is None:
             return {
                 "creator_id": creator_id,
@@ -7272,6 +7295,127 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 body.creator_id,
             ),
             "score": tracker.score_for(body.creator_id),
+        }
+
+    # ── Sprint 290 — creator stake operator surface ────────
+    # Operator-side surface for the CreatorStakeClient
+    # (Vision §14 item 2). stake / slash are operator-
+    # internal writes (real on-chain when commissioned, in-
+    # memory otherwise per the PENDING_COMMISSION pattern).
+
+    class _CreatorStakeRequest(BaseModel):
+        creator_id: str
+        amount_wei: int
+
+    class _CreatorSlashRequest(BaseModel):
+        creator_id: str
+        amount_wei: int
+        reason: str
+
+    @app.get(
+        "/marketplace/creator-stake/{creator_id}",
+        tags=["marketplace"],
+    )
+    async def get_creator_stake(
+        creator_id: str,
+    ) -> Dict[str, Any]:
+        from prsm.marketplace.creator_stake_client import (
+            MIN_HIGH_TIER_STAKE_WEI,
+        )
+        stake_client = getattr(
+            node, "_creator_stake_client", None,
+        )
+        if stake_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Creator stake client not initialized."
+                ),
+            )
+        return {
+            "creator_id": creator_id,
+            "balance_wei": stake_client.stake_balance(
+                creator_id,
+            ),
+            "high_tier_eligible": (
+                stake_client.is_high_tier_eligible(
+                    creator_id,
+                )
+            ),
+            "min_high_tier_stake_wei": (
+                MIN_HIGH_TIER_STAKE_WEI
+            ),
+            "commissioned": stake_client.is_commissioned(),
+        }
+
+    @app.post(
+        "/marketplace/creator-stake/stake",
+        tags=["marketplace"],
+    )
+    async def post_creator_stake(
+        body: _CreatorStakeRequest,
+    ) -> Dict[str, Any]:
+        stake_client = getattr(
+            node, "_creator_stake_client", None,
+        )
+        if stake_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Creator stake client not initialized."
+                ),
+            )
+        try:
+            stake_client.stake(
+                creator_id=body.creator_id,
+                amount_wei=body.amount_wei,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {
+            "creator_id": body.creator_id,
+            "balance_wei": stake_client.stake_balance(
+                body.creator_id,
+            ),
+            "high_tier_eligible": (
+                stake_client.is_high_tier_eligible(
+                    body.creator_id,
+                )
+            ),
+        }
+
+    @app.post(
+        "/marketplace/creator-stake/slash",
+        tags=["marketplace"],
+    )
+    async def post_creator_slash(
+        body: _CreatorSlashRequest,
+    ) -> Dict[str, Any]:
+        stake_client = getattr(
+            node, "_creator_stake_client", None,
+        )
+        if stake_client is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Creator stake client not initialized."
+                ),
+            )
+        try:
+            stake_client.slash(
+                creator_id=body.creator_id,
+                amount_wei=body.amount_wei,
+                reason=body.reason,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {
+            "creator_id": body.creator_id,
+            "balance_wei": stake_client.stake_balance(
+                body.creator_id,
+            ),
+            "slashed_wei": body.amount_wei,
+            "reason": body.reason,
         }
 
     # ── Sprint 275 — marketplace reputation operator surface ─
