@@ -1816,6 +1816,45 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_tee_policy",
+        description=(
+            "Vision §7 Enterprise Confidentiality Mode "
+            "layer 3 — TEE-only execution policy. Single "
+            "tool with `action` selector: evaluate | "
+            "node_status | list_tiers. Tiers: NONE < "
+            "SOFTWARE < HARDWARE_UNVERIFIED < "
+            "HARDWARE_VERIFIED. evaluate runs a policy "
+            "against an attestation blob (base64). "
+            "node_status surfaces THIS node's own effective "
+            "attestation tier so enterprises can pre-screen "
+            "eligible nodes before dispatching. list_tiers "
+            "is a static enum readout (pure client-side). "
+            "Backed by /admin/tee-policy/*."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "evaluate", "node_status",
+                        "list_tiers",
+                    ],
+                },
+                "attestation_b64": {"type": "string"},
+                "min_attestation_tier": {"type": "string"},
+                "allowed_vendors": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "require_signature_chain": {
+                    "type": "boolean",
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_enterprise_recipient",
         description=(
             "Vision §7 Enterprise Confidentiality Mode "
@@ -7837,6 +7876,135 @@ _ENTERPRISE_RECIPIENT_ACTIONS = {
 }
 
 
+_TEE_POLICY_ACTIONS = {
+    "evaluate", "node_status", "list_tiers",
+}
+
+_TEE_TIER_VALUES = (
+    "none",
+    "software",
+    "hardware_unverified",
+    "hardware_verified",
+)
+
+
+async def handle_prsm_tee_policy(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 305 — TEE policy MCP wrapper (Vision §7
+    Enterprise Confidentiality Mode layer 3)."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_TEE_POLICY_ACTIONS)})."
+        )
+    if action not in _TEE_POLICY_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_TEE_POLICY_ACTIONS)}; got "
+            f"{action!r}."
+        )
+
+    if action == "list_tiers":
+        lines = [
+            "PRSM TEE Attestation Tiers "
+            "(strictly increasing):",
+            "",
+            "  · none                — no attestation "
+            "required (default; no gating)",
+            "  · software            — software-fallback "
+            "attestation OK (parseable + signed receipt)",
+            "  · hardware_unverified — real hardware TEE "
+            "(Intel SGX/TDX, AMD SEV-SNP, Apple SEP); "
+            "structural parse only (current production state "
+            "until DCAP wiring)",
+            "  · hardware_verified   — real hardware TEE "
+            "with full cryptographic verification chain "
+            "(vendor_verified=True)",
+            "",
+            "Policy satisfaction: effective_tier >= "
+            "min_attestation_tier AND (allowed_vendors is "
+            "None OR vendor in allowed_vendors).",
+        ]
+        return "\n".join(lines)
+
+    if action == "evaluate":
+        tier = (
+            arguments.get("min_attestation_tier") or ""
+        ).strip().lower()
+        if not tier:
+            return (
+                "evaluate requires 'min_attestation_tier' "
+                f"(one of {list(_TEE_TIER_VALUES)})."
+            )
+        body: Dict[str, Any] = {
+            "attestation_b64": arguments.get(
+                "attestation_b64",
+            ),
+            "policy": {
+                "min_attestation_tier": tier,
+                "allowed_vendors": arguments.get(
+                    "allowed_vendors",
+                ),
+                "require_signature_chain": bool(
+                    arguments.get(
+                        "require_signature_chain", False,
+                    ),
+                ),
+            },
+        }
+        try:
+            r = await _call_node_api(
+                "POST", "/admin/tee-policy/evaluate", body,
+            )
+        except Exception as e:
+            return f"prsm_tee_policy evaluate failed: {e}"
+        if "status" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"evaluate refused: {detail}"
+        sym = {
+            "pass": "✅",
+            "fail": "⚠ FAIL",
+            "skipped": "·",
+        }.get(r.get("status"), "?")
+        lines = [
+            f"{sym} TEE Policy Evaluation — "
+            f"{r.get('status', '?').upper()}",
+            "",
+            f"  effective_tier:   {r.get('effective_tier')}",
+            f"  min_required:     "
+            f"{r.get('min_required_tier')}",
+            f"  vendor:           {r.get('vendor') or '(none)'}",
+            f"  diagnostic:       "
+            f"{r.get('diagnostic') or '(none)'}",
+        ]
+        if r.get("error"):
+            lines.append(f"  error:            {r['error']}")
+        return "\n".join(lines)
+
+    # node_status
+    try:
+        r = await _call_node_api(
+            "GET", "/admin/tee-policy/node-status",
+        )
+    except Exception as e:
+        return f"prsm_tee_policy node_status failed: {e}"
+    if "effective_tier" not in r:
+        detail = r.get("detail", "unknown error")
+        return f"node_status refused: {detail}"
+    return (
+        "PRSM Node TEE Attestation Status:\n\n"
+        f"  effective_tier:   {r.get('effective_tier')}\n"
+        f"  vendor:           "
+        f"{r.get('vendor') or '(unknown)'}\n"
+        f"  vendor_verified:  "
+        f"{r.get('vendor_verified', False)}\n"
+        f"  diagnostic:       "
+        f"{r.get('diagnostic') or '(none)'}"
+    )
+
+
 async def handle_prsm_enterprise_recipient(
     arguments: Dict[str, Any],
 ) -> str:
@@ -11857,6 +12025,7 @@ TOOL_HANDLERS = {
     "prsm_formal_verification": handle_prsm_formal_verification,
     "prsm_upgrade": handle_prsm_upgrade,
     "prsm_enterprise_recipient": handle_prsm_enterprise_recipient,
+    "prsm_tee_policy": handle_prsm_tee_policy,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

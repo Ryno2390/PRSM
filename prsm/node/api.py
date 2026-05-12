@@ -7701,6 +7701,92 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    # ── Sprint 305 — TEE-only execution policy ────────────
+    # Vision §7 Enterprise Confidentiality Mode layer 3.
+    # Declarative attestation-quality gate. Evaluation is
+    # pure; live dispatcher wiring is sprint 305a.
+
+    class _TEEPolicyEvaluateRequest(BaseModel):
+        attestation_b64: Optional[str] = None
+        policy: Dict[str, Any]
+
+    @app.post(
+        "/admin/tee-policy/evaluate", tags=["admin"],
+    )
+    async def tee_policy_evaluate(
+        body: _TEEPolicyEvaluateRequest,
+    ) -> Dict[str, Any]:
+        from prsm.enterprise.tee_policy import (
+            TEEPolicy, evaluate_attestation_blob,
+        )
+        import base64 as _b64
+        try:
+            policy = TEEPolicy.from_dict(body.policy or {})
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"invalid policy: {e}",
+            )
+        blob: Optional[bytes] = None
+        if body.attestation_b64:
+            try:
+                blob = _b64.b64decode(
+                    body.attestation_b64, validate=True,
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"attestation_b64 not valid base64: "
+                        f"{e}"
+                    ),
+                )
+        result = evaluate_attestation_blob(blob, policy)
+        return result.to_dict()
+
+    @app.get(
+        "/admin/tee-policy/node-status", tags=["admin"],
+    )
+    async def tee_policy_node_status() -> Dict[str, Any]:
+        """Snapshot of THIS node's own attestation tier.
+        Enterprises use this to pre-screen which nodes are
+        eligible to participate in a given workload BEFORE
+        dispatching the job."""
+        from prsm.compute.inference.attestation_backends import (
+            AttestationVerificationResult, verify_attestation,
+        )
+        from prsm.enterprise.tee_policy import (
+            effective_tier_from_result,
+        )
+        blob = getattr(
+            node, "_tee_node_attestation_blob", None,
+        )
+        if not blob:
+            result = AttestationVerificationResult(
+                vendor="unknown",
+                error="node has no attestation blob configured",
+            )
+        else:
+            try:
+                result = verify_attestation(bytes(blob))
+            except Exception as exc:  # noqa: BLE001
+                result = AttestationVerificationResult(
+                    vendor="unknown",
+                    error=(
+                        f"verify_attestation raised: {exc}"
+                    ),
+                )
+        tier = effective_tier_from_result(result)
+        return {
+            "effective_tier": tier.value,
+            "vendor": result.vendor,
+            "vendor_verified": result.vendor_verified,
+            "diagnostic": result.error or (
+                "node attestation parsed; effective "
+                f"tier={tier.value}"
+            ),
+        }
+
     # ── Sprint 303 — UUPS upgrade orchestrator ────────────
     # Vision §14 mitigation item 7: UUPS upgrade pattern
     # with pre-committed rollback escape. Composer-only —
