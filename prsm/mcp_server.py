@@ -1816,6 +1816,41 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_formal_verification",
+        description=(
+            "Vision §14 mitigation item 4: pinned formal-"
+            "invariant registry + runtime probe. Single tool "
+            "with `action` selector: list | check | check_one. "
+            "list returns the PUBLIC invariant spec for a "
+            "contract (no backend required — §14 transparency "
+            "promise). check runs all invariants for a given "
+            "contract against live on-chain state, returning "
+            "per-invariant PASS / FAIL / SKIPPED with "
+            "diagnostics. check_one runs a single invariant by "
+            "id. RoyaltyDistributor v2 has five pinned "
+            "invariants: NETWORK_FEE_BPS == 200 "
+            "(anti-confiscation), networkTreasury immutable, "
+            "owner == Foundation Safe, balance >= "
+            "totalClaimable (THE solvency invariant), and "
+            "paused() observability. Backed by "
+            "/admin/formal-verification/*."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "list", "check", "check_one",
+                    ],
+                },
+                "contract": {"type": "string"},
+                "invariant_id": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    ),
+    Tool(
         name="prsm_incident",
         description=(
             "Vision §14 mitigation item 5: public exploit-"
@@ -7689,6 +7724,168 @@ _INCIDENT_ACTIONS = {
     "recommend", "comms", "playbook",
 }
 
+
+_FORMAL_VERIFICATION_ACTIONS = {
+    "list", "check", "check_one",
+}
+
+
+async def handle_prsm_formal_verification(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 302 — formal-invariant harness (Vision §14
+    item 4). Wraps /admin/formal-verification/*. The
+    invariant LIST surface is PUBLIC by design (the spec is
+    published before any incident — §14 transparency)."""
+    action = (arguments.get("action") or "").strip().lower()
+    if not action:
+        return (
+            f"Missing required 'action' (must be one of "
+            f"{sorted(_FORMAL_VERIFICATION_ACTIONS)})."
+        )
+    if action not in _FORMAL_VERIFICATION_ACTIONS:
+        return (
+            f"action must be one of "
+            f"{sorted(_FORMAL_VERIFICATION_ACTIONS)}; "
+            f"got {action!r}."
+        )
+
+    if action == "list":
+        contract = (
+            arguments.get("contract") or ""
+        ).strip()
+        path = "/admin/formal-verification/invariants"
+        if contract:
+            path = f"{path}?contract={contract}"
+        try:
+            r = await _call_node_api("GET", path)
+        except Exception as e:
+            return f"prsm_formal_verification list failed: {e}"
+        invs = r.get("invariants") or []
+        if not invs:
+            return "No pinned invariants found."
+        lines = [
+            f"PRSM Formal Invariants — {len(invs)} pinned "
+            "(public spec):",
+            "",
+        ]
+        for inv in invs:
+            lines.append(
+                f"  [{inv['id']:<10}] "
+                f"{inv['severity']:<8}  "
+                f"{inv['contract_name']:<22}  "
+                f"{inv['title']}"
+            )
+            lines.append(
+                f"    spec: {inv['spec_text']}"
+            )
+        return "\n".join(lines)
+
+    if action == "check":
+        contract = (
+            arguments.get("contract") or ""
+        ).strip()
+        if not contract:
+            return (
+                "check requires 'contract' "
+                "(e.g., 'royalty_distributor')."
+            )
+        try:
+            r = await _call_node_api(
+                "GET",
+                f"/admin/formal-verification/check"
+                f"?contract={contract}",
+            )
+        except Exception as e:
+            return f"prsm_formal_verification check failed: {e}"
+        if "results" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"check refused: {detail}"
+        summary = r.get("summary") or {}
+        results = r.get("results") or []
+        total = (
+            summary.get("pass", 0)
+            + summary.get("fail", 0)
+            + summary.get("skipped", 0)
+        )
+        marker = (
+            "✅"
+            if summary.get("fail", 0) == 0 else "⚠"
+        )
+        lines = [
+            f"{marker} Formal-Invariant Check — "
+            f"{contract} @ {r.get('address')}",
+            "",
+            f"  Summary: "
+            f"{summary.get('pass', 0)} pass / "
+            f"{summary.get('fail', 0)} fail / "
+            f"{summary.get('skipped', 0)} skipped "
+            f"(of {total})",
+            "",
+        ]
+        for rec in results:
+            stat = rec.get("status", "?")
+            sym = {
+                "pass": "✅",
+                "fail": "⚠ FAIL",
+                "skipped": "·",
+            }.get(stat, "?")
+            line = (
+                f"  {sym}  {rec.get('invariant_id'):<10}  "
+            )
+            diag = rec.get("diagnostic") or ""
+            err = rec.get("error") or ""
+            if diag:
+                line += diag
+            elif err:
+                line += f"({err})"
+            else:
+                v = rec.get("value")
+                e = rec.get("expected")
+                if e is not None:
+                    line += f"value={v}, expected={e}"
+                elif v is not None:
+                    line += f"value={v}"
+            lines.append(line)
+        return "\n".join(lines)
+
+    # check_one
+    iid = (arguments.get("invariant_id") or "").strip()
+    if not iid:
+        return (
+            "check_one requires 'invariant_id' "
+            "(e.g., 'INV-RD-1')."
+        )
+    try:
+        r = await _call_node_api(
+            "GET",
+            f"/admin/formal-verification/check/{iid}",
+        )
+    except Exception as e:
+        return f"prsm_formal_verification check_one failed: {e}"
+    if "status" not in r:
+        detail = r.get("detail", "unknown error")
+        return f"check_one refused: {detail}"
+    stat = r.get("status", "?")
+    sym = {
+        "pass": "✅",
+        "fail": "⚠ FAIL",
+        "skipped": "·",
+    }.get(stat, "?")
+    lines = [
+        f"{sym} {r.get('invariant_id')} — {stat}",
+        "",
+    ]
+    if r.get("diagnostic"):
+        lines.append(f"  {r['diagnostic']}")
+    if r.get("error"):
+        lines.append(f"  error: {r['error']}")
+    if r.get("value") is not None:
+        lines.append(f"  value:    {r['value']}")
+    if r.get("expected") is not None:
+        lines.append(f"  expected: {r['expected']}")
+    return "\n".join(lines)
+
 _INCIDENT_SEVERITY_VALUES = {"s0", "s1", "s2", "s3"}
 
 
@@ -11192,6 +11389,7 @@ TOOL_HANDLERS = {
     "prsm_insurance_fund": handle_prsm_insurance_fund,
     "prsm_disclosure": handle_prsm_disclosure,
     "prsm_incident": handle_prsm_incident,
+    "prsm_formal_verification": handle_prsm_formal_verification,
     "prsm_waas_wallet": handle_prsm_waas_wallet,
     "prsm_gasless_transfer": handle_prsm_gasless_transfer,
     "prsm_pool_quote": handle_prsm_pool_quote,

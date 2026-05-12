@@ -7563,6 +7563,139 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    # ── Sprint 302 — formal-invariant harness ─────────────
+    # Vision §14 mitigation item 4: pinned formal-spec
+    # registry + runtime probe. /invariants is PUBLIC (the
+    # spec is published BEFORE any incident — same posture
+    # as the §14 item 5 playbook). /check requires both a
+    # wired backend AND a known contract address.
+
+    @app.get(
+        "/admin/formal-verification/invariants",
+        tags=["admin"],
+    )
+    async def formal_invariant_list(
+        contract: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.formal_invariants import (
+            INVARIANT_REGISTRY,
+        )
+        out: List[Dict[str, Any]] = []
+        for name, invs in INVARIANT_REGISTRY.items():
+            if contract and name != contract:
+                continue
+            for inv in invs:
+                out.append(inv.to_dict())
+        return {"invariants": out}
+
+    @app.get(
+        "/admin/formal-verification/check", tags=["admin"],
+    )
+    async def formal_invariant_check(
+        contract: str,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.formal_invariants import (
+            INVARIANT_REGISTRY,
+        )
+        checker = getattr(
+            node, "_formal_invariant_checker", None,
+        )
+        if checker is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Formal-invariant checker not wired "
+                    "(no RPC backend available)."
+                ),
+            )
+        if contract not in INVARIANT_REGISTRY:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"unknown contract {contract!r}; known: "
+                    f"{sorted(INVARIANT_REGISTRY)}"
+                ),
+            )
+        addresses = getattr(
+            node, "_formal_invariant_addresses", {},
+        ) or {}
+        addr = addresses.get(contract)
+        if not addr:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"contract address for {contract!r} not "
+                    f"configured (set PRSM_NETWORK or the "
+                    f"corresponding per-contract env var)."
+                ),
+            )
+        results = checker.check_contract(
+            contract, contract_address=addr,
+        )
+        summary = {"pass": 0, "fail": 0, "skipped": 0}
+        for r in results:
+            summary[r.status.value] = (
+                summary.get(r.status.value, 0) + 1
+            )
+        return {
+            "contract": contract,
+            "address": addr,
+            "summary": summary,
+            "results": [r.to_dict() for r in results],
+        }
+
+    @app.get(
+        "/admin/formal-verification/check/{invariant_id}",
+        tags=["admin"],
+    )
+    async def formal_invariant_check_one(
+        invariant_id: str,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.formal_invariants import (
+            INVARIANT_REGISTRY,
+        )
+        checker = getattr(
+            node, "_formal_invariant_checker", None,
+        )
+        if checker is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Formal-invariant checker not wired."
+                ),
+            )
+        found = None
+        contract_for_inv = None
+        for name, invs in INVARIANT_REGISTRY.items():
+            for inv in invs:
+                if inv.id == invariant_id:
+                    found = inv
+                    contract_for_inv = name
+                    break
+            if found is not None:
+                break
+        if found is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"invariant {invariant_id!r} not found"
+                ),
+            )
+        addresses = getattr(
+            node, "_formal_invariant_addresses", {},
+        ) or {}
+        addr = addresses.get(contract_for_inv)
+        if not addr:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"contract address for "
+                    f"{contract_for_inv!r} not configured."
+                ),
+            )
+        result = checker.check_one(found, addr)
+        return result.to_dict()
+
     # ── Sprint 301 — incident response playbook ───────────
     # Vision §14 mitigation item 5: public exploit-response
     # playbook + code hooks. /playbook is intentionally

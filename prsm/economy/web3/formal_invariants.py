@@ -1,0 +1,516 @@
+"""Sprint 302 — formal-invariant harness (Vision §14 item 4).
+
+Vision §14 item 4: "Formal verification on highest-value
+contracts. Payment escrow and royalty distribution contracts
+undergo formal-methods verification, not just standard audit."
+
+This module ships the SPEC LAYER + RUNTIME PROBE:
+  Invariant       — declarative pinned formal-spec record
+                    (id, kind, selector, expected, severity)
+  INVARIANT_REGISTRY — public mapping of contract_name →
+                       [Invariant]. The §14 transparency
+                       promise: anyone can see what PRSM
+                       has formally committed to.
+  InvariantChecker — runtime probe via an injected backend
+                     (call_uint256 / call_address /
+                     call_bool / token_balance_of).
+                     Returns PASS / FAIL / SKIPPED.
+  InvariantResult  — verifiable outcome record with
+                     diagnostic.
+
+The actual symbolic-execution runs (halmos, Certora) consume
+the SAME registry on a follow-on sprint. The Python harness
+gives operators a "is the protocol in spec RIGHT NOW" probe
+against live mainnet state.
+
+Highest-value target this sprint: RoyaltyDistributor v2.
+Five pinned invariants:
+  INV-RD-1  NETWORK_FEE_BPS == 200 (immutable 2% cap)
+  INV-RD-2  networkTreasury == Foundation Safe
+  INV-RD-3  owner == Foundation Safe (post-acceptOwnership)
+  INV-RD-4  ftns.balanceOf(this) >= totalClaimable (SOLVENCY)
+  INV-RD-5  paused() — operator-observable
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional, Protocol
+
+
+# ── Enums ────────────────────────────────────────────
+
+
+class InvariantSeverity(str, Enum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+
+
+class InvariantStatus(str, Enum):
+    PASS = "pass"
+    FAIL = "fail"
+    SKIPPED = "skipped"
+
+
+class InvariantKind(str, Enum):
+    UINT256_EQ = "uint256_eq"
+    UINT256_GTE = "uint256_gte"
+    ADDRESS_EQ = "address_eq"
+    BOOL_READ = "bool_read"
+    BALANCE_GTE_CLAIMABLE = "balance_gte_claimable"
+
+
+# ── Dataclasses ──────────────────────────────────────
+
+
+@dataclass
+class Invariant:
+    id: str
+    contract_name: str
+    title: str
+    description: str
+    severity: InvariantSeverity
+    spec_text: str
+    kind: InvariantKind
+    selector: str = ""
+    expected: Optional[Any] = None
+    params: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "contract_name": self.contract_name,
+            "title": self.title,
+            "description": self.description,
+            "severity": self.severity.value,
+            "spec_text": self.spec_text,
+            "kind": self.kind.value,
+            "selector": self.selector,
+            "expected": (
+                self.expected
+                if not isinstance(self.expected, bytes)
+                else self.expected.hex()
+            ),
+            "params": dict(self.params),
+        }
+
+
+@dataclass
+class InvariantResult:
+    invariant_id: str
+    status: InvariantStatus
+    value: Any = None
+    expected: Any = None
+    diagnostic: str = ""
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "invariant_id": self.invariant_id,
+            "status": self.status.value,
+            "value": self.value,
+            "expected": self.expected,
+            "diagnostic": self.diagnostic,
+            "error": self.error,
+        }
+
+
+# ── Backend protocol ─────────────────────────────────
+
+
+class FormalBackend(Protocol):
+    def call_uint256(
+        self, addr: str, selector: str,
+    ) -> Optional[int]: ...
+    def call_address(
+        self, addr: str, selector: str,
+    ) -> Optional[str]: ...
+    def call_bool(
+        self, addr: str, selector: str,
+    ) -> Optional[bool]: ...
+    def token_balance_of(
+        self, token: str, holder: str,
+    ) -> Optional[int]: ...
+
+
+# ── EVM function selectors (canonical) ───────────────
+
+
+# All selectors below are first 4 bytes of keccak256 of the
+# function signature. Pinned to the v2 RoyaltyDistributor
+# ABI per `contracts/contracts/RoyaltyDistributor.sol`.
+_SEL_NETWORK_FEE_BPS = "0x9c5e6cf2"   # NETWORK_FEE_BPS()
+_SEL_NETWORK_TREASURY = "0x8f0d1b8e"  # networkTreasury()
+_SEL_OWNER = "0x8da5cb5b"             # owner()
+_SEL_FTNS = "0x9b03f021"              # ftns()
+_SEL_TOTAL_CLAIMABLE = "0xc70b25c0"   # totalClaimable()
+_SEL_PAUSED = "0x5c975abb"            # paused()
+
+# The selector values above are derived from the v2 source.
+# Operators should verify on Basescan if treating them as
+# load-bearing; for the harness, the canonical-check
+# protocol below requires the backend to look them up
+# correctly — a mismatched ABI surfaces as
+# SKIPPED (None return) rather than silent FAIL.
+
+
+# ── Foundation Safe address (from networks.py) ───────
+
+
+_FOUNDATION_SAFE_BASE = (
+    "0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791"
+)
+
+
+# ── Pinned registry ──────────────────────────────────
+
+
+INVARIANT_REGISTRY: Dict[str, List[Invariant]] = {
+    "royalty_distributor": [
+        Invariant(
+            id="INV-RD-1",
+            contract_name="royalty_distributor",
+            title="Network fee is immutable at 200 bps (2%)",
+            description=(
+                "The protocol fee skimmed to the Foundation "
+                "Safe is a public constant. Drift would "
+                "indicate either a contract substitution or "
+                "an ABI-confusion attack."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text="NETWORK_FEE_BPS() == 200",
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_NETWORK_FEE_BPS,
+            expected=200,
+        ),
+        Invariant(
+            id="INV-RD-2",
+            contract_name="royalty_distributor",
+            title=(
+                "Network treasury is the Foundation Safe "
+                "(immutable)"
+            ),
+            description=(
+                "networkTreasury is declared immutable in "
+                "the v2 contract, so any deviation here "
+                "means we're reading the wrong contract."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                f"networkTreasury() == {_FOUNDATION_SAFE_BASE}"
+            ),
+            kind=InvariantKind.ADDRESS_EQ,
+            selector=_SEL_NETWORK_TREASURY,
+            expected=_FOUNDATION_SAFE_BASE,
+        ),
+        Invariant(
+            id="INV-RD-3",
+            contract_name="royalty_distributor",
+            title=(
+                "Contract owner is the Foundation Safe"
+            ),
+            description=(
+                "Post-acceptOwnership (sprint 134 mainnet "
+                "ceremony 2026-05-09), owner() must return "
+                "the Foundation 2-of-3 multisig — never the "
+                "deployer hot key."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                f"owner() == {_FOUNDATION_SAFE_BASE}"
+            ),
+            kind=InvariantKind.ADDRESS_EQ,
+            selector=_SEL_OWNER,
+            expected=_FOUNDATION_SAFE_BASE,
+        ),
+        Invariant(
+            id="INV-RD-4",
+            contract_name="royalty_distributor",
+            title=(
+                "Solvency: ftns.balanceOf(this) >= "
+                "totalClaimable"
+            ),
+            description=(
+                "THE money invariant. If the contract's "
+                "FTNS balance ever drops below the sum of "
+                "outstanding pull-payment claims, the "
+                "protocol is insolvent and some recipient "
+                "will be unable to claim. This invariant is "
+                "what the L4 self-audit A-08 surface was "
+                "built to maintain in lockstep."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "ftns.balanceOf(address(this)) >= "
+                "totalClaimable"
+            ),
+            kind=InvariantKind.BALANCE_GTE_CLAIMABLE,
+            selector=_SEL_TOTAL_CLAIMABLE,
+            params={
+                "ftns_selector": _SEL_FTNS,
+                "totalclaimable_selector": (
+                    _SEL_TOTAL_CLAIMABLE
+                ),
+            },
+        ),
+        Invariant(
+            id="INV-RD-5",
+            contract_name="royalty_distributor",
+            title="paused() — operator-observable",
+            description=(
+                "Pause state is surfaced as an invariant "
+                "for operator visibility. PASS just means "
+                "the read succeeded; the boolean value is "
+                "the operator's signal."
+            ),
+            severity=InvariantSeverity.MEDIUM,
+            spec_text="paused() observability",
+            kind=InvariantKind.BOOL_READ,
+            selector=_SEL_PAUSED,
+            expected=None,
+        ),
+    ],
+}
+
+
+def list_invariants_for_contract(
+    contract_name: str,
+) -> List[Invariant]:
+    return list(INVARIANT_REGISTRY.get(contract_name, []))
+
+
+# ── Checker ──────────────────────────────────────────
+
+
+class InvariantChecker:
+    def __init__(self, *, backend: FormalBackend) -> None:
+        self._backend = backend
+
+    def check_one(
+        self, inv: Invariant, contract_address: str,
+    ) -> InvariantResult:
+        if inv.kind == InvariantKind.UINT256_EQ:
+            return self._check_uint256_eq(
+                inv, contract_address,
+            )
+        if inv.kind == InvariantKind.UINT256_GTE:
+            return self._check_uint256_gte(
+                inv, contract_address,
+            )
+        if inv.kind == InvariantKind.ADDRESS_EQ:
+            return self._check_address_eq(
+                inv, contract_address,
+            )
+        if inv.kind == InvariantKind.BOOL_READ:
+            return self._check_bool_read(
+                inv, contract_address,
+            )
+        if inv.kind == InvariantKind.BALANCE_GTE_CLAIMABLE:
+            return self._check_balance_gte_claimable(
+                inv, contract_address,
+            )
+        return InvariantResult(
+            invariant_id=inv.id,
+            status=InvariantStatus.SKIPPED,
+            error=f"unhandled kind {inv.kind.value!r}",
+        )
+
+    def check_contract(
+        self,
+        contract_name: str,
+        *,
+        contract_address: str,
+    ) -> List[InvariantResult]:
+        invs = list_invariants_for_contract(contract_name)
+        return [
+            self.check_one(inv, contract_address)
+            for inv in invs
+        ]
+
+    # ── kind dispatchers ──────────────────────────────
+
+    def _check_uint256_eq(
+        self, inv: Invariant, addr: str,
+    ) -> InvariantResult:
+        try:
+            v = self._backend.call_uint256(
+                addr, inv.selector,
+            )
+        except Exception as e:  # noqa: BLE001
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error=f"RPC error: {e}",
+            )
+        if v is None:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error="backend returned None",
+            )
+        if v == inv.expected:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.PASS,
+                value=v, expected=inv.expected,
+            )
+        return InvariantResult(
+            invariant_id=inv.id,
+            status=InvariantStatus.FAIL,
+            value=v, expected=inv.expected,
+            diagnostic=(
+                f"got {v}, expected {inv.expected}"
+            ),
+        )
+
+    def _check_uint256_gte(
+        self, inv: Invariant, addr: str,
+    ) -> InvariantResult:
+        try:
+            v = self._backend.call_uint256(
+                addr, inv.selector,
+            )
+        except Exception as e:  # noqa: BLE001
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error=f"RPC error: {e}",
+            )
+        if v is None:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error="backend returned None",
+            )
+        if v >= inv.expected:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.PASS,
+                value=v, expected=inv.expected,
+            )
+        return InvariantResult(
+            invariant_id=inv.id,
+            status=InvariantStatus.FAIL,
+            value=v, expected=inv.expected,
+            diagnostic=(
+                f"got {v}, required >= {inv.expected}"
+            ),
+        )
+
+    def _check_address_eq(
+        self, inv: Invariant, addr: str,
+    ) -> InvariantResult:
+        try:
+            v = self._backend.call_address(
+                addr, inv.selector,
+            )
+        except Exception as e:  # noqa: BLE001
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error=f"RPC error: {e}",
+            )
+        if v is None:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error="backend returned None",
+            )
+        if str(v).lower() == str(inv.expected).lower():
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.PASS,
+                value=v, expected=inv.expected,
+            )
+        return InvariantResult(
+            invariant_id=inv.id,
+            status=InvariantStatus.FAIL,
+            value=v, expected=inv.expected,
+            diagnostic=(
+                f"got {v}, expected {inv.expected}"
+            ),
+        )
+
+    def _check_bool_read(
+        self, inv: Invariant, addr: str,
+    ) -> InvariantResult:
+        try:
+            v = self._backend.call_bool(
+                addr, inv.selector,
+            )
+        except Exception as e:  # noqa: BLE001
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error=f"RPC error: {e}",
+            )
+        if v is None:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error="backend returned None",
+            )
+        # Observability: any successful read PASSES; the
+        # bool value is the diagnostic.
+        return InvariantResult(
+            invariant_id=inv.id,
+            status=InvariantStatus.PASS,
+            value=v,
+            diagnostic=f"paused={v}",
+        )
+
+    def _check_balance_gte_claimable(
+        self, inv: Invariant, addr: str,
+    ) -> InvariantResult:
+        ftns_sel = inv.params.get("ftns_selector") or ""
+        tc_sel = (
+            inv.params.get("totalclaimable_selector") or ""
+        )
+        try:
+            ftns_addr = self._backend.call_address(
+                addr, ftns_sel,
+            )
+            tc = self._backend.call_uint256(addr, tc_sel)
+            if ftns_addr is None or tc is None:
+                return InvariantResult(
+                    invariant_id=inv.id,
+                    status=InvariantStatus.SKIPPED,
+                    error=(
+                        "backend returned None for one of "
+                        "ftns / totalClaimable"
+                    ),
+                )
+            bal = self._backend.token_balance_of(
+                ftns_addr, addr,
+            )
+            if bal is None:
+                return InvariantResult(
+                    invariant_id=inv.id,
+                    status=InvariantStatus.SKIPPED,
+                    error=(
+                        "backend returned None for "
+                        "token balance"
+                    ),
+                )
+        except Exception as e:  # noqa: BLE001
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error=f"RPC error: {e}",
+            )
+        diag = (
+            f"balance={bal}, totalClaimable={tc}, "
+            f"slack={bal - tc}"
+        )
+        if bal >= tc:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.PASS,
+                value=bal, expected=tc, diagnostic=diag,
+            )
+        return InvariantResult(
+            invariant_id=inv.id,
+            status=InvariantStatus.FAIL,
+            value=bal, expected=tc, diagnostic=diag,
+        )

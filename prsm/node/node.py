@@ -677,6 +677,96 @@ def _build_storage_slashing_client_or_none():
         return None
 
 
+def _build_formal_invariant_backend_or_none(endpoints):
+    """Construct a web3-backed FormalBackend for the sprint
+    302 invariant checker, or None if unwirable.
+
+    Returns None when:
+      - web3 is not importable
+      - RPC URL is unset
+      - any backend bootstrap step raises
+
+    The endpoint surface degrades cleanly to 503 for /check
+    when this returns None, while the public /invariants
+    list endpoint stays available (no backend needed for
+    spec readout).
+    """
+    rpc = (endpoints.rpc_url or "").strip()
+    if not rpc:
+        return None
+    try:
+        from web3 import Web3, HTTPProvider
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        w3 = Web3(HTTPProvider(rpc, request_kwargs={"timeout": 10}))
+        # Smoke-test the connection. If it errors we report
+        # None and let the checker surface SKIPPED rather
+        # than crashing on every probe.
+        try:
+            w3.eth.chain_id  # noqa: B018
+        except Exception:  # noqa: BLE001
+            return None
+        return _Web3FormalBackend(w3)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+class _Web3FormalBackend:
+    """FormalBackend impl over web3.py — read-only EVM calls.
+
+    Each method fail-softs to None on RPC error so the
+    InvariantChecker can mark the result SKIPPED rather
+    than crash. Backed by eth_call (low-level — no ABI
+    objects needed) for the static selector probes, and
+    by a token-balance helper that issues
+    `balanceOf(holder)` against an ERC-20 contract.
+    """
+
+    _BALANCE_OF_SELECTOR = "0x70a08231"  # balanceOf(address)
+
+    def __init__(self, w3) -> None:
+        self._w3 = w3
+
+    def _eth_call(self, addr, data_hex):
+        try:
+            return self._w3.eth.call({
+                "to": self._w3.to_checksum_address(addr),
+                "data": data_hex,
+            })
+        except Exception:  # noqa: BLE001
+            return None
+
+    def call_uint256(self, addr, selector):
+        raw = self._eth_call(addr, selector)
+        if raw is None or len(raw) < 32:
+            return None
+        return int.from_bytes(raw[-32:], "big")
+
+    def call_address(self, addr, selector):
+        raw = self._eth_call(addr, selector)
+        if raw is None or len(raw) < 32:
+            return None
+        # Last 20 bytes of the 32-byte return word.
+        return "0x" + raw[-20:].hex()
+
+    def call_bool(self, addr, selector):
+        raw = self._eth_call(addr, selector)
+        if raw is None or len(raw) < 32:
+            return None
+        return int.from_bytes(raw[-32:], "big") != 0
+
+    def token_balance_of(self, token, holder):
+        try:
+            holder_bytes = bytes.fromhex(
+                holder.removeprefix("0x").rjust(64, "0"),
+            )
+        except ValueError:
+            return None
+        data = self._BALANCE_OF_SELECTOR + holder_bytes.hex()
+        return self.call_uint256(token, data)
+
+
 def _build_heartbeat_scheduler_or_none(*, client):
     """Construct a HeartbeatScheduler if the operator opted in AND
     the underlying StorageSlashingClient is non-None.
@@ -2435,6 +2525,51 @@ class PRSMNode:
                 exc,
             )
             self._incident_response = None
+
+        # Sprint 302 — formal-invariant checker (Vision §14
+        # item 4). Pinned invariants live in
+        # formal_invariants.INVARIANT_REGISTRY (public per
+        # §14 transparency promise). Checker is wired only
+        # when an RPC-capable backend is available; without
+        # one, /admin/formal-verification/check returns 503
+        # but /invariants stays public.
+        try:
+            from prsm.economy.web3.formal_invariants import (
+                InvariantChecker,
+            )
+            from prsm.config.networks import resolve_endpoints
+            endpoints = resolve_endpoints()
+            backend = _build_formal_invariant_backend_or_none(
+                endpoints,
+            )
+            if backend is not None:
+                self._formal_invariant_checker = (
+                    InvariantChecker(backend=backend)
+                )
+            else:
+                self._formal_invariant_checker = None
+            self._formal_invariant_addresses = {
+                "royalty_distributor": (
+                    endpoints.royalty_distributor
+                ),
+            }
+            logger.info(
+                "Formal-invariant checker wired "
+                "(backend=%s, royalty_distributor=%s)",
+                bool(backend),
+                self._formal_invariant_addresses.get(
+                    "royalty_distributor",
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Formal-invariant checker construction "
+                "failed: %s — /admin/formal-verification/check "
+                "will return 503 (invariant LIST stays "
+                "public).", exc,
+            )
+            self._formal_invariant_checker = None
+            self._formal_invariant_addresses = {}
 
         # Sprint 286 — fiat-surface health check at startup.
         # Loud-but-non-blocking: ERROR findings surface in the
