@@ -7944,6 +7944,84 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    # ── Sprint 316a — TP worker shard endpoint ───────────
+    # Each TP worker node holds its own weight shard
+    # (node._tp_weight_shard) and computes the partial
+    # matmul X @ W_local for any incoming input X.
+
+    class _TPShardRequest(BaseModel):
+        shard_id: int = Field(ge=0)
+        input_activations_b64: str
+
+    @app.post(
+        "/compute/inference/tensor_parallel/shard",
+    )
+    async def tp_shard_forward(
+        body: _TPShardRequest,
+    ) -> Dict[str, Any]:
+        weight_shard = getattr(
+            node, "_tp_weight_shard", None,
+        )
+        if weight_shard is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "TP worker weight shard not "
+                    "configured (set "
+                    "node._tp_weight_shard or wire from "
+                    "operator startup script)"
+                ),
+            )
+        import base64 as _b64
+        try:
+            input_bytes = _b64.b64decode(
+                body.input_activations_b64, validate=True,
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"input_activations_b64 not valid: {e}"
+                ),
+            )
+        from prsm.compute.inference.pytorch_stage_runner import (
+            deserialize_activation,
+            serialize_activation,
+        )
+        try:
+            x = deserialize_activation(input_bytes)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"input deserialization failed: "
+                    f"{exc}"
+                ),
+            )
+        try:
+            import torch
+            with torch.no_grad():
+                partial = x @ weight_shard
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"partial matmul failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            )
+        worker_node_id = (
+            node.identity.node_id if node.identity
+            else "unknown"
+        )
+        return {
+            "shard_id": body.shard_id,
+            "worker_node_id": worker_node_id,
+            "output_partial_b64": _b64.b64encode(
+                serialize_activation(partial),
+            ).decode("ascii"),
+        }
+
     # ── Sprint 313 — pipeline stage worker endpoint ───────
     # Each "remote" stage node exposes this; the orchestrator
     # uses http_stage_runner (sprint 313) to call it. v1 is
