@@ -53,6 +53,20 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_health(_args: argparse.Namespace) -> int:
+    """Sprint 318c — runtime health check. Wraps
+    `run_health_checks()` to print the summary + return
+    rc=0 only if every check passes (so CI / deploy
+    scripts can fail-fast)."""
+    from prsm.enterprise.bringup_health import (
+        run_health_checks,
+    )
+    outcome = run_health_checks()
+    sys.stdout.write(outcome.summary())
+    sys.stdout.write("\n")
+    return 0 if outcome.ok else 1
+
+
 def _cmd_demo(args: argparse.Namespace) -> int:
     """Sprint 318b — run the end-to-end demo against a
     fresh in-process deployment. Useful as a post-deploy
@@ -119,6 +133,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
 
+    sub.add_parser(
+        "health",
+        help=(
+            "Runtime health check: persistence dirs "
+            "writable + keypairs load + subsystems "
+            "wire ok. Returns rc=0 only if every check "
+            "passes."
+        ),
+    )
+
     demo = sub.add_parser(
         "demo",
         help=(
@@ -146,6 +170,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _cmd_status(args)
     if args.command == "generate":
         return _cmd_generate(args)
+    if args.command == "health":
+        return _cmd_health(args)
     if args.command == "demo":
         return _cmd_demo(args)
     parser.print_help()
