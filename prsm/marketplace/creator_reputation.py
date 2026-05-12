@@ -54,6 +54,39 @@ REPEAT_WEIGHT = 0.4
 MIN_SAMPLES_FOR_SCORE = 10
 NEUTRAL_SCORE = 0.5
 
+# ── Sprint 288 — tier classification ─────────────────────
+# String labels (not Enum) for trivial JSON serialization.
+TIER_NEW = "new"          # cold-start; no signal yet
+TIER_LOW = "low"          # measured low
+TIER_MEDIUM = "medium"
+TIER_HIGH = "high"
+
+TIER_THRESHOLD_MEDIUM = 0.55
+TIER_THRESHOLD_HIGH = 0.75
+
+
+def tier_for_score(
+    score: float,
+    total_accesses: int,
+    *,
+    threshold_medium: float = TIER_THRESHOLD_MEDIUM,
+    threshold_high: float = TIER_THRESHOLD_HIGH,
+) -> str:
+    """Pure function mapping (score, total_accesses) → tier.
+
+    Cold-start short-circuits to TIER_NEW regardless of score
+    — distinct from TIER_LOW which means we have signal AND
+    the signal is poor. Downstream sprints (search filtering)
+    treat NEW and LOW differently.
+    """
+    if total_accesses < MIN_SAMPLES_FOR_SCORE:
+        return TIER_NEW
+    if score >= threshold_high:
+        return TIER_HIGH
+    if score >= threshold_medium:
+        return TIER_MEDIUM
+    return TIER_LOW
+
 
 @dataclass
 class CreatorReputationEntry:
@@ -209,6 +242,16 @@ class CreatorReputationTracker:
         return list(self._creators.keys())
 
     # ── Score ────────────────────────────────────────────
+
+    def tier_for(self, creator_id: str) -> str:
+        """Return the discrete tier label for this creator
+        (sprint 288). Cold-start / unknown creators return
+        TIER_NEW; otherwise tier follows the score-threshold
+        bands."""
+        e = self._creators.get(creator_id)
+        total = e.total_accesses if e else 0
+        score = self.score_for(creator_id)
+        return tier_for_score(score=score, total_accesses=total)
 
     def score_for(self, creator_id: str) -> float:
         """Return a [0.0, 1.0] reputation score for the

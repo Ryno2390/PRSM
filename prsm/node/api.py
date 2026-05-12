@@ -6033,12 +6033,53 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             # Get content metadata if available
             content_hash = None
             filename = None
+            creator_eth_address = None
             if node.content_index:
                 record = node.content_index.lookup(cid)
                 if record:
                     content_hash = record.content_hash
                     filename = record.filename
-            
+                    creator_eth_address = getattr(
+                        record, "creator_eth_address", None,
+                    )
+
+            # Sprint 288 — auto-record creator access against
+            # the marketplace reputation tracker. Best-effort;
+            # tracker exceptions caught + logged so telemetry
+            # failures never deny content retrieval. Skips
+            # silently when:
+            #   - tracker not wired
+            #   - creator_eth_address absent from content record
+            #     (content predates sprint-243 creator threading)
+            #   - no operator address (ftns_ledger unwired) —
+            #     better to skip than record an empty purchaser
+            _creator_tracker = getattr(
+                node, "_creator_reputation_tracker", None,
+            )
+            if _creator_tracker is not None and creator_eth_address:
+                _op_addr = None
+                _ledger = getattr(node, "ftns_ledger", None)
+                if _ledger is not None:
+                    _op_addr = getattr(
+                        _ledger, "_connected_address", None,
+                    )
+                if _op_addr:
+                    try:
+                        _creator_tracker.record_access(
+                            creator_id=creator_eth_address,
+                            purchaser_id=_op_addr,
+                            content_id=cid,
+                        )
+                    except Exception as _exc:  # noqa: BLE001
+                        logger.warning(
+                            "CreatorReputationTracker."
+                            "record_access failed: %s "
+                            "(creator=%s, cid=%s)",
+                            _exc,
+                            (creator_eth_address or "?")[:14],
+                            cid[:14],
+                        )
+
             # Encode content as base64 for JSON response
             data_b64 = base64.b64encode(content_bytes).decode('utf-8')
             
@@ -7056,11 +7097,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     def _creator_row(tracker, creator_id: str) -> Dict[str, Any]:
         e = tracker.get_entry(creator_id)
+        # Sprint 288 — tier always surfaces. Cold-start /
+        # unknown → TIER_NEW.
+        tier = tracker.tier_for(creator_id)
         if e is None:
             return {
                 "creator_id": creator_id,
                 "known": False,
                 "score": tracker.score_for(creator_id),
+                "tier": tier,
                 "total_accesses": 0,
                 "distinct_purchasers": 0,
                 "repeat_purchaser_count": 0,
@@ -7070,6 +7115,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         d = e.to_dict()
         d["known"] = True
         d["score"] = tracker.score_for(creator_id)
+        d["tier"] = tier
         return d
 
     @app.get(
