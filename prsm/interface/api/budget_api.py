@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from ..auth import get_current_user
 from prsm.core.models import UserInput, PRSMSession
@@ -43,7 +43,8 @@ class CreateBudgetRequest(BaseModel):
     category_allocations: Optional[Dict[str, Dict[str, Any]]] = None
     alerts: Optional[List[Dict[str, Any]]] = None
     
-    @validator('total_budget', 'max_auto_expand', 'expansion_increment', pre=True)
+    @field_validator('total_budget', 'max_auto_expand', 'expansion_increment', mode='before')
+    @classmethod
     def convert_to_decimal(cls, v):
         if v is not None:
             return Decimal(str(v))
@@ -81,7 +82,8 @@ class SpendingRequest(BaseModel):
     category: SpendingCategory
     description: str = Field(default="")
     
-    @validator('amount', pre=True)
+    @field_validator('amount', mode='before')
+    @classmethod
     def convert_to_decimal(cls, v):
         return Decimal(str(v))
 
@@ -93,11 +95,13 @@ class BudgetExpansionRequest(BaseModel):
     cost_breakdown: Optional[Dict[str, Decimal]] = None
     priority_level: str = Field(default="normal")
     
-    @validator('requested_amount', pre=True)
+    @field_validator('requested_amount', mode='before')
+    @classmethod
     def convert_to_decimal(cls, v):
         return Decimal(str(v))
-    
-    @validator('cost_breakdown', pre=True)
+
+    @field_validator('cost_breakdown', mode='before')
+    @classmethod
     def convert_breakdown_to_decimal(cls, v):
         if v is not None:
             return {k: Decimal(str(val)) for k, val in v.items()}
@@ -110,7 +114,8 @@ class ExpansionApprovalRequest(BaseModel):
     approved_amount: Optional[Decimal] = None
     reason: str = Field(default="")
     
-    @validator('approved_amount', pre=True)
+    @field_validator('approved_amount', mode='before')
+    @classmethod
     def convert_to_decimal(cls, v):
         if v is not None:
             return Decimal(str(v))

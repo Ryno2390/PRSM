@@ -20,7 +20,7 @@ RESTful API endpoints for the alpha testing program, including:
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import List, Optional
 from datetime import datetime
 
@@ -47,14 +47,16 @@ class AlphaRegistrationRequest(BaseModel):
     collaboration_consent: bool = False
     marketing_consent: bool = False
     
-    @validator('user_type')
+    @field_validator('user_type')
+    @classmethod
     def validate_user_type(cls, v):
         valid_types = [ut.value for ut in UserType]
         if v.lower() not in valid_types:
             raise ValueError(f"User type must be one of: {valid_types}")
         return v.lower()
-    
-    @validator('use_case')
+
+    @field_validator('use_case')
+    @classmethod
     def validate_use_case(cls, v):
         if len(v) < 10:
             raise ValueError("Use case description must be at least 10 characters")
@@ -84,21 +86,24 @@ class FeedbackRequest(BaseModel):
     rating: Optional[int] = None
     tags: List[str] = []
     
-    @validator('category')
+    @field_validator('category')
+    @classmethod
     def validate_category(cls, v):
         valid_categories = ["bug_report", "feature_request", "general_feedback", "quality_rating"]
         if v not in valid_categories:
             raise ValueError(f"Category must be one of: {valid_categories}")
         return v
-    
-    @validator('priority')
+
+    @field_validator('priority')
+    @classmethod
     def validate_priority(cls, v):
         valid_priorities = ["low", "medium", "high", "critical"]
         if v not in valid_priorities:
             raise ValueError(f"Priority must be one of: {valid_priorities}")
         return v
-    
-    @validator('rating')
+
+    @field_validator('rating')
+    @classmethod
     def validate_rating(cls, v):
         if v is not None and (v < 1 or v > 5):
             raise ValueError("Rating must be between 1 and 5")

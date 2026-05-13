@@ -5,7 +5,7 @@ Configuration Schemas
 Pydantic schemas for validating all PRSM configuration sections.
 """
 
-from pydantic import BaseModel, ConfigDict, Field, validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Dict, List, Optional
 from decimal import Decimal
 from enum import Enum
@@ -77,15 +77,17 @@ class NWTNConfig(BaseConfigSchema):
     cache_ttl_seconds: int = Field(3600, ge=60, description="Cache TTL in seconds")
     enable_parallel_processing: bool = Field(True, description="Enable parallel engine processing")
     
-    @validator('enabled_engines')
+    @field_validator('enabled_engines')
+    @classmethod
     def validate_engines(cls, v):
         allowed_engines = ["logical", "creative", "analytical", "intuitive", "analogical"]
         for engine in v:
             if engine not in allowed_engines:
                 raise ValueError(f"Invalid engine: {engine}. Allowed: {allowed_engines}")
         return v
-    
-    @validator('engine_weights')
+
+    @field_validator('engine_weights')
+    @classmethod
     def validate_weights(cls, v):
         for engine, weight in v.items():
             if not 0.0 <= weight <= 2.0:
@@ -145,7 +147,8 @@ class TokenomicsConfig(BaseConfigSchema):
     batch_transaction_threshold: int = Field(100, ge=1, description="Batch transaction threshold")
     transaction_fee_rate: float = Field(0.01, ge=0.0, le=0.1, description="Transaction fee rate")
     
-    @validator('thinking_mode_multipliers')
+    @field_validator('thinking_mode_multipliers')
+    @classmethod
     def validate_thinking_multipliers(cls, v):
         required_modes = ["quick", "intermediate", "deep"]
         for mode in required_modes:
@@ -181,9 +184,11 @@ class MarketplaceConfig(BaseConfigSchema):
     creator_revenue_share: float = Field(0.8, ge=0.5, le=0.95, description="Creator revenue share")
     enable_revenue_sharing: bool = Field(True, description="Enable revenue sharing")
     
-    @validator('creator_revenue_share')
-    def validate_revenue_share(cls, v, values):
-        marketplace_fee = values.get('marketplace_fee_rate', 0.05)
+    @field_validator('creator_revenue_share')
+    @classmethod
+    def validate_revenue_share(cls, v, info):
+        # V2 — sibling-field access via ValidationInfo.data
+        marketplace_fee = info.data.get('marketplace_fee_rate', 0.05)
         if v + marketplace_fee > 1.0:
             raise ValueError("Creator revenue share + marketplace fee cannot exceed 100%")
         return v
@@ -217,9 +222,10 @@ class DatabaseConfig(BaseConfigSchema):
     backup_interval_hours: int = Field(24, ge=1, le=168, description="Backup interval in hours")
     backup_retention_days: int = Field(30, ge=1, le=365, description="Backup retention in days")
     
-    @validator('port')
-    def validate_port(cls, v, values):
-        db_type = values.get('type')
+    @field_validator('port')
+    @classmethod
+    def validate_port(cls, v, info):
+        db_type = info.data.get('type')
         if db_type == DatabaseTypeEnum.POSTGRESQL and v != 5432:
             # Custom PostgreSQL port is allowed but logged
             pass
@@ -254,8 +260,9 @@ class SecurityConfig(BaseConfigSchema):
         description="Allowed CORS origins. Never use ['*'] in production."
     )
     
-    @validator('allowed_origins')
-    def validate_allowed_origins(cls, v, values):
+    @field_validator('allowed_origins')
+    @classmethod
+    def validate_allowed_origins(cls, v):
         env = os.getenv("PRSM_ENV", "development").lower()
         if "*" in v and env == "production":
             raise ValueError(
@@ -286,7 +293,8 @@ class SecurityConfig(BaseConfigSchema):
     failed_attempt_threshold: int = Field(5, ge=1, le=20, description="Failed attempt threshold")
     account_lockout_duration_minutes: int = Field(30, ge=5, le=1440, description="Account lockout duration")
     
-    @validator('jwt_secret_key')
+    @field_validator('jwt_secret_key')
+    @classmethod
     def validate_jwt_secret(cls, v):
         if len(v) < 32:
             raise ValueError("JWT secret key must be at least 32 characters long")
@@ -382,7 +390,8 @@ class LoggingConfig(BaseConfigSchema):
     enable_performance_logging: bool = Field(True, description="Enable performance logging")
     slow_query_threshold_ms: int = Field(1000, ge=100, description="Slow query threshold in ms")
     
-    @validator('log_file_path')
+    @field_validator('log_file_path')
+    @classmethod
     def validate_log_path(cls, v):
         log_dir = Path(v).parent
         if not log_dir.exists():
@@ -415,7 +424,8 @@ class SystemConfig(BaseConfigSchema):
     enable_metrics: bool = Field(True, description="Enable metrics collection")
     metrics_port: int = Field(9090, ge=1024, le=65535, description="Metrics server port")
     
-    @validator('data_directory', 'temp_directory', 'log_directory', 'cache_directory')
+    @field_validator('data_directory', 'temp_directory', 'log_directory', 'cache_directory')
+    @classmethod
     def validate_directories(cls, v):
         Path(v).mkdir(parents=True, exist_ok=True)
         return v

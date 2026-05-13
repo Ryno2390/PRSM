@@ -12,7 +12,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Dict, List, Optional, Any
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Column, String, DateTime, Text, Integer, Numeric, Boolean, ForeignKey
 from prsm.core.db_types import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -207,7 +207,8 @@ class PaymentRequest(BaseModel):
     webhook_url: Optional[str] = Field(default=None, description="Webhook URL for status updates")
     additional_data: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
     
-    @validator('fiat_amount')
+    @field_validator('fiat_amount')
+    @classmethod
     def validate_amount(cls, v):
         if v <= 0:
             raise ValueError('Amount must be positive')

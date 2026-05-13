@@ -18,7 +18,7 @@ from typing import Dict, Any, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Path
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 import structlog
 
 from prsm.core.auth import get_current_user
@@ -39,7 +39,8 @@ class ContributionProofSubmission(BaseModel):
     expected_value: Optional[Decimal] = Field(None, description="Expected contribution value")
     quality_claim: Optional[float] = Field(None, ge=0.0, le=1.0, description="Claimed quality score")
     
-    @validator('contribution_type')
+    @field_validator('contribution_type')
+    @classmethod
     def validate_contribution_type(cls, v):
         valid_types = [ct.value for ct in ContributionType]
         if v not in valid_types:

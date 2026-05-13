@@ -5,7 +5,7 @@ Pydantic Validation Schemas
 Comprehensive validation schemas for all PRSM API endpoints and data structures.
 """
 
-from pydantic import BaseModel, ConfigDict, validator, Field, root_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator, Field
 from typing import Optional, Dict, List, Any
 from decimal import Decimal
 from datetime import datetime
@@ -51,7 +51,8 @@ class BaseValidationSchema(BaseModel):
         extra="forbid",            # Forbid extra fields by default
     )
     
-    @root_validator(pre=True)
+    @model_validator(mode='before')
+    @classmethod
     def sanitize_string_fields(cls, values):
         """Sanitize all string fields"""
         if isinstance(values, dict):
@@ -75,7 +76,8 @@ class UserValidationSchema(BaseValidationSchema):
     user_id: str = Field(..., min_length=3, max_length=64, description="User identifier")
     user_tier: UserTierEnum = Field(UserTierEnum.STANDARD, description="User service tier")
     
-    @validator('user_id')
+    @field_validator('user_id')
+    @classmethod
     def validate_user_id(cls, v):
         return sanitize_user_id(v)
 
@@ -86,16 +88,19 @@ class QueryValidationSchema(BaseValidationSchema):
     query: str = Field(..., min_length=3, max_length=50000, description="User query text")
     user_id: str = Field(..., min_length=3, max_length=64, description="User identifier")
     query_id: Optional[str] = Field(None, max_length=128, description="Optional query identifier")
-    
-    @validator('query')
+
+    @field_validator('query')
+    @classmethod
     def validate_query_content(cls, v):
         return sanitize_query_content(v)
-    
-    @validator('user_id')
+
+    @field_validator('user_id')
+    @classmethod
     def validate_user_id(cls, v):
         return sanitize_user_id(v)
-    
-    @validator('query_id', pre=True)
+
+    @field_validator('query_id', mode='before')
+    @classmethod
     def validate_query_id(cls, v):
         if v is not None:
             # Generate query ID if not provided
@@ -147,7 +152,8 @@ class NWTNRequestSchema(QueryValidationSchema):
         description="Include detailed reasoning trace in response"
     )
     
-    @validator('context')
+    @field_validator('context')
+    @classmethod
     def validate_context(cls, v):
         if v is not None:
             # Limit context size
@@ -160,12 +166,12 @@ class NWTNRequestSchema(QueryValidationSchema):
                 )
         return v
     
-    @root_validator(skip_on_failure=True)
-    def validate_processing_requirements(cls, values):
+    @model_validator(mode='after')
+    def validate_processing_requirements(self):
         """Validate processing requirement combinations"""
-        thinking_mode = values.get('thinking_mode')
-        max_time = values.get('max_processing_time_seconds')
-        
+        thinking_mode = self.thinking_mode
+        max_time = self.max_processing_time_seconds
+
         # DEEP mode requires more time
         if thinking_mode == ThinkingModeEnum.DEEP and max_time < 300:
             raise BusinessLogicValidationError(
@@ -173,8 +179,8 @@ class NWTNRequestSchema(QueryValidationSchema):
                 business_rule="deep_mode_time_requirement",
                 field="max_processing_time_seconds"
             )
-        
-        return values
+
+        return self
 
 
 # Tokenomics validation schemas
@@ -184,11 +190,13 @@ class TokenomicsRequestSchema(BaseValidationSchema):
     operation_type: str = Field(..., min_length=1, max_length=50)
     amount: Optional[Decimal] = Field(None, ge=0, decimal_places=8)
     
-    @validator('user_id')
+    @field_validator('user_id')
+    @classmethod
     def validate_user_id(cls, v):
         return sanitize_user_id(v)
-    
-    @validator('operation_type')
+
+    @field_validator('operation_type')
+    @classmethod
     def validate_operation_type(cls, v):
         allowed_operations = [
             'query_cost_calculation', 'balance_check', 'transaction',
@@ -211,22 +219,25 @@ class PricingCalculationRequestSchema(TokenomicsRequestSchema):
     verbosity_level: VerbosityLevelEnum = Field(VerbosityLevelEnum.STANDARD)
     user_tier: UserTierEnum = Field(UserTierEnum.STANDARD)
     
-    @validator('query')
+    @field_validator('query')
+    @classmethod
     def validate_query_content(cls, v):
         return sanitize_query_content(v)
 
 
-# Marketplace validation schemas  
+# Marketplace validation schemas
 class MarketplaceRequestSchema(BaseValidationSchema):
     """Marketplace operation validation"""
     user_id: str = Field(..., min_length=3, max_length=64)
     operation: str = Field(..., min_length=1, max_length=50)
-    
-    @validator('user_id')
+
+    @field_validator('user_id')
+    @classmethod
     def validate_user_id(cls, v):
         return sanitize_user_id(v)
-    
-    @validator('operation')
+
+    @field_validator('operation')
+    @classmethod
     def validate_operation(cls, v):
         allowed_operations = [
             'search_assets', 'get_asset', 'create_asset', 'update_asset',
@@ -249,11 +260,13 @@ class AssetSearchSchema(MarketplaceRequestSchema):
     max_results: int = Field(20, ge=1, le=100)
     min_quality_score: float = Field(0.0, ge=0.0, le=1.0)
     
-    @validator('search_term')
+    @field_validator('search_term')
+    @classmethod
     def validate_search_term(cls, v):
         return sanitize_text_input(v, field_name="search_term")
-    
-    @validator('asset_type')
+
+    @field_validator('asset_type')
+    @classmethod
     def validate_asset_type(cls, v):
         if v is not None:
             allowed_types = [
@@ -281,15 +294,18 @@ class AssetCreationSchema(MarketplaceRequestSchema):
     tags: Optional[List[str]] = Field(None, max_items=20)
     metadata: Optional[Dict[str, Any]] = Field(None)
     
-    @validator('name')
+    @field_validator('name')
+    @classmethod
     def validate_name(cls, v):
         return sanitize_text_input(v, field_name="name")
-    
-    @validator('description')
+
+    @field_validator('description')
+    @classmethod
     def validate_description(cls, v):
         return sanitize_text_input(v, field_name="description")
-    
-    @validator('tags')
+
+    @field_validator('tags')
+    @classmethod
     def validate_tags(cls, v):
         if v is not None:
             # Sanitize each tag
@@ -301,8 +317,9 @@ class AssetCreationSchema(MarketplaceRequestSchema):
                         sanitized_tags.append(sanitized_tag)
             return sanitized_tags
         return v
-    
-    @validator('metadata')
+
+    @field_validator('metadata')
+    @classmethod
     def validate_metadata(cls, v):
         if v is not None:
             # Limit metadata size
@@ -342,14 +359,16 @@ class BatchRequestSchema(BaseValidationSchema):
     requests: List[Dict[str, Any]] = Field(..., min_items=1, max_items=100)
     batch_id: Optional[str] = Field(None, max_length=128)
     
-    @validator('batch_id', pre=True)
+    @field_validator('batch_id', mode='before')
+    @classmethod
     def generate_batch_id(cls, v):
         if v is None:
             import uuid
             return str(uuid.uuid4())
         return v
     
-    @validator('requests')
+    @field_validator('requests')
+    @classmethod
     def validate_request_size(cls, v):
         # Limit total batch size
         total_size = sum(len(str(req)) for req in v)
