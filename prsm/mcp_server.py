@@ -11170,10 +11170,33 @@ async def handle_prsm_bootstrap_status(
             f"  reconnect_successes:    "
             f"{result.get('reconnect_successes', 0)}",
         ]
+        # Sprint 375 — surface the active bootstrap URL +
+        # fallback config so operators see SPOF posture at
+        # a glance.
+        active_url = result.get("active_url")
+        if active_url is not None:
+            lines.append(f"  active_url:             {active_url}")
         bnodes = result.get("bootstrap_nodes") or []
         if bnodes:
             lines.append(f"  bootstrap_nodes ({len(bnodes)}):")
             for n in bnodes:
+                lines.append(f"    {n}")
+        fb_enabled = result.get(
+            "bootstrap_fallback_enabled",
+        )
+        fb_nodes = result.get(
+            "bootstrap_fallback_nodes",
+        ) or []
+        if fb_enabled is not None:
+            lines.append(
+                f"  fallback_enabled:       {fb_enabled}"
+            )
+        if fb_nodes:
+            lines.append(
+                f"  bootstrap_fallback_nodes "
+                f"({len(fb_nodes)}):"
+            )
+            for n in fb_nodes:
                 lines.append(f"    {n}")
         return "\n".join(lines)
 

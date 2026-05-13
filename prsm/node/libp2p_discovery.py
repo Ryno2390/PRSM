@@ -68,17 +68,41 @@ class Libp2pDiscovery:
         transport: Any,
         bootstrap_nodes: Optional[List[str]] = None,
         gossip: Optional[Any] = None,
+        bootstrap_fallback_nodes: Optional[List[str]] = None,
+        bootstrap_fallback_enabled: bool = True,
         **kwargs: Any,
     ) -> None:
         """
         Args:
             transport:       A ``Libp2pTransport`` instance.
-            bootstrap_nodes: Multiaddr / host:port / ws(s):// addresses.
-            gossip:          Optional ``Libp2pGossip`` for ephemeral announcements.
+            bootstrap_nodes: Primary multiaddr / host:port / ws(s)://
+                             addresses (typically the canonical
+                             ``wss://bootstrap1.prsm-network.com:8765``).
+            gossip:          Optional ``Libp2pGossip`` for ephemeral
+                             announcements.
+            bootstrap_fallback_nodes:
+                             Sprint 375 — multi-region backup hosts
+                             tried in order when primary returns 0
+                             connections. Closes the §7.29 honest-
+                             scope SPOF: pre-sprint-375, libp2p-mode
+                             operators ignored the EU+APAC fallback
+                             list from NodeConfig and stuck in
+                             degraded mode whenever the US droplet
+                             was unreachable.
+            bootstrap_fallback_enabled:
+                             Operator-toggleable. When False, fallback
+                             nodes are ignored (single-host posture
+                             — backwards-compat for pre-375 deploys).
             **kwargs:        Ignored (drop-in compatibility).
         """
         self.transport = transport
         self.bootstrap_nodes: List[str] = bootstrap_nodes or []
+        self.bootstrap_fallback_nodes: List[str] = (
+            bootstrap_fallback_nodes or []
+        )
+        self.bootstrap_fallback_enabled: bool = (
+            bootstrap_fallback_enabled
+        )
         self.gossip = gossip
 
         # Peer capability index — node_id → PeerInfo
@@ -179,13 +203,25 @@ class Libp2pDiscovery:
             Number of successfully connected nodes.
         """
         connected = 0
-        self._bootstrap_status["attempted"] = len(self.bootstrap_nodes)
+        candidates = self._candidate_bootstrap_addresses()
+        self._bootstrap_status["attempted"] = len(candidates)
+        # Sprint 375 — `active_url` records the candidate that
+        # produced the first successful connect. Reset per
+        # bootstrap() invocation so re-bootstrap reflects
+        # current state.
+        self._bootstrap_status["active_url"] = None
 
-        for addr in self.bootstrap_nodes:
+        for addr in candidates:
             try:
                 peer = await self.transport.connect_to_peer(addr)
                 if peer is not None:
                     connected += 1
+                    if self._bootstrap_status[
+                        "active_url"
+                    ] is None:
+                        self._bootstrap_status[
+                            "active_url"
+                        ] = addr
                     logger.debug("Bootstrap connected to %s", addr)
                 else:
                     logger.debug("Bootstrap failed for %s (returned None)", addr)
@@ -193,28 +229,66 @@ class Libp2pDiscovery:
                 logger.debug("Bootstrap error for %s: %s", addr, exc)
 
         # Sprint 164 — BootstrapClient fallback for ws:// / wss://
-        # URLs when primary libp2p path returned zero.
+        # URLs when primary libp2p path returned zero. Sprint 375
+        # extends to consume the merged primary+fallback list.
         if connected == 0:
             wsocket_addrs = [
-                a for a in self.bootstrap_nodes
+                a for a in candidates
                 if a.startswith(("ws://", "wss://"))
             ]
             if wsocket_addrs and await self._try_bootstrap_client(
                 wsocket_addrs,
             ):
                 connected = 1
+                # _try_bootstrap_client iterates internally and
+                # sets _bootstrap_active_url on success via the
+                # extended sprint-375 hook below.
+                bc_url = getattr(
+                    self, "_bootstrap_active_url", None,
+                )
+                if bc_url is not None:
+                    self._bootstrap_status[
+                        "active_url"
+                    ] = bc_url
 
         self._bootstrap_status["connected"] = connected
 
-        if connected == 0 and self.bootstrap_nodes:
+        if connected == 0 and candidates:
             self._bootstrap_status["degraded"] = True
             logger.warning(
-                "Libp2pDiscovery: all %d bootstrap node(s) unreachable; "
-                "operating in degraded mode",
-                len(self.bootstrap_nodes),
+                "Libp2pDiscovery: all %d bootstrap node(s) "
+                "unreachable; operating in degraded mode",
+                len(candidates),
             )
 
         return connected
+
+    def _candidate_bootstrap_addresses(self) -> List[str]:
+        """Sprint 375 — merged primary + fallback list with
+        dedup. Mirrors the pattern from PeerDiscovery
+        (prsm/node/discovery.py:309-327) so libp2p + WebSocket
+        discovery paths behave consistently when the canonical
+        US droplet is unreachable.
+
+        Order matters: primary tried first, fallback after.
+        When fallback is disabled at construction, returns
+        the primary list verbatim (backwards-compat for pre-
+        sprint-375 single-host configs).
+        """
+        candidates: List[str] = []
+        seen: set = set()
+        for addr in self.bootstrap_nodes:
+            if addr in seen:
+                continue
+            candidates.append(addr)
+            seen.add(addr)
+        if self.bootstrap_fallback_enabled:
+            for addr in self.bootstrap_fallback_nodes:
+                if addr in seen:
+                    continue
+                candidates.append(addr)
+                seen.add(addr)
+        return candidates
 
     async def _try_bootstrap_client(self, addrs: List[str]) -> bool:
         """Sprint 164 — BootstrapClient register/heartbeat fallback.
@@ -260,6 +334,11 @@ class Libp2pDiscovery:
                 peers = await client.connect()
                 await client.start_heartbeat()
                 self._bootstrap_client = client
+                # Sprint 375 — record the URL that produced
+                # the successful registration so /bootstrap/
+                # status surfaces it. Read back in bootstrap()
+                # after _try_bootstrap_client returns True.
+                self._bootstrap_active_url = addr
                 self._hydrate_peers_from_bootstrap(peers)
                 logger.info(
                     "Libp2pDiscovery: BootstrapClient connected via "
@@ -781,6 +860,22 @@ class Libp2pDiscovery:
             "connected": self._bootstrap_status["connected"],
             "degraded": self._bootstrap_status["degraded"],
             "bootstrap_nodes": list(self.bootstrap_nodes),
+            # Sprint 375 — surface fallback config + the
+            # active candidate URL so operators see which
+            # bootstrap host their node is actually using.
+            # Closes the §7.29 honest-scope SPOF visibility
+            # gap — pre-fix, operators had no way to tell
+            # whether a degraded node was failing-primary
+            # or failing-all.
+            "bootstrap_fallback_nodes": list(
+                self.bootstrap_fallback_nodes
+            ),
+            "bootstrap_fallback_enabled": (
+                self.bootstrap_fallback_enabled
+            ),
+            "active_url": self._bootstrap_status.get(
+                "active_url",
+            ),
             # Sprint 167 — last-poll snapshot of peers the bootstrap
             # server knows about (excluding self).
             "discovered_peer_count": self._bootstrap_status.get(

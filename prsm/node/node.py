@@ -1623,6 +1623,17 @@ class PRSMNode:
                 transport=self.transport,
                 bootstrap_nodes=self.config.bootstrap_nodes,
                 gossip=self.gossip,
+                # Sprint 375 — thread the multi-region fallback
+                # list from NodeConfig so libp2p-mode operators
+                # get the same SPOF protection that WebSocket-
+                # mode operators have had since the original
+                # PeerDiscovery design.
+                bootstrap_fallback_nodes=(
+                    self.config.bootstrap_fallback_nodes
+                ),
+                bootstrap_fallback_enabled=(
+                    self.config.bootstrap_fallback_enabled
+                ),
             )
             logger.info("Using libp2p transport backend")
         else:
