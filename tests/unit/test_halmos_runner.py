@@ -57,6 +57,27 @@ def test_catalog_has_escrow_pool_solvency_proof():
     assert "INV-EP-1" in entry["runtime_invariants"]
 
 
+def test_catalog_has_speculation_rollback_math_proof():
+    """Sprint 367 ships SpeculationRollbackMathSpec — first
+    symbolic proof against the streaming-inference subsystem
+    (off-chain Python algorithm structurally mirrored)."""
+    assert (
+        "SpeculationRollbackMathSpec"
+        in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG[
+        "SpeculationRollbackMathSpec"
+    ]
+    # No runtime invariant ID — this is a streaming-
+    # inference algorithm, not an on-chain invariant.
+    # Empty list is the canonical "no runtime mirror" signal.
+    assert entry["runtime_invariants"] == []
+    assert (
+        entry["mirrors_runtime_contract"]
+        == "streaming_inference"
+    )
+
+
 def test_catalog_has_role_disarm_access_control_proof():
     """Sprint 363 ships RoleDisarmAccessControlSpec —
     structural proof of OZ AccessControl uncircumventability
@@ -369,6 +390,36 @@ def test_live_halmos_ftns_supply_cap():
     ), proof_names
     assert any(
         "check_mint_preserves_cap" in n
+        for n in proof_names
+    ), proof_names
+
+
+@pytest.mark.requires_halmos
+def test_live_halmos_speculation_rollback_math():
+    """Real halmos invocation against the speculative-
+    decoding rollback-math invariants. Eight proofs / 14
+    symbolic paths total. Covers the Phase 3.x.11.y.x
+    critical fix + adaptive-K state machine bounds."""
+    runner = HalmosRunner(timeout_seconds=120)
+    if not runner.is_available():
+        pytest.skip("halmos or forge not on PATH")
+    suite = runner.run("SpeculationRollbackMathSpec")
+    assert suite.status == SymbolicProofStatus.PASSED, (
+        f"SpeculationRollbackMathSpec failed: "
+        f"{suite.to_dict()}"
+    )
+    proof_names = {p.name for p in suite.proofs}
+    # Headline proofs must be present + green
+    assert any(
+        "check_rollback_math_post_fix_bounded" in n
+        for n in proof_names
+    ), proof_names
+    assert any(
+        "check_pre_fix_formula_undercounts" in n
+        for n in proof_names
+    ), proof_names
+    assert any(
+        "check_adaptive_k_stays_in_range" in n
         for n in proof_names
     ), proof_names
 

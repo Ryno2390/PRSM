@@ -354,6 +354,28 @@ SYMBOLIC_PROOF_CATALOG: Dict[str, Dict[str, Any]] = {
             "per-requester escrow accumulator."
         ),
     },
+    "SpeculationRollbackMathSpec": {
+        "mirrors_runtime_contract": "streaming_inference",
+        "runtime_invariants": [],
+        "description": (
+            "Symbolic proof of two pure-arithmetic "
+            "invariants from the speculative-decoding "
+            "streaming-inference subsystem (audit-prep "
+            "§7.11+§7.12). Covers: (a) the Phase 3.x.11.y.x "
+            "critical rollback-math fix (cached_extra = "
+            "(k_round + 1) - len(emitted); pre-fix formula "
+            "(accepted_count + 1) - len(emitted) under-"
+            "counted in cap_hit_mid_emit case); (b) adaptive-"
+            "K state machine bounded transitions (halve <25%, "
+            "double >75%, hold mid; floor 1, ceiling k_max). "
+            "Source-identity-mirrors "
+            "prsm/compute/chain_rpc/client.py:1431 + 1463-"
+            "1466. No runtime invariant counterpart — "
+            "streaming-inference subsystem isn't on-chain, "
+            "so the runtime probe doesn't apply; symbolic "
+            "verification IS the canonical layer."
+        ),
+    },
     "RoleDisarmAccessControlSpec": {
         "mirrors_runtime_contract": "ftns_token",
         "runtime_invariants": [
