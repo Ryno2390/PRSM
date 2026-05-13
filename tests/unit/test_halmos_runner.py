@@ -332,21 +332,75 @@ def test_proof_result_to_dict_serializable():
 # ── subprocess timeout handling ──────────────────────
 
 
-# NOTE: a live end-to-end test that actually invokes
-# halmos against the FTNSSupplyCapSpec proof was prototyped
-# but conflicts with tests/conftest.py:602 session-scoped
-# autouse fixture that mocks subprocess.run globally for
-# external-connection safety in CI. The 17 mocked-output
-# tests above cover the parser + fail-soft surface; the
-# Solidity spec itself is the formal proof and is verified
-# manually via:
-#   PATH="$PWD/.venv/bin:$HOME/.foundry/bin:$PATH" \
-#   cd contracts/symbolic-proofs && \
-#   halmos --contract FTNSSupplyCapSpec
-# Expected output: "Symbolic test result: 3 passed; 0 failed"
-# Future sprint may carve a tools-required marker that
-# overrides the autouse subprocess mock for a subset of
-# integration tests; out of scope for sprint 360.
+# Sprint 366 — live end-to-end tests against real halmos.
+# Uses the @pytest.mark.requires_halmos marker carved in
+# tests/conftest.py to surgically bypass the session-wide
+# subprocess mock. Tests auto-skip when halmos / forge
+# isn't on PATH so CI environments without the tools still
+# pass — but when both are present, every PR touching a
+# spec contract gets symbolically verified.
+
+
+@pytest.mark.requires_halmos
+def test_live_halmos_ftns_supply_cap():
+    """Real halmos invocation against FTNSSupplyCapSpec.
+    Proves the supply-cap invariant on every test run."""
+    runner = HalmosRunner(timeout_seconds=120)
+    if not runner.is_available():
+        pytest.skip(
+            "halmos or forge not on PATH; skipping live "
+            "integration test (mocked-output tests above "
+            "cover the runner's parsing + fail-soft surface)"
+        )
+    suite = runner.run("FTNSSupplyCapSpec")
+    assert suite.status == SymbolicProofStatus.PASSED, (
+        f"FTNSSupplyCapSpec failed symbolic verification: "
+        f"{suite.to_dict()}"
+    )
+    # All 3 proofs from the spec must be present + passing
+    proof_names = {p.name for p in suite.proofs}
+    assert any(
+        "check_max_supply_constant_value" in n
+        for n in proof_names
+    ), proof_names
+    assert any(
+        "check_post_construction_in_cap" in n
+        for n in proof_names
+    ), proof_names
+    assert any(
+        "check_mint_preserves_cap" in n
+        for n in proof_names
+    ), proof_names
+
+
+@pytest.mark.requires_halmos
+def test_live_halmos_royalty_distributor_solvency():
+    """Real halmos invocation against the canonical
+    'this is what halmos is for' solvency proof. Six
+    proofs / 66 explored symbolic paths."""
+    runner = HalmosRunner(timeout_seconds=120)
+    if not runner.is_available():
+        pytest.skip("halmos or forge not on PATH")
+    suite = runner.run("RoyaltyDistributorSolvencySpec")
+    assert suite.status == SymbolicProofStatus.PASSED, (
+        f"RoyaltyDistributorSolvencySpec failed: "
+        f"{suite.to_dict()}"
+    )
+    # The headline solvency proofs must be present + green
+    proof_names = {p.name for p in suite.proofs}
+    assert any(
+        "check_distributeRoyalty_preserves_solvency" in n
+        for n in proof_names
+    ), proof_names
+    assert any(
+        "check_claim_preserves_solvency" in n
+        for n in proof_names
+    ), proof_names
+    assert any(
+        "check_recoverStranded_does_not_decrease_claimable"
+        in n
+        for n in proof_names
+    ), proof_names
 
 
 def test_runner_handles_timeout(tmp_path):

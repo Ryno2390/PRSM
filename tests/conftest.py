@@ -599,18 +599,96 @@ def mock_http_requests():
         }
 
 
+# Sprint 366 — refactor session-wide subprocess mock to use explicit
+# patcher objects stored module-level. The `requires_halmos` marker
+# fixture below uses these references to surgically stop / restart the
+# mocks for tests that legitimately need real subprocess invocation
+# (e.g., halmos live integration tests).
+_subprocess_run_patcher = None
+_subprocess_popen_patcher = None
+
+
+def _apply_subprocess_mocks():
+    """Start subprocess patches + configure canonical return shape.
+    Idempotent — safe to call after _stop_subprocess_mocks()."""
+    global _subprocess_run_patcher, _subprocess_popen_patcher
+    _subprocess_run_patcher = patch('subprocess.run')
+    _subprocess_popen_patcher = patch('subprocess.Popen')
+    mock_run = _subprocess_run_patcher.start()
+    mock_popen = _subprocess_popen_patcher.start()
+    mock_run.return_value = Mock(
+        returncode=0, stdout=b'', stderr=b'',
+    )
+    mock_popen.return_value = Mock(
+        returncode=0,
+        communicate=lambda **kwargs: (b'', b''),
+    )
+
+
+def _stop_subprocess_mocks():
+    """Stop the patches if active; tolerant of already-stopped state."""
+    global _subprocess_run_patcher, _subprocess_popen_patcher
+    if _subprocess_run_patcher:
+        try:
+            _subprocess_run_patcher.stop()
+        except RuntimeError:
+            pass  # Already stopped
+        _subprocess_run_patcher = None
+    if _subprocess_popen_patcher:
+        try:
+            _subprocess_popen_patcher.stop()
+        except RuntimeError:
+            pass
+        _subprocess_popen_patcher = None
+
+
 @pytest.fixture(scope="session", autouse=True)
 def mock_external_connections_early():
-    """Very early fixture to mock external connections before test collection"""
-    # Mock subprocess calls that might try to connect
-    # NOTE: We don't mock socket.socket as it breaks asyncio event loop initialization
-    with patch('subprocess.run') as mock_run, \
-         patch('subprocess.Popen') as mock_popen:
-        
-        mock_run.return_value = Mock(returncode=0, stdout=b'', stderr=b'')
-        mock_popen.return_value = Mock(returncode=0, communicate=lambda **kwargs: (b'', b''))
-        
+    """Very early fixture to mock external connections before test collection.
+
+    Tests marked @pytest.mark.requires_halmos get the mock temporarily
+    stopped for their duration — see _allow_real_subprocess_for_marked_tests
+    below. All other tests are unaffected; the mock stays active.
+
+    NOTE: We don't mock socket.socket as it breaks asyncio event loop
+    initialization.
+    """
+    _apply_subprocess_mocks()
+    yield
+    _stop_subprocess_mocks()
+
+
+@pytest.fixture(autouse=True)
+def _allow_real_subprocess_for_marked_tests(request):
+    """Sprint 366 — surgical bypass for the session-wide subprocess mock.
+
+    Tests decorated with @pytest.mark.requires_halmos get real
+    subprocess.run / subprocess.Popen for their duration; the mock is
+    re-applied after the test completes (or fails). All other tests
+    inherit the session-wide mock unchanged.
+
+    This closes the §7.34 honest-scope item — halmos symbolic-execution
+    proofs can now be verified in CI rather than only via manual CLI
+    invocation. The marker is opt-in (per-test) so the broad subprocess-
+    safety posture remains the default.
+
+    Usage:
+        @pytest.mark.requires_halmos
+        def test_my_symbolic_proof():
+            runner = HalmosRunner()
+            if not runner.is_available():
+                pytest.skip("halmos/forge not installed")
+            suite = runner.run("MySpec")
+            assert suite.status == SymbolicProofStatus.PASSED
+    """
+    if 'requires_halmos' not in request.keywords:
         yield
+        return
+    _stop_subprocess_mocks()
+    try:
+        yield
+    finally:
+        _apply_subprocess_mocks()
 
 
 @pytest.fixture(autouse=True)
@@ -1307,10 +1385,11 @@ def pytest_configure(config):
     markers = [
         "slow: marks tests as slow (may take several seconds)",
         "integration: marks tests as integration tests",
-        "unit: marks tests as unit tests", 
+        "unit: marks tests as unit tests",
         "performance: marks tests as performance/benchmark tests",
         "network: marks tests that require network simulation",
-        "api: marks tests that test API endpoints"
+        "api: marks tests that test API endpoints",
+        "requires_halmos: bypasses the session-wide subprocess mock so the test can invoke real halmos/forge; auto-skips when tools aren't on PATH",
     ]
     
     for marker in markers:

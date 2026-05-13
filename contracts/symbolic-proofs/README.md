@@ -111,23 +111,58 @@ else:
 | `EscrowPoolSolvencySpec` | `EscrowPool.{deposit,withdraw,settleFromRequester}` (lines 119-192) | INV-EP-1 | 5 paths on `check_settle_preserves_solvency`; 5 paths on `check_withdraw_preserves_solvency` |
 | `RoleDisarmAccessControlSpec` | OZ AccessControl `{grantRole,revokeRole}` admin-gating | INV-FT-3, INV-FT-4, INV-FT-5 | 3 paths on `check_grant_role_admin_gated`; 4 paths on `check_revoke_role_admin_gated` |
 
+## CI integration via `requires_halmos` marker (sprint 366)
+
+The project-wide `tests/conftest.py:602` autouse fixture
+mocks `subprocess.run` globally for external-connection
+safety. Halmos legitimately needs `subprocess.run` to
+invoke its own binary — so sprint 366 carved a per-test
+marker that surgically restores the real subprocess for
+marked tests only:
+
+```python
+import pytest
+from prsm.economy.web3.halmos_runner import HalmosRunner
+
+@pytest.mark.requires_halmos
+def test_my_proof():
+    runner = HalmosRunner()
+    if not runner.is_available():
+        pytest.skip("halmos/forge not installed")
+    suite = runner.run("MySpec")
+    assert suite.status.value == "passed", suite.to_dict()
+```
+
+Marker semantics:
+- Tests WITHOUT the marker keep the session-wide mock
+  (default — preserves existing test infrastructure).
+- Tests WITH the marker get real `subprocess.run` for
+  their duration; mock is re-applied after the test.
+- Marker auto-skips when halmos / forge aren't on PATH
+  (runner.is_available() returns False) — CI environments
+  without the tools still pass cleanly.
+
+To run halmos-marked tests in CI, install both tools:
+
+```
+pip install halmos && curl -L https://foundry.paradigm.xyz | bash && foundryup
+```
+
+Then ensure they're on `$PATH` when invoking pytest.
+
 ## Honest scope
 
-This is **sprint 360 proof-of-concept**. Mature symbolic-
-proof coverage requires:
-
 - All 20 runtime invariants from §14 item 4 mirrored in
-  symbolic specs (incremental sprints).
-- CI gate that runs halmos on every PR touching the spec
-  contracts. Currently the live `subprocess.run` is
-  mocked in pytest by `tests/conftest.py` so CI doesn't
-  invoke halmos directly — proofs are verified manually
-  during development.
+  symbolic specs — 16 done, 4 deferred (state-dependent;
+  runtime probe IS the right layer for those).
 - Symbolic proofs against the actual canonical contracts
   (FTNSTokenSimple, RoyaltyDistributor, etc.) rather than
   structurally-equivalent minimal mocks. Doable but
   requires modeling IERC20 + IProvenanceRegistry as
   symbolic backing contracts; deferred.
+- Source-identity CI parity check between spec contracts
+  + canonical source (would catch silent drift if
+  someone modifies one without the other); deferred.
 
 ## References
 
