@@ -362,6 +362,24 @@ SYMBOLIC_PROOF_CATALOG: Dict[str, Dict[str, Any]] = {
             "per-requester escrow accumulator."
         ),
     },
+    "M2ResponseSizePaddingSpec": {
+        "mirrors_runtime_contract": "streaming_inference",
+        "runtime_invariants": [],
+        "description": (
+            "Symbolic proof of the Phase 3.x.11.q.x M2 "
+            "response-size padding invariant (audit-prep "
+            "§7.15). For ALL input text byte lengths + ALL "
+            "codepoint-boundary dropouts (0-3 bytes), the "
+            "output is EXACTLY pad_to_bytes — closes the "
+            "M2 response-size leak where un-padded responses "
+            "leaked output-content length on the wire. Plus "
+            "finish_reason invariants: preserve on under/"
+            "exact-match branches, override to length_capped "
+            "on truncate branch. Source-identity-mirrors "
+            "prsm/compute/chain_rpc/tier_c_sharded_executors"
+            ".py:_pad_or_truncate_utf8 (208-253)."
+        ),
+    },
     "ChunkStreamingBoundsSpec": {
         "mirrors_runtime_contract": "streaming_inference",
         "runtime_invariants": [],

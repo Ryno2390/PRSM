@@ -57,6 +57,21 @@ def test_catalog_has_escrow_pool_solvency_proof():
     assert "INV-EP-1" in entry["runtime_invariants"]
 
 
+def test_catalog_has_m2_response_size_padding_proof():
+    """Sprint 369 ships M2ResponseSizePaddingSpec — Phase
+    3.x.11.q.x response-size leak closure. Off-chain
+    target like sprints 367-368."""
+    assert (
+        "M2ResponseSizePaddingSpec" in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG["M2ResponseSizePaddingSpec"]
+    assert entry["runtime_invariants"] == []
+    assert (
+        entry["mirrors_runtime_contract"]
+        == "streaming_inference"
+    )
+
+
 def test_catalog_has_chunk_streaming_bounds_proof():
     """Sprint 368 ships ChunkStreamingBoundsSpec — H1
     bounded-iterator invariant + relay-defense binding.
@@ -415,6 +430,35 @@ def test_live_halmos_ftns_supply_cap():
     ), proof_names
     assert any(
         "check_mint_preserves_cap" in n
+        for n in proof_names
+    ), proof_names
+
+
+@pytest.mark.requires_halmos
+def test_live_halmos_m2_response_size_padding():
+    """Real halmos invocation against the M2 response-size
+    padding invariant — proves output_bytes == pad_to_bytes
+    for ALL inputs regardless of codepoint-boundary
+    dropout."""
+    runner = HalmosRunner(timeout_seconds=120)
+    if not runner.is_available():
+        pytest.skip("halmos or forge not on PATH")
+    suite = runner.run("M2ResponseSizePaddingSpec")
+    assert suite.status == SymbolicProofStatus.PASSED, (
+        f"M2ResponseSizePaddingSpec failed: "
+        f"{suite.to_dict()}"
+    )
+    proof_names = {p.name for p in suite.proofs}
+    assert any(
+        "check_output_length_equals_pad_target" in n
+        for n in proof_names
+    ), proof_names
+    assert any(
+        "check_dropout_does_not_change_output_length" in n
+        for n in proof_names
+    ), proof_names
+    assert any(
+        "check_truncate_branch_overrides_finish" in n
         for n in proof_names
     ), proof_names
 

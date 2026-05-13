@@ -112,6 +112,7 @@ else:
 | `RoleDisarmAccessControlSpec` | OZ AccessControl `{grantRole,revokeRole}` admin-gating | INV-FT-3, INV-FT-4, INV-FT-5 | 3 paths on `check_grant_role_admin_gated`; 4 paths on `check_revoke_role_admin_gated` |
 | `SpeculationRollbackMathSpec` | `prsm/compute/chain_rpc/client.py` rollback math (line 1431) + adaptive-K transition (lines 1463-1466) | (off-chain — no runtime invariant counterpart; audit-prep §7.11+§7.12) | 2 paths on `check_rollback_math_post_fix_bounded`; 5 paths on `check_adaptive_k_stays_in_range` |
 | `ChunkStreamingBoundsSpec` | `prsm/compute/chain_rpc/server.py:1960-1994` H1 bounded-iterator + per-chunk request_id binding | (off-chain — audit-prep §7.3 Phase 3.x.7.1) | 65 paths on `check_accepted_bounded_by_expected` with `--loop 32`; 111 total |
+| `M2ResponseSizePaddingSpec` | `prsm/compute/chain_rpc/tier_c_sharded_executors.py:208-253` `_pad_or_truncate_utf8` | (off-chain — audit-prep §7.15 Phase 3.x.11.q.x) | 5 paths on `check_output_length_equals_pad_target`; 14 total |
 
 ## CI integration via `requires_halmos` marker (sprint 366)
 
