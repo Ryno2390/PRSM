@@ -43,7 +43,7 @@
  *     --ftns-token 0x5276a3756C85f2E9e46f6D34386167a209aa16e5 \
  *     --usdc-token 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
  *     --router 0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43 \
- *     --safe-address 0x91b0000000000000000000000000000000005791 \
+ *     --safe-address 0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791 \
  *     --ftns-amount 1000000 \
  *     --usdc-amount 250000 \
  *     --out /tmp/aerodrome-seed-bundle.json

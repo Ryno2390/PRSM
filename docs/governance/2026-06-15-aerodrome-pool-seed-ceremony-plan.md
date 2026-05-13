@@ -183,7 +183,7 @@ node contracts/scripts/build-aerodrome-pool-seed-tx.js \
   --network base-mainnet \
   --ftns-amount 1000000 \
   --usdc-amount 250000 \
-  --safe-address 0x91b0000000000000000000000000000000005791 \
+  --safe-address 0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791 \
   --router 0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43 \
   --out /tmp/aerodrome-seed-bundle.json
 ```
@@ -199,7 +199,7 @@ Run the verification script immediately after the 3rd tx confirms:
 ```bash
 node contracts/scripts/verify-aerodrome-pool-seed.js \
   --network base-mainnet \
-  --safe-address 0x91b0000000000000000000000000000000005791
+  --safe-address 0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791
 ```
 
 The script asserts:

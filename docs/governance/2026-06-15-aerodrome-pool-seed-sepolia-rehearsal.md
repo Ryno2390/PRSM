@@ -79,17 +79,17 @@ This forces **Option B (Anvil fork)** as the only path that exercises the real A
 anvil --fork-url https://mainnet.base.org --port 8545 --block-time 1 &
 
 # In another terminal: impersonate Foundation Safe so we can send txs from it
-cast rpc anvil_impersonateAccount 0x91b0000000000000000000000000000000005791 \
+cast rpc anvil_impersonateAccount 0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791 \
   --rpc-url http://127.0.0.1:8545
 
 # Top up the impersonated Safe with ETH for gas
-cast rpc anvil_setBalance 0x91b0000000000000000000000000000000005791 \
+cast rpc anvil_setBalance 0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791 \
   0x56BC75E2D63100000 --rpc-url http://127.0.0.1:8545  # 100 ETH
 
 # Confirm FTNS balance on the impersonated Safe (should already hold 100M from
 # the 2026-05-06 mainnet migration captured in the fork state)
 cast call 0x5276a3756C85f2E9e46f6D34386167a209aa16e5 \
-  "balanceOf(address)(uint256)" 0x91b0000000000000000000000000000000005791 \
+  "balanceOf(address)(uint256)" 0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791 \
   --rpc-url http://127.0.0.1:8545
 ```
 
