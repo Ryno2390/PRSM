@@ -104,12 +104,18 @@ class ResourceConfigResponse(BaseModel):
 
 class ContentUploadRequest(BaseModel):
     """Request body for uploading text content."""
-    # Sprint 208 — text Pydantic ceiling matches the default
-    # PRSM_MAX_UPLOAD_BYTES (10MB). Endpoint env-knob lets the
-    # operator raise the runtime cap, but a hard Pydantic ceiling
-    # prevents a 1GB JSON from being materialized in memory just
-    # to be 413'd a microsecond later.
-    text: str = Field(..., max_length=10 * 1024 * 1024)
+    # Sprint 208 added a 10MB Pydantic max_length as a DoS
+    # guard. Sprint 333 bumped it to 100MB because the previous
+    # static cap collided with the sprint 102 contract — when
+    # an operator sets PRSM_MAX_UPLOAD_BYTES>10MB intending to
+    # accept larger uploads, the Pydantic validator rejected
+    # with 422 before the env-aware 413 path could fire. The
+    # 100MB ceiling is the policy max: anything larger should
+    # use /content/upload/shard. The runtime env-driven cap
+    # still fires inside the handler (`text_bytes > _size_cap`)
+    # so operators get the canonical 413 with
+    # PRSM_MAX_UPLOAD_BYTES in the detail message.
+    text: str = Field(..., max_length=100 * 1024 * 1024)
     filename: str = Field(default="document.txt", max_length=512)
     # Sprint 160 — Pydantic field constraints. Pre-fix royalty_rate
     # and replicas were unconstrained, so out-of-band values
