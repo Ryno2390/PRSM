@@ -103,9 +103,10 @@ else:
 
 ## Current proofs
 
-| Spec contract | Mirrors | Invariants | Paths |
-|--------------|---------|-----------|-------|
-| `FTNSSupplyCapSpec` | `FTNSTokenSimple.mintReward` (70-73) | INV-FT-1, INV-FT-2 | 7 total across 3 proofs |
+| Spec contract | Mirrors | Invariants | Paths (headline) |
+|--------------|---------|-----------|------------------|
+| `FTNSSupplyCapSpec` | `FTNSTokenSimple.mintReward` (lines 70-73) | INV-FT-1, INV-FT-2 | 5 paths on `check_mint_preserves_cap` |
+| `RoyaltyDistributorSolvencySpec` | `RoyaltyDistributor.{distributeRoyalty,claim,recoverStranded}` (lines 111-193) | INV-RD-1, INV-RD-4 | 23 paths on `check_distributeRoyalty_preserves_solvency`; 35 paths on `check_claim_preserves_solvency` |
 
 ## Honest scope
 

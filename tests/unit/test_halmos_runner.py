@@ -36,13 +36,35 @@ def test_status_enum_values():
 
 
 def test_catalog_has_ftns_supply_cap_proof():
-    """Sprint 360 ships a single proof; subsequent sprints
-    extend. Pin the entry so accidental removal trips CI."""
+    """Sprint 360 ships FTNSSupplyCapSpec; pin the entry
+    so accidental removal trips CI."""
     assert "FTNSSupplyCapSpec" in SYMBOLIC_PROOF_CATALOG
     entry = SYMBOLIC_PROOF_CATALOG["FTNSSupplyCapSpec"]
     assert entry["mirrors_runtime_contract"] == "ftns_token"
     assert "INV-FT-1" in entry["runtime_invariants"]
     assert "INV-FT-2" in entry["runtime_invariants"]
+
+
+def test_catalog_has_royalty_distributor_solvency_proof():
+    """Sprint 361 ships RoyaltyDistributorSolvencySpec —
+    the canonical solvency proof across distributeRoyalty +
+    claim + recoverStranded. Mirrors INV-RD-1 + INV-RD-4."""
+    assert (
+        "RoyaltyDistributorSolvencySpec"
+        in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG[
+        "RoyaltyDistributorSolvencySpec"
+    ]
+    assert (
+        entry["mirrors_runtime_contract"]
+        == "royalty_distributor"
+    )
+    # INV-RD-4 is THE solvency invariant per the existing
+    # registry; INV-RD-1 covers the NETWORK_FEE_BPS pin
+    # that the symbolic spec also verifies.
+    assert "INV-RD-4" in entry["runtime_invariants"]
+    assert "INV-RD-1" in entry["runtime_invariants"]
 
 
 # ── parser ───────────────────────────────────────────

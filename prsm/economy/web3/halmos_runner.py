@@ -305,4 +305,18 @@ SYMBOLIC_PROOF_CATALOG: Dict[str, Dict[str, Any]] = {
             "FTNSTokenSimple.sol:70-73."
         ),
     },
+    "RoyaltyDistributorSolvencySpec": {
+        "mirrors_runtime_contract": "royalty_distributor",
+        "runtime_invariants": ["INV-RD-1", "INV-RD-4"],
+        "description": (
+            "Symbolic proof that distributeRoyalty + claim "
+            "+ recoverStranded all preserve the solvency "
+            "invariant balance >= totalClaimable. The "
+            "canonical 'this is what halmos is for' proof "
+            "— the runtime probe checks live state; this "
+            "proves no symbolic input can ever break the "
+            "invariant. Source-identity-mirrors "
+            "RoyaltyDistributor.sol:111-193."
+        ),
+    },
 }

@@ -11,6 +11,8 @@ solc = "0.8.22"
 optimizer = true
 optimizer_runs = 200
 via_ir = false
+ast = true
+extra_output = ["storageLayout"]
 # Allow forge to read parent-dir sources (canonical
 # contracts + node_modules).
 fs_permissions = [
