@@ -107,6 +107,7 @@ else:
 |--------------|---------|-----------|------------------|
 | `FTNSSupplyCapSpec` | `FTNSTokenSimple.mintReward` (lines 70-73) | INV-FT-1, INV-FT-2 | 5 paths on `check_mint_preserves_cap` |
 | `RoyaltyDistributorSolvencySpec` | `RoyaltyDistributor.{distributeRoyalty,claim,recoverStranded}` (lines 111-193) | INV-RD-1, INV-RD-4 | 23 paths on `check_distributeRoyalty_preserves_solvency`; 35 paths on `check_claim_preserves_solvency` |
+| `AdminBoundedSettersSpec` | Bounded admin setters across StorageSlashing / StakeBond / CompensationDistributor / EmissionController | INV-SS-1+2, INV-SB-1+2+3, INV-CD-1, INV-EC-1+2 | 3 paths each on `check_*_always_in_range` bounded-setter proofs |
 
 ## Honest scope
 

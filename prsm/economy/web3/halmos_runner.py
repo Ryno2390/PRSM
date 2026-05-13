@@ -319,4 +319,26 @@ SYMBOLIC_PROOF_CATALOG: Dict[str, Dict[str, Any]] = {
             "RoyaltyDistributor.sol:111-193."
         ),
     },
+    "AdminBoundedSettersSpec": {
+        "mirrors_runtime_contract": "multiple",
+        "runtime_invariants": [
+            "INV-SS-1", "INV-SS-2",
+            "INV-SB-1", "INV-SB-2", "INV-SB-3",
+            "INV-CD-1",
+            "INV-EC-1", "INV-EC-2",
+        ],
+        "description": (
+            "Symbolic proof that admin-only bounded "
+            "setters can NEVER produce out-of-range state "
+            "for ANY symbolic input. Covers: "
+            "StorageSlashing.setHeartbeatGrace bounds; "
+            "StakeBond.setUnbondDelay bounds; "
+            "StakeBond.CHALLENGER_BOUNTY_BPS constant; "
+            "CompensationDistributor.updateWeights anti-"
+            "rugpull 90-day delay; EmissionController "
+            "mainnet-chainid halving rejection of off-"
+            "cadence epoch. Proves the bounds ARE the "
+            "runtime behavior, not just declarative."
+        ),
+    },
 }

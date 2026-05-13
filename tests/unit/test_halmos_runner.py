@@ -45,6 +45,31 @@ def test_catalog_has_ftns_supply_cap_proof():
     assert "INV-FT-2" in entry["runtime_invariants"]
 
 
+def test_catalog_has_admin_bounded_setters_proof():
+    """Sprint 362 ships AdminBoundedSettersSpec covering
+    all remaining rate-bound invariants (INV-SS-1+2,
+    INV-SB-1+2+3, INV-CD-1, INV-EC-1+2). Pin the entry +
+    the 8 invariant IDs."""
+    assert (
+        "AdminBoundedSettersSpec" in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG[
+        "AdminBoundedSettersSpec"
+    ]
+    ids = entry["runtime_invariants"]
+    # All 8 rate-bound invariants covered
+    for expected in [
+        "INV-SS-1", "INV-SS-2",
+        "INV-SB-1", "INV-SB-2", "INV-SB-3",
+        "INV-CD-1",
+        "INV-EC-1", "INV-EC-2",
+    ]:
+        assert expected in ids, (
+            f"{expected} missing from "
+            f"AdminBoundedSettersSpec catalog entry"
+        )
+
+
 def test_catalog_has_royalty_distributor_solvency_proof():
     """Sprint 361 ships RoyaltyDistributorSolvencySpec —
     the canonical solvency proof across distributeRoyalty +
