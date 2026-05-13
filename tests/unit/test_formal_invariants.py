@@ -943,6 +943,99 @@ def test_emission_epoch_duration_pinned_to_4_years():
     assert inv.expected == 4 * 365 * 86400
 
 
+# ── Sprint 359 — CompensationDistributor / StorageSlashing
+#                    / StakeBond extension ─────────────
+
+
+def test_registry_has_compensation_distributor():
+    assert "compensation_distributor" in INVARIANT_REGISTRY
+    invs = INVARIANT_REGISTRY["compensation_distributor"]
+    assert len(invs) >= 2
+
+
+def test_compensation_min_weight_schedule_delay_pinned():
+    invs = INVARIANT_REGISTRY["compensation_distributor"]
+    inv = next((i for i in invs if i.id == "INV-CD-1"), None)
+    assert inv is not None
+    assert inv.kind == InvariantKind.UINT256_EQ
+    assert inv.severity == InvariantSeverity.CRITICAL
+    assert inv.expected == 90 * 86400
+
+
+def test_compensation_owner_is_foundation():
+    invs = INVARIANT_REGISTRY["compensation_distributor"]
+    inv = next((i for i in invs if i.id == "INV-CD-2"), None)
+    assert inv is not None
+    assert inv.kind == InvariantKind.ADDRESS_EQ
+    assert (
+        inv.expected.lower() == _FOUNDATION_SAFE.lower()
+    )
+
+
+def test_registry_has_storage_slashing():
+    assert "storage_slashing" in INVARIANT_REGISTRY
+    invs = INVARIANT_REGISTRY["storage_slashing"]
+    assert len(invs) >= 3
+
+
+def test_storage_min_max_grace_pinned():
+    invs = INVARIANT_REGISTRY["storage_slashing"]
+    min_g = next((i for i in invs if i.id == "INV-SS-1"), None)
+    max_g = next((i for i in invs if i.id == "INV-SS-2"), None)
+    assert min_g is not None
+    assert min_g.expected == 3600  # 1 hour
+    assert max_g is not None
+    assert max_g.expected == 30 * 86400  # 30 days
+
+
+def test_storage_owner_is_foundation():
+    invs = INVARIANT_REGISTRY["storage_slashing"]
+    inv = next((i for i in invs if i.id == "INV-SS-3"), None)
+    assert inv is not None
+    assert inv.kind == InvariantKind.ADDRESS_EQ
+    assert (
+        inv.expected.lower() == _FOUNDATION_SAFE.lower()
+    )
+
+
+def test_registry_has_stake_bond():
+    assert "stake_bond" in INVARIANT_REGISTRY
+    invs = INVARIANT_REGISTRY["stake_bond"]
+    assert len(invs) >= 4
+
+
+def test_stake_bond_unbond_delay_bounds_pinned():
+    invs = INVARIANT_REGISTRY["stake_bond"]
+    min_d = next((i for i in invs if i.id == "INV-SB-1"), None)
+    max_d = next((i for i in invs if i.id == "INV-SB-2"), None)
+    assert min_d is not None
+    assert min_d.expected == 86400  # 1 day
+    assert max_d is not None
+    assert max_d.expected == 30 * 86400  # 30 days
+
+
+def test_stake_bond_challenger_bounty_pinned():
+    """The anti-confiscation invariant: challenger bounty
+    locked at 70% of slashed amount. Mirrors INV-RD-1's
+    network-fee anti-tamper pattern."""
+    invs = INVARIANT_REGISTRY["stake_bond"]
+    inv = next((i for i in invs if i.id == "INV-SB-3"), None)
+    assert inv is not None
+    assert inv.kind == InvariantKind.UINT256_EQ
+    assert inv.severity == InvariantSeverity.CRITICAL
+    assert inv.expected == 7000  # 70% in bps
+
+
+def test_stake_bond_owner_is_foundation():
+    invs = INVARIANT_REGISTRY["stake_bond"]
+    inv = next((i for i in invs if i.id == "INV-SB-4"), None)
+    assert inv is not None
+    assert inv.kind == InvariantKind.ADDRESS_EQ
+    assert (
+        inv.expected.lower() == _FOUNDATION_SAFE.lower()
+    )
+
+
 def test_emission_mainnet_chain_id_pinned():
     """INV-EC-2: BASE_MAINNET_CHAIN_ID() == 8453. The
     chainid pin that enforces the 4-year mainnet halving

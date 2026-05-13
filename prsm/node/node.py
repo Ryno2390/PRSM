@@ -2585,12 +2585,18 @@ class PRSMNode:
                 "emission_controller": (
                     endpoints.emission_controller
                 ),
+                "compensation_distributor": (
+                    endpoints.compensation_distributor
+                ),
+                "storage_slashing": (
+                    endpoints.storage_slashing
+                ),
+                "stake_bond": endpoints.stake_bond,
             }
             logger.info(
                 "Formal-invariant checker wired "
-                "(backend=%s, royalty_distributor=%s, "
-                "ftns_token=%s, escrow_pool=%s, "
-                "emission_controller=%s)",
+                "(backend=%s, 7 contracts: rd=%s ftns=%s "
+                "ep=%s ec=%s cd=%s ss=%s sb=%s)",
                 bool(backend),
                 self._formal_invariant_addresses.get(
                     "royalty_distributor",
@@ -2603,6 +2609,15 @@ class PRSMNode:
                 ),
                 self._formal_invariant_addresses.get(
                     "emission_controller",
+                ),
+                self._formal_invariant_addresses.get(
+                    "compensation_distributor",
+                ),
+                self._formal_invariant_addresses.get(
+                    "storage_slashing",
+                ),
+                self._formal_invariant_addresses.get(
+                    "stake_bond",
                 ),
             )
         except Exception as exc:  # noqa: BLE001

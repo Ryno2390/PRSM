@@ -170,6 +170,24 @@ _SEL_EPOCH_DURATION_SECONDS = (
 _SEL_BASE_MAINNET_CHAIN_ID = (
     "0xc7b6b6e8"                       # BASE_MAINNET_CHAIN_ID()
 )
+_SEL_MIN_WEIGHT_SCHEDULE_DELAY = (
+    "0x5a7d67c9"                       # MIN_WEIGHT_SCHEDULE_DELAY()
+)
+_SEL_MIN_HEARTBEAT_GRACE = (
+    "0xebf2fbfe"                       # MIN_HEARTBEAT_GRACE()
+)
+_SEL_MAX_HEARTBEAT_GRACE = (
+    "0xa0648401"                       # MAX_HEARTBEAT_GRACE()
+)
+_SEL_MIN_UNBOND_DELAY = (
+    "0x962dc269"                       # MIN_UNBOND_DELAY_SECONDS()
+)
+_SEL_MAX_UNBOND_DELAY = (
+    "0xa0e48ecc"                       # MAX_UNBOND_DELAY_SECONDS()
+)
+_SEL_CHALLENGER_BOUNTY_BPS = (
+    "0xfc65a392"                       # CHALLENGER_BOUNTY_BPS()
+)
 
 
 # ── OpenZeppelin AccessControl role hashes (bytes32) ──
@@ -500,6 +518,181 @@ INVARIANT_REGISTRY: Dict[str, List[Invariant]] = {
             kind=InvariantKind.UINT256_EQ,
             selector=_SEL_BASE_MAINNET_CHAIN_ID,
             expected=8453,
+        ),
+    ],
+    "compensation_distributor": [
+        Invariant(
+            id="INV-CD-1",
+            contract_name="compensation_distributor",
+            title=(
+                "MIN_WEIGHT_SCHEDULE_DELAY pinned at 90 days"
+            ),
+            description=(
+                "Phase 8 reward-split weights cannot be "
+                "updated faster than 90 days. The delay is "
+                "the structural defense against unilateral "
+                "weight-flip attacks by a compromised owner "
+                "key. Drift would weaken anti-rugpull "
+                "protections."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "MIN_WEIGHT_SCHEDULE_DELAY() == 90 days"
+            ),
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_MIN_WEIGHT_SCHEDULE_DELAY,
+            expected=90 * 86400,
+        ),
+        Invariant(
+            id="INV-CD-2",
+            contract_name="compensation_distributor",
+            title="owner() == Foundation Safe",
+            description=(
+                "Post-2026-05-07 ownership ceremony, "
+                "CompensationDistributor is sole-owned by "
+                "the Foundation Safe via Ownable2Step + "
+                "acceptOwnership. Drift = compromise or "
+                "unauthorized ceremony."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                f"owner() == {_FOUNDATION_SAFE_BASE}"
+            ),
+            kind=InvariantKind.ADDRESS_EQ,
+            selector=_SEL_OWNER,
+            expected=_FOUNDATION_SAFE_BASE,
+        ),
+    ],
+    "storage_slashing": [
+        Invariant(
+            id="INV-SS-1",
+            contract_name="storage_slashing",
+            title=(
+                "MIN_HEARTBEAT_GRACE pinned at 1 hour"
+            ),
+            description=(
+                "Lower bound on heartbeat grace prevents an "
+                "owner from setting an unreasonably-short "
+                "grace that would mass-slash honest "
+                "operators on transient network issues."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text="MIN_HEARTBEAT_GRACE() == 1 hours",
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_MIN_HEARTBEAT_GRACE,
+            expected=3600,
+        ),
+        Invariant(
+            id="INV-SS-2",
+            contract_name="storage_slashing",
+            title=(
+                "MAX_HEARTBEAT_GRACE pinned at 30 days"
+            ),
+            description=(
+                "Upper bound prevents grace from being set "
+                "so long that slashing effectively never "
+                "fires — weakening the storage-honest game."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text="MAX_HEARTBEAT_GRACE() == 30 days",
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_MAX_HEARTBEAT_GRACE,
+            expected=30 * 86400,
+        ),
+        Invariant(
+            id="INV-SS-3",
+            contract_name="storage_slashing",
+            title="owner() == Foundation Safe",
+            description=(
+                "Post-2026-05-07 ownership ceremony, "
+                "StorageSlashing is sole-owned by the "
+                "Foundation Safe via Ownable2Step + "
+                "acceptOwnership."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                f"owner() == {_FOUNDATION_SAFE_BASE}"
+            ),
+            kind=InvariantKind.ADDRESS_EQ,
+            selector=_SEL_OWNER,
+            expected=_FOUNDATION_SAFE_BASE,
+        ),
+    ],
+    "stake_bond": [
+        Invariant(
+            id="INV-SB-1",
+            contract_name="stake_bond",
+            title=(
+                "MIN_UNBOND_DELAY_SECONDS pinned at 1 day"
+            ),
+            description=(
+                "Lower bound on unbond delay prevents an "
+                "owner from setting an instant-unbond mode "
+                "that would let providers escape slashing "
+                "by withdrawing the moment a challenge "
+                "appears."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text="MIN_UNBOND_DELAY_SECONDS() == 1 days",
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_MIN_UNBOND_DELAY,
+            expected=86400,
+        ),
+        Invariant(
+            id="INV-SB-2",
+            contract_name="stake_bond",
+            title=(
+                "MAX_UNBOND_DELAY_SECONDS pinned at 30 days"
+            ),
+            description=(
+                "Upper bound prevents unbond delay from "
+                "being weaponized to permanently lock "
+                "honest providers' bonds."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text="MAX_UNBOND_DELAY_SECONDS() == 30 days",
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_MAX_UNBOND_DELAY,
+            expected=30 * 86400,
+        ),
+        Invariant(
+            id="INV-SB-3",
+            contract_name="stake_bond",
+            title=(
+                "CHALLENGER_BOUNTY_BPS pinned at 7000 (70%)"
+            ),
+            description=(
+                "Anti-confiscation invariant — challenger "
+                "bounty is the public-goods incentive that "
+                "makes slashing a positive-EV activity. "
+                "Drift would either over-pay challengers "
+                "(insolvent treasury exposure) or under-pay "
+                "(slashing market drying up). Mirrors "
+                "INV-RD-1's network-fee anti-tamper "
+                "pattern."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text="CHALLENGER_BOUNTY_BPS() == 7000",
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_CHALLENGER_BOUNTY_BPS,
+            expected=7000,
+        ),
+        Invariant(
+            id="INV-SB-4",
+            contract_name="stake_bond",
+            title="owner() == Foundation Safe",
+            description=(
+                "Post-2026-05-07 ownership ceremony, "
+                "StakeBond is sole-owned by the Foundation "
+                "Safe via Ownable2Step + acceptOwnership."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                f"owner() == {_FOUNDATION_SAFE_BASE}"
+            ),
+            kind=InvariantKind.ADDRESS_EQ,
+            selector=_SEL_OWNER,
+            expected=_FOUNDATION_SAFE_BASE,
         ),
     ],
     "escrow_pool": [
