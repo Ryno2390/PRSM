@@ -538,7 +538,11 @@ def test_uploader_with_creator_address_computes_provenance_hash():
         creator_address=creator_address,
     )
     # Bypass actual IPFS + DB persistence.
-    uploader._ipfs_add = AsyncMock(return_value="QmFakeCID123")
+    # Sprint 334 — post-IPFS-removal (2026-05-07) the upload path
+    # calls `_publish_content` instead of `_ipfs_add`. Mock the
+    # current entrypoint directly so the test exercises the real
+    # post-migration path.
+    uploader._publish_content = AsyncMock(return_value="QmFakeCID123")
     uploader._persist_provenance = AsyncMock()
 
     file_bytes = b"hello world phase 1.2"
@@ -590,7 +594,7 @@ def test_uploader_without_creator_address_skips_provenance_hash():
         ledger=ledger,
         creator_address=None,
     )
-    uploader._ipfs_add = AsyncMock(return_value="QmFakeCID456")
+    uploader._publish_content = AsyncMock(return_value="QmFakeCID456")
     uploader._persist_provenance = AsyncMock()
 
     uploaded = asyncio.run(
@@ -1098,7 +1102,7 @@ def test_uploaded_content_is_servable_by_provider():
         ledger=ledger,
         content_provider=provider,
     )
-    uploader._ipfs_add = AsyncMock(return_value="QmWiringTest")
+    uploader._publish_content = AsyncMock(return_value="QmWiringTest")
     uploader._persist_provenance = AsyncMock()
 
     uploaded = asyncio.run(
@@ -1417,7 +1421,7 @@ def test_provenance_hash_survives_db_persist_and_hydrate():
         ledger=ledger,
         creator_address=creator_address,
     )
-    uploader._ipfs_add = AsyncMock(return_value="QmPersistTestCID")
+    uploader._publish_content = AsyncMock(return_value="QmPersistTestCID")
 
     with patch(
         "prsm.core.database.ProvenanceQueries.upsert_provenance",
@@ -1695,7 +1699,7 @@ def test_uploader_gossip_advertise_uses_canonical_keys():
         gossip=gossip,
         ledger=ledger,
     )
-    uploader._ipfs_add = AsyncMock(return_value="QmKeyTest")
+    uploader._publish_content = AsyncMock(return_value="QmKeyTest")
     uploader._persist_provenance = AsyncMock()
 
     uploaded = asyncio.run(
@@ -2053,7 +2057,13 @@ def test_storage_provider_replica_serve_fires_payment_and_gossip():
         f"expected canonical status=found; got {payload.get('status')!r}"
     )
     assert payload.get("transfer_mode") == "gateway"
-    assert payload.get("gateway_url", "").endswith("/ipfs/QmReplicaTest")
+    # Sprint 334 — post-2026-05-07 native-storage migration uses
+    # `prsm://content/<cid>` URLs instead of the legacy
+    # `/ipfs/<cid>` pattern. Test was authored against the old
+    # IPFS-era code path and never updated.
+    assert payload.get("gateway_url", "").endswith(
+        "prsm://content/QmReplicaTest"
+    )
     assert payload.get("size") == 2048
 
 

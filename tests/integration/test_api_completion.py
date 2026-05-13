@@ -446,13 +446,20 @@ class TestLoadTesting:
             assert "sample_count" in result
 
     @pytest.mark.asyncio
-    async def test_ipfs_unavailable_returns_error_dict(self, load_test_suite):
-        """IPFS test should return error dict when IPFS is unavailable."""
+    async def test_content_store_unavailable_returns_error_dict(
+        self, load_test_suite,
+    ):
+        """Sprint 334 — post-IPFS-removal (2026-05-07) the load
+        test method `_test_ipfs_storage` was renamed
+        `_test_content_store` and the import-failure path
+        targets `prsm.storage` instead of the dropped
+        `prsm.compute.spine.ipfs_client`. Test updated to match.
+        """
         suite, config = load_test_suite
 
-        # Test the error handling by mocking the import to fail
-        with patch.dict('sys.modules', {'prsm.compute.spine.ipfs_client': None}):
-            result = await suite._test_ipfs_storage(config)
+        # Force the import to fail to exercise the error path
+        with patch.dict('sys.modules', {'prsm.storage': None}):
+            result = await suite._test_content_store(config)
 
             # Should handle the error gracefully
             assert result["available"] is False
