@@ -346,9 +346,14 @@ class Libp2pDiscovery:
         observability).
         """
         cutoff = time.time() - threshold_seconds
+        # `<=` (not `<`) so threshold=0 evicts a peer whose
+        # last_seen is exactly `now` — semantically "evict
+        # everything when threshold is zero". With non-zero
+        # thresholds the boundary case is irrelevant since
+        # time.time() resolution exceeds the cutoff.
         stale_ids = [
             pid for pid, peer in self._capability_index.items()
-            if peer.last_seen < cutoff
+            if peer.last_seen <= cutoff
         ]
         for pid in stale_ids:
             self._capability_index.pop(pid, None)

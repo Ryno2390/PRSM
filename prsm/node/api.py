@@ -10437,6 +10437,29 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         qo_err = getattr(node, "_query_orchestrator_error", None)
         if qo_err:
             body["query_orchestrator_error"] = qo_err
+        # Sprint 327 — compact bootstrap connectivity digest so
+        # operators get bootstrap state without a separate
+        # /bootstrap/status hit. Fail-soft: if discovery isn't
+        # wired or raises, omit the `bootstrap` key entirely so
+        # absence is meaningful (no confusing zero/false values).
+        # Cumulative counters from sprint 324 stay on
+        # /bootstrap/status — /info keeps it tight.
+        disco = getattr(node, "discovery", None)
+        if disco is not None:
+            try:
+                full = disco.get_bootstrap_status()
+                body["bootstrap"] = {
+                    "client_state": full.get("client_state", "?"),
+                    "connected": int(full.get("connected", 0) or 0),
+                    "degraded": bool(full.get("degraded", False)),
+                    "discovered_peer_count": int(
+                        full.get("discovered_peer_count", 0) or 0
+                    ),
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "info: bootstrap summary skipped: %s", exc,
+                )
         try:
             from prsm.config.networks import (
                 get_network_config, _resolve_network_name,
