@@ -3376,6 +3376,57 @@ When future events fire (CDP commission, Aerodrome pool seed, fleet kill-switch 
 
 ---
 
+### 7.35 Cycle ratification + consolidation arc (sprints 365–381, 2026-05-13)
+
+**Scope note.** §7.34 covered the 10-sprint engineering arc (355–364) that expanded the Vision §14 item 4 surface. §7.35 covers the 17-sprint **consolidation** arc (365–381) that capped the same shipping cycle: audit-prep §7.34 documentation (sprint 365), CI bypass marker for halmos live tests (sprint 366), extending halmos to off-chain streaming-inference algorithms via Solidity structural mirrors (sprints 367–374), source-identity CI parity gate (sprint 378), multi-bootstrap fallback engine + operator-trifecta (sprints 375–377, 380), fleet kill-switch operator runbook (sprint 379), and the council ratification (sprint 381 PRSM-CR-2026-05-13-2 binding R-2026-05-13-1 + R-2026-05-13-2).
+
+**Why this is in the cumulative bundle.** Two distinct value categories an auditor needs to assess:
+
+1. **Symbolic-execution coverage expansion to off-chain algorithms.** Sprints 367–374 ship 8 new spec files (43 halmos proofs / 239 explored paths) mirroring algorithmic invariants from the streaming-inference subsystem (audit-prep §7.3 / §7.5 / §7.9 / §7.11–§7.12 / §7.13 / §7.14 / §7.15) + content-dedup three-band routing (§7.19). The pattern: each Solidity structural mirror cites the canonical Python source `path:lines` in a STRUCTURAL EQUIVALENCE header; the source-identity CI gate (sprint 378) hash-pins the cited ranges so silent drift between mirror + canonical is CI-detectable.
+
+2. **§7.29 SPOF closure via multi-bootstrap fallback.** The libp2p-backend code path that ignored NodeConfig's `bootstrap_fallback_nodes` is fixed (sprint 375). The full operator-observability stack — REST `/bootstrap/status` + `/health/detailed` + MCP `prsm_bootstrap_status` + Prometheus labeled gauge + CLI `prsm node bootstrap` — surfaces the active bootstrap URL across all five idiomatic surfaces (sprints 375–377, 380). Operators can now diagnose "primary down, on EU fallback" vs "ALL bootstraps down" at a glance.
+
+**Why this is institutionally distinct from §7.34.** §7.34 covered engineering substance. §7.35 covers two binding regression-discipline rules ratified by PRSM-CR-2026-05-13-2: R-2026-05-13-1 (source-identity CI parity rule — modifying spec or canonical source REQUIRES coordinated pin regen in same change-set) + R-2026-05-13-2 (fleet kill-switch runbook design-only-status anchor — flipping it REQUIRES §7-trigger event + audit-prep §7.X entry + new CR superseding). These are council-commitment-level engineering discipline, not engineering substance.
+
+**Headline guarantees.**
+
+1. **Sprint 366 — `@pytest.mark.requires_halmos` CI bypass marker** (`halmos-ci-bypass-marker-merge-ready-20260513`). Refactored `tests/conftest.py:602` session-wide subprocess mock to expose explicit `.start()/.stop()` patcher objects. Function-scoped autouse fixture inspects `request.keywords` for the marker and surgically restores real `subprocess.run` for marked tests. Pre-fix the project-wide mock prevented live halmos verification in CI. Closes a §7.34 honest-scope item explicitly.
+2. **Sprints 367–374 — halmos extended to 8 off-chain algorithmic invariants** (8 merge-ready tags). 43 new proofs across speculation rollback math (§7.11–§7.12), chunk-streaming bounded iterator + relay-defense (§7.3), M1 cadence-driven yield (§7.13), encrypted-probs co-set validators (§7.14), M2 response-size padding (§7.15), SSE streaming-emit cap (§7.5), KVCacheManager LRU bound (§7.9), three-band similarity routing (§7.19). Each spec uses Solidity structural mirror + STRUCTURAL EQUIVALENCE header citing canonical Python source `path:lines`.
+3. **Sprint 378 — source-identity CI parity gate** (`source-identity-parity-gate-merge-ready-20260513`). `prsm/economy/web3/source_identity.py` parses citations matching `(prsm|contracts)/[path]:NNN(-NNN)?` from all spec files, SHA-256-hashes the cited line range (trailing-whitespace-normalized = stable under benign EOL edits), compares against pinned hashes in `contracts/symbolic-proofs/source_identity_pins.json` (11 pins initial registry). CI test `test_live_source_identity_parity` runs on every PR. Detection categories: drifted / missing_source / missing_pin / out_of_range. Operator workflow when canonical source legitimately changes: update spec → re-run halmos → run `scripts/update_source_identity_pins.py` → commit together. Auto-regen on CI is explicitly prohibited.
+4. **Sprints 375–377, 380 — multi-bootstrap fallback closes §7.29 SPOF**. Engine: `Libp2pDiscovery.__init__` consumes `bootstrap_fallback_nodes` + `bootstrap_fallback_enabled` (defaults preserving pre-sprint-375 single-host posture). New `_candidate_bootstrap_addresses()` helper merges primary + fallback with dedup. `bootstrap()` iterates merged list, records `active_url` field on first successful connect. Operator-trifecta surfaces: REST `/bootstrap/status` JSON, `/health/detailed`'s `bootstrap_discovery` subsystem entry, MCP `prsm_bootstrap_status` + `prsm_node_health` (renders inline `active=host:port`), Prometheus `prsm_bootstrap_active{url="..."}` labeled gauge + `prsm_bootstrap_fallback_enabled` gauge, CLI `prsm node bootstrap` (color-coded health markers + ●/○ candidate-list markers).
+5. **Sprint 379 — fleet kill-switch operator runbook** (`fleet-kill-switch-operator-runbook-merge-ready-20260513`). `docs/operations/fleet-kill-switch-operator-runbook.md` (~330 lines / 8 sections + print-pin quick-reference card). Documents the 7 per-node kill switches available today + the fleet-coordination layer's operator-opt-in posture (design-only as of 2026-05-13) + directive lifecycle + verification/dispute/appeals + post-incident recovery + audit-trail expectations. Pinned by `tests/unit/test_fleet_kill_switch_runbook.py` (10 tests gating deletion, env var presence, authority thresholds, design-only anchor). Closes the §7.21 honest-scope item explicitly.
+6. **Sprint 381 — council ratification PRSM-CR-2026-05-13-2** (`docs/governance/PRSM-CR-2026-05-13-2.md`). Sole-founder 1-of-1 quorum per precedent. Binds R-2026-05-13-1 + R-2026-05-13-2 as council-commitment-level regression rules. Explicit non-scope enumeration prevents future scope-creep from pointing at this CR as precedent. Pinned by `tests/unit/test_prsm_cr_2026_05_13_2.py` (11 tests).
+
+**Trust seams.**
+
+1. **Source-identity gate authority is CI-encoded, not contract-encoded.** R-2026-05-13-1 binds via the CI test mechanism, not via a smart contract or external auditor co-sign. A change-set that disables the gate without a superseding CR would surface as a P0 audit finding but not be cryptographically prevented. The mitigation is the same as the §7.34 trust seams: institutional discipline + audit-trail visibility.
+2. **Runbook anchor is text-pinned, not state-pinned.** R-2026-05-13-2's `test_runbook_does_not_claim_fleet_layer_is_live` checks for the exact string `"design-only as of 2026-05-13"`. A future engineer could update the string AND the test in the same change-set without firing a §7 trigger or filing a new CR — the gate is procedural, not technical. The mitigation is council oversight + this CR's explicit protocol.
+3. **Off-chain symbolic proofs depend on structural-mirror discipline.** Each off-chain spec is a Solidity contract that mirrors Python algorithmic logic. The audit-visible claim is source-identity equivalence at the cited line range — verified by the parity gate. But the claim that the structural mirror SEMANTICALLY captures the canonical Python algorithm is engineering-attested, not automatically provable. The pin update workflow (`scripts/update_source_identity_pins.py`) intentionally requires explicit operator action to enforce this attestation.
+4. **Multi-bootstrap fallback honest-scope: EU+APAC droplets aspirational.** `DEFAULT_BOOTSTRAP_NODES` in NodeConfig lists `wss://bootstrap-eu.prsm-network.com:8765` and `wss://bootstrap-apac.prsm-network.com:8765`, but those hosts don't yet exist. The code path is ready; spinning up the actual droplets + DNS records is operator/governance-driven, not engineering-driven. PRSM-CR-2026-05-13-2 §5 non-scope item 6 explicitly names this.
+5. **CI bypass marker semantics depend on tests/conftest.py architecture.** `@pytest.mark.requires_halmos` works because the session-wide subprocess mock was refactored to use explicit `.start()/.stop()` patchers. Any future conftest refactor that reverts to the `with patch()` context-manager form would silently break the marker — surfacing only when a live halmos test is run on a halmos+forge-equipped machine. Mitigation: the marker contract is documented in `contracts/symbolic-proofs/README.md` + verified by per-marker test cases.
+
+**Honest scope deferred.**
+
+- **Halmos Certora integration.** `prsm/economy/web3/formal_invariants.py` module docstring names halmos + Certora as the symbolic engines that consume the registry. Halmos is shipped; Certora is honest-scope. Engagement gates on PRSM-POL-2 external-audit-trigger conditions.
+- **Direct symbolic proofs against canonical contracts.** Current symbolic specs are structural mirrors. Direct proofs would require modeling IERC20 + IProvenanceRegistry + OZ AccessControl as symbolic backing contracts; heavier sprint. Deferred.
+- **Multi-region bootstrap droplet provisioning.** As above — operator/governance-driven.
+- **Fleet-coordination layer Phase F1 implementation.** Gates on §7 promotion triggers (T1–T6); none fired as of this writing.
+
+**Auditor reading path (§7.35 delta).**
+
+1. Start with PRSM-CR-2026-05-13-2 (the institutional anchor for this arc).
+2. Then the source-identity gate module: `prsm/economy/web3/source_identity.py` + `tests/unit/test_source_identity_parity.py` + `contracts/symbolic-proofs/source_identity_pins.json`.
+3. Then the operator runbook: `docs/operations/fleet-kill-switch-operator-runbook.md` + `tests/unit/test_fleet_kill_switch_runbook.py`.
+4. Then the multi-bootstrap arc surfaces: `prsm/node/libp2p_discovery.py` + `prsm/node/api.py` + `prsm/mcp_server.py` + `prsm/cli.py` (the four files that gained sprint-375 fields).
+5. Then the 8 off-chain symbolic specs: `contracts/symbolic-proofs/test/{SpeculationRollbackMath,ChunkStreamingBounds,M1CadenceDrivenYield,EncryptedProbsCoSet,M2ResponseSizePadding,StreamingEmitCap,KVCacheLRUBound,ThreeBandRouting}.t.sol`.
+6. Cross-reference §7.34 for the on-chain expansion arc that preceded this consolidation cycle.
+
+**Tags.** 17 merge-ready tags this arc (`halmos-ci-bypass-marker-...` through `cli-node-bootstrap-subcommand-...`), all dated `20260513`. Headline tag: `cli-node-bootstrap-subcommand-merge-ready-20260513` (commit `34c95140`) — final operator-trifecta closure. Council ratification tag (sprint 381) covers the institutional commitment.
+
+**Cumulative count.** Sprint 374 closed the §14 item 4 expansion at 13 specs / 81 halmos proofs. Post-§7.35 the lane is unchanged at the engineering layer; the discipline layer (CI gates + council-binding regression rules) is the substantive addition. Cross-suite 273+ tests green throughout the arc.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
