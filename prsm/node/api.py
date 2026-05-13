@@ -10773,6 +10773,56 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             logger.warning("metrics arbitration probe failed: %s", exc)
 
+        # Sprint 328 — bootstrap discovery counters + gauges
+        # for ops dashboards. Counters from sprint 324 are
+        # cumulative-monotonic (process-restart reset); live
+        # gauges reflect point-in-time snapshots. Fail-soft per
+        # the rest of /metrics: omit block on any error.
+        try:
+            disco = getattr(node, "discovery", None)
+            if disco is not None:
+                bs = disco.get_bootstrap_status()
+                # Counters (sprint 324 cumulative)
+                counter_metrics = (
+                    ("prsm_bootstrap_peer_join_events_total",
+                     "Cumulative peer_join announcements consumed",
+                     bs.get("peer_join_events", 0)),
+                    ("prsm_bootstrap_peer_leave_events_total",
+                     "Cumulative peer_leave announcements consumed",
+                     bs.get("peer_leave_events", 0)),
+                    ("prsm_bootstrap_stale_evictions_total",
+                     "Cumulative peers swept by last_seen threshold",
+                     bs.get("stale_evictions", 0)),
+                    ("prsm_bootstrap_reconnect_attempts_total",
+                     "Cumulative reconnect dispatches in poll loop",
+                     bs.get("reconnect_attempts", 0)),
+                    ("prsm_bootstrap_reconnect_successes_total",
+                     "Cumulative reconnect successes",
+                     bs.get("reconnect_successes", 0)),
+                )
+                for name, help_text, value in counter_metrics:
+                    lines.append(f"# HELP {name} {help_text}")
+                    lines.append(f"# TYPE {name} counter")
+                    lines.append(f"{name} {int(value or 0)}")
+                # Gauges (point-in-time)
+                gauge_metrics = (
+                    ("prsm_bootstrap_connected",
+                     "Bootstrap nodes currently registered with",
+                     int(bs.get("connected", 0) or 0)),
+                    ("prsm_bootstrap_discovered_peer_count",
+                     "Peers visible via last bootstrap poll",
+                     int(bs.get("discovered_peer_count", 0) or 0)),
+                    ("prsm_bootstrap_degraded",
+                     "1 iff all bootstrap nodes unreachable",
+                     1 if bs.get("degraded", False) else 0),
+                )
+                for name, help_text, value in gauge_metrics:
+                    lines.append(f"# HELP {name} {help_text}")
+                    lines.append(f"# TYPE {name} gauge")
+                    lines.append(f"{name} {value}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("metrics bootstrap probe failed: %s", exc)
+
         # Always emit at least one metric so probes have something
         # to scrape. The "up" gauge is canonical for this.
         lines.append("# HELP prsm_node_up Node-up indicator")
