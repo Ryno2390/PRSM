@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Column, String, DateTime, Boolean, Enum as SQLEnum, Text, Integer, JSON, Numeric
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
@@ -243,8 +243,7 @@ class OnboardingProgressResponse(BaseModel):
     estimated_time_remaining_hours: Optional[float] = None
     next_steps: List[str]
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OnboardingStageUpdate(BaseModel):
@@ -276,8 +275,7 @@ class EarlyAdopterStatusResponse(BaseModel):
     milestone_achievements: List[str]
     recognition_badges: List[str]
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EngagementActivity(BaseModel):

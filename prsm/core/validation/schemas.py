@@ -5,7 +5,7 @@ Pydantic Validation Schemas
 Comprehensive validation schemas for all PRSM API endpoints and data structures.
 """
 
-from pydantic import BaseModel, validator, Field, root_validator
+from pydantic import BaseModel, ConfigDict, validator, Field, root_validator
 from typing import Optional, Dict, List, Any
 from decimal import Decimal
 from datetime import datetime
@@ -44,15 +44,12 @@ class UserTierEnum(str, Enum):
 class BaseValidationSchema(BaseModel):
     """Base schema with common validation rules"""
     
-    class Config:
-        # Validate on assignment
-        validate_assignment = True
-        # Use enum values
-        use_enum_values = True
-        # Allow population by field name or alias
-        validate_by_name = True
-        # Forbid extra fields by default
-        extra = "forbid"
+    model_config = ConfigDict(
+        validate_assignment=True,  # Validate on attribute set
+        use_enum_values=True,      # Serialize enums as values
+        populate_by_name=True,     # Allow population by field name or alias
+        extra="forbid",            # Forbid extra fields by default
+    )
     
     @root_validator(pre=True)
     def sanitize_string_fields(cls, values):
@@ -371,5 +368,4 @@ class HealthCheckSchema(BaseModel):
     """Health check validation (minimal validation needed)"""
     service: Optional[str] = Field(None, max_length=50)
     
-    class Config:
-        extra = "allow"  # Allow extra fields for health checks
+    model_config = ConfigDict(extra="allow")  # Allow extra fields for health checks

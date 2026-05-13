@@ -9,7 +9,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 import uuid
 
 
@@ -75,11 +75,12 @@ class SwapRequest(BaseModel):
     expires_at: datetime
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             Decimal: str,
-            datetime: lambda v: v.isoformat()
-        }
+            datetime: lambda v: v.isoformat(),
+        },
+    )
 
 
 class Settlement(BaseModel):
@@ -98,11 +99,12 @@ class Settlement(BaseModel):
     settlement_hash: str  # provenance content hash
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             Decimal: str,
-            datetime: lambda v: v.isoformat()
-        }
+            datetime: lambda v: v.isoformat(),
+        },
+    )
 
 
 class ClearingTransaction(BaseModel):
@@ -119,11 +121,12 @@ class ClearingTransaction(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None
     
-    class Config:
-        json_encoders = {
+    model_config = ConfigDict(
+        json_encoders={
             Decimal: str,
-            datetime: lambda v: v.isoformat()
-        }
+            datetime: lambda v: v.isoformat(),
+        },
+    )
 
 
 @dataclass

@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from uuid import UUID, uuid4
 
 logger = structlog.get_logger(__name__)
@@ -55,8 +55,7 @@ class PostQuantumIdentity(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_used: Optional[datetime] = None
     
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
     def to_storage_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for database storage"""

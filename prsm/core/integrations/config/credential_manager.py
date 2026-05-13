@@ -23,7 +23,7 @@ from uuid import uuid4
 
 from cryptography.fernet import Fernet
 import base64
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from ..models.integration_models import IntegrationPlatform
 from prsm.core.config import settings
@@ -64,10 +64,15 @@ class CredentialData(BaseModel):
     password: Optional[SecretStr] = None
     custom_fields: Dict[str, Any] = Field(default_factory=dict)
     
-    class Config:
-        json_encoders = {
-            SecretStr: lambda v: v.get_secret_value() if v else None
-        }
+    # Sprint 335 — Pydantic V3 prep: class-based `Config` is
+    # deprecated in V2 and removed in V3. ConfigDict is the
+    # canonical replacement. json_encoders is also deprecated
+    # but still functional under V2; that's a separate sprint.
+    model_config = ConfigDict(
+        json_encoders={
+            SecretStr: lambda v: v.get_secret_value() if v else None,
+        },
+    )
 
 
 class CredentialManager:

@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any, Dict, Optional
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 try:
     from pydantic.fields import ModelField
 except ImportError:
@@ -28,13 +28,11 @@ class SecureBaseModel(BaseModel):
     HTML content is escaped unless explicitly allowed.
     """
     
-    class Config:
-        # Enable validation for assignment
-        validate_assignment = True
-        # Use enum values instead of enum objects
-        use_enum_values = True
-        # Allow extra fields for flexibility (but validate them)
-        extra = "forbid"
+    model_config = ConfigDict(
+        validate_assignment=True,  # Validate on attribute set
+        use_enum_values=True,      # Serialize enums as values
+        extra="forbid",            # Reject unknown fields
+    )
     
     @model_validator(mode='before')
     @classmethod

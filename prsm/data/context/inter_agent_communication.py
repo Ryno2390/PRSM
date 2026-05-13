@@ -23,7 +23,7 @@ from collections import defaultdict, deque
 import zlib
 
 import structlog
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from prsm.core.models import (
     PRSMBaseModel, TimestampMixin, AgentType
@@ -282,8 +282,7 @@ class CommunicationChannel(PRSMBaseModel):
     total_messages_received: int = Field(default=0)
     average_response_time: float = Field(default=0.0)
     
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class InterAgentCommunicationEngine(TimestampMixin):

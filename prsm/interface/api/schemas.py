@@ -4,7 +4,7 @@ Comprehensive schemas for API documentation and validation
 """
 
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 from enum import Enum
 
@@ -48,24 +48,23 @@ class LoginResponse(APIResponse):
     expires_in: int = Field(3600, description="Token expiration time in seconds")
     user: Dict[str, Any] = Field(description="User information")
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "success": True,
-                "message": "Login successful",
-                "timestamp": "2024-01-15T10:00:00Z",
-                "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-                "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-                "token_type": "bearer",
-                "expires_in": 3600,
-                "user": {
-                    "id": "123e4567-e89b-12d3-a456-426614174000",
-                    "email": "researcher@university.edu",
-                    "role": "researcher",
-                    "ftns_balance": 1000.0
-                }
-            }
-        }
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "success": True,
+            "message": "Login successful",
+            "timestamp": "2024-01-15T10:00:00Z",
+            "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+            "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+            "token_type": "bearer",
+            "expires_in": 3600,
+            "user": {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "email": "researcher@university.edu",
+                "role": "researcher",
+                "ftns_balance": 1000.0,
+            },
+        },
+    })
 
 class RegisterRequest(BaseModel):
     """User registration request"""
@@ -104,23 +103,22 @@ class MarketplaceResource(BaseModel):
     updated_at: datetime = Field(description="Last update timestamp")
     tags: List[str] = Field(example=["nlp", "transformer", "pytorch"], description="Resource tags")
     
-    class Config:
-        schema_extra = {
-            "example": {
-                "id": "res_123456789",
-                "title": "GPT-4 Fine-tuned Scientific Model",
-                "description": "A specialized GPT-4 model fine-tuned on scientific literature for research assistance",
-                "resource_type": "ai_model",
-                "price": 150.0,
-                "seller_id": "user_987654321",
-                "seller_name": "AI Research Consortium",
-                "rating": 4.9,
-                "reviews_count": 42,
-                "created_at": "2024-01-10T08:00:00Z",
-                "updated_at": "2024-01-14T16:30:00Z",
-                "tags": ["gpt-4", "scientific", "research", "fine-tuned"]
-            }
-        }
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "id": "res_123456789",
+            "title": "GPT-4 Fine-tuned Scientific Model",
+            "description": "A specialized GPT-4 model fine-tuned on scientific literature for research assistance",
+            "resource_type": "ai_model",
+            "price": 150.0,
+            "seller_id": "user_987654321",
+            "seller_name": "AI Research Consortium",
+            "rating": 4.9,
+            "reviews_count": 42,
+            "created_at": "2024-01-10T08:00:00Z",
+            "updated_at": "2024-01-14T16:30:00Z",
+            "tags": ["gpt-4", "scientific", "research", "fine-tuned"],
+        },
+    })
 
 class MarketplaceSearchResponse(PaginatedResponse):
     """Marketplace search results"""
@@ -204,20 +202,19 @@ class SystemHealth(BaseModel):
     components: Dict[str, Any] = Field(description="Individual component statuses")
     response_time_ms: float = Field(example=245.5, description="Health check response time")
     
-    class Config:
-        schema_extra = {
-            "example": {
-                "status": "healthy",
-                "timestamp": "2024-01-15T10:00:00Z",
-                "components": {
-                    "database": {"status": "healthy", "response_time_ms": 15.2},
-                    "redis": {"status": "healthy", "response_time_ms": 8.1},
-                    "content_store": {"status": "healthy", "response_time_ms": 45.6},
-                    "vector_db": {"status": "healthy", "response_time_ms": 23.4}
-                },
-                "response_time_ms": 245.5
-            }
-        }
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "status": "healthy",
+            "timestamp": "2024-01-15T10:00:00Z",
+            "components": {
+                "database": {"status": "healthy", "response_time_ms": 15.2},
+                "redis": {"status": "healthy", "response_time_ms": 8.1},
+                "content_store": {"status": "healthy", "response_time_ms": 45.6},
+                "vector_db": {"status": "healthy", "response_time_ms": 23.4},
+            },
+            "response_time_ms": 245.5,
+        },
+    })
 
 class MetricsSnapshot(BaseModel):
     """System metrics snapshot"""

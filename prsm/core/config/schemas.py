@@ -5,7 +5,7 @@ Configuration Schemas
 Pydantic schemas for validating all PRSM configuration sections.
 """
 
-from pydantic import BaseModel, Field, validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, validator, model_validator
 from typing import Dict, List, Optional
 from decimal import Decimal
 from enum import Enum
@@ -33,11 +33,12 @@ class DatabaseTypeEnum(str, Enum):
 class BaseConfigSchema(BaseModel):
     """Base configuration schema with common validation"""
     
-    class Config:
-        validate_assignment = True
-        use_enum_values = True
-        validate_by_name = True
-        extra = "forbid"
+    model_config = ConfigDict(
+        validate_assignment=True,
+        use_enum_values=True,
+        populate_by_name=True,
+        extra="forbid",
+    )
 
 
 # Core component configurations

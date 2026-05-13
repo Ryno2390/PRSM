@@ -8,7 +8,7 @@ from enum import Enum
 from typing import List, Optional, Set
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, ConfigDict, Field, EmailStr
 from sqlalchemy import Column, String, DateTime, Boolean, Enum as SQLEnum, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
@@ -209,8 +209,7 @@ class UserResponse(BaseModel):
     last_login: Optional[datetime] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserCreate(BaseModel):
@@ -295,5 +294,4 @@ class UserSession(BaseModel):
     client_ip: Optional[str] = None
     user_agent: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
