@@ -138,10 +138,15 @@ async function main() {
   await registry.waitForDeployment();
 
   const Distributor = await hre.ethers.getContractFactory("RoyaltyDistributor");
+  // Sprint 346 — A-08 v2 (2026-05-09) extended the constructor
+  // with `_initialOwner` for Ownable2Step. The e2e deploy script
+  // missed the update; pass deployer.address so the test
+  // exercises the canonical v2 surface (matches mainnet).
   const distributor = await Distributor.deploy(
     await token.getAddress(),
     await registry.getAddress(),
-    treasury.address
+    treasury.address,
+    deployer.address,
   );
   await distributor.waitForDeployment();
 
@@ -252,7 +257,15 @@ def test_register_then_distribute_e2e(hardhat_node, deployed):
     assert tx_dist.startswith("0x")
     assert distribute_status.value == "confirmed"
 
-    # 4. Verify balances on-chain via direct token contract reads
+    # 4. Verify the 3-way split on-chain.
+    #
+    # Sprint 346 — A-08 v2 (2026-05-09) moved RoyaltyDistributor
+    # from push-payment to PULL: distribute_royalty credits per-
+    # recipient `claimable[addr]` balances; recipients must call
+    # claim() to actually receive their FTNS. Pre-v2 the test
+    # asserted token.balanceOf(addr) which only updates after a
+    # claim. Updated to assert the claimable[addr] mapping
+    # directly, which is the v2-canonical surface.
     from web3 import Web3
 
     w3 = Web3(Web3.HTTPProvider(hardhat_node))
@@ -265,24 +278,45 @@ def test_register_then_distribute_e2e(hardhat_node, deployed):
             "type": "function",
         }
     ]
-    token_contract = w3.eth.contract(
-        address=Web3.to_checksum_address(deployed["token"]), abi=erc20_abi
+    distributor_abi = [
+        {
+            "inputs": [{"name": "recipient", "type": "address"}],
+            "name": "claimable",
+            "outputs": [{"name": "", "type": "uint256"}],
+            "stateMutability": "view",
+            "type": "function",
+        }
+    ]
+    distributor_contract = w3.eth.contract(
+        address=Web3.to_checksum_address(deployed["distributor"]),
+        abi=distributor_abi,
     )
-    treasury_balance = token_contract.functions.balanceOf(
+    treasury_claimable = distributor_contract.functions.claimable(
         Web3.to_checksum_address(deployed["treasury"])
     ).call()
-    serving_balance = token_contract.functions.balanceOf(
+    serving_claimable = distributor_contract.functions.claimable(
         Web3.to_checksum_address(serving_node)
     ).call()
-    creator_balance = token_contract.functions.balanceOf(
+    creator_claimable = distributor_contract.functions.claimable(
         Web3.to_checksum_address(deployed["deployer"])
     ).call()
 
-    assert treasury_balance == 2 * 10**18
-    assert serving_balance == 90 * 10**18
-    # Creator started with 10_000 FTNS, paid 100 (gross), received 8 back.
-    # Net: 10_000 - 100 + 8 = 9908
-    assert creator_balance == (10_000 - 100 + 8) * 10**18
+    assert treasury_claimable == 2 * 10**18
+    assert serving_claimable == 90 * 10**18
+    assert creator_claimable == 8 * 10**18
+
+    # Creator token balance: started with 10_000 FTNS, paid 100
+    # to the distributor, hasn't claimed yet. Net token balance:
+    # 10_000 - 100 = 9_900 (the 8 FTNS creator share sits in
+    # claimable until claim() is invoked).
+    token_contract = w3.eth.contract(
+        address=Web3.to_checksum_address(deployed["token"]),
+        abi=erc20_abi,
+    )
+    creator_balance = token_contract.functions.balanceOf(
+        Web3.to_checksum_address(deployed["deployer"])
+    ).call()
+    assert creator_balance == (10_000 - 100) * 10**18
 
 
 # ── Phase 1.1 Task 10: local fallback economics regression ───────────────
