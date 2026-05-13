@@ -11328,11 +11328,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     }
 
         # Sprint 342 — federated_learning_orchestrator subsystem.
-        # Operators using §7 enterprise mode need to see when the
-        # orchestrator fails to wire (broken persist dir, schema
-        # corruption, etc) without scraping logs.
+        # Sprint 343 — generalized to accept a custom probe
+        # callable so subsystems with non-list_jobs APIs
+        # (content_filter / disclosure_intake / incident_response
+        # / $CORP capability registry / upgrade orchestrator)
+        # share the same pattern.
         def _orchestrator_subsystem(
             name: str, attr: str,
+            probe=None, count_field: str = "record_count",
         ) -> None:
             orch = getattr(node, attr, None)
             if orch is None:
@@ -11343,11 +11346,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     }
                 return
             try:
-                jobs = orch.list_jobs()
+                # Default probe: list_jobs() → len(list)
+                if probe is None:
+                    result = orch.list_jobs()
+                    count = len(result) if result is not None else 0
+                else:
+                    count = probe(orch)
                 subsystems[name] = {
                     "available": True,
                     "status": "ok",
-                    "jobs_count": len(jobs) if jobs is not None else 0,
+                    count_field: count,
                 }
             except Exception as exc:  # noqa: BLE001
                 subsystems[name] = {
@@ -11356,13 +11364,44 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "error": str(exc),
                 }
 
+        # §7 enterprise orchestrators (sprints 308 + 312)
         _orchestrator_subsystem(
             "federated_learning_orchestrator",
             "_federated_learning_orchestrator",
+            count_field="jobs_count",
         )
         _orchestrator_subsystem(
             "pipeline_inference_orchestrator",
             "_pipeline_inference_orchestrator",
+            count_field="jobs_count",
+        )
+
+        # Sprint 343 — five wired stores that lacked /health
+        # visibility. Each uses a record-count probe.
+        _orchestrator_subsystem(
+            "content_filter_store",            # sprint 270
+            "_content_filter_store",
+            probe=lambda x: x.count(),
+        )
+        _orchestrator_subsystem(
+            "disclosure_intake",               # sprint 300
+            "_disclosure_intake",
+            probe=lambda x: x.count(),
+        )
+        _orchestrator_subsystem(
+            "incident_response",               # sprint 302
+            "_incident_response",
+            probe=lambda x: x.count(),
+        )
+        _orchestrator_subsystem(
+            "corp_capability_store",           # sprint 304
+            "_corp_capability_store",
+            probe=lambda x: len(x.list_issuers()),
+        )
+        _orchestrator_subsystem(
+            "upgrade_orchestrator",            # sprint 303
+            "_upgrade_orchestrator",
+            probe=lambda x: x.count(),
         )
 
         # Aggregate status.
@@ -11375,11 +11414,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # royalty_distributor as optional. Degraded bootstrap
         # alone flips top-level to "degraded" (not unhealthy).
         # Sprint 342 — fl + pipeline orchestrators join as optional.
+        # Sprint 343 — content_filter/disclosure/incident/$CORP/
+        # upgrade orchestrators join as optional too.
         optional = [
             "job_history", "royalty_distributor",
             "bootstrap_discovery",
             "federated_learning_orchestrator",
             "pipeline_inference_orchestrator",
+            "content_filter_store",
+            "disclosure_intake",
+            "incident_response",
+            "corp_capability_store",
+            "upgrade_orchestrator",
         ]
         _OPT_OUT_STATUSES = ("not_wired", "disabled")
         core_ok = all(
