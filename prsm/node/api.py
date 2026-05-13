@@ -11327,6 +11327,44 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                         "error": str(exc),
                     }
 
+        # Sprint 342 — federated_learning_orchestrator subsystem.
+        # Operators using §7 enterprise mode need to see when the
+        # orchestrator fails to wire (broken persist dir, schema
+        # corruption, etc) without scraping logs.
+        def _orchestrator_subsystem(
+            name: str, attr: str,
+        ) -> None:
+            orch = getattr(node, attr, None)
+            if orch is None:
+                if hasattr(node, attr):
+                    subsystems[name] = {
+                        "available": False,
+                        "status": "not_wired",
+                    }
+                return
+            try:
+                jobs = orch.list_jobs()
+                subsystems[name] = {
+                    "available": True,
+                    "status": "ok",
+                    "jobs_count": len(jobs) if jobs is not None else 0,
+                }
+            except Exception as exc:  # noqa: BLE001
+                subsystems[name] = {
+                    "available": False,
+                    "status": "error",
+                    "error": str(exc),
+                }
+
+        _orchestrator_subsystem(
+            "federated_learning_orchestrator",
+            "_federated_learning_orchestrator",
+        )
+        _orchestrator_subsystem(
+            "pipeline_inference_orchestrator",
+            "_pipeline_inference_orchestrator",
+        )
+
         # Aggregate status.
         # Sprint 147 — `not_wired` / `disabled` is operator opt-out,
         # not a degradation. Only count an optional subsystem as
@@ -11336,9 +11374,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # Sprint 329 — bootstrap_discovery joins job_history /
         # royalty_distributor as optional. Degraded bootstrap
         # alone flips top-level to "degraded" (not unhealthy).
+        # Sprint 342 — fl + pipeline orchestrators join as optional.
         optional = [
             "job_history", "royalty_distributor",
             "bootstrap_discovery",
+            "federated_learning_orchestrator",
+            "pipeline_inference_orchestrator",
         ]
         _OPT_OUT_STATUSES = ("not_wired", "disabled")
         core_ok = all(
