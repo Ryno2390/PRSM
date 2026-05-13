@@ -3109,6 +3109,203 @@ When future events fire (CDP commission, Aerodrome pool seed, fleet kill-switch 
 
 ---
 
+### 7.29 P2P discovery hardening arc (sprints 319–331, 2026-05-10 → 2026-05-12)
+
+**Scope note.** Different axis from §7.20/§7.22 (Phase 7/8 contract observation) and §7.28 (mainnet smart-contract ceremony). §7.29 covers the **node-to-node discovery layer** that sits below all on-chain observation — the libp2p gossip wiring + bootstrap-relay client that every operator depends on for `connected=N, degraded=false` health. Pre-arc, every operator pointed at the canonical `wss://bootstrap1.prsm-network.com:8765` default sat in **degraded mode forever** because the BootstrapClient's WebSocket fallback was never wired into the live Libp2pDiscovery loop on the inbound side, and the operator surface had no way to see *why* discovery was unhealthy.
+
+**Why this is in the cumulative bundle.** An auditor's threat model for the P2P layer covers (a) bootstrap-relay liveness, (b) peer roster freshness under churn, (c) malformed-message resistance, and (d) operator-observability that detects (a)–(c) in time to act. The arc closes all four. Critical structural finding mid-arc: the fallback existed in code but was never connected to the inbound message path — exactly the seam-bug class that mocked tests miss and live-fleet observation catches.
+
+**Auditor angle.** Discovery-layer reliability is load-bearing for every higher-level audit story (P2P-routing of `/compute/inference`, content distribution, federated-inference orchestrator handshakes, fleet-wide kill-switch directive distribution if §7.21 ever activates). The 12-sprint hardening arc is dogfood-discovered (operator running the canonical client noticed `degraded=true` persisting through bootstrap-recoveries), and the remediation pattern is consistent across 8 sub-sprints: tighten one layer, observe the next misbehavior surface, tighten that one, repeat. Each sprint is independently auditable; the chain is the value.
+
+**Headline guarantees.**
+
+1. **Sprint 319 (`6653dfcd`) — msg-type filtering.** Libp2pDiscovery only consumes message types it understands; unknown types log + skip rather than raising. Closes the class of "one bad publisher takes down the whole peer-mesh consumer."
+2. **Sprint 320 (`228eb78d`) — peer_join/leave consumer.** Bootstrap-relay now consumes published peer_join / peer_leave envelopes; pre-fix only the *outbound* publish path was wired.
+3. **Sprint 321 (`730c93fb`) — reconnect + sentinel.** WebSocket reconnect loop with exponential backoff + sentinel-handshake on reconnect (proves identity to the bootstrap server before re-subscribing). Closes the silent-stale-connection mode where a TCP RST left the client thinking it was subscribed.
+4. **Sprint 322 (`7f3e6b5d`) — capabilities into PeerInfo + setdefault on peer_join.** Capability tags (compute / storage / inference-tier) now propagate via peer_join envelope and survive into PeerInfo, with `setdefault` semantics on re-join so transient duplicates don't clobber.
+5. **Sprint 323 (`2e74b6b9`) — stale-peer expiry sweep.** Periodic sweep of PeerInfo with `last_seen` older than `PRSM_PEER_STALE_AFTER_SEC` (default 300s) evicts ghost entries. Prevents long-running nodes from accumulating thousands of stale references.
+6. **Sprint 324 (`7f59f874`) — `get_bootstrap_status` 5 counters + client_state.** New operator-facing struct surfaces: published_count / received_count / reconnect_count / sentinel_failures / unknown_msg_skipped + a `client_state` enum (CONNECTED / RECONNECTING / DEGRADED / DISCONNECTED). Closes the "why is degraded=true" observability gap.
+7. **Sprint 325 (`fc78a35b`) — prsm_bootstrap_status MCP shape detection.** MCP wrapper renders the new struct with explicit field-presence detection so old-version nodes don't break the new client (forward-compat-safe).
+8. **Sprint 326 (`c28ff5d7`) — `/peers` known[].capabilities + prsm_peers renders known list.** Sister surface to §7.29 #4: capabilities are now visible per-peer in the `/peers` endpoint and rendered tabularly by the MCP tool. Closes the operator-side UX gap from sprint 322 (capabilities were captured but invisible).
+9. **Sprint 327–329 (sequential operator-facing follow-ons).** `/info` digest extension (bootstrap_status compact summary surfaces in unauthenticated triage path), `/metrics` Prometheus gauges for the 5 bootstrap counters, and `/health/detailed` bootstrap subsystem (healthy/degraded/unhealthy aggregation matches the client_state enum).
+10. **Sprint 331 — fleet bootstrap-fallback live-verification.** End-to-end fleet observation: live nodes pointing at the canonical DO bootstrap server now reach `connected=N, degraded=false` from cold start; pre-arc fleet sat in degraded mode through the same recovery scenarios.
+
+**Trust seams.**
+
+1. Bootstrap-relay liveness depends on a **single canonical bootstrap host** (`wss://bootstrap1.prsm-network.com:8765`). DO Droplet operator availability is currently a single point of failure for new-node onboarding; running mesh nodes are unaffected. Multi-bootstrap fallback is honest-scope.
+2. Capability tags are **operator-self-asserted via libp2p gossip envelope**. A malicious operator can claim arbitrary tiers (`compute=Tier-A` while running stub backend). Real verification belongs at the §7.13 Tier C structural-deny + §7.20 EmissionController stake-weighting layers, not at the discovery surface. The seam is named here so an auditor knows the deny-path lives elsewhere.
+3. Stale-peer sweep uses **local clock skew** for `last_seen` arithmetic — operators with badly-skewed system clocks may either over-evict (clock-fast) or under-evict (clock-slow). NTP is the operator-discipline expectation.
+4. The 5-counter telemetry is **observability not enforcement** — observing reconnect_count > 100 doesn't trigger any automatic remediation. Operators must alert + intervene. (Auto-quarantine is honest-scope.)
+5. Forward-compat-safe MCP rendering (#7) **trusts upstream Pydantic shape**. If a future node-version drops a field, the MCP renders `unknown` rather than crashing; if a future node-version *adds* a field, the MCP renders fields it knows + ignores the rest. Bidirectional contract documented inline.
+
+**Honest scope deferred.**
+
+- Multi-bootstrap fallback (multiple DO regions + community-run bootstraps via canonical discovery list).
+- Capability-claim cross-attestation against stake-weighted observation.
+- Auto-quarantine on reconnect-storm thresholds.
+- DHT-based discovery (architecture C — Foundation's documented-but-rejected at design-time; see §7.21 fleet kill-switch where the same architecture trade was analyzed).
+- last_processed_block-style persistent baseline across restarts for bootstrap reconnect.
+
+**Auditor reading path.**
+
+1. Start at `prsm/node/discovery/libp2p_discovery.py` (per-sprint git-blame surfaces each layer's purpose).
+2. Then `prsm/node/bootstrap.py` (BootstrapClient + reconnect + sentinel).
+3. Cross-reference `MEMORY.md` entry `project_p2p_discovery_message_filtering_2026_05_12.md` for the full 8-sub-sprint commit-by-commit narrative.
+4. Live-verify via `prsm_bootstrap_status` MCP tool against a running node pointed at the canonical bootstrap.
+5. Annex `docs/security/EXPLOIT_RESPONSE_PLAYBOOK_ANNEX_2026_05.md` §5.4 detection scenarios — the discovery layer's degradation now feeds the same `/health/detailed` + `/metrics` surfaces the playbook expects.
+
+**Tag.** `prsm-bootstrap-status-mcp-merge-ready-20260510` + sister tags per sub-sprint. Latest discovery-arc tag: `p2p-known-peer-capabilities-merge-ready-20260512` on commit `c28ff5d7`.
+
+---
+
+### 7.30 Pydantic V3 + SQLAlchemy 2.0 forward-compatibility migration arc (sprints 335–341, 2026-05-11)
+
+**Scope note.** Cross-cutting dependency migration — different axis from any subsystem-bounded entry. Forward-compatibility hygiene against upstream Pydantic V3 (deprecation warnings already firing in V2.x runs) and SQLAlchemy 2.0 (declarative_base relocation). ~12 files / ~100 sites changed; semantics preserved bit-identically.
+
+**Why this is in the cumulative bundle.** An auditor evaluating supply-chain hygiene wants to see (a) migration completeness (no stale V2-only patterns hiding in less-trafficked modules), (b) zero-behavior-change discipline (the same model in V3 syntax must validate the same inputs the same way), and (c) test coverage that proves the migration didn't silently weaken any field constraint. The arc closes all three across the repo.
+
+**Headline guarantees.**
+
+1. **`class Config:` → `model_config = ConfigDict(...)`** across every Pydantic model with config. Old syntax deprecated in V2 with removal warning in V3; new syntax is V2/V3-compatible.
+2. **`@validator` → `@field_validator(..., mode="before"|"after")`** with explicit mode parameter. Removes the implicit-pre/post-ambiguity that V3 surfaces as a deprecation. Validation semantics unchanged.
+3. **`Field(example=...)` → `Field(examples=[...])`** — V3 only accepts the plural form. OpenAPI schema output preserved (FastAPI tolerates both during the V2→V3 bridge).
+4. **`json_encoders` config** removed where it was a no-op or moved to per-field `field_serializer` decorators where it was load-bearing. The legacy global json_encoders dict is gone in V3.
+5. **`Field(..., max_items=N)` → `Field(..., max_length=N)`** for list/tuple fields. V3 unifies the constraint vocabulary.
+6. **`from sqlalchemy.ext.declarative import declarative_base` → `from sqlalchemy.orm import declarative_base`** — SA 2.0 relocation. Only one site (legacy provenance-ledger ORM); checked.
+7. **Pydantic V2 `model_dump()` / `model_validate()`** consistently used in place of legacy `.dict()` / `.parse_obj()` where they appeared in tests + serialization shims.
+
+**Trust seams.**
+
+1. Migration is **syntactic** — no field types, no constraints, no validators were *removed* or *weakened*. Proof is the unchanged cross-suite pass-set pre-arc + post-arc.
+2. **OpenAPI schema** is the audit-visible surface for clients. The `example` → `examples` rename emits identical schema JSON; verified by re-running the schema-snapshot test.
+3. **No pinning of Pydantic V3 yet.** Pyproject still permits V2.x; the migration just makes the codebase V3-ready. When V3 GAs and the team chooses to bump the floor, the migration is the prerequisite, not the action.
+
+**Honest scope deferred.** Bumping the Pydantic floor to V3 (separate sprint; gated on upstream V3 GA + test re-run under V3-RC environment). SQLAlchemy 2.0 floor bump (same shape — relocations made now, floor bump separate).
+
+**Auditor reading path.**
+
+1. `git log --oneline --all --grep="pydantic" --grep="sqlalchemy"` surfaces the 7-sprint window.
+2. Inspect `prsm/api/models.py` + `prsm/wallet/models.py` + `prsm/node/models.py` for representative ConfigDict + field_validator + Field(examples=) usage.
+3. Re-run cross-suite — pre-arc pass-set is identical to post-arc pass-set.
+
+**Tag.** Latest in arc: `pydantic-v3-sqla-2-final-sweep-merge-ready-20260511` (sprint 341).
+
+---
+
+### 7.31 Production-reliability bug-fix arc (sprints 330, 332, 333, 334, 346, 347)
+
+**Scope note.** Six dogfood-discovered bug fixes that don't fit any single subsystem entry but each closes a real production-blocking class of failure. Documented as one §7.X entry because the *pattern* (live-fleet observation → bug class identified → fix landed same day → cross-suite green) is the auditor-visible discipline.
+
+**Why this is in the cumulative bundle.** Auditors evaluating engineering rigor want to see (a) bugs caught by dogfood not by mocks, (b) post-incident hygiene (regression test added + memory entry written), and (c) headline production-blocking severity called out explicitly so an auditor can prioritize their own re-verification.
+
+**Headline guarantees.**
+
+1. **Sprint 330 — libtorrent BitTorrent compat fix.** Upstream libtorrent version changed the `add_torrent_params.flags` enum encoding. PRSM's content-distribution layer broke on `pip install -U` of libtorrent. Fix: explicit feature-detect → fallback encoding path. Closes silent breakage on operator package-bump.
+2. **Sprint 332 — torch C++ test infrastructure leak.** Cross-suite test interaction was leaking torch CUDA contexts across pytest modules, causing flaky failures > 200 tests in. Fix: explicit `torch.cuda.empty_cache()` in session-scoped fixture + per-module reset.
+3. **Sprint 333 — ContentUploadRequest Pydantic ceiling.** Discovery sprint: payload size field had no upper bound; a malformed operator-side upload could pin server memory. Fix: explicit `max_length` + `le=` on size fields + 422-with-clear-message handler.
+4. **Sprint 334 — IPFS-removal stale-test refresh.** Tests still referenced the old IPFS adapter path post-removal; collection succeeded but runs silently skipped. Fix: removal of dead test modules + cross-suite re-baseline.
+5. **Sprint 346 — onchain provenance V2 contract-surface drift.** ProvenanceRegistry V2 (`0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf`) added fields the test fixtures didn't model. Fix: regenerate fixtures from the deployed ABI + re-run Phase 7.1 e2e suite.
+6. **Sprint 347 — Phase 7.1 ReceiptLeaf v2 / consensus_submitter critical production fix. PRODUCTION-BLOCKING.** consensus_submitter built ReceiptLeafFields against the old v1 receipt shape; every live Phase 7.1 challenge submission post-sprint-322-receipt-v2 was malformed and would have been rejected by the on-chain verifier. Fix: rebuild submitter against v2 leaf fields + add regression test that submitter output deserializes round-trip against the live Solidity verifier interface.
+
+**Trust seams.**
+
+1. Sprint 347's bug was **invisible to all mocked tests** — mocked challenge-submission paths returned synthetic-success regardless of leaf-field shape. Live verification against the deployed contract caught it. Same seam-bug class as Phase 3.x.8.1 Task 5 (documented in this bundle).
+2. Sprints 330 + 332 + 334 are **infrastructure hygiene** — not directly audit-scope but a clean test suite is what makes audit-scope verifiable.
+
+**Honest scope deferred.** Property-based fuzzing of all Pydantic field bounds (sprints 333 + 197a–208 covered the highest-traffic surfaces; long-tail coverage is honest-scope).
+
+**Auditor reading path.**
+
+1. `git log --oneline --all --grep="P0\|critical"` surfaces sprint 347's commit message tagged production-blocking.
+2. `prsm/economy/web3/consensus_submitter.py` — the fix site.
+3. `tests/integration/test_consensus_submitter_v2_roundtrip.py` — the regression test.
+
+**Tag.** Latest in arc: `consensus-submitter-v2-receipt-merge-ready-20260512` (sprint 347).
+
+---
+
+### 7.32 `/health/detailed` + `/metrics` + `prsm_node_health` observability extension arc (sprints 342–345, 2026-05-11)
+
+**Scope note.** Closes the operator-observability gap on subsystems that shipped post-§7.20 / post-§7.22 (Phase 7-storage clients + watchers + FL primitives from §14 enterprise-confidentiality arc + content-moderation stores from §14 arc). Pre-arc, `/health/detailed` covered 9 subsystems; post-arc, 14. `/metrics` gauges added for each new subsystem.
+
+**Why this is in the cumulative bundle.** `/health/detailed` is the load-bearing surface for **alert-on-degradation** in the parent exploit-response playbook (`docs/security/EXPLOIT_RESPONSE_PLAYBOOK_ANNEX_2026_05.md` §5.4). Every subsystem an auditor cares about must surface its readiness here, or the playbook's "detect within 5 min" objective fails for that subsystem.
+
+**Headline guarantees.**
+
+1. **Subsystem count 9 → 14.** New entries: FederatedInferenceOrchestrator, PipelineOrchestrator (HTTP transport for §312 federated-inference arc), CreatorReputationStore + ContentFingerprintRegistry (from the §14 data-quality arc), ContentFilterStore (from the §14 content-moderation arc).
+2. **`/metrics` Prometheus gauges** for each new subsystem (e.g., `prsm_federated_inference_jobs_in_flight`, `prsm_creator_reputation_records_total`, `prsm_content_filter_entries_total`). Per-metric fail-soft (one raising doesn't 500 the endpoint).
+3. **`prsm_node_health` MCP renders the new subsystem rows** with healthy/degraded/unhealthy aggregation that mirrors the `/health/detailed` JSON status enum.
+4. **Per-subsystem fail-soft** — a raising subsystem on the `/health/detailed` aggregation marks itself unhealthy but doesn't 500 the whole endpoint.
+5. **`/health` (minimal) unchanged** — load-balancer probe semantics preserved; `/health/detailed` is the ops-alerting surface.
+6. **Forward-compat-safe MCP render** — same pattern as §7.29 #7: new fields are tolerated, dropped fields render `unknown`.
+
+**Trust seams.**
+
+1. **Operator-trusted subsystem reporting** — each subsystem self-reports healthy/degraded/unhealthy. A buggy subsystem reporting "healthy" while broken is a class of failure the surface itself can't detect; mitigation is to *also* watch the corresponding `/metrics` counter drift.
+2. **Subsystem-count enum** is pinned in the MCP-render test. Forgetting to add a new subsystem to the test catches drift at CI time.
+3. The 14-subsystem aggregation may **mask single-subsystem degradation** in a fleet-wide dashboard. Per-subsystem panels in the operator Grafana dashboard close that.
+
+**Honest scope deferred.** Per-subsystem alerting thresholds (operator policy, not framework); SLO definitions per subsystem; multi-region fleet aggregation across `/health/detailed` endpoints (deferred until external operator fleet > 10 — same trigger as §7.21 fleet kill-switch).
+
+**Auditor reading path.**
+
+1. `prsm/api/health.py::detailed()` — the aggregator.
+2. `prsm/api/metrics.py::prometheus_text()` — the Prometheus exposition.
+3. `prsm/mcp/tools/prsm_node_health.py` — the MCP wrapper.
+4. `tests/unit/test_health_detailed_subsystem_count.py` — the enum pin.
+
+**Tag.** Latest in arc: `health-detailed-fl-content-moderation-subsystems-merge-ready-20260511` (sprint 345).
+
+---
+
+### 7.33 Aerodrome pool-seed ceremony packet (sprints 348–354, 2026-05-12 → 2026-05-13)
+
+**Scope note.** Treasury-disbursement axis — different from any prior contract-deploy or contract-ownership-handoff entry. §7.33 covers the **multi-sig governance packet + Sepolia rehearsal + cross-entity authorization framework** for seeding the initial Aerodrome USDC/FTNS liquidity pool on Base mainnet. Per PRSM-CR-2026-05-13-1 + companion Prismatica Written Consent: $500K USDC + 2M FTNS @ $0.25/FTNS, Prismatica-funded (for-profit entity), Foundation-Safe-LP-recipient (nonprofit). Mainnet ceremony has *not* executed at the time of this entry; the packet is rehearsal-validated and ratified-in-principle, pending two remaining operative-condition rows (Prismatica USDC wire tx hash + mainnet pre-flight Safe balance snapshot).
+
+**Why this is in the cumulative bundle.** Auditors evaluating the multi-entity treasury structure want to see (a) Foundation + Prismatica role separation preserved in writing, (b) no-securities characterization preserved across the cross-entity flow (one-way unilateral letter posture; not a contract; no quid-pro-quo language), (c) rehearsal discipline matching the A-08 v2 rehearsal pattern from §7.28, (d) substantive bugs caught + fixed in rehearsal (Foundation Safe address typo), (e) contemporaneous documentary record (council resolution + Written Consent + Letter of Expected Receipt all dated within the ceremony window).
+
+**Headline guarantees.**
+
+1. **Three-artifact governance architecture.** (a) Foundation council resolution `docs/governance/PRSM-CR-2026-05-13-1.md` (ratified-in-principle 2026-05-13; 3 of 5 operative-conditions met). (b) Prismatica Written Consent — DGCL §141(f) unanimous-written-consent format; not in repo (Prismatica is a separate DE C-corp; per `feedback_repo_scope_prsm_vs_prismatica.md` portfolio-grade Prismatica docs live on a separate private surface; the *template* shape was drafted in-conversation and held back from this repo by design). (c) Foundation Letter of Expected Receipt `docs/governance/2026-05-13-foundation-letter-of-expected-receipt-prismatica-pool-seed.md` — one-way unilateral acknowledgment; preserves no-securities characterization; use-or-return provision (60-day deploy window / 30-day return-if-undeployed).
+2. **Ceremony plan** `docs/governance/2026-06-15-aerodrome-pool-seed-ceremony-plan.md` — full 3-tx sequence (FTNS.approve → USDC.approve → Aerodrome Router.addLiquidity); mirrors the A-08 ceremony-plan structure. Tx 3 is the load-bearing volatile-pool first-liquidity call; LP token formula validated against `sqrt(amt0 × amt1) - MINIMUM_LIQUIDITY` (1000 wei locked at `address(0)`).
+3. **Sepolia rehearsal runbook** `docs/governance/2026-06-15-aerodrome-pool-seed-sepolia-rehearsal.md` — Aerodrome doesn't deploy on Base Sepolia; documented Option B (Anvil fork of Base mainnet) as the only valid rehearsal path. `anvil_impersonateAccount` + `anvil_setBalance` + `anvil_setStorageAt` to manipulate Foundation Safe state on the fork.
+4. **Bundle builder + verifier scripts.** `contracts/scripts/build-aerodrome-pool-seed-tx.js` generates a Safe{Wallet} Transaction Builder JSON bundle; smoke-tested for `0x095ea7b3` (approve) + `0x5a47ddc3` (addLiquidity) selectors with warn-not-reject canonical-address mismatch detection. `contracts/scripts/verify-aerodrome-pool-seed.js` — 6-assertion post-flight runner (pool exists at deterministic CREATE2 address, FTNS reserve, USDC reserve, LP token balance to Safe, Foundation Safe FTNS balance, Foundation Safe USDC balance).
+5. **Rehearsal PASS record** `docs/governance/2026-05-13-aerodrome-pool-seed-rehearsal-lessons.md` — Anvil-fork rehearsal validated end-to-end; all 6 verify-script assertions PASS; pool created at deterministic address `0xD47003c5cC59F18c74569385A78f8388187732c2`.
+6. **Substantive bug caught + fixed in rehearsal.** Memory abbreviated Foundation Safe address as `0x91b0...5791`; packet files initially expanded the middle to all-zero (`0x91b0000000000000000000000000000000005791`) — syntactically valid hex but points to no contract on mainnet. Anvil-fork rehearsal caught it: zero-filled address showed 0 FTNS / 0 USDC / 0 bytes of code; canonical `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` showed 345 bytes of Safe code + 99.9999M FTNS post-A-08-ceremony. Fixed globally with `sed` across 5 files; documented in `2026-05-13-aerodrome-pool-seed-rehearsal-lessons.md`.
+7. **Hardware-wallet sign-test combined-record basis.** The PRSM-Test-Safe (MetaMask-owned) was used for the Safe-UI sign-test walkthrough; the prior A-08 v2 mainnet ceremony 2026-05-09 was treated as substantive Ledger-validation basis (the same 2-of-3 hardware multi-sig flow signed acceptOwnership of the v2 RoyaltyDistributor four days prior — see §7.28). Lessons doc §2.4 records the combined-record reasoning.
+8. **Mainnet ceremony NOT YET EXECUTED.** Two operative-condition rows remain PENDING in PRSM-CR-2026-05-13-1 §5: Prismatica USDC wire tx hash + mainnet pre-flight Foundation Safe balance snapshot. Both are user-driven actions (USDC wire from Prismatica's external bank → Foundation Safe; balance snapshot is operator-trusted reconciliation). The packet is *ready* the moment those land.
+
+**Trust seams.**
+
+1. **Cross-entity flow** (Prismatica → Foundation Safe → Aerodrome pool LP → Foundation Safe holds LP) preserves no-securities characterization *only if* the Letter of Expected Receipt's one-way unilateral posture is maintained. Any bilateral-contract language reintroduced in future correspondence would re-open the Howey-prong analysis.
+2. **Use-or-return provision** (60-day deploy / 30-day return) is the substantive load-bearing clause. Without it, the USDC sits in Foundation Safe indefinitely with no characterized destiny, weakening the no-securities posture.
+3. **Aerodrome is a Velodrome-fork DEX on Base** — same volatile-pool xy=k constant-product invariant. Auditor may want to review Aerodrome's Router.sol independently; PRSM uses canonical mainnet Router address with no proxy injection.
+4. **First-liquidity LP token** at sqrt(amt0 × amt1) - 1000 wei means Foundation Safe receives the LP tokens minus 1000 wei locked at `address(0)` (irreducible by design — Aerodrome's anti-first-LP-attack mitigation).
+5. **Foundation Safe is 2-of-3 hardware multi-sig** (Ledger + Trezor + OneKey). The mainnet ceremony requires the same 2-of-3 hardware-wallet flow validated four days prior (A-08 v2 §7.28).
+6. **Prismatica Written Consent template was drafted in conversation but not committed** by design (per `feedback_repo_scope_prsm_vs_prismatica.md`). An auditor reviewing the cross-entity flow should be told the template exists and request it through the Foundation/Prismatica governance channel, not search this repo.
+
+**Honest scope deferred.**
+
+- Mainnet ceremony execution (gated on USDC wire + balance snapshot).
+- Post-ceremony Aerodrome pool live-rate wiring into §7.23's `prsm_balance_check` `source: "aerodrome-live"` transition.
+- CDP off-ramp commissioning (Vision §13 Phase 5; gated independently).
+- Multi-bank-alias resolver in `coinbase_offramp_initiate` (post-CDP-commission honest-scope from §7.24).
+
+**Auditor reading path.**
+
+1. `docs/governance/PRSM-CR-2026-05-13-1.md` — Foundation council resolution.
+2. `docs/governance/2026-05-13-foundation-letter-of-expected-receipt-prismatica-pool-seed.md` — Foundation Letter (the artifact that preserves no-securities characterization).
+3. `docs/governance/2026-06-15-aerodrome-pool-seed-ceremony-plan.md` — ceremony plan.
+4. `docs/governance/2026-06-15-aerodrome-pool-seed-sepolia-rehearsal.md` — rehearsal runbook.
+5. `docs/governance/2026-05-13-aerodrome-pool-seed-rehearsal-lessons.md` — rehearsal PASS record + Foundation-Safe-address-typo bug catch.
+6. `contracts/scripts/build-aerodrome-pool-seed-tx.js` + `contracts/scripts/verify-aerodrome-pool-seed.js` — packet generators / verifiers.
+7. Prismatica Written Consent template — request through Foundation/Prismatica governance channel; not in repo by design.
+8. Cross-reference §7.28 for the A-08 v2 mainnet ceremony — same 2-of-3 hardware multi-sig flow + same combined-record substantive Ledger-validation basis.
+
+**Tag.** Packet preparation tag: `aerodrome-pool-seed-rehearsal-pass-20260513` (latest sprint 354). Mainnet ceremony-execution tag deferred until operative-conditions land.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
@@ -3143,6 +3340,11 @@ When the Foundation signs the auditor contract:
 - **2.4 (2026-05-08)** — added §7.25 "Integration tests for Phase 7/8 + MCP composer stack". Closes the system-level coverage gap from today's 38-commit shipping day. 2 integration test files / 16 tests across MCP composer end-to-end + Node lifecycle wiring — verifying that today's many components compose correctly across MCP handler → API endpoint → stub-ledger seams + Node initialize/start/stop wiring. 7 headline guarantees: in-process ASGI dispatch via `fake_call_node_api` shim makes end-to-end possible without aiohttp; PENDING_COMMISSION claim verified end-to-end (runtime complement to §7.24's static composer-only claim); Vision §13 Phase 5 read-then-quote composability tested; static wiring integrity for daemon lifecycle (each of 5 daemon attrs in BOTH start AND stop, plus task slots + bounded-wait pattern); runtime stop contract validated against stub fleet of 5 schedulers/watchers — including misbehaving-daemon containment proving the bounded-wait pattern works (P0 incident-response property: a hung daemon during teardown does NOT prevent Node.stop completing within the 5-min parent-playbook P0 latency budget); initialize-time builder integration (8 builders called + 5 task slots pre-allocated to None); serialization-boundary bug class surfaced at integration scope (caught by the address-truncation off-by-one during test development). 4 trust seams: introspection-based static checks are not runtime guarantees (split into 2 suites is intentional); Node.initialize is NOT exercised end-to-end (deliberate honest-scope due to bootstrap weight); stub fleet ≠ real schedulers (correct boundary — RPC behavior covered by per-watcher unit tests at §7.22); fake_call_node_api shim trusts the unit-stub interface (lower-level HTTP bugs out of scope). 5 deferred honest-scope items: full Node.initialize integration / multi-process operator-fleet integration / real Sepolia or Base testnet RPC / performance + load testing / hung-daemon real-world simulation. Tag `phase78-mcp-integration-tests-merge-ready-20260508`. 16 new tests; 136-test cross-suite regression check at green.
 - **2.3 (2026-05-08)** — added §7.24 "coinbase_offramp_initiate MCP tool v1 — pre-flight composer". Companion to §7.23 (read side); this entry covers the WRITE-side composer of the Vision §13 Phase 5 cash-out flow. Critical framing: V1 is composer-ONLY — `status: "PENDING_COMMISSION"` ships with every quote response and the `commission_gate_note` field explicitly states "does NOT initiate any on-chain swap or fiat off-ramp." Actual execution gates on CDP commissioning (Vision gantt 2026-06-15). 8 headline guarantees: no on-chain or fiat-side action in v1 (P0-claim that any regression introducing execution without `execute=true` arg would be an audit finding); 400 vs 422 vs 503 boundary explicit in handler not Pydantic; cross-references prsm_balance_check on insufficient-balance error; forward-compatible response shape (status flips PENDING_COMMISSION → IN_FLIGHT → SETTLED post-commission; new fields like tx_hash + cdp_transaction_id additive); routes explicit in response (`swap_route: "aerodrome"` + `offramp_route: "coinbase-cdp"`); bank_account_alias is a nickname not an account-ID (PRSM does NOT store banking PII; CDP resolves actual account at execute-time post-commission); tool count pin updated to 20 (renamed `test_nineteen_*` → `test_twenty_tools_defined`); USD-amount enforcement at schema layer (`minimum=0.01`) + handler layer (400 on non-positive) — defense in depth. 5 trust seams: PENDING_COMMISSION is a load-bearing claim that v1 is composer-only (CI / future audit-prep entries should check this until commission is ratified); no PII transit (foundation of regulatory-shielding claim in Tokenomics §5.5); bank-alias is operator-trusted in v1 not Coinbase-validated (closes on commission); USD-rate + balance reads inherit §7.23 trust seams (Aerodrome pool seeding closes both simultaneously); composability with prsm_balance_check documented but not enforced (intentional UX choice). 6 deferred honest-scope items: actual execution path / Hardware Passkey handshake / multi-bank-alias resolver / KYC integration / aggregate-source quoting / live Aerodrome rate. Tag `coinbase-offramp-initiate-v1-merge-ready-20260508`. 21 new tests across 2 suites + tool-count pin update. **The Vision §13 Phase 5 cash-out flow now has both READ and WRITE-side composers shipped end-to-end at MCP layer; only the actual execution surface remains, gated on Aerodrome pool seeding + CDP commissioning per the gantt.**
 - **2.2 (2026-05-08)** — added §7.23 "prsm_balance_check MCP tool v1". First user-facing edge of the operator-side surface that §7.20 + §7.22 covered; closes the Vision §13 Phase 5 stand-in ("not yet created — currently just a stand-in"). 7 headline guarantees: endpoint reads existing `node.ftns_ledger` (no new chain-RPC paths); `source` field forward-compatible from `"onchain"` to `"aerodrome-live"` post-pool-seed without breaking MCP client contract; USD rate is bootstrap-phase static placeholder via `PRSM_FTNS_USD_RATE` env (default 1.0; invalid → fallback) gated on Aerodrome migration per Vision gantt 2026-06-15; 503 fallback when `ftns_ledger=None` returns user-facing string with env-var hint; optional `address` arg for cross-address queries; output format displays USD rate explicitly so users see the conversion-rate trust contract; tool count pinned at `len(TOOLS) == 19` (renamed `test_eighteen_*` → `test_nineteen_tools_defined`). 4 trust seams: bootstrap-phase rate is operator-trusted not on-chain-attested (operator misconfig = 100× over-stated USD); endpoint inherits existing unauthenticated `/balance` security model; address param doesn't require ownership proof (matches Etherscan public semantics); no write surface introduced (read-only at every layer). 5 honest-scope items: live Aerodrome rate (gated on pool seed), source-aggregation across escrow + JobHistory + creator-pool accruals (response shape stays stable; gains optional fields), companion `coinbase_offramp_initiate` (next sprint), authenticated-scope to wallet (lower priority because public-on-chain semantics), caching (out of v1 scope). Tag `prsm-balance-check-mcp-v1-merge-ready-20260508`. 17 new tests across 2 suites + 1 pre-existing test count-pin updated.
+- **3.5 (2026-05-13)** — added §7.33 "Aerodrome pool-seed ceremony packet" covering the 7-sprint same-week arc (348–354) that built the multi-sig governance packet + Sepolia rehearsal + cross-entity authorization framework for seeding the initial Aerodrome USDC/FTNS pool. Three-artifact governance architecture (Foundation council resolution PRSM-CR-2026-05-13-1 + Foundation Letter of Expected Receipt + Prismatica Written Consent — template drafted in-conversation but held back from this repo per Prismatica/Foundation scope-boundary). Anvil-fork rehearsal validated all 6 verify-script assertions end-to-end + caught a Foundation Safe address typo before it reached mainnet. PRSM-Test-Safe sign-test combined with prior A-08 v2 ceremony as substantive Ledger-validation basis. Mainnet ceremony NOT YET EXECUTED — two operative-condition rows (Prismatica USDC wire tx hash + pre-flight Foundation Safe balance snapshot) remain user-driven. 8 trust seams + 4 honest-scope items. Packet tag `aerodrome-pool-seed-rehearsal-pass-20260513` (sprint 354).
+- **3.4 (2026-05-11)** — added §7.32 "/health/detailed + /metrics + prsm_node_health observability extension arc" covering sprints 342–345. Subsystem count 9 → 14 (FederatedInferenceOrchestrator + PipelineOrchestrator + CreatorReputationStore + ContentFingerprintRegistry + ContentFilterStore). /metrics Prometheus gauges added per new subsystem. Per-subsystem fail-soft + forward-compat-safe MCP render. Tag `health-detailed-fl-content-moderation-subsystems-merge-ready-20260511`.
+- **3.3 (2026-05-12)** — added §7.31 "Production-reliability bug-fix arc" covering six dogfood-discovered fixes (sprints 330, 332, 333, 334, 346, 347). Headline: sprint 347 consensus_submitter ReceiptLeaf v2 critical production fix (PRODUCTION-BLOCKING — every live Phase 7.1 challenge submission post-receipt-v2 would have been rejected by the on-chain verifier; bug invisible to all mocked tests, caught by live verification against the deployed Solidity verifier interface). Same seam-bug class as Phase 3.x.8.1 Task 5. Tag `consensus-submitter-v2-receipt-merge-ready-20260512` (sprint 347).
+- **3.2 (2026-05-11)** — added §7.30 "Pydantic V3 + SQLAlchemy 2.0 forward-compatibility migration arc" covering sprints 335–341. ~12 files / ~100 sites changed; semantics preserved bit-identically (cross-suite pass-set identical pre-arc + post-arc). class Config → ConfigDict, @validator → @field_validator, Field(example=) → Field(examples=[]), json_encoders removed, max_items → max_length, declarative_base relocation. Pyproject floor not yet bumped; migration makes the codebase V3-ready. Tag `pydantic-v3-sqla-2-final-sweep-merge-ready-20260511` (sprint 341).
+- **3.1 (2026-05-12)** — added §7.29 "P2P discovery hardening arc" covering 12 sub-sprints (319–331) of node-to-node discovery layer hardening. Pre-arc, every operator pointed at the canonical wss://bootstrap1.prsm-network.com:8765 default sat in degraded mode forever because the BootstrapClient WebSocket fallback was never wired into the live Libp2pDiscovery loop on the inbound side. Arc closes: msg-type filtering / peer_join+leave consumer / reconnect+sentinel / capabilities into PeerInfo / stale-peer expiry / get_bootstrap_status 5 counters + client_state / prsm_bootstrap_status MCP shape detection / /peers known[].capabilities. Sprint 331 records live-fleet verification: connected=N, degraded=false from cold start against the canonical DO bootstrap. 5 trust seams + 5 honest-scope items. Latest tag `p2p-known-peer-capabilities-merge-ready-20260512`.
 - **2.2 (2026-05-09)** — added §7.28 "A-08 RoyaltyDistributor v2 mainnet ceremony executed". Records the on-chain transactions executing the v2 RoyaltyDistributor redeploy on Base mainnet plus the gating Sepolia rehearsal. v2 at `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e`, owned by Foundation Safe `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` via Ownable2Step transferOwnership (`0x2bcab365…3b6b9` block 45784368) + acceptOwnership (Safe 2-of-3 hardware multi-sig). Adds `Ownable2Step` + `totalClaimable` accumulator + `recoverStranded(address)` surface — the load-bearing v2 invariant validated end-to-end on Sepolia rehearsal (recoverStranded swept stranded donation without disturbing credited balance). v1 at `0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2` retained for legacy claimable balances; operators self-migrate per ceremony plan §5.3. PRSM-CR-2026-05-09-1 ratified post-execution. networks.py pin updated v1 → v2 in commit `611597c8`. Tag `a-08-v2-redeploy-ceremony-complete-20260509`. Sepolia rehearsal manifest committed in `43144c8e`.
 - **2.1 (2026-05-08)** — added §7.22 "Event watchers + node-lifecycle wiring". Closes the contract-OBSERVATION half of the operator-side surface; with §7.20's contract-INVOCATION half (clients + schedulers), the loop is now closed end-to-end. 12 headline guarantees: three watcher modules (KeyDistribution + StorageSlashing + CompensationDistributor) following EmissionWatcher's async asyncio.Event-driven pattern; per-event-type subscription gating saves RPC; first-tick baseline at chain tip with NO history replay; per-event-type RPC failure does NOT advance baseline (events not silently lost on transient failure; trade is callback-replay on retry, operator's idempotency contract); callback exceptions swallowed; 3+3+1=12 new client-side methods (`latest_block` + `get_*_events` per event type); three node.py builders following the dual-gate pattern (client + `*_WATCHER_ENABLED=1`); default INFO/WARNING-log callbacks wired at builder time (no-callback = no-polling per watcher contract, so default callbacks are required for env-var activation to be useful); missing `_build_key_distribution_client_or_none` builder added with optional private_key (Tier C watcher-only mode supported); Node lifecycle integration extends stop() to await all 5 daemon tasks (2 schedulers + 3 watchers); annex §5.4 detection scenario flips from poll-based to event-driven for KeyReleased monitoring. 6 trust seams: subscription gating creates configuration trap, chain-RPC dependency is single point of failure for detection (multi-RPC redundancy is honest-scope), per-event-type retry trade-off favors safety over efficiency, first-tick baseline correct but loses startup-window events, default INFO-log callbacks provide observability NOT incident response, KeyDistributionClient builder accepts private_key=None as deliberate departure (read-only watcher-only mode). Honest scope: address-filter on subscriptions deferred, block-range chunking for backfills deferred, multi-RPC redundancy deferred, last_processed_block persistence across restarts deferred, Prometheus metrics integration deferred, RPC-side argument_filters topic filtering deferred. 2 merge-ready tags + 47 tests across 4 suites. Latest tag `node-event-watcher-wiring-merge-ready-20260508`.
 - **2.0 (2026-05-08)** — added §7.21 "Fleet kill-switch design (design-only)". Closes the third and final §6.2 readiness item from `docs/security/EXPLOIT_RESPONSE_PLAYBOOK_ANNEX_2026_05.md` via design-only scoping; the first two items closed earlier the same day (commits e75ccd9a / 3b73a60e / 25da8b69 / 321de20c) with shipped code, but the fleet-coordination layer is structurally larger and gates on §7 promotion triggers (T1 active P0 / T2 fleet > 10 operators / T3 TVL > $50K / T4 VC term sheet / T5 external auditor flag / T6 ≥ 2 operator requests). 9 headline guarantees: per-node mechanism remains load-bearing (cannot be replaced), operator opt-in is non-negotiable (`PRSM_FLEET_KILL_SWITCH_ENABLED=1`), no new governance authority (issuance maps to existing council multisig), granularity bound at 7 subsystems with list-expansion requiring PRSM software release, cryptographic verification across all candidate architectures, recommended phased C → A migration (HTTPS-pull bootstrap → on-chain canonical), four-tier issuance authority (P0 3-of-5 / P1 single-actor / deactivation 3-of-5 / list-expansion 4-of-5 + auditor), replay protection via issued_at + last_processed_at, seven explicit non-goals (no Foundation-controlled remote shutdown, no canary rollout, no operator challenge mechanism, no jurisdictional gating, no time-locked directives, no partial-subsystem directives, no pre-committed false-positive compensation). 6 trust seams: opt-in preserves sovereignty, Phase 1 HSM custody is new operational primitive (mapped to DNSSEC root-zone precedent), HTTPS-endpoint centralization is bootstrap-only, DHT Architecture B documented-but-rejected-with-reasoning, P0/P1 issuance asymmetry mirrors parent playbook §5, granularity bound enforced client-side as compromised-key defense. Honest scope: design-only with no code shipped, implementation gated on §7 triggers, HSM custody policy not yet ratified, Architecture A audit not engaged, operator runbook not yet drafted. Tag `fleet-kill-switch-scoping-merge-ready-20260508`.
