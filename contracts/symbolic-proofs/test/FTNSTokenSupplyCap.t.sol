@@ -12,8 +12,9 @@ pragma solidity ^0.8.22;
 ///
 /// @dev STRUCTURAL EQUIVALENCE NOTE (audit-visible):
 ///   The _mintInternal logic below is a line-by-line mirror of
-///   FTNSTokenSimple.mintReward at contracts/contracts/
-///   FTNSTokenSimple.sol:70-73. The full contract is UUPS-
+///   FTNSTokenSimple.mintReward at
+///   contracts/contracts/FTNSTokenSimple.sol:70-73.
+///   The full contract is UUPS-
 ///   upgradeable + uses OZ AccessControlUpgradeable, which is
 ///   irrelevant to the supply-cap algorithm and complicates
 ///   symbolic-execution setup. The proof here covers the load-

@@ -158,6 +158,33 @@ pip install halmos && curl -L https://foundry.paradigm.xyz | bash && foundryup
 
 Then ensure they're on `$PATH` when invoking pytest.
 
+## Source-identity CI parity gate (sprint 378)
+
+Every citation in this lane's spec files (e.g.,
+`prsm/compute/chain_rpc/client.py:1431`) is hash-pinned in
+`source_identity_pins.json`. The pinned hash is SHA-256 of
+the cited line range with trailing whitespace stripped per
+line (stable under benign EOL edits).
+
+CI test `tests/unit/test_source_identity_parity.py::
+test_live_source_identity_parity` runs on every PR and
+fails if any cited canonical-source range has mutated
+without a coordinated spec update. This closes the §7.34
+honest-scope item — silent drift between halmos specs +
+canonical source is now CI-detectable.
+
+When canonical source legitimately changes:
+
+1. Update the affected spec(s) to match
+2. Re-run halmos to confirm proofs still pass
+3. Regenerate pins: `python scripts/update_source_identity_pins.py`
+4. Commit spec changes + pin update together
+
+Citation format required: paths MUST start with `prsm/` or
+`contracts/` (full repo-relative path). Bare names like
+`RoyaltyDistributor.sol:111-155` are silently skipped by
+the parser to avoid ambiguity.
+
 ## Honest scope
 
 - All 20 runtime invariants from §14 item 4 mirrored in
@@ -168,9 +195,6 @@ Then ensure they're on `$PATH` when invoking pytest.
   structurally-equivalent minimal mocks. Doable but
   requires modeling IERC20 + IProvenanceRegistry as
   symbolic backing contracts; deferred.
-- Source-identity CI parity check between spec contracts
-  + canonical source (would catch silent drift if
-  someone modifies one without the other); deferred.
 
 ## References
 

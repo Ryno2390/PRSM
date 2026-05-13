@@ -9,9 +9,9 @@ pragma solidity ^0.8.22;
 ///
 /// @dev STRUCTURAL EQUIVALENCE (audit-visible):
 ///   The three operations below mirror line-by-line:
-///     distributeRoyalty -> RoyaltyDistributor.sol:111-155
-///     claim             -> RoyaltyDistributor.sol:161-170
-///     recoverStranded   -> RoyaltyDistributor.sol:186-193
+///     distributeRoyalty -> contracts/contracts/RoyaltyDistributor.sol:111-155
+///     claim             -> contracts/contracts/RoyaltyDistributor.sol:161-170
+///     recoverStranded   -> contracts/contracts/RoyaltyDistributor.sol:186-193
 ///   Simplifications applied (orthogonal to solvency):
 ///     - IERC20 substituted with internal `balance` uint256
 ///       (the proof tracks balance arithmetic, not transfer
@@ -51,7 +51,7 @@ contract RoyaltyDistributor {
     }
 
     /// Mirrors RoyaltyDistributor.distributeRoyalty
-    /// (RoyaltyDistributor.sol:111-155). The proof models
+    /// (contracts/contracts/RoyaltyDistributor.sol:111-155). The proof models
     /// the caller as having unlimited FTNS allowance + the
     /// transferFrom always succeeding; this is the standard
     /// "honest ERC-20" symbolic assumption.
@@ -87,7 +87,7 @@ contract RoyaltyDistributor {
     }
 
     /// Mirrors RoyaltyDistributor.claim
-    /// (RoyaltyDistributor.sol:161-170).
+    /// (contracts/contracts/RoyaltyDistributor.sol:161-170).
     function claim() external {
         uint256 amount = claimable[msg.sender];
         require(amount > 0, "Nothing to claim");
@@ -97,7 +97,7 @@ contract RoyaltyDistributor {
     }
 
     /// Mirrors RoyaltyDistributor.recoverStranded
-    /// (RoyaltyDistributor.sol:186-193). The to-address +
+    /// (contracts/contracts/RoyaltyDistributor.sol:186-193). The to-address +
     /// onlyOwner gating is orthogonal to the solvency
     /// math; proof covers the arithmetic.
     function recoverStranded(address to) external {
