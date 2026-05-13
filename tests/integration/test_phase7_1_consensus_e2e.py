@@ -134,18 +134,27 @@ async function main() {
   const token = await Token.deploy();
   await token.waitForDeployment();
 
-  const Pool = await hre.ethers.getContractFactory("EscrowPool");
-  const pool = await Pool.deploy(
-    deployer.address, await token.getAddress(), hre.ethers.ZeroAddress,
-  );
-  await pool.waitForDeployment();
+  // Sprint 347 — Registry-before-Pool ordering required since
+  // EscrowPool bakes settlementRegistry as immutable
+  // constructor arg (L4 audit MED-6); StakeBond bakes
+  // initialSlasher (L2 audit HIGH-7); setFoundationReserveWallet
+  // requires the wallet to be a contract. Same migration as
+  // applied to test_phase7_stake_slash_e2e + test_register_then_
+  // distribute_e2e.
 
   const Registry = await hre.ethers.getContractFactory(
     "BatchSettlementRegistry",
   );
   const registry = await Registry.deploy(deployer.address, 3600);
   await registry.waitForDeployment();
-  await pool.connect(deployer).setSettlementRegistry(await registry.getAddress());
+
+  const Pool = await hre.ethers.getContractFactory("EscrowPool");
+  const pool = await Pool.deploy(
+    deployer.address,
+    await token.getAddress(),
+    await registry.getAddress(),
+  );
+  await pool.waitForDeployment();
   await registry.connect(deployer).setEscrowPool(await pool.getAddress());
 
   const Verifier = await hre.ethers.getContractFactory(
@@ -159,11 +168,15 @@ async function main() {
 
   const Bond = await hre.ethers.getContractFactory("StakeBond");
   const bond = await Bond.deploy(
-    deployer.address, await token.getAddress(), 86400,
+    deployer.address,
+    await token.getAddress(),
+    86400,
+    await registry.getAddress(),
   );
   await bond.waitForDeployment();
-  await bond.connect(deployer).setSlasher(await registry.getAddress());
-  await bond.connect(deployer).setFoundationReserveWallet(deployer.address);
+  await bond.connect(deployer).setFoundationReserveWallet(
+    await pool.getAddress(),
+  );
   await registry.connect(deployer).setStakeBond(await bond.getAddress());
 
   // Mint 100K FTNS to each provider so they can bond 50K.
@@ -229,14 +242,17 @@ def _leaf_hash(leaf: dict) -> bytes:
     from eth_abi import encode
     from eth_utils import keccak
 
+    # Sprint 347 — ReceiptLeaf gained `signingMessageHash`
+    # at the end of the tuple (L2 audit C-INT-01 fix).
     encoded = encode(
         [
-            "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)",
+            "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)",
         ],
         [(
             leaf["jobIdHash"], leaf["shardIndex"], leaf["providerIdHash"],
             leaf["providerPubkeyHash"], leaf["outputHash"],
             leaf["executedAtUnix"], leaf["valueFtns"], leaf["signatureHash"],
+            leaf.get("signingMessageHash", b"\x00" * 32),
         )],
     )
     return keccak(encoded)
@@ -249,11 +265,12 @@ def _encode_consensus_aux(
        abi.encode(bytes32, bytes32[], ReceiptLeaf)
     """
     from eth_abi import encode
+    # Sprint 347 — ReceiptLeaf tuple gained `signingMessageHash`.
     return encode(
         [
             "bytes32",
             "bytes32[]",
-            "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)",
+            "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)",
         ],
         [
             conflicting_batch_id,
@@ -265,6 +282,7 @@ def _encode_consensus_aux(
                 majority_leaf["outputHash"],
                 majority_leaf["executedAtUnix"],
                 majority_leaf["valueFtns"], majority_leaf["signatureHash"],
+                majority_leaf.get("signingMessageHash", b"\x00" * 32),
             ),
         ],
     )
@@ -386,6 +404,14 @@ def test_phase7_1_consensus_mismatch_e2e(hardhat_node, deployed):
             "executedAtUnix": executed_at,
             "valueFtns": 10 * 10**18,
             "signatureHash": keccak(f"sig-{label}".encode()),
+            # Sprint 347 — L2 audit C-INT-01: ReceiptLeaf
+            # gained `signingMessageHash`. Not used by the
+            # CONSENSUS_MISMATCH path (which binds to
+            # outputHash + jobIdHash + shardIndex), but must be
+            # present in the tuple for selector match.
+            "signingMessageHash": keccak(
+                f"signing-{label}".encode()
+            ),
         }
 
     # ── 3. Python-side consensus resolves before on-chain work ─────────
@@ -421,6 +447,8 @@ def test_phase7_1_consensus_mismatch_e2e(hardhat_node, deployed):
             "inputs": [
                 {"name": "batchId", "type": "bytes32"},
                 {
+                    # Sprint 347 — ReceiptLeaf gained
+                    # `signingMessageHash` (L2 audit C-INT-01).
                     "components": [
                         {"name": "jobIdHash", "type": "bytes32"},
                         {"name": "shardIndex", "type": "uint32"},
@@ -430,6 +458,7 @@ def test_phase7_1_consensus_mismatch_e2e(hardhat_node, deployed):
                         {"name": "executedAtUnix", "type": "uint64"},
                         {"name": "valueFtns", "type": "uint128"},
                         {"name": "signatureHash", "type": "bytes32"},
+                        {"name": "signingMessageHash", "type": "bytes32"},
                     ],
                     "name": "leaf",
                     "type": "tuple",
@@ -535,6 +564,8 @@ def test_phase7_1_consensus_mismatch_e2e(hardhat_node, deployed):
             executed_at_unix=leaf["executedAtUnix"],
             value_ftns_wei=leaf["valueFtns"],
             signature_hash=leaf["signatureHash"],
+            # Sprint 347 — ReceiptLeaf gained signingMessageHash.
+            signing_message_hash=leaf["signingMessageHash"],
         )
 
     attempt = ChallengeAttempt(

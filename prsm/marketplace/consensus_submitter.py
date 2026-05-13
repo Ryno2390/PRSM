@@ -77,8 +77,10 @@ DEFAULT_CHALLENGE_GAS = 1_000_000
 class ReceiptLeafFields:
     """On-chain-encoded ReceiptLeaf tuple fields.
 
-    Matches `BatchSettlementRegistry.ReceiptLeaf`:
-      (bytes32, uint32, bytes32, bytes32, bytes32, uint64, uint128, bytes32)
+    Matches `BatchSettlementRegistry.ReceiptLeaf` (sprint 347 —
+    L2 audit C-INT-01 added the trailing `signingMessageHash`):
+      (bytes32, uint32, bytes32, bytes32, bytes32, uint64,
+       uint128, bytes32, bytes32)
 
     The caller is responsible for deriving these from the Python
     `ShardExecutionReceipt` — see `from_python_receipt` below for the
@@ -92,6 +94,14 @@ class ReceiptLeafFields:
     executed_at_unix: int
     value_ftns_wei: int
     signature_hash: bytes
+    # Sprint 347 — L2 audit C-INT-01 fix. Binds the INVALID_
+    # SIGNATURE challenge path to a leaf-committed message hash
+    # so the challenger can't re-target verification to an
+    # attacker-chosen message. The submitter doesn't use the
+    # CONSENSUS_MISMATCH path, but the field is part of the
+    # struct selector and must be present for the on-chain
+    # ReceiptLeaf tuple to encode/decode cleanly.
+    signing_message_hash: bytes
 
     @classmethod
     def from_python_receipt(
@@ -111,6 +121,11 @@ class ReceiptLeafFields:
           - provider_pubkey_hash = keccak256(provider_pubkey_b64.utf8)
           - output_hash = bytes.fromhex(receipt.output_hash)  (hex str → 32 bytes)
           - signature_hash = keccak256(signature.utf8)
+          - signing_message_hash = keccak256(signing_message.utf8)
+            where signing_message is the canonical signing-payload
+            (build_receipt_signing_payload). The receipt itself
+            doesn't carry the message — we reconstruct it from
+            (job_id, shard_index, output_hash, executed_at_unix).
 
         `value_ftns_wei` comes from the orchestrator's per-provider
         escrow amount; the receipt itself doesn't carry a price.
@@ -123,6 +138,10 @@ class ReceiptLeafFields:
                 f"receipt.output_hash must be 32 bytes hex (got "
                 f"{len(output_bytes)})"
             )
+        signing_payload = (
+            f"{receipt.job_id}||{receipt.shard_index}||"
+            f"{receipt.output_hash}||{receipt.executed_at_unix}"
+        ).encode("utf-8")
         return cls(
             job_id_hash=bytes(keccak(receipt.job_id.encode("utf-8"))),
             shard_index=receipt.shard_index,
@@ -134,6 +153,7 @@ class ReceiptLeafFields:
             executed_at_unix=receipt.executed_at_unix,
             value_ftns_wei=value_ftns_wei,
             signature_hash=bytes(keccak(receipt.signature.encode("utf-8"))),
+            signing_message_hash=bytes(keccak(signing_payload)),
         )
 
     def to_tuple(self) -> Tuple:
@@ -143,7 +163,7 @@ class ReceiptLeafFields:
             self.job_id_hash, self.shard_index, self.provider_id_hash,
             self.provider_pubkey_hash, self.output_hash,
             self.executed_at_unix, self.value_ftns_wei,
-            self.signature_hash,
+            self.signature_hash, self.signing_message_hash,
         )
 
 
@@ -185,6 +205,8 @@ class ConsensusChallengeSubmitter:
         "inputs": [
             {"name": "batchId", "type": "bytes32"},
             {
+                # Sprint 347 — ReceiptLeaf gained
+                # `signingMessageHash` (L2 audit C-INT-01).
                 "components": [
                     {"name": "jobIdHash", "type": "bytes32"},
                     {"name": "shardIndex", "type": "uint32"},
@@ -194,6 +216,7 @@ class ConsensusChallengeSubmitter:
                     {"name": "executedAtUnix", "type": "uint64"},
                     {"name": "valueFtns", "type": "uint128"},
                     {"name": "signatureHash", "type": "bytes32"},
+                    {"name": "signingMessageHash", "type": "bytes32"},
                 ],
                 "name": "leaf",
                 "type": "tuple",
@@ -298,11 +321,12 @@ class ConsensusChallengeSubmitter:
            abi.encode(bytes32 conflictingBatchId, bytes32[] majorityProof,
                       ReceiptLeaf majorityLeaf).
         """
+        # Sprint 347 — ReceiptLeaf gained `signingMessageHash`.
         return bytes(abi_encode(
             [
                 "bytes32",
                 "bytes32[]",
-                "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)",
+                "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)",
             ],
             [
                 attempt.majority_batch_id,

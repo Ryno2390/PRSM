@@ -79,6 +79,8 @@ def _make_submitter(mock_web3, gas_budget=None):
 
 
 def _make_attempt():
+    # Sprint 347 — ReceiptLeafFields gained signing_message_hash
+    # to match the on-chain ReceiptLeaf struct (L2 audit C-INT-01).
     leaf_majority = ReceiptLeafFields(
         job_id_hash=b"\x11" * 32,
         shard_index=0,
@@ -88,6 +90,7 @@ def _make_attempt():
         executed_at_unix=1_700_000_000,
         value_ftns_wei=10 * 10**18,
         signature_hash=b"\x44" * 32,
+        signing_message_hash=b"\x88" * 32,
     )
     leaf_minority = ReceiptLeafFields(
         job_id_hash=b"\x11" * 32,   # same job
@@ -98,6 +101,7 @@ def _make_attempt():
         executed_at_unix=1_700_000_000,
         value_ftns_wei=10 * 10**18,
         signature_hash=b"\x77" * 32,
+        signing_message_hash=b"\x99" * 32,
     )
     return ChallengeAttempt(
         minority_batch_id=b"\x01" * 32,
@@ -166,12 +170,15 @@ def test_receipt_leaf_fields_rejects_wrong_output_hash_length():
 def test_receipt_leaf_fields_to_tuple_matches_contract_argument_order():
     """The tuple must be ordered (jobIdHash, shardIndex, providerIdHash,
     providerPubkeyHash, outputHash, executedAtUnix, valueFtns,
-    signatureHash) — matches ReceiptLeaf struct field order in the ABI."""
+    signatureHash, signingMessageHash) — matches ReceiptLeaf struct
+    field order in the ABI. Sprint 347 added signingMessageHash at
+    position 8 (L2 audit C-INT-01)."""
     fields = ReceiptLeafFields(
         job_id_hash=b"\x01" * 32, shard_index=7,
         provider_id_hash=b"\x02" * 32, provider_pubkey_hash=b"\x03" * 32,
         output_hash=b"\x04" * 32, executed_at_unix=1234,
         value_ftns_wei=10**18, signature_hash=b"\x05" * 32,
+        signing_message_hash=b"\x06" * 32,
     )
     t = fields.to_tuple()
     assert t[0] == b"\x01" * 32      # jobIdHash
@@ -182,6 +189,7 @@ def test_receipt_leaf_fields_to_tuple_matches_contract_argument_order():
     assert t[5] == 1234               # executedAtUnix
     assert t[6] == 10**18             # valueFtns
     assert t[7] == b"\x05" * 32      # signatureHash
+    assert t[8] == b"\x06" * 32      # signingMessageHash
 
 
 # ── auxData encoding ─────────────────────────────────────────────────
@@ -197,11 +205,12 @@ def test_aux_encoding_matches_handler_layout(mock_web3):
     attempt = _make_attempt()
     encoded = sub._encode_aux(attempt)
 
+    # Sprint 347 — ReceiptLeaf gained signingMessageHash.
     (batch_id, proof, leaf_tuple) = abi_decode(
         [
             "bytes32",
             "bytes32[]",
-            "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)",
+            "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)",
         ],
         encoded,
     )

@@ -131,24 +131,28 @@ async function main() {
   const token = await Token.deploy();
   await token.waitForDeployment();
 
-  // 2. EscrowPool (satellite — needed so Registry.setEscrowPool can be
-  //    invoked; we don't actually use it in this test since the
-  //    challenge path invalidates pre-finalization, but the Registry
-  //    enforces the wire on finalize).
-  const Pool = await hre.ethers.getContractFactory("EscrowPool");
-  const pool = await Pool.deploy(
-    deployer.address, await token.getAddress(), hre.ethers.ZeroAddress
-  );
-  await pool.waitForDeployment();
+  // Sprint 347 — Registry must deploy BEFORE Pool because
+  // EscrowPool now bakes settlementRegistry as IMMUTABLE
+  // constructor arg (L4 audit MED-6 / D-02 fix). Same migration
+  // as sprint 346 for the RoyaltyDistributor e2e.
 
-  // 3. Registry with a 1-hour challenge window (min allowed).
+  // 2. Registry (1-hour challenge window, min allowed).
   const Registry = await hre.ethers.getContractFactory(
     "BatchSettlementRegistry"
   );
   const registry = await Registry.deploy(deployer.address, 3600);
   await registry.waitForDeployment();
 
-  await pool.connect(deployer).setSettlementRegistry(await registry.getAddress());
+  // 3. EscrowPool — registry baked at construction.
+  const Pool = await hre.ethers.getContractFactory("EscrowPool");
+  const pool = await Pool.deploy(
+    deployer.address,
+    await token.getAddress(),
+    await registry.getAddress(),
+  );
+  await pool.waitForDeployment();
+
+  // Registry's escrow_pool ref is still mutable — cross-wire.
   await registry.connect(deployer).setEscrowPool(await pool.getAddress());
 
   // 4. Mock signature verifier — defaults to returning false, which is
@@ -162,17 +166,26 @@ async function main() {
     await verifier.getAddress()
   );
 
-  // 5. StakeBond with a 1-day unbond delay (min allowed) and the
-  //    deployer as the Foundation reserve wallet.
+  // 5. StakeBond — sprint 347 / L2 audit HIGH-7 (B-CROSS-3):
+  //    initialSlasher is now a 4th constructor arg; setSlasher
+  //    was removed. Bake the Registry address in at deploy.
   const Bond = await hre.ethers.getContractFactory("StakeBond");
   const bond = await Bond.deploy(
-    deployer.address, await token.getAddress(), 86400
+    deployer.address,
+    await token.getAddress(),
+    86400,
+    await registry.getAddress(),
   );
   await bond.waitForDeployment();
 
-  // Cross-wire.
-  await bond.connect(deployer).setSlasher(await registry.getAddress());
-  await bond.connect(deployer).setFoundationReserveWallet(deployer.address);
+  // Foundation reserve wallet — sprint 347: setFoundation
+  // ReserveWallet now requires the wallet to BE a contract
+  // (WalletNotContract revert; deployer EOA fails). Use Pool's
+  // address as a stand-in — the wallet only matters for the
+  // drainFoundationReserve path (not on the slash hot path).
+  await bond.connect(deployer).setFoundationReserveWallet(
+    await pool.getAddress(),
+  );
   await registry.connect(deployer).setStakeBond(await bond.getAddress());
 
   // 6. Mint FTNS to the provider so they can bond 50K.
@@ -235,14 +248,17 @@ def _leaf_hash(leaf: dict) -> bytes:
     from eth_abi import encode
     from eth_utils import keccak
 
+    # Sprint 347 — ReceiptLeaf gained `signingMessageHash` at
+    # the end of the tuple. Hash signature updated to match.
     encoded = encode(
         [
-            "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)",
+            "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32,bytes32)",
         ],
         [(
             leaf["jobIdHash"], leaf["shardIndex"], leaf["providerIdHash"],
             leaf["providerPubkeyHash"], leaf["outputHash"],
             leaf["executedAtUnix"], leaf["valueFtns"], leaf["signatureHash"],
+            leaf["signingMessageHash"],
         )],
     )
     return keccak(encoded)
@@ -251,11 +267,18 @@ def _leaf_hash(leaf: dict) -> bytes:
 def _encode_invalid_sig_aux(
     signing_msg: bytes, pubkey: bytes, signature: bytes,
 ) -> bytes:
-    """Mirror _handleInvalidSignature's auxData layout:
-       abi.encode(bytes, bytes, bytes) = (signingMessage, publicKey, signature)
+    """Mirror _handleInvalidSignature's auxData layout.
+
+    Sprint 347 — L2 audit C-INT-01 fix: auxData now packs only
+    (publicKey, signature). The signing message comes from the
+    leaf-committed `signingMessageHash` (binding the challenge
+    to a leaf-attested value, not challenger-supplied). The
+    `signing_msg` arg is retained in the helper signature so
+    callers don't need to change their call sites but is no
+    longer encoded into auxData.
     """
     from eth_abi import encode
-    return encode(["bytes", "bytes", "bytes"], [signing_msg, pubkey, signature])
+    return encode(["bytes", "bytes"], [pubkey, signature])
 
 
 @requires_hardhat
@@ -354,6 +377,14 @@ def test_phase7_bond_slash_claim_rep_e2e(hardhat_node, deployed):
         "executedAtUnix": int(time.time()),
         "valueFtns": 10 * 10**18,  # 10 FTNS per receipt
         "signatureHash": keccak(signature),
+        # Sprint 347 — L2 audit C-INT-01 fix: ReceiptLeaf gained
+        # `signingMessageHash` to bind the INVALID_SIGNATURE
+        # challenge to a leaf-committed message hash. The
+        # _handleInvalidSignature path passes
+        # `leaf.signingMessageHash` to the verifier as the
+        # canonical message — not auxData[0]. Test passes the
+        # same hash here that it will pack into auxData below.
+        "signingMessageHash": keccak(signing_msg),
     }
     leaf_root = _leaf_hash(leaf)  # 1-leaf tree: root == leafHash
 
@@ -377,6 +408,13 @@ def test_phase7_bond_slash_claim_rep_e2e(hardhat_node, deployed):
             "inputs": [
                 {"name": "batchId", "type": "bytes32"},
                 {
+                    # Sprint 347 — ReceiptLeaf gained
+                    # `signingMessageHash` (L2 audit C-INT-01
+                    # fix: bind challenge to a leaf-committed
+                    # message hash so attackers can't re-target
+                    # the INVALID_SIGNATURE challenge to an
+                    # attacker-chosen message). Selector now
+                    # encodes a 9-component tuple, not 8.
                     "components": [
                         {"name": "jobIdHash", "type": "bytes32"},
                         {"name": "shardIndex", "type": "uint32"},
@@ -386,6 +424,7 @@ def test_phase7_bond_slash_claim_rep_e2e(hardhat_node, deployed):
                         {"name": "executedAtUnix", "type": "uint64"},
                         {"name": "valueFtns", "type": "uint128"},
                         {"name": "signatureHash", "type": "bytes32"},
+                        {"name": "signingMessageHash", "type": "bytes32"},
                     ],
                     "name": "leaf",
                     "type": "tuple",
