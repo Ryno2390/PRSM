@@ -1360,27 +1360,33 @@ class TestGPUDetection:
     
     @pytest.mark.asyncio
     async def test_gpu_memory_no_gpu_libraries(self):
-        """Test fallback when no GPU libraries are available."""
+        """Test fallback when no GPU libraries are available.
+
+        Sprint 332 — replaced the prior `del sys.modules['torch']`
+        + finally-restore pattern with `patch.dict(...None)`. The
+        old pattern triggered an actual `import torch` re-attempt
+        inside `_detect_gpu_memory`, which raises
+        `RuntimeError: Only a single TORCH_LIBRARY can be used to
+        register the namespace triton` on newer PyTorch. That
+        partial re-import mutated torch's C++ dtype singletons
+        globally — every subsequent test that did
+        `t.dtype in _DTYPE_TO_STR` then failed because the dict
+        keys were the PRE-leak singleton refs and `t.dtype` was
+        the post-leak refs. 25 cross-suite failures all traced
+        to this test alone.
+
+        `sys.modules[name] = None` is the documented Python
+        sentinel for "module is uncached but unavailable" — it
+        raises ImportError without attempting an actual import,
+        avoiding the C++ re-registration entirely.
+        """
         detector = ResourceCapabilityDetector()
-        
-        # Mock all GPU libraries to raise ImportError
-        import sys
-        
-        # Store original modules
-        original_modules = {}
-        for mod in ['pynvml', 'torch', 'GPUtil']:
-            if mod in sys.modules:
-                original_modules[mod] = sys.modules[mod]
-                del sys.modules[mod]
-        
-        try:
+        with patch.dict('sys.modules', {
+            'pynvml': None, 'torch': None, 'GPUtil': None,
+        }):
             result = await detector._detect_gpu_memory()
             # Should return 0.0 when no GPU detected
             assert result == 0.0
-        finally:
-            # Restore original modules
-            for mod, val in original_modules.items():
-                sys.modules[mod] = val
     
     @pytest.mark.asyncio
     async def test_gpu_memory_cpu_only_fallback(self):
