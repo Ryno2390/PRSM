@@ -57,6 +57,24 @@ def test_catalog_has_escrow_pool_solvency_proof():
     assert "INV-EP-1" in entry["runtime_invariants"]
 
 
+def test_catalog_has_streaming_emit_cap_proof():
+    """Sprint 372: SSE streaming-emit cap (§7.5)."""
+    assert (
+        "StreamingEmitCapSpec" in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG["StreamingEmitCapSpec"]
+    assert entry["runtime_invariants"] == []
+
+
+def test_catalog_has_kv_cache_lru_bound_proof():
+    """Sprint 373: KVCacheManager LRU bound (§7.9)."""
+    assert (
+        "KVCacheLRUBoundSpec" in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG["KVCacheLRUBoundSpec"]
+    assert entry["runtime_invariants"] == []
+
+
 def test_catalog_has_m1_cadence_driven_yield_proof():
     """Sprint 370: M1 cadence-driven yield invariant (§7.13)."""
     assert (

@@ -362,6 +362,36 @@ SYMBOLIC_PROOF_CATALOG: Dict[str, Dict[str, Any]] = {
             "per-requester escrow accumulator."
         ),
     },
+    "StreamingEmitCapSpec": {
+        "mirrors_runtime_contract": "streaming_inference",
+        "runtime_invariants": [],
+        "description": (
+            "Symbolic proof of the Phase 3.x.8.1 SSE "
+            "streaming-endpoint settle-on-tokens-emitted "
+            "billing invariant (audit-prep §7.5). For ALL "
+            "per-iteration accept counts + budget pre-"
+            "states, tokens_emitted NEVER exceeds "
+            "max_tokens. cap_hit_mid_emit fires iff actual "
+            "truncation; cap_reached fires iff post-state "
+            "hits or exceeds max. Source-identity-mirrors "
+            "prsm/compute/chain_rpc/client.py:1359-1367 "
+            "(round-1 MEDIUM-2 split remediation)."
+        ),
+    },
+    "KVCacheLRUBoundSpec": {
+        "mirrors_runtime_contract": "streaming_inference",
+        "runtime_invariants": [],
+        "description": (
+            "Symbolic proof of the KVCacheManager LRU bound "
+            "invariant (audit-prep §7.9 Phase 3.x.11). For "
+            "ALL allocation sequences, cache size NEVER "
+            "exceeds max_cached_requests — closes unbounded-"
+            "cache-growth under concurrent request load. "
+            "Source-identity-mirrors prsm/compute/chain_rpc/"
+            "kv_cache.py:201-249 KVCacheManager.allocate "
+            "pre-insert eviction loop."
+        ),
+    },
     "M1CadenceDrivenYieldSpec": {
         "mirrors_runtime_contract": "streaming_inference",
         "runtime_invariants": [],
