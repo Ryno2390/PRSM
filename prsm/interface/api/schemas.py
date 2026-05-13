@@ -36,8 +36,8 @@ class PaginatedResponse(BaseModel):
 
 class LoginRequest(BaseModel):
     """Login request model"""
-    email: str = Field(example="researcher@university.edu", description="User email address")
-    password: str = Field(example="secure_password_123", description="User password")
+    email: str = Field(examples=["researcher@university.edu"], description="User email address")
+    password: str = Field(examples=["secure_password_123"], description="User password")
     remember_me: bool = Field(False, description="Whether to extend session duration")
 
 class LoginResponse(APIResponse):
@@ -68,9 +68,9 @@ class LoginResponse(APIResponse):
 
 class RegisterRequest(BaseModel):
     """User registration request"""
-    email: str = Field(example="new.researcher@university.edu", description="User email")
-    password: str = Field(example="secure_password_123", description="Password (min 8 characters)")
-    full_name: str = Field(example="Dr. Jane Smith", description="Full name")
+    email: str = Field(examples=["new.researcher@university.edu"], description="User email")
+    password: str = Field(examples=["secure_password_123"], description="Password (min 8 characters)")
+    full_name: str = Field(examples=["Dr. Jane Smith"], description="Full name")
     organization: Optional[str] = Field("University of Science", description="Organization/institution")
     role: str = Field("researcher", description="Requested role")
 
@@ -91,17 +91,17 @@ class ResourceType(str, Enum):
 class MarketplaceResource(BaseModel):
     """Marketplace resource model"""
     id: str = Field(description="Unique resource identifier")
-    title: str = Field(example="Advanced NLP Model", description="Resource title")
+    title: str = Field(examples=["Advanced NLP Model"], description="Resource title")
     description: str = Field(description="Detailed resource description")
     resource_type: ResourceType = Field(description="Type of resource")
-    price: float = Field(example=50.0, description="Price in FTNS tokens")
+    price: float = Field(examples=[50.0], description="Price in FTNS tokens")
     seller_id: str = Field(description="Seller user ID")
-    seller_name: str = Field(example="AI Research Lab", description="Seller display name")
-    rating: float = Field(example=4.8, description="Average rating (0-5)")
-    reviews_count: int = Field(example=25, description="Number of reviews")
+    seller_name: str = Field(examples=["AI Research Lab"], description="Seller display name")
+    rating: float = Field(examples=[4.8], description="Average rating (0-5)")
+    reviews_count: int = Field(examples=[25], description="Number of reviews")
     created_at: datetime = Field(description="Resource creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
-    tags: List[str] = Field(example=["nlp", "transformer", "pytorch"], description="Resource tags")
+    tags: List[str] = Field(examples=[["nlp", "transformer", "pytorch"]], description="Resource tags")
     
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -131,9 +131,9 @@ class MarketplaceSearchResponse(PaginatedResponse):
 class FTNSBalance(BaseModel):
     """FTNS token balance information"""
     user_id: str = Field(description="User identifier")
-    available_balance: float = Field(example=1250.75, description="Available FTNS tokens")
-    locked_balance: float = Field(example=250.0, description="Locked FTNS tokens (in escrow)")
-    total_balance: float = Field(example=1500.75, description="Total FTNS tokens")
+    available_balance: float = Field(examples=[1250.75], description="Available FTNS tokens")
+    locked_balance: float = Field(examples=[250.0], description="Locked FTNS tokens (in escrow)")
+    total_balance: float = Field(examples=[1500.75], description="Total FTNS tokens")
     last_updated: datetime = Field(description="Last balance update timestamp")
 
 class FTNSTransaction(BaseModel):
@@ -141,10 +141,10 @@ class FTNSTransaction(BaseModel):
     transaction_id: str = Field(description="Unique transaction identifier")
     from_user_id: Optional[str] = Field(None, description="Sender user ID")
     to_user_id: Optional[str] = Field(None, description="Recipient user ID")
-    amount: float = Field(example=75.0, description="Transaction amount in FTNS")
-    transaction_type: str = Field(example="purchase", description="Type of transaction")
-    description: str = Field(example="AI Model Purchase", description="Transaction description")
-    status: str = Field(example="completed", description="Transaction status")
+    amount: float = Field(examples=[75.0], description="Transaction amount in FTNS")
+    transaction_type: str = Field(examples=["purchase"], description="Type of transaction")
+    description: str = Field(examples=["AI Model Purchase"], description="Transaction description")
+    status: str = Field(examples=["completed"], description="Transaction status")
     created_at: datetime = Field(description="Transaction creation timestamp")
     
 # === Session and Task Schemas ===
@@ -152,25 +152,25 @@ class FTNSTransaction(BaseModel):
 class ResearchSession(BaseModel):
     """Research session model"""
     session_id: str = Field(description="Unique session identifier")
-    title: str = Field(example="Climate Change ML Analysis", description="Session title")
+    title: str = Field(examples=["Climate Change ML Analysis"], description="Session title")
     description: str = Field(description="Session description")
     owner_id: str = Field(description="Session owner user ID")
     collaborators: List[str] = Field(description="List of collaborator user IDs")
-    status: str = Field(example="active", description="Session status")
+    status: str = Field(examples=["active"], description="Session status")
     created_at: datetime = Field(description="Session creation timestamp")
     last_activity: datetime = Field(description="Last activity timestamp")
-    ftns_budget: float = Field(example=500.0, description="Allocated FTNS budget")
-    ftns_spent: float = Field(example=125.0, description="FTNS tokens spent")
+    ftns_budget: float = Field(examples=[500.0], description="Allocated FTNS budget")
+    ftns_spent: float = Field(examples=[125.0], description="FTNS tokens spent")
 
 class TaskHierarchy(BaseModel):
     """Hierarchical task structure"""
     task_id: str = Field(description="Unique task identifier")
     parent_task_id: Optional[str] = Field(None, description="Parent task ID")
-    title: str = Field(example="Data Preprocessing", description="Task title")
+    title: str = Field(examples=["Data Preprocessing"], description="Task title")
     description: str = Field(description="Task description")
-    status: str = Field(example="in_progress", description="Task status")
-    priority: int = Field(example=3, description="Task priority (1-5)")
-    estimated_cost: float = Field(example=25.0, description="Estimated FTNS cost")
+    status: str = Field(examples=["in_progress"], description="Task status")
+    priority: int = Field(examples=[3], description="Task priority (1-5)")
+    estimated_cost: float = Field(examples=[25.0], description="Estimated FTNS cost")
     actual_cost: Optional[float] = Field(None, description="Actual FTNS cost")
     subtasks: List['TaskHierarchy'] = Field([], description="Subtasks")
 
@@ -187,7 +187,7 @@ class ConversationMessage(WebSocketMessage):
     """AI conversation message"""
     conversation_id: str = Field(description="Conversation identifier")
     message_id: str = Field(description="Unique message identifier")
-    role: str = Field(example="assistant", description="Message role (user/assistant)")
+    role: str = Field(examples=["assistant"], description="Message role (user/assistant)")
     content: str = Field(description="Message content")
     model_used: Optional[str] = Field(None, description="AI model used for response")
     tokens_used: Optional[int] = Field(None, description="Tokens consumed")
@@ -197,10 +197,10 @@ class ConversationMessage(WebSocketMessage):
 
 class SystemHealth(BaseModel):
     """System health status"""
-    status: str = Field(example="healthy", description="Overall system status")
+    status: str = Field(examples=["healthy"], description="Overall system status")
     timestamp: datetime = Field(description="Health check timestamp")
     components: Dict[str, Any] = Field(description="Individual component statuses")
-    response_time_ms: float = Field(example=245.5, description="Health check response time")
+    response_time_ms: float = Field(examples=[245.5], description="Health check response time")
     
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -219,10 +219,10 @@ class SystemHealth(BaseModel):
 class MetricsSnapshot(BaseModel):
     """System metrics snapshot"""
     timestamp: datetime = Field(description="Metrics collection timestamp")
-    active_users: int = Field(example=1250, description="Currently active users")
-    total_sessions: int = Field(example=3420, description="Total research sessions")
-    marketplace_transactions: int = Field(example=856, description="Marketplace transactions today")
-    ftns_volume: float = Field(example=12500.75, description="FTNS token volume today")
+    active_users: int = Field(examples=[1250], description="Currently active users")
+    total_sessions: int = Field(examples=[3420], description="Total research sessions")
+    marketplace_transactions: int = Field(examples=[856], description="Marketplace transactions today")
+    ftns_volume: float = Field(examples=[12500.75], description="FTNS token volume today")
     system_load: Dict[str, float] = Field(description="System load metrics")
 
 # === API Usage Examples ===
