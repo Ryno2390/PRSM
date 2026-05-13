@@ -324,8 +324,17 @@ class BitTorrentClient:
                 if comment:
                     t.set_comment(comment)
 
+                # `set_priv` was removed from create_torrent in
+                # libtorrent 2.0.12+. Older API takes a flag here;
+                # newer API exposes `priv` directly. Both fail-soft.
                 if private:
-                    t.set_priv(True)
+                    if hasattr(t, "set_priv"):
+                        t.set_priv(True)
+                    elif hasattr(t, "priv"):
+                        try:
+                            t.priv = True
+                        except Exception:
+                            pass
 
                 # Read files and compute hashes
                 lt.set_piece_hashes(t, str(path.parent if path.is_file() else path))
@@ -333,8 +342,15 @@ class BitTorrentClient:
                 # Generate the .torrent entry
                 torrent_bytes = lt.bencode(t.generate())
 
-                # Get infohash
-                info = t.get_torrent_info()
+                # Sprint 179 — libtorrent 2.0.12+ removed
+                # `create_torrent.get_torrent_info()`. The new API
+                # path is to load the bencoded data back into a
+                # `torrent_info` object. We try the old method first
+                # for back-compat.
+                if hasattr(t, "get_torrent_info"):
+                    info = t.get_torrent_info()
+                else:
+                    info = lt.torrent_info(lt.bdecode(torrent_bytes))
                 infohash = str(info.info_hash())
 
                 return infohash, torrent_bytes, info
