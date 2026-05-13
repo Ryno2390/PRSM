@@ -189,14 +189,17 @@ class PRSMBaseModel(BaseModel):
     across the distributed system components.
     """
     
+    # Sprint 340 — Pydantic V2 serializes datetime as ISO 8601
+    # and UUID as string by default in JSON mode. The legacy
+    # `json_encoders={datetime: ..., UUID: ...}` block was
+    # producing identical output to the V2 default and emitted
+    # PydanticDeprecatedSince20 warnings for every model that
+    # inherits from PRSMBaseModel (170+ subclasses). Removed
+    # (no behavior change).
     model_config = {
         "from_attributes": True,
         "use_enum_values": True,
         "populate_by_name": True,
-        "json_encoders": {
-            datetime: lambda v: v.isoformat(),
-            UUID: lambda v: str(v)
-        }
     }
     
     def dict(self, **kwargs):

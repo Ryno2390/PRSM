@@ -291,7 +291,7 @@ class AssetCreationSchema(MarketplaceRequestSchema):
     price_ftns: Decimal = Field(..., ge=0, decimal_places=8)
     
     # Optional fields
-    tags: Optional[List[str]] = Field(None, max_items=20)
+    tags: Optional[List[str]] = Field(None, max_length=20)
     metadata: Optional[Dict[str, Any]] = Field(None)
     
     @field_validator('name')
@@ -356,7 +356,7 @@ class ValidationErrorResponseSchema(APIResponseSchema):
 # Batch validation schema
 class BatchRequestSchema(BaseValidationSchema):
     """Batch processing request validation"""
-    requests: List[Dict[str, Any]] = Field(..., min_items=1, max_items=100)
+    requests: List[Dict[str, Any]] = Field(..., min_length=1, max_length=100)
     batch_id: Optional[str] = Field(None, max_length=128)
     
     @field_validator('batch_id', mode='before')
