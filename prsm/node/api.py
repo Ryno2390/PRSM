@@ -10829,6 +10829,74 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             logger.warning("metrics bootstrap probe failed: %s", exc)
 
+        # Sprint 345 — gauges for the §7/§14 orchestrators +
+        # stores wired in sprints 342/343. Each probe is in its
+        # own try/except so a single subsystem failure omits its
+        # gauge without 500-ing the endpoint. Subsystem not
+        # wired → gauge omitted entirely (Prometheus reads
+        # absence as "feature disabled" instead of "wired but
+        # zero").
+        def _emit_count_gauge(
+            attr: str, probe, metric_name: str, help_text: str,
+        ) -> None:
+            store = getattr(node, attr, None)
+            if store is None:
+                return
+            try:
+                value = int(probe(store))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "metrics %s probe failed: %s",
+                    metric_name, exc,
+                )
+                return
+            lines.append(f"# HELP {metric_name} {help_text}")
+            lines.append(f"# TYPE {metric_name} gauge")
+            lines.append(f"{metric_name} {value}")
+
+        _emit_count_gauge(
+            "_federated_learning_orchestrator",
+            lambda x: len(x.list_jobs() or []),
+            "prsm_fl_jobs_count",
+            "Federated-learning orchestrator job count",
+        )
+        _emit_count_gauge(
+            "_pipeline_inference_orchestrator",
+            lambda x: len(x.list_jobs() or []),
+            "prsm_pipeline_jobs_count",
+            "Pipeline-inference orchestrator job count",
+        )
+        _emit_count_gauge(
+            "_content_filter_store",
+            lambda x: x.count(),
+            "prsm_content_filter_count",
+            "Content-filter rule record count",
+        )
+        _emit_count_gauge(
+            "_disclosure_intake",
+            lambda x: x.count(),
+            "prsm_disclosure_count",
+            "Responsible-disclosure record count",
+        )
+        _emit_count_gauge(
+            "_incident_response",
+            lambda x: x.count(),
+            "prsm_incident_count",
+            "Security-incident record count",
+        )
+        _emit_count_gauge(
+            "_corp_capability_store",
+            lambda x: len(x.list_issuers()),
+            "prsm_corp_issuer_count",
+            "$CORP capability issuer count",
+        )
+        _emit_count_gauge(
+            "_upgrade_orchestrator",
+            lambda x: x.count(),
+            "prsm_upgrade_count",
+            "UUPS upgrade proposal record count",
+        )
+
         # Always emit at least one metric so probes have something
         # to scrape. The "up" gauge is canonical for this.
         lines.append("# HELP prsm_node_up Node-up indicator")
