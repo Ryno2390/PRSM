@@ -5995,6 +5995,19 @@ async def handle_prsm_node_health(arguments: Dict[str, Any]) -> str:
             cs = info.get("client_state", "?")
             peers = info.get("discovered_peer_count", 0)
             line += f"  (client_state={cs}, peers={peers})"
+        elif "jobs_count" in info:
+            # Sprint 344 — sprint-342 orchestrators surface
+            # jobs_count. FL + pipeline-inference both follow
+            # the same shape; checking the field rather than
+            # the name keeps this generic.
+            line += f"  (jobs={info['jobs_count']})"
+        elif "record_count" in info:
+            # Sprint 344 — sprint-343 stores surface
+            # record_count. Same generic field check; covers
+            # content_filter_store / disclosure_intake /
+            # incident_response / corp_capability_store /
+            # upgrade_orchestrator without per-name branches.
+            line += f"  (records={info['record_count']})"
         lines.append(line)
         # Canonical-match indicator (shipped post-A-08 ceremony):
         # surface mismatches loudly so operators see stale env
