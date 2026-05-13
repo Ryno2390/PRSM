@@ -164,6 +164,12 @@ _SEL_TOTAL_ESCROWED_BALANCE = (
     "0x71e780f3"                       # totalEscrowedBalance()
 )
 _SEL_HAS_ROLE = "0x91d14854"          # hasRole(bytes32,address)
+_SEL_EPOCH_DURATION_SECONDS = (
+    "0xdf617c6e"                       # EPOCH_DURATION_SECONDS()
+)
+_SEL_BASE_MAINNET_CHAIN_ID = (
+    "0xc7b6b6e8"                       # BASE_MAINNET_CHAIN_ID()
+)
 
 
 # ── OpenZeppelin AccessControl role hashes (bytes32) ──
@@ -447,6 +453,53 @@ INVARIANT_REGISTRY: Dict[str, List[Invariant]] = {
                 "role_hash": _DEFAULT_ADMIN_ROLE_HASH,
                 "account": _DISARMED_HOT_KEY_BASE,
             },
+        ),
+    ],
+    "emission_controller": [
+        Invariant(
+            id="INV-EC-1",
+            contract_name="emission_controller",
+            title=(
+                "EPOCH_DURATION_SECONDS is pinned at 4 years"
+            ),
+            description=(
+                "The halving cadence is the canonical "
+                "monetary-policy parameter for Phase 8 "
+                "emissions. EmissionController.constructor "
+                "enforces chainid-8453 → "
+                "MAINNET_EPOCH_DURATION_SECONDS = 4*365 days; "
+                "this runtime invariant guards against "
+                "contract substitution to a deployment that "
+                "didn't honor the constraint. Drift dilutes "
+                "or constricts FTNS issuance pace."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "EPOCH_DURATION_SECONDS() == 4 * 365 days "
+                "(126_144_000 seconds)"
+            ),
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_EPOCH_DURATION_SECONDS,
+            expected=4 * 365 * 86400,
+        ),
+        Invariant(
+            id="INV-EC-2",
+            contract_name="emission_controller",
+            title=(
+                "BASE_MAINNET_CHAIN_ID() == 8453"
+            ),
+            description=(
+                "The chainid pin that enforces the 4-year "
+                "mainnet halving constraint at construction. "
+                "If this constant doesn't match, the live "
+                "contract is either deployed to a different "
+                "chain or has been substituted."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text="BASE_MAINNET_CHAIN_ID() == 8453",
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_BASE_MAINNET_CHAIN_ID,
+            expected=8453,
         ),
     ],
     "escrow_pool": [

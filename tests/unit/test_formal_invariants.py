@@ -918,6 +918,44 @@ def test_ftns_admin_role_disarmed_invariant_pinned():
     )
 
 
+# ── Sprint 358 — EmissionController halving-cycle pin ──
+
+
+def test_registry_has_emission_controller():
+    assert "emission_controller" in INVARIANT_REGISTRY
+    invs = INVARIANT_REGISTRY["emission_controller"]
+    assert len(invs) >= 2
+
+
+def test_emission_epoch_duration_pinned_to_4_years():
+    """INV-EC-1: mainnet EPOCH_DURATION_SECONDS == 4 years
+    (126144000s). The halving cadence is the canonical
+    monetary-policy parameter for Phase 8 emissions; drift
+    would either dilute or constrict FTNS issuance.
+    Enforced at construction by chainid-8453 check;
+    runtime invariant guards against contract substitution.
+    """
+    invs = INVARIANT_REGISTRY["emission_controller"]
+    inv = next((i for i in invs if i.id == "INV-EC-1"), None)
+    assert inv is not None
+    assert inv.kind == InvariantKind.UINT256_EQ
+    assert inv.severity == InvariantSeverity.CRITICAL
+    assert inv.expected == 4 * 365 * 86400
+
+
+def test_emission_mainnet_chain_id_pinned():
+    """INV-EC-2: BASE_MAINNET_CHAIN_ID() == 8453. The
+    chainid pin that enforces the 4-year mainnet halving
+    constraint at construction. Drift would suggest
+    contract substitution to a non-Base deployment."""
+    invs = INVARIANT_REGISTRY["emission_controller"]
+    inv = next((i for i in invs if i.id == "INV-EC-2"), None)
+    assert inv is not None
+    assert inv.kind == InvariantKind.UINT256_EQ
+    assert inv.severity == InvariantSeverity.CRITICAL
+    assert inv.expected == 8453
+
+
 def test_balance_gte_claimable_default_label_preserved():
     """Backward-compat — when `reserve_label` is NOT in
     params, the diagnostic still says 'totalClaimable' so
