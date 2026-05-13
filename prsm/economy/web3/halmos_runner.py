@@ -114,6 +114,7 @@ class HalmosRunner:
         timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
         halmos_bin: Optional[str] = None,
         forge_bin: Optional[str] = None,
+        loop_bound: int = 32,
     ) -> None:
         self._proofs_dir = proofs_dir
         self._timeout = timeout_seconds
@@ -121,6 +122,12 @@ class HalmosRunner:
         # resolve via PATH.
         self._halmos = halmos_bin
         self._forge = forge_bin
+        # Halmos default loop unroll is 2 — too low for the
+        # chunk-streaming bounded-iterator proofs (sprint
+        # 368). 32 covers all current specs without solver
+        # blow-up; override via constructor arg for proofs
+        # that need deeper unrolling.
+        self._loop_bound = loop_bound
 
     def _resolve_halmos(self) -> Optional[str]:
         if self._halmos:
@@ -178,6 +185,7 @@ class HalmosRunner:
         cmd = [
             halmos,
             "--contract", contract,
+            "--loop", str(self._loop_bound),
         ]
         try:
             proc = subprocess.run(
@@ -352,6 +360,24 @@ SYMBOLIC_PROOF_CATALOG: Dict[str, Dict[str, Any]] = {
             "RoyaltyDistributorSolvencySpec — same "
             "algorithmic shape but on the Phase 3.1 "
             "per-requester escrow accumulator."
+        ),
+    },
+    "ChunkStreamingBoundsSpec": {
+        "mirrors_runtime_contract": "streaming_inference",
+        "runtime_invariants": [],
+        "description": (
+            "Symbolic proof of the H1 round-1 remediation "
+            "bounded-iterator invariant from the chunked-"
+            "activation-streaming subsystem (audit-prep §7.3, "
+            "Phase 3.x.7.1). For ALL peer-shipped frame "
+            "counts, accepted chunk count is bounded above "
+            "by expected_total_chunks — closes the unbounded-"
+            "memory-growth threat where a malicious peer "
+            "ships excess chunks past the manifest. Also "
+            "covers the per-chunk request_id binding (relay-"
+            "defense invariant) at server.py:1983. Source-"
+            "identity-mirrors "
+            "prsm/compute/chain_rpc/server.py:1960-1994."
         ),
     },
     "SpeculationRollbackMathSpec": {

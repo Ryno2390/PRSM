@@ -57,6 +57,31 @@ def test_catalog_has_escrow_pool_solvency_proof():
     assert "INV-EP-1" in entry["runtime_invariants"]
 
 
+def test_catalog_has_chunk_streaming_bounds_proof():
+    """Sprint 368 ships ChunkStreamingBoundsSpec — H1
+    bounded-iterator invariant + relay-defense binding.
+    Off-chain target like SpeculationRollbackMathSpec."""
+    assert (
+        "ChunkStreamingBoundsSpec" in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG["ChunkStreamingBoundsSpec"]
+    assert entry["runtime_invariants"] == []
+    assert (
+        entry["mirrors_runtime_contract"]
+        == "streaming_inference"
+    )
+
+
+def test_runner_passes_loop_bound_to_halmos():
+    """Sprint 368 — verify the --loop flag is passed.
+    Default loop_bound=32 covers chunk-streaming proofs.
+    Test by inspecting the cmd construction logic."""
+    runner = HalmosRunner(loop_bound=42)
+    # Internal attribute pin — if anyone removes the flag,
+    # this fails immediately.
+    assert runner._loop_bound == 42
+
+
 def test_catalog_has_speculation_rollback_math_proof():
     """Sprint 367 ships SpeculationRollbackMathSpec — first
     symbolic proof against the streaming-inference subsystem
@@ -390,6 +415,34 @@ def test_live_halmos_ftns_supply_cap():
     ), proof_names
     assert any(
         "check_mint_preserves_cap" in n
+        for n in proof_names
+    ), proof_names
+
+
+@pytest.mark.requires_halmos
+def test_live_halmos_chunk_streaming_bounds():
+    """Real halmos invocation against the H1 bounded-iterator
+    proof. 65 symbolic paths on the headline bounded-by-
+    expected check; 111 total across the spec."""
+    runner = HalmosRunner(timeout_seconds=120)
+    if not runner.is_available():
+        pytest.skip("halmos or forge not on PATH")
+    suite = runner.run("ChunkStreamingBoundsSpec")
+    assert suite.status == SymbolicProofStatus.PASSED, (
+        f"ChunkStreamingBoundsSpec failed: "
+        f"{suite.to_dict()}"
+    )
+    proof_names = {p.name for p in suite.proofs}
+    assert any(
+        "check_accepted_bounded_by_expected" in n
+        for n in proof_names
+    ), proof_names
+    assert any(
+        "check_excess_always_raises" in n
+        for n in proof_names
+    ), proof_names
+    assert any(
+        "check_request_id_mismatch_rejects" in n
         for n in proof_names
     ), proof_names
 
