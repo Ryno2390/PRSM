@@ -5984,6 +5984,17 @@ async def handle_prsm_node_health(arguments: Dict[str, Any]) -> str:
             line += f"  ({short})"
         elif name == "royalty_distributor" and "claimable_wei" in info:
             line += f"  (claimable: {info['claimable_wei']} wei)"
+        elif name == "bootstrap_discovery" and (
+            "client_state" in info
+        ):
+            # Sprint 331 — surface client_state + peers count
+            # inline so operators triaging via MCP see the
+            # load-bearing discovery fields without drilling
+            # into /bootstrap/status. Mirrors the pattern of
+            # payment_escrow surfacing pending_count.
+            cs = info.get("client_state", "?")
+            peers = info.get("discovered_peer_count", 0)
+            line += f"  (client_state={cs}, peers={peers})"
         lines.append(line)
         # Canonical-match indicator (shipped post-A-08 ceremony):
         # surface mismatches loudly so operators see stale env
