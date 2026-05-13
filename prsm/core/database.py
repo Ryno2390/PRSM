@@ -39,8 +39,7 @@ from sqlalchemy import (
     Float, Boolean, JSON, Text, ForeignKey, Index, UniqueConstraint, text
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from prsm.core.db_types import UUID
 from sqlalchemy.sql import func
 import structlog

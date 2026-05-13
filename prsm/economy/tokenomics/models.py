@@ -38,8 +38,7 @@ from sqlalchemy import (
     Column, String, Integer, Float, Boolean, DateTime, Text, ForeignKey, Index, CheckConstraint, UniqueConstraint, DECIMAL
 )
 from prsm.core.db_types import UUID as PG_UUID, JSONB
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, validates
+from sqlalchemy.orm import declarative_base, relationship, validates
 from sqlalchemy.sql import func
 
 # Create a separate Base for FTNS models to avoid conflicts with core models
