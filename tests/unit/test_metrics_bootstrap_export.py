@@ -147,3 +147,124 @@ def test_metrics_fail_soft_when_get_bootstrap_status_raises():
     assert resp.status_code == 200
     assert "prsm_bootstrap_peer_join_events_total" not in resp.text
     assert "prsm_node_up 1" in resp.text
+
+
+# ── Sprint 377 — multi-bootstrap Prometheus surface ──
+
+
+def test_metrics_emits_active_url_gauge_with_label():
+    """Sprint 377: active_url surfaces as a labeled gauge.
+    Prometheus pattern for current-string-state: emit value 1
+    with the string as a label. Operators can then `count by
+    (url)` across the fleet to graph bootstrap distribution.
+    """
+    discovery = MagicMock()
+    discovery.get_bootstrap_status = MagicMock(return_value={
+        "attempted": 2, "connected": 1, "degraded": False,
+        "bootstrap_nodes": [
+            "wss://bootstrap1.prsm-network.com:8765",
+        ],
+        "bootstrap_fallback_nodes": [
+            "wss://bootstrap-eu.prsm-network.com:8765",
+        ],
+        "bootstrap_fallback_enabled": True,
+        "active_url": (
+            "wss://bootstrap-eu.prsm-network.com:8765"
+        ),
+        "discovered_peer_count": 3,
+        "peer_join_events": 0, "peer_leave_events": 0,
+        "stale_evictions": 0, "reconnect_attempts": 0,
+        "reconnect_successes": 0, "client_state": "connected",
+    })
+    client = _make_client(discovery=discovery)
+    body = client.get("/metrics").text
+    # Labeled gauge — operators alert on absence of "bootstrap1"
+    # label across the fleet (= primary down).
+    assert (
+        'prsm_bootstrap_active{url="'
+        'wss://bootstrap-eu.prsm-network.com:8765"} 1'
+    ) in body
+
+
+def test_metrics_emits_fallback_enabled_gauge():
+    discovery = MagicMock()
+    discovery.get_bootstrap_status = MagicMock(return_value={
+        "attempted": 1, "connected": 1, "degraded": False,
+        "bootstrap_nodes": ["wss://"],
+        "bootstrap_fallback_nodes": [],
+        "bootstrap_fallback_enabled": True,
+        "active_url": "wss://",
+        "discovered_peer_count": 1,
+        "peer_join_events": 0, "peer_leave_events": 0,
+        "stale_evictions": 0, "reconnect_attempts": 0,
+        "reconnect_successes": 0, "client_state": "connected",
+    })
+    client = _make_client(discovery=discovery)
+    body = client.get("/metrics").text
+    assert "prsm_bootstrap_fallback_enabled 1" in body
+
+
+def test_metrics_fallback_enabled_zero_when_disabled():
+    discovery = MagicMock()
+    discovery.get_bootstrap_status = MagicMock(return_value={
+        "attempted": 1, "connected": 1, "degraded": False,
+        "bootstrap_nodes": ["wss://"],
+        "bootstrap_fallback_nodes": [],
+        "bootstrap_fallback_enabled": False,
+        "active_url": "wss://",
+        "discovered_peer_count": 0,
+        "peer_join_events": 0, "peer_leave_events": 0,
+        "stale_evictions": 0, "reconnect_attempts": 0,
+        "reconnect_successes": 0, "client_state": "connected",
+    })
+    client = _make_client(discovery=discovery)
+    body = client.get("/metrics").text
+    assert "prsm_bootstrap_fallback_enabled 0" in body
+
+
+def test_metrics_omits_active_url_when_none():
+    """When active_url is None (all candidates failed), the
+    labeled gauge is omitted — Prometheus absence is the
+    canonical 'no current value' signal, much cleaner than
+    emitting an empty-label gauge."""
+    discovery = MagicMock()
+    discovery.get_bootstrap_status = MagicMock(return_value={
+        "attempted": 2, "connected": 0, "degraded": True,
+        "bootstrap_nodes": ["wss://"],
+        "bootstrap_fallback_nodes": ["wss://eu/"],
+        "bootstrap_fallback_enabled": True,
+        "active_url": None,
+        "discovered_peer_count": 0,
+        "peer_join_events": 0, "peer_leave_events": 0,
+        "stale_evictions": 0, "reconnect_attempts": 2,
+        "reconnect_successes": 0, "client_state": "dead",
+    })
+    client = _make_client(discovery=discovery)
+    body = client.get("/metrics").text
+    assert "prsm_bootstrap_active{" not in body
+    # Degraded gauge still fires
+    assert "prsm_bootstrap_degraded 1" in body
+
+
+def test_metrics_active_url_label_escapes_quotes():
+    """Defensive: if active_url contains a quote character
+    (shouldn't, but be safe), it must be escaped to keep the
+    Prometheus exposition format valid."""
+    discovery = MagicMock()
+    discovery.get_bootstrap_status = MagicMock(return_value={
+        "attempted": 1, "connected": 1, "degraded": False,
+        "bootstrap_nodes": ['wss://he"llo:8765'],
+        "bootstrap_fallback_nodes": [],
+        "bootstrap_fallback_enabled": True,
+        "active_url": 'wss://he"llo:8765',
+        "discovered_peer_count": 0,
+        "peer_join_events": 0, "peer_leave_events": 0,
+        "stale_evictions": 0, "reconnect_attempts": 0,
+        "reconnect_successes": 0, "client_state": "connected",
+    })
+    client = _make_client(discovery=discovery)
+    resp = client.get("/metrics")
+    # Endpoint stays 200 + label-value escapes the embedded
+    # quote (Prometheus exposition format: \" is the escape).
+    assert resp.status_code == 200
+    assert r'\"' in resp.text or 'he\\"llo' in resp.text

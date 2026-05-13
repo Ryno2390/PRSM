@@ -10908,6 +10908,51 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     lines.append(f"# HELP {name} {help_text}")
                     lines.append(f"# TYPE {name} gauge")
                     lines.append(f"{name} {value}")
+                # Sprint 377 — multi-bootstrap surface.
+                # fallback_enabled as a plain gauge; active_url
+                # as a labeled gauge with value 1 (canonical
+                # Prometheus pattern for current-string-state
+                # — operators do `count by (url)` across the
+                # fleet to graph bootstrap distribution).
+                fb_enabled = bs.get(
+                    "bootstrap_fallback_enabled",
+                )
+                if fb_enabled is not None:
+                    lines.append(
+                        "# HELP prsm_bootstrap_fallback_enabled "
+                        "1 iff multi-region bootstrap fallback "
+                        "is enabled"
+                    )
+                    lines.append(
+                        "# TYPE prsm_bootstrap_fallback_enabled "
+                        "gauge"
+                    )
+                    lines.append(
+                        f"prsm_bootstrap_fallback_enabled "
+                        f"{1 if fb_enabled else 0}"
+                    )
+                active_url = bs.get("active_url")
+                if active_url:
+                    # Prometheus label-value escape rules: \"
+                    # for ", \\ for \, \n for newline.
+                    escaped = (
+                        str(active_url)
+                        .replace("\\", "\\\\")
+                        .replace('"', '\\"')
+                        .replace("\n", "\\n")
+                    )
+                    lines.append(
+                        "# HELP prsm_bootstrap_active "
+                        "Current bootstrap URL the node is "
+                        "registered with (labeled gauge)"
+                    )
+                    lines.append(
+                        "# TYPE prsm_bootstrap_active gauge"
+                    )
+                    lines.append(
+                        f'prsm_bootstrap_active{{url="'
+                        f'{escaped}"}} 1'
+                    )
         except Exception as exc:  # noqa: BLE001
             logger.warning("metrics bootstrap probe failed: %s", exc)
 
