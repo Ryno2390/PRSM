@@ -2658,7 +2658,7 @@ Finally the test surface: `tests/unit/test_compensation_distributor_client.py` (
 
 - **Architecture A external audit not yet engaged.** `FleetKillSwitch.sol` source has not been drafted; audit firm not engaged. Both gate on a §7 trigger firing.
 
-- **Operator runbook not yet drafted.** Once Phase F1 ships, an operator-side runbook (analogous to Item 6 operator activation runbook from `docs/2026-05-08-prsm-prov-1-item-6-operator-activation-runbook.md`) will be needed to document opt-in / observation / incident-response / rollback procedures.
+- ~~**Operator runbook not yet drafted.**~~ ✅ **Closed sprint 379 (2026-05-13)** — `docs/operations/fleet-kill-switch-operator-runbook.md` shipped. Documents (a) the seven per-node kill switches available TODAY (canonical env-var names + apply/verify/reverse workflow), (b) the fleet-coordination layer's operator-opt-in posture (when implemented post-§7-trigger), (c) directive-fire response procedures, (d) verification + dispute + appeals path, (e) post-incident recovery, (f) audit-trail expectations. Pinned by `tests/unit/test_fleet_kill_switch_runbook.py` (10 tests gating: deletion, all 7 env vars present, authority thresholds visible, design-only status anchored to 2026-05-13). Tag `fleet-kill-switch-operator-runbook-merge-ready-20260513`.
 
 ### Auditor reading path (§7.21 delta)
 
