@@ -113,6 +113,8 @@ else:
 | `SpeculationRollbackMathSpec` | `prsm/compute/chain_rpc/client.py` rollback math (line 1431) + adaptive-K transition (lines 1463-1466) | (off-chain — no runtime invariant counterpart; audit-prep §7.11+§7.12) | 2 paths on `check_rollback_math_post_fix_bounded`; 5 paths on `check_adaptive_k_stays_in_range` |
 | `ChunkStreamingBoundsSpec` | `prsm/compute/chain_rpc/server.py:1960-1994` H1 bounded-iterator + per-chunk request_id binding | (off-chain — audit-prep §7.3 Phase 3.x.7.1) | 65 paths on `check_accepted_bounded_by_expected` with `--loop 32`; 111 total |
 | `M2ResponseSizePaddingSpec` | `prsm/compute/chain_rpc/tier_c_sharded_executors.py:208-253` `_pad_or_truncate_utf8` | (off-chain — audit-prep §7.15 Phase 3.x.11.q.x) | 5 paths on `check_output_length_equals_pad_target`; 14 total |
+| `M1CadenceDrivenYieldSpec` | `prsm/compute/chain_rpc/tier_c_sharded_executors.py:328-351` `FixedRateShardedExecutor.execute_chain_streaming` | (off-chain — audit-prep §7.13 Phase 3.x.11.q) | 6 PASS / 12 paths; headline `check_inter_emission_gap_bounded` |
+| `EncryptedProbsCoSetSpec` | `prsm/compute/chain_rpc/protocol.py:956-998` encrypted-probs validators | (off-chain — audit-prep §7.14 Phase 3.x.11.q.y) | 9 PASS / 36 paths; mutual exclusion + co-set + length cap |
 
 ## CI integration via `requires_halmos` marker (sprint 366)
 

@@ -57,6 +57,33 @@ def test_catalog_has_escrow_pool_solvency_proof():
     assert "INV-EP-1" in entry["runtime_invariants"]
 
 
+def test_catalog_has_m1_cadence_driven_yield_proof():
+    """Sprint 370: M1 cadence-driven yield invariant (§7.13)."""
+    assert (
+        "M1CadenceDrivenYieldSpec" in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG["M1CadenceDrivenYieldSpec"]
+    assert entry["runtime_invariants"] == []
+    assert (
+        entry["mirrors_runtime_contract"]
+        == "streaming_inference"
+    )
+
+
+def test_catalog_has_encrypted_probs_coset_proof():
+    """Sprint 371: encrypted_proposed_token_probs co-set
+    validators (§7.14)."""
+    assert (
+        "EncryptedProbsCoSetSpec" in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG["EncryptedProbsCoSetSpec"]
+    assert entry["runtime_invariants"] == []
+    assert (
+        entry["mirrors_runtime_contract"]
+        == "streaming_inference"
+    )
+
+
 def test_catalog_has_m2_response_size_padding_proof():
     """Sprint 369 ships M2ResponseSizePaddingSpec — Phase
     3.x.11.q.x response-size leak closure. Off-chain

@@ -362,6 +362,34 @@ SYMBOLIC_PROOF_CATALOG: Dict[str, Dict[str, Any]] = {
             "per-requester escrow accumulator."
         ),
     },
+    "M1CadenceDrivenYieldSpec": {
+        "mirrors_runtime_contract": "streaming_inference",
+        "runtime_invariants": [],
+        "description": (
+            "Symbolic proof of the Phase 3.x.11.q M1 "
+            "cadence-driven yield invariant (audit-prep "
+            "§7.13). FixedRateShardedExecutor's pre-yield "
+            "sleep gate guarantees inter-emission gap >= "
+            "cadence regardless of inner-executor compute "
+            "speed — closes the per-token timing leak where "
+            "fast compute would reveal short-content tokens. "
+            "Source-identity-mirrors prsm/compute/chain_rpc/"
+            "tier_c_sharded_executors.py:328-351."
+        ),
+    },
+    "EncryptedProbsCoSetSpec": {
+        "mirrors_runtime_contract": "streaming_inference",
+        "runtime_invariants": [],
+        "description": (
+            "Symbolic proof of Phase 3.x.11.q.y encrypted_"
+            "proposed_token_probs co-set validators (audit-"
+            "prep §7.14). Four invariants: mutual exclusion "
+            "with plaintext probs, co-set with proposed_ids, "
+            "non-empty when set, bytes length in [1, 1024]. "
+            "Source-identity-mirrors prsm/compute/chain_rpc/"
+            "protocol.py:956-998."
+        ),
+    },
     "M2ResponseSizePaddingSpec": {
         "mirrors_runtime_contract": "streaming_inference",
         "runtime_invariants": [],
