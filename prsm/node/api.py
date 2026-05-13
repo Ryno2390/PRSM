@@ -11468,6 +11468,17 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                         "discovered_peer_count": int(
                             bs.get("discovered_peer_count", 0) or 0
                         ),
+                        # Sprint 376 — surface sprint-375
+                        # multi-bootstrap fields so ops alerting
+                        # can distinguish "primary down, on
+                        # fallback" from "ALL bootstraps down."
+                        # Defaults to None when the upstream
+                        # status dict omits them (pre-sprint-375
+                        # discovery objects).
+                        "active_url": bs.get("active_url"),
+                        "fallback_enabled": bs.get(
+                            "bootstrap_fallback_enabled",
+                        ),
                     }
                     subsystems["bootstrap_discovery"] = entry
                 except Exception as exc:  # noqa: BLE001

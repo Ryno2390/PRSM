@@ -101,3 +101,73 @@ def test_renders_error_with_reason_when_bootstrap_errors():
     # The generic error-rendering path surfaces the reason —
     # don't double-render it
     assert "boom" in out
+
+
+# ── Sprint 376 — active_url rendering ────────────────
+
+
+def test_renders_active_url_when_set():
+    """Sprint 376: prsm_node_health renders the sprint-375
+    active_url inline so operators see which bootstrap host
+    is in use during triage."""
+    payload = _health_with_bootstrap({
+        "available": True,
+        "status": "ok",
+        "client_state": "connected",
+        "connected": 1,
+        "discovered_peer_count": 3,
+        "active_url": (
+            "wss://bootstrap-eu.prsm-network.com:8765"
+        ),
+        "fallback_enabled": True,
+    })
+    with patch("prsm.mcp_server._call_node_api",
+               new=AsyncMock(return_value=payload)):
+        out = asyncio.run(handle_prsm_node_health({}))
+    # Host:port surfaced without wss:// scheme noise
+    assert "bootstrap-eu.prsm-network.com:8765" in out
+    assert "active=" in out
+    # Standard fields still rendered
+    assert "client_state=connected" in out
+    assert "peers=3" in out
+
+
+def test_renders_without_active_url_when_none():
+    """When active_url is None (all candidates failed), the
+    line falls back to client_state+peers only — no
+    spurious active= field."""
+    payload = _health_with_bootstrap({
+        "available": False,
+        "status": "degraded",
+        "client_state": "dead",
+        "connected": 0,
+        "discovered_peer_count": 0,
+        "active_url": None,
+        "fallback_enabled": True,
+    })
+    with patch("prsm.mcp_server._call_node_api",
+               new=AsyncMock(return_value=payload)):
+        out = asyncio.run(handle_prsm_node_health({}))
+    assert "client_state=dead" in out
+    assert "peers=0" in out
+    # No spurious active= when None
+    assert "active=" not in out
+
+
+def test_renders_active_url_strips_scheme():
+    """The renderer strips ws:// or wss:// so the host:port
+    is what operators see at a glance."""
+    payload = _health_with_bootstrap({
+        "available": True,
+        "status": "ok",
+        "client_state": "connected",
+        "connected": 1,
+        "discovered_peer_count": 1,
+        "active_url": "wss://example.com:8765",
+        "fallback_enabled": True,
+    })
+    with patch("prsm.mcp_server._call_node_api",
+               new=AsyncMock(return_value=payload)):
+        out = asyncio.run(handle_prsm_node_health({}))
+    assert "active=example.com:8765" in out
+    assert "active=wss://" not in out

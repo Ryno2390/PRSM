@@ -5992,9 +5992,29 @@ async def handle_prsm_node_health(arguments: Dict[str, Any]) -> str:
             # load-bearing discovery fields without drilling
             # into /bootstrap/status. Mirrors the pattern of
             # payment_escrow surfacing pending_count.
+            # Sprint 376 — also surface active_url when set,
+            # so operators triaging "we're degraded" see at
+            # a glance whether they're on primary, fallback,
+            # or no host at all.
             cs = info.get("client_state", "?")
             peers = info.get("discovered_peer_count", 0)
-            line += f"  (client_state={cs}, peers={peers})"
+            active_url = info.get("active_url")
+            if active_url:
+                # Compact rendering: extract host:port from
+                # the wss:// URL — operators recognize
+                # bootstrap1 / bootstrap-eu / bootstrap-apac
+                # without the full URL noise.
+                short_url = active_url
+                if "://" in short_url:
+                    short_url = short_url.split("://", 1)[1]
+                line += (
+                    f"  (client_state={cs}, peers={peers}, "
+                    f"active={short_url})"
+                )
+            else:
+                line += (
+                    f"  (client_state={cs}, peers={peers})"
+                )
         elif "jobs_count" in info:
             # Sprint 344 — sprint-342 orchestrators surface
             # jobs_count. FL + pipeline-inference both follow

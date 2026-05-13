@@ -157,3 +157,127 @@ def test_top_status_healthy_when_bootstrap_not_wired_with_core_ok():
     # NOT trigger degraded because it's opt-out
     sub = body["subsystems"]["bootstrap_discovery"]
     assert sub["status"] == "not_wired"
+
+
+# ── Sprint 376 — multi-bootstrap fields on /health/detailed ─
+
+
+def test_bootstrap_discovery_surfaces_active_url_when_set():
+    """Sprint 376: /health/detailed exposes the sprint-375
+    active_url so ops dashboards can graph 'which bootstrap
+    is this node actually using' across the fleet."""
+    discovery = MagicMock()
+    discovery.get_bootstrap_status = MagicMock(return_value={
+        "attempted": 2, "connected": 1, "degraded": False,
+        "bootstrap_nodes": [
+            "wss://bootstrap1.prsm-network.com:8765",
+        ],
+        "bootstrap_fallback_nodes": [
+            "wss://bootstrap-eu.prsm-network.com:8765",
+        ],
+        "bootstrap_fallback_enabled": True,
+        "active_url": "wss://bootstrap-eu.prsm-network.com:8765",
+        "discovered_peer_count": 5,
+        "peer_join_events": 1, "peer_leave_events": 0,
+        "stale_evictions": 0, "reconnect_attempts": 1,
+        "reconnect_successes": 1, "client_state": "connected",
+    })
+    client = _make_client(discovery=discovery)
+    sub = client.get(
+        "/health/detailed",
+    ).json()["subsystems"]["bootstrap_discovery"]
+    assert (
+        sub["active_url"]
+        == "wss://bootstrap-eu.prsm-network.com:8765"
+    )
+    assert sub["fallback_enabled"] is True
+
+
+def test_bootstrap_discovery_active_url_none_when_disconnected():
+    """When all candidates failed, active_url is None.
+    Surfaces through /health/detailed so ops sees the
+    distinction between 'primary down, on fallback' and
+    'ALL bootstraps down'."""
+    discovery = MagicMock()
+    discovery.get_bootstrap_status = MagicMock(return_value={
+        "attempted": 3, "connected": 0, "degraded": True,
+        "bootstrap_nodes": [
+            "wss://bootstrap1.prsm-network.com:8765",
+        ],
+        "bootstrap_fallback_nodes": [
+            "wss://bootstrap-eu.prsm-network.com:8765",
+            "wss://bootstrap-apac.prsm-network.com:8765",
+        ],
+        "bootstrap_fallback_enabled": True,
+        "active_url": None,
+        "discovered_peer_count": 0,
+        "peer_join_events": 0, "peer_leave_events": 0,
+        "stale_evictions": 0, "reconnect_attempts": 3,
+        "reconnect_successes": 0, "client_state": "dead",
+    })
+    client = _make_client(discovery=discovery)
+    sub = client.get(
+        "/health/detailed",
+    ).json()["subsystems"]["bootstrap_discovery"]
+    assert sub["active_url"] is None
+    assert sub["fallback_enabled"] is True
+    assert sub["status"] == "degraded"
+
+
+def test_bootstrap_discovery_fallback_disabled_surfaces():
+    """Single-host posture (fallback_enabled=False) reaches
+    /health/detailed so ops can audit whether operators are
+    running pre-375 single-host configs."""
+    discovery = MagicMock()
+    discovery.get_bootstrap_status = MagicMock(return_value={
+        "attempted": 1, "connected": 1, "degraded": False,
+        "bootstrap_nodes": [
+            "wss://bootstrap1.prsm-network.com:8765",
+        ],
+        "bootstrap_fallback_nodes": [],
+        "bootstrap_fallback_enabled": False,
+        "active_url": (
+            "wss://bootstrap1.prsm-network.com:8765"
+        ),
+        "discovered_peer_count": 1,
+        "peer_join_events": 0, "peer_leave_events": 0,
+        "stale_evictions": 0, "reconnect_attempts": 0,
+        "reconnect_successes": 0, "client_state": "connected",
+    })
+    client = _make_client(discovery=discovery)
+    sub = client.get(
+        "/health/detailed",
+    ).json()["subsystems"]["bootstrap_discovery"]
+    assert sub["fallback_enabled"] is False
+    assert sub["active_url"] == (
+        "wss://bootstrap1.prsm-network.com:8765"
+    )
+
+
+def test_bootstrap_discovery_legacy_status_without_active_url():
+    """Backwards-compat: pre-sprint-375 discovery objects
+    don't include active_url. The /health/detailed entry
+    must tolerate the missing field gracefully (None /
+    omit) — not raise."""
+    discovery = MagicMock()
+    discovery.get_bootstrap_status = MagicMock(return_value={
+        "attempted": 1, "connected": 1, "degraded": False,
+        "bootstrap_nodes": [
+            "wss://bootstrap1.prsm-network.com:8765",
+        ],
+        "discovered_peer_count": 1,
+        "peer_join_events": 0, "peer_leave_events": 0,
+        "stale_evictions": 0, "reconnect_attempts": 0,
+        "reconnect_successes": 0, "client_state": "connected",
+        # No active_url / fallback_nodes / fallback_enabled
+    })
+    client = _make_client(discovery=discovery)
+    sub = client.get(
+        "/health/detailed",
+    ).json()["subsystems"]["bootstrap_discovery"]
+    # Entry should still be valid + status=ok
+    assert sub["status"] == "ok"
+    assert sub["connected"] == 1
+    # New fields default to None when source omits them
+    assert sub.get("active_url") is None
+    assert sub.get("fallback_enabled") is None
