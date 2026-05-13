@@ -1752,6 +1752,166 @@ def node_webhooks(api_port, output_format, limit):
     )
 
 
+@node.command("bootstrap")
+@click.option(
+    "--api-port", default=8000, type=int,
+    help="Local API port (default 8000)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_bootstrap(api_port: int, output_format: str):
+    """Show P2P bootstrap status: primary, fallback,
+    active URL, SPOF posture.
+
+    Sprint 380 — third surface for the sprint-375 multi-
+    bootstrap fields. Same data as /bootstrap/status JSON +
+    prsm_bootstrap_status MCP tool; the CLI completes the
+    operator-trifecta (REST / MCP / shell).
+    """
+    import json
+    import httpx
+
+    url = f"http://127.0.0.1:{api_port}/bootstrap/status"
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(url)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at "
+            f"{url}[/red]\n"
+            f"[dim]Start with: prsm node start[/dim]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+
+    if resp.status_code == 503:
+        detail = "(not wired)"
+        try:
+            detail = resp.json().get("detail", detail)
+        except Exception:  # noqa: BLE001
+            pass
+        console.print(
+            f"[yellow]Bootstrap discovery not wired.[/yellow]"
+            f"\n[dim]{detail}[/dim]"
+        )
+        sys.exit(1)
+    if resp.status_code != 200:
+        console.print(
+            f"[red]/bootstrap/status returned "
+            f"{resp.status_code}[/red]: {resp.text}"
+        )
+        sys.exit(1)
+
+    body = resp.json()
+
+    if output_format == "json":
+        console.print(json.dumps(body, indent=2))
+        return
+
+    # Health summary marker — operators triage by color.
+    connected = int(body.get("connected", 0) or 0)
+    degraded = bool(body.get("degraded", False))
+    client_state = body.get("client_state", "?")
+    if connected > 0 and not degraded and (
+        client_state == "connected"
+    ):
+        marker = "[green]✓ healthy[/green]"
+    elif degraded or client_state == "dead":
+        marker = "[red]⚠ degraded[/red]"
+    else:
+        marker = "[yellow]⚠ disconnected[/yellow]"
+
+    console.print(f"[bold]PRSM Bootstrap Status[/bold] — {marker}")
+    console.print(f"  client_state:           {client_state}")
+    console.print(f"  connected:              {connected}")
+    console.print(f"  attempted:              {body.get('attempted', 0)}")
+    console.print(
+        f"  discovered peers:       "
+        f"{body.get('discovered_peer_count', 0)}"
+    )
+
+    # Sprint 375/376 — active_url + fallback config
+    active_url = body.get("active_url")
+    if active_url:
+        # Strip scheme for compact rendering — same pattern
+        # as the prsm_node_health MCP wrapper.
+        short = active_url
+        if "://" in short:
+            short = short.split("://", 1)[1]
+        console.print(
+            f"  [bold]active URL:[/bold]             {short}"
+        )
+    else:
+        console.print(
+            "  [bold]active URL:[/bold]             "
+            "[dim](none — all candidates failed)[/dim]"
+        )
+
+    fb_enabled = body.get("bootstrap_fallback_enabled")
+    if fb_enabled is not None:
+        if fb_enabled:
+            console.print(
+                "  fallback enabled:       [green]yes[/green]"
+            )
+        else:
+            console.print(
+                "  fallback enabled:       "
+                "[yellow]no (single-host posture)[/yellow]"
+            )
+
+    # Counter snapshot (sprint 324)
+    console.print()
+    console.print(
+        "  peer_join_events:       "
+        f"{body.get('peer_join_events', 0)}"
+    )
+    console.print(
+        "  peer_leave_events:      "
+        f"{body.get('peer_leave_events', 0)}"
+    )
+    console.print(
+        "  stale_evictions:        "
+        f"{body.get('stale_evictions', 0)}"
+    )
+    console.print(
+        "  reconnect_attempts:     "
+        f"{body.get('reconnect_attempts', 0)}"
+    )
+    console.print(
+        "  reconnect_successes:    "
+        f"{body.get('reconnect_successes', 0)}"
+    )
+
+    # Candidate URLs (primary + fallback)
+    bnodes = body.get("bootstrap_nodes") or []
+    if bnodes:
+        console.print()
+        console.print(
+            f"  bootstrap_nodes ({len(bnodes)} primary):"
+        )
+        for n in bnodes:
+            marker = (
+                "[green]●[/green]" if n == active_url
+                else "[dim]○[/dim]"
+            )
+            console.print(f"    {marker} {n}")
+
+    fb_nodes = body.get("bootstrap_fallback_nodes") or []
+    if fb_nodes:
+        console.print(
+            f"  fallback_nodes ({len(fb_nodes)}):"
+        )
+        for n in fb_nodes:
+            marker = (
+                "[green]●[/green]" if n == active_url
+                else "[dim]○[/dim]"
+            )
+            console.print(f"    {marker} {n}")
+
+
 def _node_admin_trigger(*, api_port: int, path: str, label: str):
     """Shared helper for action triggers — POSTs to admin
     endpoints, renders tx_hash + status."""
