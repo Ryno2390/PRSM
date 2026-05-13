@@ -29,59 +29,80 @@ The mainnet ceremony moves council-ratified treasury funds ($250K-$1M USDC + mat
 
 ## 2. Prerequisites
 
-### 2.1 Sepolia Safe
+### 2.1 Sepolia Safe (state survey 2026-05-13)
 
-PRSM operates a Sepolia Foundation Safe mirror at `<SEPOLIA_SAFE_ADDRESS — fill in from prior rehearsal docs>`. If no mirror exists, deploy a fresh 2-of-3 Sepolia Safe with the same signer set (Ledger Sepolia testnet derivation + Trezor Sepolia derivation + OneKey reserve).
+PRSM has an existing Sepolia rehearsal Safe at `0xCb4Bfa18E5B166C2E13c18007b4F4E1b2CE8A889` (Base Sepolia, chainid 84532, Safe v1.4.1, 1-of-1 with sole owner Ledger `0xA3683EDDBed6622f132698D7DC36a7C2DAFe4Ed3`). This is the same Safe used for the 2026-05-09 A-08 v2 rehearsal.
 
-- [ ] Sepolia Safe address known
-- [ ] All 3 signers' Sepolia-testnet addresses configured as Safe owners
-- [ ] Sepolia ETH balance ≥ 0.05 on Safe (faucet: https://www.alchemy.com/faucets/ethereum-sepolia)
+**Threshold reality check.** This Safe is 1-of-1 (test wallet acting as Safe-equivalent per `2026-05-09-A-08-v2-redeploy-ceremony-plan.md` §8) rather than 2-of-3 like the mainnet Foundation Safe. This is acceptable: the rehearsal exercises Safe-UI compose + hardware-wallet signing UX — both invariant under threshold. The 2-of-3 mainnet threshold is then a "more of the same" multiplier on the signing UX validated here.
 
-### 2.2 Sepolia FTNS
+State verified 2026-05-13:
+- [x] Safe address: `0xCb4Bfa18E5B166C2E13c18007b4F4E1b2CE8A889`
+- [x] Owner: `0xA3683EDDBed6622f132698D7DC36a7C2DAFe4Ed3` (Ledger)
+- [ ] **GAP: Safe ETH balance is 4e-05 ETH — needs faucet top-up to ≥ 0.05 ETH** (faucet: https://www.alchemy.com/faucets/base-sepolia or https://docs.base.org/tools/network-faucets)
 
-PRSM has Sepolia FTNS test contracts from prior rehearsals (per `project_t10_a08_2026_05_07.md` / `prsm/config/networks.py` SEPOLIA config). If no FTNS exists on Sepolia, deploy via:
+### 2.2 Sepolia FTNS (state survey 2026-05-13)
+
+Existing Sepolia FTNS deployments (per `contracts/deployments/`):
+
+- **Latest (recommended for this rehearsal):** `0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a` — `FTNSTokenSimple` UUPS proxy on Base Sepolia, deployed 2026-05-07 (manifest: `phase1-ftns-base-sepolia-1778159554505.json`)
+- **A-08 rehearsal alternative:** `0xF8d0c1AE75441d3C3Dd2A2420C0789043916412a` — used 2026-05-09 if needed
+
+Initial 100M supply on the recommended FTNS was minted to deployer `0xCCAc7b21695De068979b1ca47B0cfBD328654220`, NOT the Safe.
+
+- [x] Sepolia FTNS address known: `0x7F5f00FAA2421c4C585cc66c87420b1659c98e6a`
+- [ ] **GAP: Transfer ≥ 2M FTNS from deployer to Sepolia Safe `0xCb4Bfa18E5B166C2E13c18007b4F4E1b2CE8A889`** before rehearsal. Use Sepolia FTNS's built-in `transfer(safe, 2_000_000 * 10^18)` from deployer EOA.
+
+### 2.3 Sepolia USDC mock (state survey 2026-05-13)
+
+Sepolia doesn't have canonical Circle USDC. PRSM ships `contracts/contracts/test/MockUSDC.sol` (6-decimal USDC stand-in; permissionless mint; intentionally distinct from the 18-decimal MockERC20 so a decimals-encoding bug surfaces on Sepolia rather than masking) + `contracts/scripts/deploy-mock-usdc.js` deploy + mint helper.
 
 ```bash
 cd contracts
-PRSM_NETWORK=sepolia npx hardhat run scripts/deploy-ftns-token-simple.js --network sepolia
+PRIVATE_KEY=<sepolia-deployer-key> \
+SEPOLIA_SAFE=0xCb4Bfa18E5B166C2E13c18007b4F4E1b2CE8A889 \
+MINT_AMOUNT=500000 \
+npx hardhat run scripts/deploy-mock-usdc.js --network base-sepolia
 ```
 
-- [ ] Sepolia FTNS deployed; address recorded
-- [ ] Sepolia Safe holds ≥ 1M FTNS test units (deployer mints to Safe in deploy script)
+- [ ] **GAP: MockUSDC not yet deployed** — run the script above
+- [ ] Resulting address recorded in `contracts/deployments/mock-usdc-base-sepolia-<ts>.json`
+- [ ] Sepolia Safe holds 500K mUSDC (script mints automatically as part of deploy)
 
-### 2.3 Sepolia USDC mock
+### 2.4 Aerodrome Sepolia mirror (verified 2026-05-13)
 
-Sepolia doesn't have canonical Circle USDC. Deploy a MockERC20 with 6 decimals + USDC-like behavior:
+**Aerodrome has NO Base Sepolia testnet deployment.** Confirmed via `aerodrome-finance/contracts` GitHub — only Base mainnet (chainid 8453) is supported. The previous Option A (Base Sepolia mirror) is therefore NOT AVAILABLE.
+
+This forces **Option B (Anvil fork)** as the only path that exercises the real Aerodrome contracts. The trade-off: Anvil fork runs against impersonated Foundation Safe (not actual Sepolia Safe), which means the hardware-wallet signing UX validates via the actual mainnet Foundation Safe in a one-off test sign (NOT a real ceremony) BEFORE the rehearsal — see §3.1 below for the revised sequence.
 
 ```bash
-cd contracts
-PRSM_NETWORK=sepolia npx hardhat run scripts/deploy-mock-usdc.js --network sepolia
+# Option B setup — fork Base mainnet at a recent block
+anvil --fork-url https://mainnet.base.org --port 8545 --block-time 1 &
+
+# In another terminal: impersonate Foundation Safe so we can send txs from it
+cast rpc anvil_impersonateAccount 0x91b0000000000000000000000000000000005791 \
+  --rpc-url http://127.0.0.1:8545
+
+# Top up the impersonated Safe with ETH for gas
+cast rpc anvil_setBalance 0x91b0000000000000000000000000000000005791 \
+  0x56BC75E2D63100000 --rpc-url http://127.0.0.1:8545  # 100 ETH
+
+# Confirm FTNS balance on the impersonated Safe (should already hold 100M from
+# the 2026-05-06 mainnet migration captured in the fork state)
+cast call 0x5276a3756C85f2E9e46f6D34386167a209aa16e5 \
+  "balanceOf(address)(uint256)" 0x91b0000000000000000000000000000000005791 \
+  --rpc-url http://127.0.0.1:8545
 ```
 
-If the script doesn't exist, deploy `contracts/test/MockERC20.sol` and rename the instance "Mock USDC" in deployment metadata.
+- [ ] Anvil fork running on port 8545
+- [ ] Foundation Safe `0x91b0...5791` impersonated
+- [ ] Safe's USDC top-up: `cast rpc anvil_setStorageAt` to write a 500K USDC balance into the Safe's slot (USDC uses storage slot 9 for balances mapping; key = keccak256(safe_addr ++ slot)) — OR mint via `anvil_impersonateAccount` of USDC's role holders if any. For convenience the script `setup-anvil-aerodrome-rehearsal.sh` (TBD ship in this packet) automates this.
 
-- [ ] Sepolia mock-USDC deployed; address recorded
-- [ ] Sepolia Safe holds ≥ 250K USDC test units (mint to Safe post-deploy)
+**Hardware-wallet UX validation under Anvil.** Because Anvil signs from impersonated accounts (no real EOA), we CAN'T exercise Ledger/Trezor signing against the Anvil fork directly. The rehearsal therefore splits in two:
 
-### 2.4 Aerodrome Sepolia mirror
+1. **Anvil fork (Option B):** exercises calldata + bundle import + the 3-tx execution sequence against real Aerodrome contracts. Validates that calldata is correct + verify-script assertions pass. NO hardware-wallet involvement.
+2. **Sepolia Safe sign-test:** exercises Ledger/Trezor signing against the Sepolia Safe with a TRIVIAL tx (e.g., send 0.0001 ETH to self) — validates that the device flow works end-to-end without contract complexity. Run this immediately before the Anvil portion so muscle memory is fresh.
 
-Aerodrome does NOT have a Sepolia deployment as of this drafting. Two options:
-
-**Option A: Base Sepolia.** Aerodrome may have a Base Sepolia testnet deployment. Verify via `https://aerodrome.finance/docs` at rehearsal time. If exists, use Base Sepolia (chainid 84532) instead of mainnet Sepolia.
-
-**Option B: Local Anvil fork of Base mainnet.** Fork Base mainnet block N into a local Anvil node; that mirror has the real Aerodrome contracts + the real USDC, and we top up the Safe with `anvil_setBalance` + `anvil_impersonateAccount` to mint test FTNS. This rehearsal is closest to mainnet behavior but most invasive to set up.
-
-```bash
-# Option B setup
-anvil --fork-url https://mainnet.base.org --port 8545 &
-# In another terminal:
-cast send 0x91b0...5791 --value 1ether --from <hardhat-default-account>
-# ... impersonate Foundation Safe, send mock txs
-```
-
-- [ ] Decided: Option A (Base Sepolia) OR Option B (Anvil fork) OR defer rehearsal to mainnet-day-only (NOT RECOMMENDED — see §1)
-- [ ] If Option A: Aerodrome Sepolia Router + Factory addresses recorded
-- [ ] If Option B: Anvil fork running + Foundation Safe impersonation working
+The mainnet ceremony is the combination: real Aerodrome (from Anvil rehearsal) + real hardware signing (from Sepolia sign-test).
 
 ### 2.5 Hardware
 
