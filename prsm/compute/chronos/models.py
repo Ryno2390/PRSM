@@ -9,7 +9,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 import uuid
 
 
@@ -75,12 +75,12 @@ class SwapRequest(BaseModel):
     expires_at: datetime
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
-    model_config = ConfigDict(
-        json_encoders={
-            Decimal: str,
-            datetime: lambda v: v.isoformat(),
-        },
-    )
+    # Sprint 339 — Pydantic V2 serializes Decimal as string
+    # and datetime as ISO 8601 by default. The legacy
+    # `json_encoders={Decimal: str, datetime: ...}` block was
+    # producing identical output to the V2 default and emitted
+    # PydanticDeprecatedSince20 warnings every load — pure
+    # redundancy. Removed (no behavior change).
 
 
 class Settlement(BaseModel):
@@ -99,12 +99,12 @@ class Settlement(BaseModel):
     settlement_hash: str  # provenance content hash
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
-    model_config = ConfigDict(
-        json_encoders={
-            Decimal: str,
-            datetime: lambda v: v.isoformat(),
-        },
-    )
+    # Sprint 339 — Pydantic V2 serializes Decimal as string
+    # and datetime as ISO 8601 by default. The legacy
+    # `json_encoders={Decimal: str, datetime: ...}` block was
+    # producing identical output to the V2 default and emitted
+    # PydanticDeprecatedSince20 warnings every load — pure
+    # redundancy. Removed (no behavior change).
 
 
 class ClearingTransaction(BaseModel):
@@ -121,12 +121,12 @@ class ClearingTransaction(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None
     
-    model_config = ConfigDict(
-        json_encoders={
-            Decimal: str,
-            datetime: lambda v: v.isoformat(),
-        },
-    )
+    # Sprint 339 — Pydantic V2 serializes Decimal as string
+    # and datetime as ISO 8601 by default. The legacy
+    # `json_encoders={Decimal: str, datetime: ...}` block was
+    # producing identical output to the V2 default and emitted
+    # PydanticDeprecatedSince20 warnings every load — pure
+    # redundancy. Removed (no behavior change).
 
 
 @dataclass
