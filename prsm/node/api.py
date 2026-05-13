@@ -11253,13 +11253,87 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "available": False, "status": "not_wired",
             }
 
+        # Sprint 329 — bootstrap_discovery subsystem. Wired but
+        # degraded/dead → status=degraded so ops alerts on
+        # /health/detailed catch it. Not wired → opt-out per
+        # the sprint-147 convention. Errors get a separate
+        # status so operators see the raise reason.
+        disco = getattr(node, "discovery", None)
+        # Sprint 329 — guard against the "MagicMock attribute"
+        # case from incomplete test fixtures: `node.discovery`
+        # may auto-vivify a MagicMock that has a callable
+        # `get_bootstrap_status` returning another MagicMock.
+        # Treat anything that doesn't yield a real dict shape
+        # as not_wired so opt-out semantics hold + we don't
+        # falsely flag the node degraded.
+        if disco is None or not hasattr(
+            disco, "get_bootstrap_status",
+        ):
+            subsystems["bootstrap_discovery"] = {
+                "available": False,
+                "status": "not_wired",
+            }
+        else:
+            try:
+                bs = disco.get_bootstrap_status()
+            except Exception as exc:  # noqa: BLE001
+                bs = exc
+            if not isinstance(bs, dict):
+                # Non-dict return (incomplete test fixture or
+                # raise) → treat as not_wired so opt-out
+                # semantics hold + the node doesn't get falsely
+                # marked degraded.
+                if isinstance(bs, Exception):
+                    subsystems["bootstrap_discovery"] = {
+                        "available": False,
+                        "status": "error",
+                        "error": str(bs),
+                    }
+                else:
+                    subsystems["bootstrap_discovery"] = {
+                        "available": False,
+                        "status": "not_wired",
+                    }
+                bs = None
+            if isinstance(bs, dict):
+                try:
+                    degraded_flag = bool(bs.get("degraded", False))
+                    connected = int(bs.get("connected", 0) or 0)
+                    client_state = bs.get("client_state", "?")
+                    entry = {
+                        "available": (
+                            connected > 0 and not degraded_flag
+                        ),
+                        "status": (
+                            "degraded" if degraded_flag else "ok"
+                        ),
+                        "client_state": client_state,
+                        "connected": connected,
+                        "discovered_peer_count": int(
+                            bs.get("discovered_peer_count", 0) or 0
+                        ),
+                    }
+                    subsystems["bootstrap_discovery"] = entry
+                except Exception as exc:  # noqa: BLE001
+                    subsystems["bootstrap_discovery"] = {
+                        "available": False,
+                        "status": "error",
+                        "error": str(exc),
+                    }
+
         # Aggregate status.
         # Sprint 147 — `not_wired` / `disabled` is operator opt-out,
         # not a degradation. Only count an optional subsystem as
         # degraded if it's wired but reporting unavailable for a
         # genuine reason (status=error/crashed/uninitialized).
         core = ["ftns_ledger", "payment_escrow"]
-        optional = ["job_history", "royalty_distributor"]
+        # Sprint 329 — bootstrap_discovery joins job_history /
+        # royalty_distributor as optional. Degraded bootstrap
+        # alone flips top-level to "degraded" (not unhealthy).
+        optional = [
+            "job_history", "royalty_distributor",
+            "bootstrap_discovery",
+        ]
         _OPT_OUT_STATUSES = ("not_wired", "disabled")
         core_ok = all(
             subsystems[s]["available"] for s in core
