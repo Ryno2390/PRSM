@@ -724,6 +724,7 @@ class _Web3FormalBackend:
     """
 
     _BALANCE_OF_SELECTOR = "0x70a08231"  # balanceOf(address)
+    _HAS_ROLE_SELECTOR = "0x91d14854"    # hasRole(bytes32,address)
 
     def __init__(self, w3) -> None:
         self._w3 = w3
@@ -765,6 +766,33 @@ class _Web3FormalBackend:
             return None
         data = self._BALANCE_OF_SELECTOR + holder_bytes.hex()
         return self.call_uint256(token, data)
+
+    def call_has_role(self, addr, role_hash, account):
+        """ABI-encode hasRole(bytes32 role, address account)
+        + dispatch eth_call. Returns bool or None on failure.
+
+        Calldata layout:
+          selector (4 bytes) || role_hash (32 bytes; bytes32
+          is encoded as-is) || account (32 bytes; address is
+          left-padded with 12 zero bytes).
+        """
+        try:
+            role_clean = role_hash.removeprefix("0x").rjust(
+                64, "0",
+            )
+            account_clean = account.removeprefix("0x").rjust(
+                64, "0",
+            )
+            # Validate hex
+            bytes.fromhex(role_clean)
+            bytes.fromhex(account_clean)
+        except ValueError:
+            return None
+        data = (
+            self._HAS_ROLE_SELECTOR + role_clean
+            + account_clean
+        )
+        return self.call_bool(addr, data)
 
 
 def _build_heartbeat_scheduler_or_none(*, client):

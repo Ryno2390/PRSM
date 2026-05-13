@@ -128,6 +128,7 @@ class _MockBackend:
         self.uint256: dict = {}
         self.address: dict = {}
         self.bool_v: dict = {}
+        self.has_role: dict = {}
         self.raise_for: set = set()
 
     def call_uint256(
@@ -161,6 +162,14 @@ class _MockBackend:
         if key in self.raise_for:
             raise RuntimeError("simulated RPC error")
         return self.uint256.get(key)
+
+    def call_has_role(
+        self, addr: str, role_hash: str, account: str,
+    ):
+        key = (addr.lower(), role_hash.lower(), account.lower())
+        if key in self.raise_for:
+            raise RuntimeError("simulated RPC error")
+        return self.has_role.get(key)
 
 
 def _checker(backend) -> InvariantChecker:
@@ -657,6 +666,256 @@ def test_escrow_pool_solvency_diagnostic_uses_reserve_label():
     )
     # Old label MUST NOT appear when override is set
     assert "totalClaimable" not in (result.diagnostic or "")
+
+
+_FOUNDATION_SAFE = (
+    "0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791"
+)
+_DISARMED_HOT_KEY = (
+    "0x8eaA00FF741323bc8B0ab1290c544738D9b2f012"
+)
+_DEFAULT_ADMIN_ROLE = "0x" + "00" * 32
+_MINTER_ROLE = (
+    "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6"
+)
+
+
+def test_has_role_kind_value():
+    assert InvariantKind.HAS_ROLE_EQ.value == "has_role_eq"
+
+
+def test_check_has_role_pass_true_match():
+    """Positive assertion: Foundation Safe HAS admin role.
+    Invariant expects True; backend returns True; PASS."""
+    inv = Invariant(
+        id="X-HR-1", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text=(
+            "hasRole(DEFAULT_ADMIN_ROLE, Foundation Safe)"
+        ),
+        kind=InvariantKind.HAS_ROLE_EQ,
+        selector="",
+        expected=True,
+        params={
+            "role_hash": _DEFAULT_ADMIN_ROLE,
+            "account": _FOUNDATION_SAFE,
+        },
+    )
+    backend = _MockBackend()
+    key = (
+        "0xtoken",
+        _DEFAULT_ADMIN_ROLE,
+        _FOUNDATION_SAFE.lower(),
+    )
+    backend.has_role[key] = True
+    result = _checker(backend).check_one(inv, "0xtoken")
+    assert result.status == InvariantStatus.PASS
+    assert result.value is True
+
+
+def test_check_has_role_pass_false_match():
+    """Negative assertion: disarmed hot key MUST NOT hold
+    MINTER_ROLE per CR-2026-05-06-3. Invariant expects
+    False; backend returns False; PASS (the disarm
+    actually held)."""
+    inv = Invariant(
+        id="X-HR-2", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text=(
+            "hasRole(MINTER_ROLE, disarmed_hot_key) == false"
+        ),
+        kind=InvariantKind.HAS_ROLE_EQ,
+        selector="",
+        expected=False,
+        params={
+            "role_hash": _MINTER_ROLE,
+            "account": _DISARMED_HOT_KEY,
+        },
+    )
+    backend = _MockBackend()
+    key = (
+        "0xtoken", _MINTER_ROLE, _DISARMED_HOT_KEY.lower(),
+    )
+    backend.has_role[key] = False
+    result = _checker(backend).check_one(inv, "0xtoken")
+    assert result.status == InvariantStatus.PASS
+    assert result.value is False
+
+
+def test_check_has_role_fail_disarm_broken():
+    """The high-leverage failure mode: disarmed hot key
+    suddenly holds MINTER_ROLE again. Expected False;
+    backend returns True; FAIL with audit-visible
+    diagnostic."""
+    inv = Invariant(
+        id="X-HR-3", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text=(
+            "hasRole(MINTER_ROLE, disarmed_hot_key) == false"
+        ),
+        kind=InvariantKind.HAS_ROLE_EQ,
+        selector="",
+        expected=False,
+        params={
+            "role_hash": _MINTER_ROLE,
+            "account": _DISARMED_HOT_KEY,
+        },
+    )
+    backend = _MockBackend()
+    key = (
+        "0xtoken", _MINTER_ROLE, _DISARMED_HOT_KEY.lower(),
+    )
+    backend.has_role[key] = True
+    result = _checker(backend).check_one(inv, "0xtoken")
+    assert result.status == InvariantStatus.FAIL
+    assert result.value is True
+
+
+def test_check_has_role_fail_admin_lost():
+    """Other failure mode: Foundation Safe loses admin role
+    via accidental grantRole/revokeRole sequence. Expected
+    True; backend returns False; FAIL."""
+    inv = Invariant(
+        id="X-HR-4", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="hasRole(DEFAULT_ADMIN_ROLE, foundation)",
+        kind=InvariantKind.HAS_ROLE_EQ,
+        selector="",
+        expected=True,
+        params={
+            "role_hash": _DEFAULT_ADMIN_ROLE,
+            "account": _FOUNDATION_SAFE,
+        },
+    )
+    backend = _MockBackend()
+    key = (
+        "0xtoken",
+        _DEFAULT_ADMIN_ROLE,
+        _FOUNDATION_SAFE.lower(),
+    )
+    backend.has_role[key] = False
+    result = _checker(backend).check_one(inv, "0xtoken")
+    assert result.status == InvariantStatus.FAIL
+
+
+def test_check_has_role_skipped_on_none():
+    inv = Invariant(
+        id="X-HR-5", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="x", kind=InvariantKind.HAS_ROLE_EQ,
+        selector="", expected=True,
+        params={
+            "role_hash": _MINTER_ROLE,
+            "account": _DISARMED_HOT_KEY,
+        },
+    )
+    backend = _MockBackend()  # no has_role set → None
+    result = _checker(backend).check_one(inv, "0xtoken")
+    assert result.status == InvariantStatus.SKIPPED
+
+
+def test_check_has_role_skipped_on_rpc_error():
+    inv = Invariant(
+        id="X-HR-6", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="x", kind=InvariantKind.HAS_ROLE_EQ,
+        selector="", expected=True,
+        params={
+            "role_hash": _MINTER_ROLE,
+            "account": _DISARMED_HOT_KEY,
+        },
+    )
+    backend = _MockBackend()
+    key = (
+        "0xtoken", _MINTER_ROLE, _DISARMED_HOT_KEY.lower(),
+    )
+    backend.raise_for.add(key)
+    result = _checker(backend).check_one(inv, "0xtoken")
+    assert result.status == InvariantStatus.SKIPPED
+
+
+def test_check_has_role_skipped_on_missing_params():
+    """If role_hash or account is missing from params,
+    SKIPPED rather than crash — same pattern as
+    BALANCE_GTE_CLAIMABLE's selector-missing path."""
+    inv = Invariant(
+        id="X-HR-7", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="x", kind=InvariantKind.HAS_ROLE_EQ,
+        selector="", expected=True,
+        params={},  # missing both
+    )
+    backend = _MockBackend()
+    result = _checker(backend).check_one(inv, "0xtoken")
+    assert result.status == InvariantStatus.SKIPPED
+
+
+def test_ftns_has_admin_role_invariant_pinned():
+    """INV-FT-3: Foundation Safe is the sole admin per
+    CR-2026-05-06-3. Pinned invariant catches if admin
+    grants drift."""
+    invs = INVARIANT_REGISTRY["ftns_token"]
+    inv = next((i for i in invs if i.id == "INV-FT-3"), None)
+    assert inv is not None
+    assert inv.kind == InvariantKind.HAS_ROLE_EQ
+    assert inv.severity == InvariantSeverity.CRITICAL
+    assert inv.expected is True
+    assert (
+        inv.params["role_hash"].lower()
+        == _DEFAULT_ADMIN_ROLE.lower()
+    )
+    assert (
+        inv.params["account"].lower()
+        == _FOUNDATION_SAFE.lower()
+    )
+
+
+def test_ftns_minter_role_disarmed_invariant_pinned():
+    """INV-FT-4: disarmed hot key MUST NOT hold MINTER_ROLE.
+    The 900M-FTNS unilateral-mint attack surface that
+    CR-2026-05-06-3 closed. Pinned invariant catches re-arm."""
+    invs = INVARIANT_REGISTRY["ftns_token"]
+    inv = next((i for i in invs if i.id == "INV-FT-4"), None)
+    assert inv is not None
+    assert inv.kind == InvariantKind.HAS_ROLE_EQ
+    assert inv.severity == InvariantSeverity.CRITICAL
+    assert inv.expected is False  # NEGATIVE assertion
+    assert (
+        inv.params["role_hash"].lower()
+        == _MINTER_ROLE.lower()
+    )
+    assert (
+        inv.params["account"].lower()
+        == _DISARMED_HOT_KEY.lower()
+    )
+
+
+def test_ftns_admin_role_disarmed_invariant_pinned():
+    """INV-FT-5: disarmed hot key MUST NOT hold admin role
+    either. The full disarm-verification surface from
+    CR-2026-05-06-3 covers both MINTER_ROLE and
+    DEFAULT_ADMIN_ROLE."""
+    invs = INVARIANT_REGISTRY["ftns_token"]
+    inv = next((i for i in invs if i.id == "INV-FT-5"), None)
+    assert inv is not None
+    assert inv.kind == InvariantKind.HAS_ROLE_EQ
+    assert inv.severity == InvariantSeverity.CRITICAL
+    assert inv.expected is False
+    assert (
+        inv.params["role_hash"].lower()
+        == _DEFAULT_ADMIN_ROLE.lower()
+    )
+    assert (
+        inv.params["account"].lower()
+        == _DISARMED_HOT_KEY.lower()
+    )
 
 
 def test_balance_gte_claimable_default_label_preserved():

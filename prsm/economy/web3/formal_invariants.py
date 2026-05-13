@@ -60,6 +60,7 @@ class InvariantKind(str, Enum):
     ADDRESS_EQ = "address_eq"
     BOOL_READ = "bool_read"
     BALANCE_GTE_CLAIMABLE = "balance_gte_claimable"
+    HAS_ROLE_EQ = "has_role_eq"
 
 
 # ── Dataclasses ──────────────────────────────────────
@@ -133,6 +134,9 @@ class FormalBackend(Protocol):
     def token_balance_of(
         self, token: str, holder: str,
     ) -> Optional[int]: ...
+    def call_has_role(
+        self, addr: str, role_hash: str, account: str,
+    ) -> Optional[bool]: ...
 
 
 # ── EVM function selectors (canonical) ───────────────
@@ -158,6 +162,34 @@ _SEL_TOTAL_SUPPLY = "0x18160ddd"      # totalSupply() (ERC-20)
 _SEL_MAX_SUPPLY = "0x32cb6b0c"        # MAX_SUPPLY()
 _SEL_TOTAL_ESCROWED_BALANCE = (
     "0x71e780f3"                       # totalEscrowedBalance()
+)
+_SEL_HAS_ROLE = "0x91d14854"          # hasRole(bytes32,address)
+
+
+# ── OpenZeppelin AccessControl role hashes (bytes32) ──
+
+
+# DEFAULT_ADMIN_ROLE is bytes32(0) by OZ convention.
+_DEFAULT_ADMIN_ROLE_HASH = "0x" + "00" * 32
+# MINTER_ROLE = keccak256("MINTER_ROLE") — pinned to the
+# FTNSTokenSimple.sol constant; computed once + frozen here
+# so the harness doesn't need a runtime keccak dependency.
+_MINTER_ROLE_HASH = (
+    "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef"
+    "8d981c8956a6"
+)
+
+
+# ── Foundation Safe + disarmed hot-key addresses ─────
+
+
+# Disarmed hot key per PRSM-CR-2026-05-06-3 (executed
+# 2026-05-06). All FTNSToken role grants on this address
+# were revoked + the on-disk private-key file was deleted;
+# the runtime invariants below pin that the role-disarm
+# still holds.
+_DISARMED_HOT_KEY_BASE = (
+    "0x8eaA00FF741323bc8B0ab1290c544738D9b2f012"
 )
 
 # The selector values above are derived from the v2 source.
@@ -330,6 +362,92 @@ INVARIANT_REGISTRY: Dict[str, List[Invariant]] = {
             selector=_SEL_TOTAL_SUPPLY,
             expected=1_000_000_000 * 10**18,
         ),
+        Invariant(
+            id="INV-FT-3",
+            contract_name="ftns_token",
+            title=(
+                "Foundation Safe holds DEFAULT_ADMIN_ROLE"
+            ),
+            description=(
+                "Post-PRSM-CR-2026-05-06-3 execution "
+                "(2026-05-06), the Foundation Safe is the "
+                "SOLE FTNSToken administrator. If this "
+                "invariant ever fails, the protocol has "
+                "lost the ability to grant new MINTER_ROLE "
+                "holders — operationally recoverable but "
+                "audit-critical. POSITIVE assertion."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "hasRole(DEFAULT_ADMIN_ROLE, Foundation Safe)"
+                " == true"
+            ),
+            kind=InvariantKind.HAS_ROLE_EQ,
+            selector="",
+            expected=True,
+            params={
+                "role_hash": _DEFAULT_ADMIN_ROLE_HASH,
+                "account": _FOUNDATION_SAFE_BASE,
+            },
+        ),
+        Invariant(
+            id="INV-FT-4",
+            contract_name="ftns_token",
+            title=(
+                "Disarmed hot key MUST NOT hold MINTER_ROLE"
+            ),
+            description=(
+                "The 900M-FTNS unilateral-mint attack "
+                "surface that PRSM-CR-2026-05-06-3 closed. "
+                "The hot key was disarmed via 4 grants + "
+                "batched 4-revoke multisig + on-disk file "
+                "deletion. If MINTER_ROLE ever appears back "
+                "on this account, either the disarm was "
+                "incomplete or the address was re-granted "
+                "by accident. NEGATIVE assertion — failure "
+                "is a P0 disarm-broken event."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "hasRole(MINTER_ROLE, disarmed_hot_key) "
+                "== false"
+            ),
+            kind=InvariantKind.HAS_ROLE_EQ,
+            selector="",
+            expected=False,
+            params={
+                "role_hash": _MINTER_ROLE_HASH,
+                "account": _DISARMED_HOT_KEY_BASE,
+            },
+        ),
+        Invariant(
+            id="INV-FT-5",
+            contract_name="ftns_token",
+            title=(
+                "Disarmed hot key MUST NOT hold "
+                "DEFAULT_ADMIN_ROLE"
+            ),
+            description=(
+                "Sister invariant to INV-FT-4. The disarm "
+                "ceremony revoked both MINTER_ROLE and "
+                "DEFAULT_ADMIN_ROLE on the deployer hot key. "
+                "Re-armed admin role would itself permit "
+                "re-granting MINTER_ROLE — both checks "
+                "needed for full disarm verification."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "hasRole(DEFAULT_ADMIN_ROLE, "
+                "disarmed_hot_key) == false"
+            ),
+            kind=InvariantKind.HAS_ROLE_EQ,
+            selector="",
+            expected=False,
+            params={
+                "role_hash": _DEFAULT_ADMIN_ROLE_HASH,
+                "account": _DISARMED_HOT_KEY_BASE,
+            },
+        ),
     ],
     "escrow_pool": [
         Invariant(
@@ -407,6 +525,10 @@ class InvariantChecker:
             )
         if inv.kind == InvariantKind.BALANCE_GTE_CLAIMABLE:
             return self._check_balance_gte_claimable(
+                inv, contract_address,
+            )
+        if inv.kind == InvariantKind.HAS_ROLE_EQ:
+            return self._check_has_role_eq(
                 inv, contract_address,
             )
         return InvariantResult(
@@ -649,4 +771,52 @@ class InvariantChecker:
             invariant_id=inv.id,
             status=InvariantStatus.FAIL,
             value=bal, expected=tc, diagnostic=diag,
+        )
+
+    def _check_has_role_eq(
+        self, inv: Invariant, addr: str,
+    ) -> InvariantResult:
+        role_hash = inv.params.get("role_hash") or ""
+        account = inv.params.get("account") or ""
+        if not role_hash or not account:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error=(
+                    "missing role_hash or account in "
+                    "invariant params"
+                ),
+            )
+        try:
+            v = self._backend.call_has_role(
+                addr, role_hash, account,
+            )
+        except Exception as e:  # noqa: BLE001
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error=f"RPC error: {e}",
+            )
+        if v is None:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error="backend returned None",
+            )
+        diag = (
+            f"hasRole({role_hash[:10]}..., "
+            f"{account})={v}; expected={inv.expected}"
+        )
+        if bool(v) == bool(inv.expected):
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.PASS,
+                value=v, expected=inv.expected,
+                diagnostic=diag,
+            )
+        return InvariantResult(
+            invariant_id=inv.id,
+            status=InvariantStatus.FAIL,
+            value=v, expected=inv.expected,
+            diagnostic=diag,
         )
