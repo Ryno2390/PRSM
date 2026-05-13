@@ -2552,13 +2552,22 @@ class PRSMNode:
                 "royalty_distributor": (
                     endpoints.royalty_distributor
                 ),
+                "ftns_token": endpoints.ftns_token,
+                "escrow_pool": endpoints.escrow_pool,
             }
             logger.info(
                 "Formal-invariant checker wired "
-                "(backend=%s, royalty_distributor=%s)",
+                "(backend=%s, royalty_distributor=%s, "
+                "ftns_token=%s, escrow_pool=%s)",
                 bool(backend),
                 self._formal_invariant_addresses.get(
                     "royalty_distributor",
+                ),
+                self._formal_invariant_addresses.get(
+                    "ftns_token",
+                ),
+                self._formal_invariant_addresses.get(
+                    "escrow_pool",
                 ),
             )
         except Exception as exc:  # noqa: BLE001

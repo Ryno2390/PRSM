@@ -433,3 +433,257 @@ def test_result_to_dict_serializable():
     assert d["status"] == "pass"
     assert d["invariant_id"] == "X-12"
     assert d["value"] == 42
+
+
+# ── Sprint 356 — FTNSToken + EscrowPool extension ────
+#
+# Background: while researching the §14 item 4 extension we
+# discovered the existing `_SEL_FTNS` selector was wrong
+# (keccak256("ftns()") first 4 bytes = 0xefa21b41, not the
+# 0x9b03f021 that ship sprint 302 had committed). Result: on
+# real mainnet RPC, INV-RD-4 — explicitly called "THE money
+# invariant" in the module docstring — would SKIP rather
+# than catch solvency drift. The mocked-backend tests above
+# all pass with any selector, so this stayed invisible until
+# we tried to extend the harness to additional contracts.
+#
+# This block adds: the selector correctness pin (regression
+# test on the discovered bug), the new UINT256_LTE kind for
+# supply-cap-style invariants, FTNSToken registry entries
+# (supply ceiling), and EscrowPool registry entries
+# (solvency mirror of INV-RD-4 against totalEscrowedBalance).
+
+
+def test_ftns_selector_pinned_to_canonical_keccak():
+    """Regression pin: the `ftns()` getter selector MUST be
+    the keccak256("ftns()") first-4-bytes value 0xefa21b41.
+    The original sprint 302 commit had 0x9b03f021 which is
+    NOT the correct selector and would silently SKIP INV-RD-4
+    on real RPC. Catching this is exactly what this harness
+    was built to do — but the harness itself had a typo.
+    """
+    from prsm.economy.web3 import formal_invariants as fi
+    assert fi._SEL_FTNS == "0xefa21b41", (
+        f"_SEL_FTNS was {fi._SEL_FTNS}; canonical keccak256("
+        f"'ftns()')[:4] is 0xefa21b41"
+    )
+
+
+def test_uint256_lte_kind_value():
+    assert InvariantKind.UINT256_LTE.value == "uint256_lte"
+
+
+def test_check_uint256_lte_pass():
+    inv = Invariant(
+        id="X-LTE-1", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="totalSupply() <= MAX_SUPPLY",
+        kind=InvariantKind.UINT256_LTE,
+        selector="0xdead",
+        expected=1_000_000_000 * 10**18,
+    )
+    backend = _MockBackend()
+    backend.uint256[("0xabc", "0xdead")] = (
+        100_000_000 * 10**18
+    )
+    result = _checker(backend).check_one(inv, "0xabc")
+    assert result.status == InvariantStatus.PASS
+    assert result.value == 100_000_000 * 10**18
+
+
+def test_check_uint256_lte_pass_at_boundary():
+    inv = Invariant(
+        id="X-LTE-2", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="totalSupply() <= MAX_SUPPLY",
+        kind=InvariantKind.UINT256_LTE,
+        selector="0xdead", expected=1000,
+    )
+    backend = _MockBackend()
+    # Exactly at boundary — LTE means inclusive of equal
+    backend.uint256[("0xabc", "0xdead")] = 1000
+    result = _checker(backend).check_one(inv, "0xabc")
+    assert result.status == InvariantStatus.PASS
+
+
+def test_check_uint256_lte_fail_supply_breach():
+    """If totalSupply ever exceeds MAX_SUPPLY, the contract
+    has been compromised (MINTER_ROLE was supposed to enforce
+    this on every mint). Failure here = monetary base attack.
+    """
+    inv = Invariant(
+        id="X-LTE-3", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="totalSupply() <= MAX_SUPPLY",
+        kind=InvariantKind.UINT256_LTE,
+        selector="0xdead",
+        expected=1_000_000_000 * 10**18,
+    )
+    backend = _MockBackend()
+    backend.uint256[("0xabc", "0xdead")] = (
+        1_000_000_001 * 10**18
+    )
+    result = _checker(backend).check_one(inv, "0xabc")
+    assert result.status == InvariantStatus.FAIL
+    assert "1000000001" in (result.diagnostic or "")
+
+
+def test_check_uint256_lte_skipped_on_rpc_error():
+    inv = Invariant(
+        id="X-LTE-4", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="totalSupply() <= MAX_SUPPLY",
+        kind=InvariantKind.UINT256_LTE,
+        selector="0xdead", expected=1000,
+    )
+    backend = _MockBackend()
+    backend.raise_for.add(("0xabc", "0xdead"))
+    result = _checker(backend).check_one(inv, "0xabc")
+    assert result.status == InvariantStatus.SKIPPED
+
+
+def test_check_uint256_lte_skipped_on_none():
+    inv = Invariant(
+        id="X-LTE-5", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="x", kind=InvariantKind.UINT256_LTE,
+        selector="0xdead", expected=1000,
+    )
+    backend = _MockBackend()  # no value set → returns None
+    result = _checker(backend).check_one(inv, "0xabc")
+    assert result.status == InvariantStatus.SKIPPED
+
+
+# ── FTNSToken registry ───────────────────────────────
+
+
+def test_registry_has_ftns_token():
+    assert "ftns_token" in INVARIANT_REGISTRY
+    invs = INVARIANT_REGISTRY["ftns_token"]
+    assert len(invs) >= 2
+
+
+def test_ftns_max_supply_invariant_pinned_to_1B():
+    invs = INVARIANT_REGISTRY["ftns_token"]
+    max_inv = next(
+        (i for i in invs if i.id == "INV-FT-1"), None,
+    )
+    assert max_inv is not None
+    assert max_inv.severity == InvariantSeverity.CRITICAL
+    assert max_inv.kind == InvariantKind.UINT256_EQ
+    # 1B FTNS in wei
+    assert max_inv.expected == 1_000_000_000 * 10**18
+
+
+def test_ftns_total_supply_lte_max_supply_invariant():
+    invs = INVARIANT_REGISTRY["ftns_token"]
+    sup = next(
+        (i for i in invs if i.id == "INV-FT-2"), None,
+    )
+    assert sup is not None
+    assert sup.severity == InvariantSeverity.CRITICAL
+    assert sup.kind == InvariantKind.UINT256_LTE
+    assert sup.expected == 1_000_000_000 * 10**18
+
+
+# ── EscrowPool registry ──────────────────────────────
+
+
+def test_registry_has_escrow_pool():
+    assert "escrow_pool" in INVARIANT_REGISTRY
+    invs = INVARIANT_REGISTRY["escrow_pool"]
+    assert len(invs) >= 1
+
+
+def test_escrow_pool_solvency_invariant_critical():
+    """Mirror of INV-RD-4 against totalEscrowedBalance.
+    If ftns.balanceOf(EscrowPool) drops below the sum of
+    requester escrow credits, some requester withdraw or
+    batch-settlement will revert at the ERC-20 transfer
+    boundary — operational impact is the same shape as
+    RoyaltyDistributor insolvency.
+    """
+    invs = INVARIANT_REGISTRY["escrow_pool"]
+    sol = next(
+        (i for i in invs
+         if i.kind == InvariantKind.BALANCE_GTE_CLAIMABLE),
+        None,
+    )
+    assert sol is not None
+    assert sol.severity == InvariantSeverity.CRITICAL
+    # Reserve-label override should surface in the spec_text
+    assert "totalEscrowedBalance" in sol.spec_text
+
+
+def test_escrow_pool_solvency_diagnostic_uses_reserve_label():
+    """When `reserve_label` param is set, the
+    balance-gte-claimable handler MUST surface that label in
+    the diagnostic. Without it, operators reading EscrowPool
+    output would see 'totalClaimable=N' which is the wrong
+    contract's variable name."""
+    inv = Invariant(
+        id="X-EP-DIAG", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="ftns.balanceOf(this) >= totalEscrowedBalance",
+        kind=InvariantKind.BALANCE_GTE_CLAIMABLE,
+        selector="0xtotalescrowed",
+        params={
+            "ftns_selector": "0xftnsaddr",
+            "totalclaimable_selector": "0xtotalescrowed",
+            "reserve_label": "totalEscrowedBalance",
+        },
+    )
+    backend = _MockBackend()
+    contract_addr = "0xpool"
+    ftns_addr = "0x" + "aa" * 20
+    backend.address[(contract_addr, "0xftnsaddr")] = ftns_addr
+    backend.uint256[
+        (contract_addr, "0xtotalescrowed")
+    ] = 5_000
+    backend.uint256[
+        (ftns_addr, contract_addr, "balance")
+    ] = 5_500
+    result = _checker(backend).check_one(inv, contract_addr)
+    assert result.status == InvariantStatus.PASS
+    assert (
+        "totalEscrowedBalance=5000"
+        in (result.diagnostic or "")
+    )
+    # Old label MUST NOT appear when override is set
+    assert "totalClaimable" not in (result.diagnostic or "")
+
+
+def test_balance_gte_claimable_default_label_preserved():
+    """Backward-compat — when `reserve_label` is NOT in
+    params, the diagnostic still says 'totalClaimable' so
+    INV-RD-4's output shape stays identical to sprint 302."""
+    inv = Invariant(
+        id="X-RD-DIAG", contract_name="x", title="t",
+        description="d",
+        severity=InvariantSeverity.CRITICAL,
+        spec_text="ftns.balanceOf(this) >= totalClaimable",
+        kind=InvariantKind.BALANCE_GTE_CLAIMABLE,
+        selector="0xtc",
+        params={
+            "ftns_selector": "0xftnsaddr",
+            "totalclaimable_selector": "0xtc",
+            # NO reserve_label override
+        },
+    )
+    backend = _MockBackend()
+    contract_addr = "0xrd"
+    ftns_addr = "0x" + "bb" * 20
+    backend.address[(contract_addr, "0xftnsaddr")] = ftns_addr
+    backend.uint256[(contract_addr, "0xtc")] = 100
+    backend.uint256[
+        (ftns_addr, contract_addr, "balance")
+    ] = 200
+    result = _checker(backend).check_one(inv, contract_addr)
+    assert result.status == InvariantStatus.PASS
+    assert "totalClaimable=100" in (result.diagnostic or "")

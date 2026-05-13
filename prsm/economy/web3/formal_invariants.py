@@ -56,6 +56,7 @@ class InvariantStatus(str, Enum):
 class InvariantKind(str, Enum):
     UINT256_EQ = "uint256_eq"
     UINT256_GTE = "uint256_gte"
+    UINT256_LTE = "uint256_lte"
     ADDRESS_EQ = "address_eq"
     BOOL_READ = "bool_read"
     BALANCE_GTE_CLAIMABLE = "balance_gte_claimable"
@@ -143,9 +144,21 @@ class FormalBackend(Protocol):
 _SEL_NETWORK_FEE_BPS = "0x9c5e6cf2"   # NETWORK_FEE_BPS()
 _SEL_NETWORK_TREASURY = "0x8f0d1b8e"  # networkTreasury()
 _SEL_OWNER = "0x8da5cb5b"             # owner()
-_SEL_FTNS = "0x9b03f021"              # ftns()
+_SEL_FTNS = "0xefa21b41"              # ftns() — sprint 356 fix:
+# sprint 302 originally committed 0x9b03f021 which is NOT
+# keccak256("ftns()")[:4]. That bug caused INV-RD-4 (the
+# solvency invariant) to SKIP on mainnet because the
+# backend's eth_call against a wrong selector returns 0x and
+# we map None → SKIPPED. The mocked-backend tests didn't
+# catch this because they index by the (wrong) selector
+# verbatim. Pinned by test_ftns_selector_pinned_to_canonical_keccak.
 _SEL_TOTAL_CLAIMABLE = "0xc70b25c0"   # totalClaimable()
 _SEL_PAUSED = "0x5c975abb"            # paused()
+_SEL_TOTAL_SUPPLY = "0x18160ddd"      # totalSupply() (ERC-20)
+_SEL_MAX_SUPPLY = "0x32cb6b0c"        # MAX_SUPPLY()
+_SEL_TOTAL_ESCROWED_BALANCE = (
+    "0x71e780f3"                       # totalEscrowedBalance()
+)
 
 # The selector values above are derived from the v2 source.
 # Operators should verify on Basescan if treating them as
@@ -271,6 +284,88 @@ INVARIANT_REGISTRY: Dict[str, List[Invariant]] = {
             expected=None,
         ),
     ],
+    "ftns_token": [
+        Invariant(
+            id="INV-FT-1",
+            contract_name="ftns_token",
+            title=(
+                "MAX_SUPPLY is pinned at 1B FTNS (immutable)"
+            ),
+            description=(
+                "MAX_SUPPLY is a public constant in "
+                "FTNSTokenSimple.sol. Drift here would "
+                "indicate either a contract substitution or "
+                "ABI confusion. The entire monetary base "
+                "of the protocol depends on this constant "
+                "matching the value committed in source."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "MAX_SUPPLY() == 1_000_000_000 * 10**18"
+            ),
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_MAX_SUPPLY,
+            expected=1_000_000_000 * 10**18,
+        ),
+        Invariant(
+            id="INV-FT-2",
+            contract_name="ftns_token",
+            title=(
+                "totalSupply() <= MAX_SUPPLY (cap honored)"
+            ),
+            description=(
+                "Every mint in FTNSTokenSimple.mint() "
+                "requires totalSupply() + amount <= "
+                "MAX_SUPPLY. If this invariant ever fails, "
+                "either MINTER_ROLE was abused via a "
+                "compromised key or a malicious upgrade "
+                "bypassed the check. THE supply-side money "
+                "invariant for the protocol's token base."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "totalSupply() <= MAX_SUPPLY (1B * 10**18)"
+            ),
+            kind=InvariantKind.UINT256_LTE,
+            selector=_SEL_TOTAL_SUPPLY,
+            expected=1_000_000_000 * 10**18,
+        ),
+    ],
+    "escrow_pool": [
+        Invariant(
+            id="INV-EP-1",
+            contract_name="escrow_pool",
+            title=(
+                "Solvency: ftns.balanceOf(this) >= "
+                "totalEscrowedBalance"
+            ),
+            description=(
+                "Mirror of INV-RD-4 against the Phase 3.1 "
+                "EscrowPool's per-requester FTNS balance "
+                "accumulator. If the pool's FTNS reserve "
+                "ever drops below sum(balances), some "
+                "requester withdraw or batch-settlement "
+                "transfer reverts at the ERC-20 boundary. "
+                "L2 audit MEDIUM B-CROSS-2 added the "
+                "totalEscrowedBalance counter specifically "
+                "to make this invariant runtime-checkable."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "ftns.balanceOf(address(this)) >= "
+                "totalEscrowedBalance"
+            ),
+            kind=InvariantKind.BALANCE_GTE_CLAIMABLE,
+            selector=_SEL_TOTAL_ESCROWED_BALANCE,
+            params={
+                "ftns_selector": _SEL_FTNS,
+                "totalclaimable_selector": (
+                    _SEL_TOTAL_ESCROWED_BALANCE
+                ),
+                "reserve_label": "totalEscrowedBalance",
+            },
+        ),
+    ],
 }
 
 
@@ -296,6 +391,10 @@ class InvariantChecker:
             )
         if inv.kind == InvariantKind.UINT256_GTE:
             return self._check_uint256_gte(
+                inv, contract_address,
+            )
+        if inv.kind == InvariantKind.UINT256_LTE:
+            return self._check_uint256_lte(
                 inv, contract_address,
             )
         if inv.kind == InvariantKind.ADDRESS_EQ:
@@ -395,6 +494,40 @@ class InvariantChecker:
             value=v, expected=inv.expected,
             diagnostic=(
                 f"got {v}, required >= {inv.expected}"
+            ),
+        )
+
+    def _check_uint256_lte(
+        self, inv: Invariant, addr: str,
+    ) -> InvariantResult:
+        try:
+            v = self._backend.call_uint256(
+                addr, inv.selector,
+            )
+        except Exception as e:  # noqa: BLE001
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error=f"RPC error: {e}",
+            )
+        if v is None:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error="backend returned None",
+            )
+        if v <= inv.expected:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.PASS,
+                value=v, expected=inv.expected,
+            )
+        return InvariantResult(
+            invariant_id=inv.id,
+            status=InvariantStatus.FAIL,
+            value=v, expected=inv.expected,
+            diagnostic=(
+                f"got {v}, required <= {inv.expected}"
             ),
         )
 
@@ -499,8 +632,11 @@ class InvariantChecker:
                 status=InvariantStatus.SKIPPED,
                 error=f"RPC error: {e}",
             )
+        reserve_label = (
+            inv.params.get("reserve_label") or "totalClaimable"
+        )
         diag = (
-            f"balance={bal}, totalClaimable={tc}, "
+            f"balance={bal}, {reserve_label}={tc}, "
             f"slack={bal - tc}"
         )
         if bal >= tc:
