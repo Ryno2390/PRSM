@@ -45,6 +45,34 @@ def test_catalog_has_ftns_supply_cap_proof():
     assert "INV-FT-2" in entry["runtime_invariants"]
 
 
+def test_catalog_has_escrow_pool_solvency_proof():
+    """Sprint 363 ships EscrowPoolSolvencySpec — sister
+    proof to RoyaltyDistributorSolvencySpec, mirrors
+    INV-EP-1."""
+    assert (
+        "EscrowPoolSolvencySpec" in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG["EscrowPoolSolvencySpec"]
+    assert entry["mirrors_runtime_contract"] == "escrow_pool"
+    assert "INV-EP-1" in entry["runtime_invariants"]
+
+
+def test_catalog_has_role_disarm_access_control_proof():
+    """Sprint 363 ships RoleDisarmAccessControlSpec —
+    structural proof of OZ AccessControl uncircumventability
+    underlying INV-FT-3/4/5."""
+    assert (
+        "RoleDisarmAccessControlSpec"
+        in SYMBOLIC_PROOF_CATALOG
+    )
+    entry = SYMBOLIC_PROOF_CATALOG[
+        "RoleDisarmAccessControlSpec"
+    ]
+    ids = entry["runtime_invariants"]
+    for expected in ["INV-FT-3", "INV-FT-4", "INV-FT-5"]:
+        assert expected in ids
+
+
 def test_catalog_has_admin_bounded_setters_proof():
     """Sprint 362 ships AdminBoundedSettersSpec covering
     all remaining rate-bound invariants (INV-SS-1+2,

@@ -341,4 +341,40 @@ SYMBOLIC_PROOF_CATALOG: Dict[str, Dict[str, Any]] = {
             "runtime behavior, not just declarative."
         ),
     },
+    "EscrowPoolSolvencySpec": {
+        "mirrors_runtime_contract": "escrow_pool",
+        "runtime_invariants": ["INV-EP-1"],
+        "description": (
+            "Symbolic proof that deposit + withdraw + "
+            "settleFromRequester all preserve the "
+            "solvency invariant balance >= "
+            "totalEscrowedBalance. Sister proof to "
+            "RoyaltyDistributorSolvencySpec — same "
+            "algorithmic shape but on the Phase 3.1 "
+            "per-requester escrow accumulator."
+        ),
+    },
+    "RoleDisarmAccessControlSpec": {
+        "mirrors_runtime_contract": "ftns_token",
+        "runtime_invariants": [
+            "INV-FT-3", "INV-FT-4", "INV-FT-5",
+        ],
+        "description": (
+            "Symbolic proof that OZ AccessControl is "
+            "uncircumventable: role membership can only "
+            "change via admin-gated grantRole / "
+            "revokeRole. The PRSM-specific INV-FT-3/4/5 "
+            "claims (Foundation Safe holds admin; "
+            "disarmed hot key holds no role) are "
+            "STATE-DEPENDENT — verified by the runtime "
+            "probe against live mainnet state. This proof "
+            "covers the STRUCTURAL guarantee that makes "
+            "the disarm sticky: no symbolic caller can "
+            "grant a role without first holding the "
+            "admin role. Halmos caught a real proof bug "
+            "during development (post-state vs pre-state "
+            "assertion on self-revoke) — documented "
+            "inline."
+        ),
+    },
 }
