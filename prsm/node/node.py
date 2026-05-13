@@ -2630,6 +2630,32 @@ class PRSMNode:
             self._formal_invariant_checker = None
             self._formal_invariant_addresses = {}
 
+        # Sprint 364 — halmos symbolic-execution runner.
+        # Wired unconditionally; fail-soft when halmos/forge
+        # isn't installed (runner.is_available() returns
+        # False, endpoint returns 503 with named missing
+        # tools). Same posture as the runtime probe above —
+        # symbolic surface stays operational when tools are
+        # absent, just returns 503 explaining what's missing.
+        try:
+            from prsm.economy.web3.halmos_runner import (
+                HalmosRunner,
+            )
+            self._halmos_runner = HalmosRunner()
+            logger.info(
+                "Halmos symbolic-execution runner wired "
+                "(available=%s; missing=%s)",
+                self._halmos_runner.is_available(),
+                self._halmos_runner.missing_tools(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Halmos runner construction failed: %s "
+                "— /admin/formal-verification/symbolic/check "
+                "will return 503.", exc,
+            )
+            self._halmos_runner = None
+
         # Sprint 306 — $CORP authorization capability store
         # (Vision §7 Enterprise Confidentiality Mode layer 2).
         # Filesystem-persisted via PRSM_CORP_CAPABILITY_DIR.

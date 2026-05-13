@@ -8058,6 +8058,7 @@ _INCIDENT_ACTIONS = {
 
 _FORMAL_VERIFICATION_ACTIONS = {
     "list", "check", "check_one",
+    "symbolic_list", "symbolic_check",
 }
 
 
@@ -9530,6 +9531,111 @@ async def handle_prsm_formal_verification(
                 elif v is not None:
                     line += f"value={v}"
             lines.append(line)
+        return "\n".join(lines)
+
+    if action == "symbolic_list":
+        try:
+            r = await _call_node_api(
+                "GET",
+                "/admin/formal-verification/symbolic",
+            )
+        except Exception as e:
+            return (
+                f"prsm_formal_verification symbolic_list "
+                f"failed: {e}"
+            )
+        specs = r.get("specs") or []
+        if not specs:
+            return "No symbolic-proof specs registered."
+        lines = [
+            f"PRSM Symbolic-Proof Catalog — {len(specs)} "
+            "spec(s) (halmos-compatible):",
+            "",
+        ]
+        for s in specs:
+            lines.append(
+                f"  [{s['name']}]  mirrors "
+                f"{s.get('mirrors_runtime_contract')}"
+            )
+            invs = s.get("runtime_invariants") or []
+            if invs:
+                lines.append(
+                    f"    runtime invariants: "
+                    f"{', '.join(invs)}"
+                )
+            desc = s.get("description") or ""
+            if desc:
+                lines.append(f"    {desc[:200]}")
+        return "\n".join(lines)
+
+    if action == "symbolic_check":
+        spec = (arguments.get("spec") or "").strip()
+        if not spec:
+            return (
+                "symbolic_check requires 'spec' "
+                "(e.g., 'FTNSSupplyCapSpec')."
+            )
+        try:
+            r = await _call_node_api(
+                "GET",
+                f"/admin/formal-verification/symbolic/"
+                f"check/{spec}",
+            )
+        except Exception as e:
+            return (
+                f"prsm_formal_verification symbolic_check "
+                f"failed: {e}"
+            )
+        if "status" not in r:
+            detail = r.get("detail", "unknown error")
+            return f"symbolic_check refused: {detail}"
+        status = r.get("status", "?")
+        summary = r.get("summary") or {}
+        proofs = r.get("proofs") or []
+        marker = {
+            "passed": "✅",
+            "failed": "⚠ FAIL",
+            "skipped": "·",
+            "error": "❌",
+        }.get(status, "?")
+        invs = r.get("runtime_invariants") or []
+        lines = [
+            f"{marker} Symbolic Proof — {spec}  ({status})",
+            "",
+            f"  halmos: {r.get('halmos_version') or 'unknown'}",
+            (
+                f"  Summary: {summary.get('passed', 0)} "
+                f"passed / {summary.get('failed', 0)} "
+                f"failed / {summary.get('errored', 0)} "
+                f"errored"
+            ),
+        ]
+        if invs:
+            lines.append(
+                f"  Mirrors runtime invariants: "
+                f"{', '.join(invs)}"
+            )
+        err = r.get("error")
+        if err:
+            lines.append(f"  error: {err}")
+        lines.append("")
+        for p in proofs:
+            psym = {
+                "passed": "✅",
+                "failed": "⚠ FAIL",
+                "error":  "❌",
+            }.get(p.get("status"), "·")
+            line = (
+                f"  {psym}  {p.get('name')}  "
+                f"(paths: {p.get('paths_explored', 0)}, "
+                f"time: {p.get('time_seconds', 0):.2f}s)"
+            )
+            lines.append(line)
+            cex = p.get("counterexample")
+            if cex:
+                lines.append(
+                    f"     counterexample: {cex}"
+                )
         return "\n".join(lines)
 
     # check_one

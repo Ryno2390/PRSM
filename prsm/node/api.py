@@ -9284,6 +9284,88 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         result = checker.check_one(found, addr)
         return result.to_dict()
 
+    # ── Sprint 364 — symbolic verification surface ────────
+    # Halmos symbolic-execution results, complementing the
+    # runtime probe above. /symbolic is PUBLIC (catalog list,
+    # same posture as /invariants). /symbolic/check/{spec}
+    # requires a wired HalmosRunner (sprint 360) — fail-soft
+    # 503 if halmos/forge isn't installed.
+
+    @app.get(
+        "/admin/formal-verification/symbolic",
+        tags=["admin"],
+    )
+    async def formal_verification_symbolic_list(
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.halmos_runner import (
+            SYMBOLIC_PROOF_CATALOG,
+        )
+        specs: List[Dict[str, Any]] = []
+        for name, entry in SYMBOLIC_PROOF_CATALOG.items():
+            specs.append({
+                "name": name,
+                "mirrors_runtime_contract": entry.get(
+                    "mirrors_runtime_contract",
+                ),
+                "runtime_invariants": list(
+                    entry.get("runtime_invariants", []),
+                ),
+                "description": entry.get("description", ""),
+            })
+        return {"specs": specs}
+
+    @app.get(
+        "/admin/formal-verification/symbolic/check/{spec}",
+        tags=["admin"],
+    )
+    async def formal_verification_symbolic_check(
+        spec: str,
+    ) -> Dict[str, Any]:
+        from prsm.economy.web3.halmos_runner import (
+            SYMBOLIC_PROOF_CATALOG,
+        )
+        if spec not in SYMBOLIC_PROOF_CATALOG:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"unknown symbolic spec {spec!r}; "
+                    f"known: {sorted(SYMBOLIC_PROOF_CATALOG)}"
+                ),
+            )
+        runner = getattr(node, "_halmos_runner", None)
+        if runner is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Halmos symbolic runner not wired. "
+                    "Install halmos (pip install halmos) + "
+                    "forge (foundryup), then restart the "
+                    "node."
+                ),
+            )
+        if not runner.is_available():
+            missing = runner.missing_tools()
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Halmos runner unavailable — missing "
+                    f"tools: {', '.join(missing)}."
+                ),
+            )
+        suite = runner.run(spec)
+        body = suite.to_dict()
+        # Attach catalog cross-reference so operators see
+        # which runtime invariants this proof mirrors —
+        # same join as the runtime-probe endpoint exposes.
+        entry = SYMBOLIC_PROOF_CATALOG[spec]
+        body["runtime_invariants"] = list(
+            entry.get("runtime_invariants", []),
+        )
+        body["mirrors_runtime_contract"] = entry.get(
+            "mirrors_runtime_contract",
+        )
+        return body
+
     # ── Sprint 301 — incident response playbook ───────────
     # Vision §14 mitigation item 5: public exploit-response
     # playbook + code hooks. /playbook is intentionally

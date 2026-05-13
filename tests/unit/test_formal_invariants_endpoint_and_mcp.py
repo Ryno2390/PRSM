@@ -337,3 +337,293 @@ async def test_mcp_check_one_requires_id():
         "action": "check_one",
     })
     assert "invariant_id" in r.lower()
+
+
+# ── Sprint 364 — symbolic surface ────────────────────
+#
+# GET /admin/formal-verification/symbolic        — catalog
+# GET /admin/formal-verification/symbolic/{spec} — run halmos
+#
+# prsm_formal_verification MCP action additions:
+#   "symbolic_list"  — list available proofs
+#   "symbolic_check" — run a specific proof + render result
+#
+# The endpoint uses node._halmos_runner; when unwired (no
+# halmos / forge installed, or proofs dir missing) returns
+# 503 with the missing-tool message. Mirrors the runtime-
+# probe 503 posture so the operator UX is consistent.
+
+
+class _FakeHalmosSuite:
+    """Stub matching SymbolicProofSuite.to_dict() shape."""
+
+    def __init__(self, contract, status, proofs=None, error=None):
+        self._d = {
+            "contract": contract,
+            "status": status,
+            "halmos_version": "0.3.3",
+            "proofs": proofs or [],
+            "error": error,
+            "summary": {
+                "passed": sum(
+                    1 for p in (proofs or [])
+                    if p.get("status") == "passed"
+                ),
+                "failed": sum(
+                    1 for p in (proofs or [])
+                    if p.get("status") == "failed"
+                ),
+                "errored": sum(
+                    1 for p in (proofs or [])
+                    if p.get("status") == "error"
+                ),
+            },
+        }
+
+    def to_dict(self):
+        return dict(self._d)
+
+
+class _FakeHalmosRunner:
+    def __init__(self, available=True, suite=None,
+                 missing=None):
+        self._available = available
+        self._suite = suite
+        self._missing = missing or []
+
+    def is_available(self):
+        return self._available
+
+    def missing_tools(self):
+        return list(self._missing)
+
+    def run(self, spec):
+        return self._suite
+
+
+def _client_with_halmos(runner=None):
+    node = MagicMock()
+    node.identity.node_id = "test-node"
+    node.ftns_ledger = None
+    node._formal_invariant_checker = None
+    node._formal_invariant_addresses = {}
+    node._halmos_runner = runner
+    return TestClient(
+        create_api_app(node, enable_security=False),
+        raise_server_exceptions=False,
+    )
+
+
+def test_symbolic_list_returns_catalog():
+    """GET /admin/formal-verification/symbolic returns the
+    SYMBOLIC_PROOF_CATALOG so operators can discover what's
+    available without invoking halmos."""
+    body = _client_with_halmos().get(
+        "/admin/formal-verification/symbolic",
+    ).json()
+    assert "specs" in body
+    # All 5 spec contracts shipped through sprint 363
+    names = {s["name"] for s in body["specs"]}
+    assert "FTNSSupplyCapSpec" in names
+    assert "RoyaltyDistributorSolvencySpec" in names
+    assert "AdminBoundedSettersSpec" in names
+    assert "EscrowPoolSolvencySpec" in names
+    assert "RoleDisarmAccessControlSpec" in names
+
+
+def test_symbolic_list_includes_runtime_invariants():
+    body = _client_with_halmos().get(
+        "/admin/formal-verification/symbolic",
+    ).json()
+    rd_entry = next(
+        s for s in body["specs"]
+        if s["name"] == "RoyaltyDistributorSolvencySpec"
+    )
+    assert "INV-RD-4" in rd_entry["runtime_invariants"]
+    assert (
+        rd_entry["mirrors_runtime_contract"]
+        == "royalty_distributor"
+    )
+
+
+def test_symbolic_list_is_public():
+    """Catalog list MUST be public same as /invariants —
+    the formal spec is published before any incident
+    per Vision §14 transparency promise. No runner needed."""
+    # Even without a runner (unwired), the list must work.
+    body = _client_with_halmos(runner=None).get(
+        "/admin/formal-verification/symbolic",
+    ).json()
+    assert "specs" in body
+
+
+def test_symbolic_check_503_when_runner_unwired():
+    """If node._halmos_runner is None, GET /symbolic/check
+    returns 503 — same posture as runtime-probe /check."""
+    r = _client_with_halmos(runner=None).get(
+        "/admin/formal-verification/symbolic/check/"
+        "FTNSSupplyCapSpec",
+    )
+    assert r.status_code == 503
+    assert "halmos" in r.json()["detail"].lower()
+
+
+def test_symbolic_check_503_when_tools_missing():
+    """Runner wired but halmos/forge not installed →
+    503 with named missing tools."""
+    runner = _FakeHalmosRunner(
+        available=False, missing=["halmos", "forge"],
+    )
+    r = _client_with_halmos(runner=runner).get(
+        "/admin/formal-verification/symbolic/check/"
+        "FTNSSupplyCapSpec",
+    )
+    assert r.status_code == 503
+    detail = r.json()["detail"].lower()
+    assert "halmos" in detail
+    assert "forge" in detail
+
+
+def test_symbolic_check_404_unknown_spec():
+    """Unknown spec → 404, naming the known specs."""
+    runner = _FakeHalmosRunner(available=True)
+    r = _client_with_halmos(runner=runner).get(
+        "/admin/formal-verification/symbolic/check/"
+        "NonexistentSpec",
+    )
+    assert r.status_code == 404
+    assert "FTNSSupplyCapSpec" in r.json()["detail"]
+
+
+def test_symbolic_check_happy_path_all_pass():
+    """Runner returns all-PASS suite → endpoint returns
+    200 with status=passed + per-proof rendering."""
+    suite = _FakeHalmosSuite(
+        contract="FTNSSupplyCapSpec",
+        status="passed",
+        proofs=[
+            {
+                "name": "check_mint_preserves_cap(...)",
+                "status": "passed",
+                "paths_explored": 5,
+                "time_seconds": 0.02,
+                "error": None,
+                "counterexample": None,
+            },
+        ],
+    )
+    runner = _FakeHalmosRunner(available=True, suite=suite)
+    body = _client_with_halmos(runner=runner).get(
+        "/admin/formal-verification/symbolic/check/"
+        "FTNSSupplyCapSpec",
+    ).json()
+    assert body["status"] == "passed"
+    assert body["summary"]["passed"] == 1
+    assert body["summary"]["failed"] == 0
+    assert body["contract"] == "FTNSSupplyCapSpec"
+    # Catalog cross-reference attached
+    assert "runtime_invariants" in body
+    assert "INV-FT-1" in body["runtime_invariants"]
+
+
+def test_symbolic_check_surfaces_failed_proofs():
+    """When halmos finds a counterexample, the FAIL must
+    propagate cleanly so operators alert. status=failed +
+    summary.failed > 0."""
+    suite = _FakeHalmosSuite(
+        contract="RoleDisarmAccessControlSpec",
+        status="failed",
+        proofs=[
+            {
+                "name": "check_revoke_role_admin_gated(...)",
+                "status": "failed",
+                "paths_explored": 4,
+                "time_seconds": 0.68,
+                "error": None,
+                "counterexample": {
+                    "caller": "0xdead", "role": "0x00",
+                },
+            },
+        ],
+    )
+    runner = _FakeHalmosRunner(available=True, suite=suite)
+    r = _client_with_halmos(runner=runner).get(
+        "/admin/formal-verification/symbolic/check/"
+        "RoleDisarmAccessControlSpec",
+    )
+    body = r.json()
+    assert r.status_code == 200  # endpoint succeeded
+    assert body["status"] == "failed"
+    assert body["summary"]["failed"] == 1
+
+
+# ── MCP symbolic actions ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mcp_symbolic_list_renders_table():
+    with patch(
+        "prsm.mcp_server._call_node_api",
+        new=AsyncMock(return_value={
+            "specs": [
+                {
+                    "name": "FTNSSupplyCapSpec",
+                    "mirrors_runtime_contract": "ftns_token",
+                    "runtime_invariants": [
+                        "INV-FT-1", "INV-FT-2",
+                    ],
+                    "description": "supply cap proof",
+                },
+            ],
+        }),
+    ):
+        r = await handle_prsm_formal_verification({
+            "action": "symbolic_list",
+        })
+    assert "FTNSSupplyCapSpec" in r
+    assert "INV-FT-1" in r
+
+
+@pytest.mark.asyncio
+async def test_mcp_symbolic_check_renders_summary():
+    with patch(
+        "prsm.mcp_server._call_node_api",
+        new=AsyncMock(return_value={
+            "contract": "FTNSSupplyCapSpec",
+            "status": "passed",
+            "halmos_version": "0.3.3",
+            "runtime_invariants": ["INV-FT-1", "INV-FT-2"],
+            "summary": {
+                "passed": 3, "failed": 0, "errored": 0,
+            },
+            "proofs": [
+                {
+                    "name": "check_max_supply_constant_value()",
+                    "status": "passed",
+                    "paths_explored": 1,
+                    "time_seconds": 0.0,
+                    "error": None,
+                    "counterexample": None,
+                },
+            ],
+        }),
+    ) as mock_call:
+        r = await handle_prsm_formal_verification({
+            "action": "symbolic_check",
+            "spec": "FTNSSupplyCapSpec",
+        })
+    args = mock_call.await_args[0]
+    assert args[1] == (
+        "/admin/formal-verification/symbolic/check/"
+        "FTNSSupplyCapSpec"
+    )
+    assert "passed" in r.lower()
+    assert "FTNSSupplyCapSpec" in r
+
+
+@pytest.mark.asyncio
+async def test_mcp_symbolic_check_requires_spec():
+    r = await handle_prsm_formal_verification({
+        "action": "symbolic_check",
+    })
+    assert "spec" in r.lower()
