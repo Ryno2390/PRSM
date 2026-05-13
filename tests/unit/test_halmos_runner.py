@@ -57,6 +57,16 @@ def test_catalog_has_escrow_pool_solvency_proof():
     assert "INV-EP-1" in entry["runtime_invariants"]
 
 
+def test_catalog_has_three_band_routing_proof():
+    """Sprint 374: PRSM-PROV-1 three-band routing (§7.19)."""
+    assert "ThreeBandRoutingSpec" in SYMBOLIC_PROOF_CATALOG
+    entry = SYMBOLIC_PROOF_CATALOG["ThreeBandRoutingSpec"]
+    assert entry["runtime_invariants"] == []
+    assert (
+        entry["mirrors_runtime_contract"] == "content_dedup"
+    )
+
+
 def test_catalog_has_streaming_emit_cap_proof():
     """Sprint 372: SSE streaming-emit cap (§7.5)."""
     assert (

@@ -362,6 +362,21 @@ SYMBOLIC_PROOF_CATALOG: Dict[str, Dict[str, Any]] = {
             "per-requester escrow accumulator."
         ),
     },
+    "ThreeBandRoutingSpec": {
+        "mirrors_runtime_contract": "content_dedup",
+        "runtime_invariants": [],
+        "description": (
+            "Symbolic proof of the PRSM-PROV-1 Item 6 three-"
+            "band similarity-score routing invariants (audit-"
+            "prep §7.19). Construction enforces band ordering "
+            "(arbitration_floor <= derivative <= duplicate); "
+            "routing is monotonic in score; each band-boundary "
+            "is correctly inclusive on its lower bound. "
+            "Source-identity-mirrors prsm/data/dedup/"
+            "thresholds.py:55-99 (EffectiveThresholds + "
+            "__post_init__) + the routing call-sites."
+        ),
+    },
     "StreamingEmitCapSpec": {
         "mirrors_runtime_contract": "streaming_inference",
         "runtime_invariants": [],

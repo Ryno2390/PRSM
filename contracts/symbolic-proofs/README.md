@@ -117,6 +117,7 @@ else:
 | `EncryptedProbsCoSetSpec` | `prsm/compute/chain_rpc/protocol.py:956-998` encrypted-probs validators | (off-chain — audit-prep §7.14 Phase 3.x.11.q.y) | 9 PASS / 36 paths; mutual exclusion + co-set + length cap |
 | `StreamingEmitCapSpec` | `prsm/compute/chain_rpc/client.py:1359-1367` cap-bound + truncation | (off-chain — audit-prep §7.5 Phase 3.x.8.1) | 5 PASS / 14 paths; settle-on-emit billing invariant |
 | `KVCacheLRUBoundSpec` | `prsm/compute/chain_rpc/kv_cache.py:201-249` `KVCacheManager.allocate` LRU eviction | (off-chain — audit-prep §7.9 Phase 3.x.11) | 5 PASS / 24 paths; bounded-cache invariant |
+| `ThreeBandRoutingSpec` | `prsm/data/dedup/thresholds.py:55-99` `EffectiveThresholds` + routing call-sites | (off-chain — audit-prep §7.19 PRSM-PROV-1 Item 6) | 7 PASS / 21 paths; band ordering + monotonic routing |
 
 ## CI integration via `requires_halmos` marker (sprint 366)
 
