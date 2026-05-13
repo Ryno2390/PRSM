@@ -23,7 +23,7 @@ from uuid import uuid4
 
 from cryptography.fernet import Fernet
 import base64
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_serializer
 
 from ..models.integration_models import IntegrationPlatform
 from prsm.core.config import settings
@@ -64,15 +64,25 @@ class CredentialData(BaseModel):
     password: Optional[SecretStr] = None
     custom_fields: Dict[str, Any] = Field(default_factory=dict)
     
-    # Sprint 335 — Pydantic V3 prep: class-based `Config` is
-    # deprecated in V2 and removed in V3. ConfigDict is the
-    # canonical replacement. json_encoders is also deprecated
-    # but still functional under V2; that's a separate sprint.
-    model_config = ConfigDict(
-        json_encoders={
-            SecretStr: lambda v: v.get_secret_value() if v else None,
-        },
+    # Sprint 338 — closed the V3-prep arc on this file. The
+    # SecretStr fields get a JSON-only field_serializer that
+    # reveals the underlying secret when the model is dumped
+    # to JSON (the legacy `json_encoders` behavior). The same
+    # serializer covers every SecretStr field on the model;
+    # `when_used="json"` keeps `.model_dump()` (Python dict)
+    # behavior unchanged (returns SecretStr objects).
+    @field_serializer(
+        "api_key",
+        "access_token",
+        "refresh_token",
+        "client_secret",
+        "password",
+        when_used="json",
     )
+    def _dump_secret(
+        self, v: Optional[SecretStr],
+    ) -> Optional[str]:
+        return v.get_secret_value() if v is not None else None
 
 
 class CredentialManager:
