@@ -321,3 +321,115 @@ class TestNodeHealthErrors:
         ):
             result = await handle_prsm_node_health({})
         assert "cannot reach" in result.lower()
+
+
+class TestTickAgeRendering:
+    """Sprint 404 — surface the sprint 399-401 tick_status +
+    last_tick_age_seconds fields in the prsm_node_health
+    MCP renderer. Operators triaging via Claude Code see
+    silent-economic-failure modes (task running but every
+    tick failing) directly in the side panel."""
+
+    def _fleet(self, *, heartbeat_tick_status, age_seconds):
+        async def fake_call_node_api(method, path, data=None):
+            return {
+                "status": "healthy",
+                "node_id": "test-node",
+                "subsystems": {
+                    "ftns_ledger": {"available": True, "status": "ok"},
+                    "payment_escrow": {
+                        "available": True, "status": "ok",
+                        "pending_count": 0,
+                    },
+                    "job_history": {"available": True, "status": "ok"},
+                    "royalty_distributor": {
+                        "available": True, "status": "ok",
+                    },
+                    "heartbeat_scheduler": {
+                        "available": True, "status": "ok",
+                        "interval_seconds": 900,
+                        "task_running": True,
+                        "last_tick_age_seconds": age_seconds,
+                        "tick_status": heartbeat_tick_status,
+                    },
+                },
+            }
+        return fake_call_node_api
+
+    @pytest.mark.asyncio
+    async def test_stale_tick_renders_loud_marker(self):
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=self._fleet(
+                heartbeat_tick_status="stale",
+                age_seconds=5000,
+            ),
+        ):
+            result = await handle_prsm_node_health({})
+        # Stale = silent-economic-failure. Loud marker like
+        # the cleanup_task CRASHED treatment.
+        assert "stale" in result.lower()
+        assert "heartbeat_scheduler" in result
+        # Age surfaces so operators see how bad it is
+        assert "5000" in result or "5,000" in result
+
+    @pytest.mark.asyncio
+    async def test_degraded_tick_renders_warning_marker(self):
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=self._fleet(
+                heartbeat_tick_status="degraded",
+                age_seconds=2200,
+            ),
+        ):
+            result = await handle_prsm_node_health({})
+        assert "degraded" in result.lower()
+        assert "2200" in result or "2,200" in result
+
+    @pytest.mark.asyncio
+    async def test_healthy_tick_subtle_or_omitted(self):
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=self._fleet(
+                heartbeat_tick_status="healthy",
+                age_seconds=12,
+            ),
+        ):
+            result = await handle_prsm_node_health({})
+        # Healthy = don't shout. Output should NOT contain
+        # the loud "stale" / "degraded" markers.
+        assert "stale" not in result.lower()
+        assert "[!]" not in result or "cleanup_task" in result
+        # heartbeat_scheduler still appears in the subsystem
+        # list at minimum
+        assert "heartbeat_scheduler" in result
+
+    @pytest.mark.asyncio
+    async def test_subsystem_without_tick_status_unchanged(self):
+        """Backwards-compat: subsystems that don't have
+        tick_status at all (ftns_ledger, payment_escrow, etc.)
+        render the same as pre-sprint-404."""
+        async def fake_call_node_api(method, path, data=None):
+            return {
+                "status": "healthy",
+                "node_id": "test-node",
+                "subsystems": {
+                    "ftns_ledger": {"available": True, "status": "ok"},
+                    "payment_escrow": {
+                        "available": True, "status": "ok",
+                        "pending_count": 5,
+                    },
+                    "job_history": {"available": True, "status": "ok"},
+                    "royalty_distributor": {
+                        "available": True, "status": "ok",
+                    },
+                },
+            }
+        with patch(
+            "prsm.mcp_server._call_node_api",
+            side_effect=fake_call_node_api,
+        ):
+            result = await handle_prsm_node_health({})
+        # No tick_status / stale / degraded markers anywhere
+        assert "stale" not in result.lower()
+        assert "tick" not in result.lower()

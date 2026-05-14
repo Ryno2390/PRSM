@@ -6067,8 +6067,30 @@ async def handle_prsm_node_health(arguments: Dict[str, Any]) -> str:
     for name, info in subsystems.items():
         avail = info.get("available", False)
         marker = "[ok]" if avail else "[--]"
+        # Sprint 404 — tick_status from sprint 399-401
+        # daemon extensions takes priority on the marker so
+        # silent-economic-failure modes (task running but
+        # every tick failing) surface as loudly as
+        # cleanup_task CRASHED. Stale → loud, degraded →
+        # warning, otherwise existing behavior.
+        tick_status = info.get("tick_status")
+        if tick_status == "stale":
+            marker = "[!]"
+        elif tick_status == "degraded":
+            marker = "[⚠]"
         sub_status = info.get("status", "?")
         line = f"    {marker} {name:<22}  {sub_status}"
+        # Append tick-age annotation when tick_status is
+        # present + non-healthy. Operators see both the
+        # severity AND how stale things are.
+        if tick_status in ("stale", "degraded"):
+            age = info.get("last_tick_age_seconds")
+            if isinstance(age, (int, float)):
+                line += (
+                    f"  [{tick_status}: tick {int(age)}s old]"
+                )
+            else:
+                line += f"  [{tick_status}: no tick yet]"
         if not avail and "error" in info:
             line += f"  (error: {info['error']})"
         elif name == "payment_escrow" and "pending_count" in info:
