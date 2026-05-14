@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional, Union
 
 from prsm.economy.web3.compensation_distributor import DistributedEvent
@@ -72,10 +73,27 @@ class CompensationDistributorWatcher:
         self._state_store = state_store
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
+        # Sprint 401 — tick-age tracking. Bumped on each
+        # success path; RPC failures leave it stale.
+        self.last_tick_at: Optional[datetime] = None
 
     @property
     def poll_interval_sec(self) -> float:
         return self._poll_interval
+
+    @property
+    def interval_seconds(self) -> float:
+        """Alias for poll_interval_sec — sprint-400
+        _daemon_subsystem helper's canonical attr name."""
+        return self._poll_interval
+
+    @property
+    def last_tick_age_seconds(self) -> Optional[float]:
+        if self.last_tick_at is None:
+            return None
+        return (
+            datetime.now(timezone.utc) - self.last_tick_at
+        ).total_seconds()
 
     async def run_forever(self) -> None:
         self._stop_event.clear()
@@ -115,9 +133,11 @@ class CompensationDistributorWatcher:
             else:
                 self.last_processed_block = latest
                 self._persist_baseline()
+                self.last_tick_at = datetime.now(timezone.utc)
                 return
 
         if latest <= self.last_processed_block:
+            self.last_tick_at = datetime.now(timezone.utc)
             return
 
         if self._on_distributed is None:
@@ -125,6 +145,7 @@ class CompensationDistributorWatcher:
             # RPC on subsequent ticks.
             self.last_processed_block = latest
             self._persist_baseline()
+            self.last_tick_at = datetime.now(timezone.utc)
             return
 
         from_block = self.last_processed_block + 1
@@ -137,12 +158,14 @@ class CompensationDistributorWatcher:
                 "CompensationDistributorWatcher: get_distributed_events "
                 "RPC failed",
             )
-            return  # do NOT advance baseline
+            return  # do NOT advance baseline OR last_tick_at
 
         for event in events:
             await self._invoke_cb(event)
         self.last_processed_block = to_block
         self._persist_baseline()
+        # Sprint 401 — full poll-and-dispatch success.
+        self.last_tick_at = datetime.now(timezone.utc)
 
     def _persist_baseline(self) -> None:
         if self._state_store is None or self.last_processed_block is None:

@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 
@@ -64,6 +65,12 @@ class JobReaper:
         self._max_duration_seconds = max_duration_seconds
         self._interval_seconds = interval_seconds
         self._running = False
+        # Sprint 401 — tick-age tracking (mirrors sprint 399/400
+        # pattern from HeartbeatScheduler + PullAndDistribute).
+        # Bumped after each successful reap_once(); reap_once
+        # raising an exception leaves it stale, which is the
+        # silent-failure signal.
+        self.last_tick_at: Optional[datetime] = None
 
     @property
     def max_duration_seconds(self) -> float:
@@ -72,6 +79,14 @@ class JobReaper:
     @property
     def interval_seconds(self) -> float:
         return self._interval_seconds
+
+    @property
+    def last_tick_age_seconds(self) -> Optional[float]:
+        if self.last_tick_at is None:
+            return None
+        return (
+            datetime.now(timezone.utc) - self.last_tick_at
+        ).total_seconds()
 
     async def reap_once(self) -> int:
         """One-shot scan + reap. Returns count of records reaped."""
@@ -151,6 +166,11 @@ class JobReaper:
             await asyncio.sleep(self._interval_seconds)
             try:
                 await self.reap_once()
+                # Sprint 401 — bump only on successful sweep.
+                # An exception leaves last_tick_at stale,
+                # which surfaces as tick_status=stale on
+                # /health/detailed.
+                self.last_tick_at = datetime.now(timezone.utc)
             except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "JobReaper loop error: %s", exc,

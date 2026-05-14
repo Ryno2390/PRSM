@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
 from prsm.economy.web3.storage_slashing import (
@@ -112,10 +113,31 @@ class StorageSlashingWatcher:
         self._event_filters = event_filters or {}
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
+        # Sprint 401 — tick-age tracking. Bumped only on
+        # successful poll completion (latest_block() RPC
+        # success + tick body reaching its natural exit).
+        # RPC failure leaves it stale → silent-watcher-
+        # death surfaces on /health/detailed.
+        self.last_tick_at: Optional[datetime] = None
 
     @property
     def poll_interval_sec(self) -> float:
         return self._poll_interval
+
+    @property
+    def interval_seconds(self) -> float:
+        """Alias for poll_interval_sec — adopts the sprint-
+        400 _daemon_subsystem helper's canonical attr name
+        so /health/detailed auto-surfaces tick_status."""
+        return self._poll_interval
+
+    @property
+    def last_tick_age_seconds(self) -> Optional[float]:
+        if self.last_tick_at is None:
+            return None
+        return (
+            datetime.now(timezone.utc) - self.last_tick_at
+        ).total_seconds()
 
     async def run_forever(self) -> None:
         self._stop_event.clear()
@@ -138,6 +160,8 @@ class StorageSlashingWatcher:
             logger.exception(
                 "StorageSlashingWatcher: latest_block() RPC failed"
             )
+            # Sprint 401 — RPC failure means no forward
+            # progress; last_tick_at stays stale.
             return
 
         if self.last_processed_block is None:
@@ -155,9 +179,15 @@ class StorageSlashingWatcher:
             else:
                 self.last_processed_block = latest
                 self._persist_baseline()
+                # Sprint 401 — baseline-established path
+                # IS a successful tick.
+                self.last_tick_at = datetime.now(timezone.utc)
                 return
 
         if latest <= self.last_processed_block:
+            # Sprint 401 — no-new-blocks path IS a
+            # successful tick (poll completed, no work).
+            self.last_tick_at = datetime.now(timezone.utc)
             return
 
         from_block = self.last_processed_block + 1
@@ -193,6 +223,11 @@ class StorageSlashingWatcher:
         if all_succeeded:
             self.last_processed_block = to_block
             self._persist_baseline()
+            # Sprint 401 — full-poll success path.
+            self.last_tick_at = datetime.now(timezone.utc)
+        # If all_succeeded=False, tick partially failed —
+        # do NOT bump. Operators see stale tick_status until
+        # the next clean poll catches up.
 
     def _persist_baseline(self) -> None:
         if self._state_store is None or self.last_processed_block is None:

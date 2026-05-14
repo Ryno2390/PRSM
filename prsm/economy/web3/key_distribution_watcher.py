@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
 from prsm.economy.web3.key_distribution import KeyReleasedEvent
@@ -202,10 +203,26 @@ class KeyDistributionWatcher:
         self._event_filters = event_filters or {}
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
+        # Sprint 401 — tick-age tracking.
+        self.last_tick_at: Optional[datetime] = None
 
     @property
     def poll_interval_sec(self) -> float:
         return self._poll_interval
+
+    @property
+    def interval_seconds(self) -> float:
+        """Alias for poll_interval_sec — sprint-400
+        _daemon_subsystem helper's canonical attr name."""
+        return self._poll_interval
+
+    @property
+    def last_tick_age_seconds(self) -> Optional[float]:
+        if self.last_tick_at is None:
+            return None
+        return (
+            datetime.now(timezone.utc) - self.last_tick_at
+        ).total_seconds()
 
     async def run_forever(self) -> None:
         self._stop_event.clear()
@@ -252,9 +269,11 @@ class KeyDistributionWatcher:
             else:
                 self.last_processed_block = latest
                 self._persist_baseline()
+                self.last_tick_at = datetime.now(timezone.utc)
                 return
 
         if latest <= self.last_processed_block:
+            self.last_tick_at = datetime.now(timezone.utc)
             return  # no new blocks
 
         from_block = self.last_processed_block + 1
@@ -296,6 +315,10 @@ class KeyDistributionWatcher:
         if all_succeeded:
             self.last_processed_block = to_block
             self._persist_baseline()
+            # Sprint 401 — full poll success.
+            self.last_tick_at = datetime.now(timezone.utc)
+        # Partial-failure: do NOT bump. tick_status surfaces
+        # stale until next clean poll.
 
     def _persist_baseline(self) -> None:
         """Save the current baseline to state_store (if wired).
