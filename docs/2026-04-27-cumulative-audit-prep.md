@@ -3455,7 +3455,7 @@ When future events fire (CDP commission, Aerodrome pool seed, fleet kill-switch 
 
 - **Activation-DP-side wiring.** Sprint 295's `ActivationDPInjector` (per-stage Gaussian noise + composition tracking) is shipped; the corresponding `ActivationDPAwareChainExecutor` decorator is NOT. Unlike topology (which can be recorded by a pure outer wrapper because the structural fact is observable post-dispatch), DP injection has to happen INSIDE the chain executor's dispatch loop — noise is applied to each activation transfer between stages. Wiring this requires extending `RpcChainExecutor._dispatch_stage` to accept an injector callback. Tracked as the natural sibling of sprint 414.
 
-- **Node-construction default wiring.** Sprints 413–415 ship the components but don't change the default factory wiring at `prsm/compute/chain_rpc/factories.py:make_rpc_chain_executor` — operators must explicitly wrap with `TopologyAwareChainExecutor` to populate the field. This is deliberate (avoids changing default behavior of an established factory without a CR), but means today's production receipts still report `topology_assignment=None` until an operator opts in. Future sprint could either flip the default OR document explicit operator wiring in deploy guides.
+- **Node-construction default wiring.** ~~Sprints 413–415 ship the components but don't change the default factory wiring~~ **Closed by sprint 417 — see §7.37.** `make_rpc_chain_executor` now wraps with `TopologyAwareChainExecutor` by default; operators opt out via `wrap_topology_aware=False`.
 
 - **Multi-stage attestation envelope integration.** The per-stage TEE attestations (sprint 3.x.7 Task 5) and the topology assignment are independent observables today. A verifier checking both has to cross-reference manually. A future tighter binding (e.g., the topology assignment's stable_hash committed inside the multi-stage attestation envelope) would shrink the attack surface by an additional discrete factor. Not load-bearing for current sprint-292 verifier checks.
 
@@ -3470,6 +3470,54 @@ When future events fire (CDP commission, Aerodrome pool seed, fleet kill-switch 
 **Tags.** 3 merge-ready tags (`parallax-receipt-privacy-wiring-...`, `topology-aware-chain-executor-decorator-...`, `topology-end-to-end-signed-receipt-...`), all dated `20260514`. Headline tag: `topology-end-to-end-signed-receipt-merge-ready-20260514` (commit `d307a5b2`) — the load-bearing end-to-end demonstration.
 
 **Cumulative count.** §7 verifiable-claim pathway: 6 sprints (292 verifier, 293–295 attestation backends + DP injector, 296 rotation policy, 297 receipt schema + signing-payload encoding, 413–415 topology-side end-to-end closure). Activation-DP-side wiring remains as the sibling deferral. Cross-suite 91 green across the §7-relevant test surface (`topology_end_to_end_signed_receipt + topology_aware_chain_executor + parallax_executor_receipt_privacy_wiring + receipt_privacy_capstone + topology_rotation + activation_dp`).
+
+---
+
+### 7.37 §7 Private Inference — default-wiring + DP-side end-to-end (sprints 417–419, 2026-05-14)
+
+**Scope note.** §7.36 covered the topology-side end-to-end (sprints 413–415) and called out two honest-scope deferrals: (a) node-construction default wiring, and (b) activation-DP-side wiring. Sprints 417–419 close BOTH. This §7.37 entry documents that closure, completing the §7 Private Inference verifiable-claim pathway on both axes.
+
+**Why this is in the cumulative bundle.** §7.36 made the topology claim verifiable but PRACTICALLY DORMANT (operators had to explicitly wrap) AND made no claim on activation-DP. §7.37 flips production receipts to carry topology by default AND ships the missing DP-side decorator. Operators wanting strict `require_topology_rotation=True` AND/OR `require_activation_dp_trace=True` against `verify_receipt_privacy_claim` (sprint 292) can now enforce both with zero false-positives on properly-built receipts.
+
+**Headline guarantees.**
+
+1. **Sprint 417 — `make_rpc_chain_executor` default-wires topology** (`make-rpc-chain-executor-topology-default-merge-ready-20260514`). New `wrap_topology_aware: bool = True` kwarg on the factory; default ON so production receipts immediately carry verifiable `topology_assignment`. Sound flip because sprint-414's decorator is a strict-superset wrapper (preserves all inner result fields, propagates errors unchanged, only ADDS topology). 4 pre-existing tests that probed raw `RpcChainExecutor` internals updated to pass `wrap_topology_aware=False` (their semantic was "test the FACTORY's threading of args into the inner constructor" — that's the unwrapped form). Closes §7.36 honest-scope item (a).
+
+2. **Sprint 418 — `post_stage_hook` integration point in `RpcChainExecutor.execute_chain`** (`chain-rpc-post-stage-hook-merge-ready-20260514`). New optional `post_stage_hook: Callable[[ndarray, int], ndarray]` kwarg fires after each stage's `StageOutcome` is recorded + before the activation is passed to the next stage. Per-call kwarg (NOT constructor) so per-request injector state (sprint-295's double-spend protection set) works correctly across concurrent requests on the same executor. `TopologyAwareChainExecutor.execute_chain` updated to `**kwargs` pass-through so a DP-aware decorator can stack above topology and thread its hook through verbatim. 5 hook-behavior tests + 1 pass-through test pin the contract. Scope was deliberately narrowed to plumbing-only (no DP injection yet) to avoid the misleading-trace failure where a "shadow injector" would populate the receipt field without actually applying noise.
+
+3. **Sprint 419 — `ActivationDPAwareChainExecutor` decorator** (`activation-dp-aware-chain-executor-decorator-merge-ready-20260514`). New module `prsm/compute/inference/activation_dp_aware_executor.py`. Sibling of sprint-414's `TopologyAwareChainExecutor`. Per request: builds `StageNoisePolicy.for_tier(request.privacy_tier, len(chain.stages))` → fresh `ActivationDPInjector` → wires it as sprint-418's `post_stage_hook` → reads `injector.trace()` post-call → returns result with `activation_noise_trace` populated. Tier NONE special-cased (skip hook, no trace — semantic: request didn't ask for DP, no claim made). Conflict-detection: a caller-supplied `post_stage_hook` raises ValueError (DP must be the sole activation mutator to keep the receipt claim sound). Closes §7.36 honest-scope item (b).
+
+**Trust seams.**
+
+1. **Default-wire opt-out path is operator-attested.** The `wrap_topology_aware=False` opt-out lets operators construct raw `RpcChainExecutor` instances — useful for unit-test fixtures that assert on bare receipt shape, but if production-deployed inadvertently would produce receipts without topology claims. Mitigation: the test names that use `wrap_topology_aware=False` explicitly comment "probe raw inner" so the intent is auditable; production operator docs should never instruct passing this flag.
+
+2. **Tier NONE legitimately skips DP — semantically correct, but verifier-side awareness needed.** A receipt with `privacy_tier=NONE` carries no `activation_noise_trace`. An auditor enforcing DP across the fleet should explicitly check `receipt.privacy_tier != NONE` before requiring the trace, or operators issuing NONE-tier requests will fail strict verification. Mitigation: sprint-292 verifier's `require_activation_dp_trace=True` is the policy gate, and the policy-binding lives at the operator/auditor layer rather than in the runtime.
+
+3. **DP composition with caller-supplied hooks is forbidden, not composed.** If a future operator wires another `post_stage_hook` consumer (e.g., per-stage activation logging) above the DP decorator, the call raises ValueError. This is the deliberate v1 design — silent composition could cause subtle mutation-ordering bugs invisible to unit tests. Future versions could enable composition via an explicit chain-of-hooks API; today's posture is strict.
+
+4. **The DP injector's `np.random.normal` uses the process-global RNG.** A determinism-required workflow (e.g., reproducible-receipt-for-bug-triage) would need an injectable RNG. Today's design accepts process-global because (a) actual cryptographic verifiability of DP doesn't require reproducibility (it requires correctness of the ε budget), and (b) per-stage noise applied to per-stage activation is non-reproducible by intent. Honest-scope: if reproducibility becomes load-bearing for any future flow, the injector takes a seed/RNG-factory.
+
+5. **`np.linalg.norm` clip semantics scale by L2 globally, not per-element.** The sensitivity bound `clip_norm = 1.0` (default) caps the L2 norm of the entire activation tensor. For very large tensors with many small elements, this is more permissive than a per-element clip. Operators tuning for stronger privacy can pass `clip_norm` in the decorator constructor. Documented in `prsm/compute/inference/activation_dp.py:StageNoisePolicy` docstring.
+
+**Honest scope deferred.**
+
+- **End-to-end DP signed-receipt verification test.** Sprint 415 shipped the topology e2e test. The DP side has comprehensive unit tests + verifier integration via `verify_receipt_privacy_claim`'s `require_activation_dp_trace=True` mode, but no monolithic "build decorator → run inference → sign → verify with strict DP flag" test like sprint 415's topology variant. Could be added; not load-bearing for audit-claim soundness because the unit tests already pin every component.
+
+- **Default-wire DP-side flip.** Sprint 417 flipped the topology default ON. The DP-side decorator (sprint 419) is NOT yet in the default factory chain — operators must explicitly wrap. Reason: DP injection is non-trivially state-changing (clips + adds noise, can affect downstream model output quality), so changing the default has model-quality implications that warrant operator opt-in. A future sprint could ship a per-tier default policy that makes the wire mandatory for tiers > NONE.
+
+- **Per-stage activation logging hook + composition API.** Trust seam #3 calls out today's strict no-composition posture. If telemetry needs surface real demand, a future composable-hook API can be designed.
+
+**Auditor reading path (§7.37 delta).**
+
+1. Start with sprint 419's decorator — `prsm/compute/inference/activation_dp_aware_executor.py` + `tests/unit/test_activation_dp_aware_chain_executor.py`.
+2. Then sprint 418's hook integration point — `prsm/compute/chain_rpc/client.py:execute_chain` (post_stage_hook kwarg + dispatch-loop integration) + `tests/unit/test_chain_rpc_client.py:TestPostStageHook`.
+3. Then sprint 417's factory default-wiring — `prsm/compute/chain_rpc/factories.py:make_rpc_chain_executor` (wrap_topology_aware kwarg) + `tests/unit/test_make_rpc_chain_executor_topology_default.py`.
+4. Cross-reference §7.36 for the topology-side end-to-end (this entry's prerequisite).
+5. Cross-reference sprint 292's `verify_receipt_privacy_claim` — same verifier that now consumes BOTH topology AND activation-DP traces under `require_*` policy flags.
+
+**Tags.** 3 merge-ready tags: `make-rpc-chain-executor-topology-default-merge-ready-20260514` (commit `2b29dcaf`), `chain-rpc-post-stage-hook-merge-ready-20260514` (commit `4b5e6375`), `activation-dp-aware-chain-executor-decorator-merge-ready-20260514` (commit `5f4ed6bd`). Headline tag: the sprint 419 DP decorator — closes the DP-side that §7.36 explicitly named as deferred.
+
+**Cumulative count.** §7 verifiable-claim pathway is now end-to-end complete on BOTH axes. Topology side: sprints 296 + 297 + 413 + 414 + 415 + 416 + 417 (7 sprints). DP side: sprints 295 + 297 + 413 + 418 + 419 (5 sprints, with 297 + 413 shared with the topology side). Cross-suite 217 green across the full §7 surface (`activation_dp_aware_chain_executor + topology_aware_chain_executor + topology_end_to_end_signed_receipt + parallax_executor_receipt_privacy_wiring + make_rpc_chain_executor_topology_default + chain_rpc_factories + receipt_privacy_capstone + chain_rpc_client + activation_dp + topology_rotation`).
 
 ---
 
