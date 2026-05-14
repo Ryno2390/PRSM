@@ -136,20 +136,53 @@ $ curl -X POST http://127.0.0.1:8000/content/upload \
  "error": "Content not found on any available provider"}
 ```
 
-The retrieve path goes through DHT/provider lookup; the local node's
-own upload doesn't register itself as a self-provider for retrieval.
+**Root cause (live-diagnosed sprint 425).** Two disjoint storage worlds
+sharing one endpoint:
+
+1. The BitTorrent publish path (`content_uploader.upload_text` →
+   `_publish_content`) seeds bytes into the libtorrent layer + returns a
+   **BT v1 infohash** (40 hex chars = 160-bit SHA-1).
+2. The retrieve path at `content_provider.request_content`:
+   - Checks `self._local_content[cid]` — this DOES succeed (verified via
+     `/content/provider-stats` showing `local_content_count` increments
+     on every upload), confirming `_register_with_provider` fires
+     correctly.
+   - Then calls `_fetch_local(cid)` which goes to
+     `prsm.storage.get_content_store().retrieve_local(ContentHash.from_hex(cid))`.
+   - `ContentHash.from_hex()` (storage/models.py:72) expects a
+     **2-char-algorithm-prefix + 64-char SHA-256 digest = 66 chars**.
+     The 40-char BT infohash is structurally wrong shape — raises
+     ValueError, caught + swallowed, returns None.
+
+So the local node knows it has the content (registered) but cannot
+retrieve the bytes because the retrieve probe queries the wrong storage
+backend. The bytes live in the libtorrent session, not in the native
+ContentStore.
 
 **Severity.** High for the single-node user-validation flow — Vision §4
-step 8 (the query path against uploaded content) can't be exercised
-without at least two nodes OR a self-provider shim. Doesn't block
-multi-node operation but breaks the canonical user-onboarding workflow
-on a single machine.
+step 8 (query against uploaded content) cannot be exercised on a single
+machine. Doesn't block multi-node operation but breaks the canonical
+user-onboarding workflow.
 
-**Status.** Surfaced 2026-05-14. Deferred — needs design call on
-whether the upload path should auto-register the local node as a
-provider for content it uploaded (likely yes), OR whether retrieve
-should consult the local content_store before going to DHT (also
-likely yes).
+**Fix candidates (deferred to its own sprint — needs design call):**
+
+- **Option A:** Extend `_fetch_local` to ALSO check the content_publisher
+  (BT layer) when the cid looks like an infohash (40-char hex) rather
+  than a ContentHash hex. Minimal churn; preserves both backends.
+- **Option B:** Unify the storage layer — the BT publish path also
+  writes into the native ContentStore under a derived ContentHash so
+  retrieve has one source of truth. More invasive but aligns the
+  native-storage migration arc.
+- **Option C:** Upload returns the ContentHash hex (not the BT
+  infohash) as the user-facing CID. Requires the BT layer to be
+  keyed by ContentHash. Most invasive.
+
+Option A is the natural minimum-viable fix; B or C is the eventual
+right answer. Decision belongs in a separate sprint with the
+native-storage-migration owner.
+
+**Status.** Surfaced 2026-05-14 sprint 425 live diagnosis. Deferred
+pending design call on storage-layer reconciliation.
 
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
