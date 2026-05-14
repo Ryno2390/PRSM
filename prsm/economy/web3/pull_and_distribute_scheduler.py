@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional, Union
 
 from prsm.economy.web3.provenance_registry import (
@@ -123,10 +124,27 @@ class PullAndDistributeScheduler:
         self._stop_event = asyncio.Event()
         self.success_count = 0
         self.failure_count = 0
+        # Sprint 400 — same pattern as sprint 399 on
+        # HeartbeatScheduler. Bumped only on success path
+        # so chain-RPC-failing tick days surface as stale,
+        # which is the silent-economic-failure signal
+        # operators need to catch.
+        self.last_tick_at: Optional[datetime] = None
 
     @property
     def interval_seconds(self) -> float:
         return self._interval
+
+    @property
+    def last_tick_age_seconds(self) -> Optional[float]:
+        """Seconds since last successful tick, or None if no
+        tick has ever succeeded. Mirrors sprint 399 on
+        HeartbeatScheduler."""
+        if self.last_tick_at is None:
+            return None
+        return (
+            datetime.now(timezone.utc) - self.last_tick_at
+        ).total_seconds()
 
     async def run_forever(self) -> None:
         """Run the pull-and-distribute loop until ``stop()`` is called."""
@@ -186,6 +204,9 @@ class PullAndDistributeScheduler:
             return
 
         self.success_count += 1
+        # Sprint 400 — bump on success only. All failure
+        # paths above return early without updating this.
+        self.last_tick_at = datetime.now(timezone.utc)
         logger.info("pull_and_distribute ok: %s", tx_hash)
 
         if self._on_success is not None:

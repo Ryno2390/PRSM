@@ -486,6 +486,88 @@ class TestHeartbeatSchedulerTickAge:
         assert body["status"] in ("healthy", "degraded")
 
 
+class TestCompensationSchedulerTickAge:
+    """Sprint 400 — same tick-age pattern as sprint 399's
+    HeartbeatScheduler now applied via the generic
+    _daemon_subsystem helper. The compensation_scheduler
+    subsystem entry surfaces tick_status when the daemon
+    exposes last_tick_age_seconds + interval_seconds.
+    Critical path: compensation_scheduler is the daemon
+    that calls pull_and_distribute on-chain — silent
+    failure = creator royalties NOT distributed."""
+
+    def _setup(self, age_seconds, interval=86400):
+        node = _node_full()
+        scheduler = MagicMock()
+        scheduler.interval_seconds = interval
+        scheduler.last_tick_age_seconds = age_seconds
+        node._compensation_scheduler = scheduler
+        fake_task = MagicMock()
+        fake_task.done.return_value = False
+        node._compensation_scheduler_task = fake_task
+        return node
+
+    def test_age_field_surfaced(self):
+        node = self._setup(age_seconds=42.0)
+        resp = _client(node).get("/health/detailed")
+        cs = resp.json()["subsystems"]["compensation_scheduler"]
+        assert cs["last_tick_age_seconds"] == 42.0
+
+    def test_recent_tick_healthy(self):
+        # 1000s old, 86400s interval = 0.01× → healthy
+        node = self._setup(age_seconds=1000, interval=86400)
+        resp = _client(node).get("/health/detailed")
+        cs = resp.json()["subsystems"]["compensation_scheduler"]
+        assert cs["tick_status"] == "healthy"
+
+    def test_two_to_five_x_interval_degraded(self):
+        # 200000s old, 86400s interval = 2.31× → degraded
+        node = self._setup(age_seconds=200000, interval=86400)
+        resp = _client(node).get("/health/detailed")
+        cs = resp.json()["subsystems"]["compensation_scheduler"]
+        assert cs["tick_status"] == "degraded"
+
+    def test_over_five_x_interval_stale(self):
+        # 500000s old, 86400s interval = 5.79× → stale
+        node = self._setup(age_seconds=500000, interval=86400)
+        resp = _client(node).get("/health/detailed")
+        cs = resp.json()["subsystems"]["compensation_scheduler"]
+        assert cs["tick_status"] == "stale"
+
+    def test_none_age_stale(self):
+        node = self._setup(age_seconds=None)
+        resp = _client(node).get("/health/detailed")
+        cs = resp.json()["subsystems"]["compensation_scheduler"]
+        assert cs["tick_status"] == "stale"
+        assert cs["last_tick_age_seconds"] is None
+
+    def test_legacy_daemon_without_tick_age_attr_skips_surface(self):
+        """Daemons that haven't adopted the sprint-399 pattern
+        (no last_tick_age_seconds attribute) should NOT
+        surface tick_status/last_tick_age_seconds — the
+        fields should simply be absent from the entry.
+        Backwards-compat for the 4 event watchers + reaper
+        that haven't been extended yet."""
+        node = _node_full()
+        # Plain MagicMock — explicitly remove the tick-age
+        # attr so the daemon claims NOT to support the pattern
+        scheduler = MagicMock(spec=[
+            "interval_seconds",
+        ])
+        scheduler.interval_seconds = 60
+        node._compensation_scheduler = scheduler
+        fake_task = MagicMock()
+        fake_task.done.return_value = False
+        node._compensation_scheduler_task = fake_task
+        resp = _client(node).get("/health/detailed")
+        cs = resp.json()["subsystems"]["compensation_scheduler"]
+        # task_running surfaces (pre-sprint-400 contract)
+        assert cs["task_running"] is True
+        # tick_status does NOT (sprint-400 opt-in)
+        assert "tick_status" not in cs
+        assert "last_tick_age_seconds" not in cs
+
+
 class TestRemainingDaemonSubsystems:
     """Same daemon-lifecycle pattern applied to the remaining 4
     long-running tasks: compensation_scheduler + 3 event watchers

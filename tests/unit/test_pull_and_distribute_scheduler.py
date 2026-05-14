@@ -193,6 +193,95 @@ class TestSingleTick:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Sprint 400 — last_tick_at tracking (mirrors sprint 399 on
+# HeartbeatScheduler). The silent-economic-failure mode here is
+# worse than HeartbeatScheduler: every failed tick = creator
+# royalties NOT distributed for that interval = direct revenue
+# loss to creators.
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestLastTickAtTracking:
+    def test_last_tick_at_initially_none(self):
+        client = _FakeDistributorClient()
+        scheduler = PullAndDistributeScheduler(client=client)
+        assert scheduler.last_tick_at is None
+
+    @pytest.mark.asyncio
+    async def test_successful_tick_bumps_last_tick_at(self):
+        from datetime import datetime, timezone
+        before = datetime.now(timezone.utc)
+        client = _FakeDistributorClient()
+        scheduler = PullAndDistributeScheduler(client=client)
+        await scheduler.tick()
+        after = datetime.now(timezone.utc)
+        assert scheduler.last_tick_at is not None
+        assert before <= scheduler.last_tick_at <= after
+
+    @pytest.mark.asyncio
+    async def test_broadcast_failure_does_not_bump(self):
+        client = _FakeDistributorClient(
+            outcomes=[BroadcastFailedError],
+        )
+        scheduler = PullAndDistributeScheduler(client=client)
+        await scheduler.tick()
+        assert scheduler.last_tick_at is None
+
+    @pytest.mark.asyncio
+    async def test_pending_error_does_not_bump(self):
+        client = _FakeDistributorClient(
+            outcomes=[OnChainPendingError("pending", tx_hash="0xdead")],
+        )
+        scheduler = PullAndDistributeScheduler(client=client)
+        await scheduler.tick()
+        assert scheduler.last_tick_at is None
+
+    @pytest.mark.asyncio
+    async def test_reverted_error_does_not_bump(self):
+        client = _FakeDistributorClient(
+            outcomes=[OnChainRevertedError],
+        )
+        scheduler = PullAndDistributeScheduler(client=client)
+        await scheduler.tick()
+        assert scheduler.last_tick_at is None
+
+    @pytest.mark.asyncio
+    async def test_unexpected_exception_does_not_bump(self):
+        client = _FakeDistributorClient(
+            outcomes=[RuntimeError("weird")],
+        )
+        scheduler = PullAndDistributeScheduler(client=client)
+        await scheduler.tick()
+        assert scheduler.last_tick_at is None
+
+    @pytest.mark.asyncio
+    async def test_multiple_successes_advance_last_tick_at(self):
+        client = _FakeDistributorClient()
+        scheduler = PullAndDistributeScheduler(client=client)
+        await scheduler.tick()
+        first = scheduler.last_tick_at
+        import asyncio as _asyncio
+        await _asyncio.sleep(0.001)
+        await scheduler.tick()
+        second = scheduler.last_tick_at
+        assert second > first
+
+    def test_last_tick_age_seconds_none_when_never_ticked(self):
+        client = _FakeDistributorClient()
+        scheduler = PullAndDistributeScheduler(client=client)
+        assert scheduler.last_tick_age_seconds is None
+
+    @pytest.mark.asyncio
+    async def test_last_tick_age_seconds_after_tick(self):
+        client = _FakeDistributorClient()
+        scheduler = PullAndDistributeScheduler(client=client)
+        await scheduler.tick()
+        age = scheduler.last_tick_age_seconds
+        assert age is not None
+        assert 0 <= age < 1.0
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Run loop (timing-based tests use direct multi-tick — same property
 # pattern as HeartbeatScheduler, avoids pytest-asyncio fixture
 # overhead flakiness)

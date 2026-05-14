@@ -11457,6 +11457,33 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     logger.debug(
                         "%s task probe raised: %s", name, exc,
                     )
+            # Sprint 400 — daemons that adopt the sprint-399
+            # tick-age tracking pattern (last_tick_at +
+            # last_tick_age_seconds + interval_seconds)
+            # automatically surface tick_status in
+            # /health/detailed. Thresholds match sprint 392:
+            # age < 2× → healthy, 2-5× → degraded, ≥5× or
+            # None → stale. Pure-additive: aggregate
+            # top-level status NOT modified.
+            interval = getattr(daemon, "interval_seconds", None)
+            age = getattr(daemon, "last_tick_age_seconds", None)
+            if isinstance(interval, (int, float)) and interval > 0 \
+                    and hasattr(daemon, "last_tick_age_seconds"):
+                try:
+                    entry["last_tick_age_seconds"] = age
+                    if age is None:
+                        tick_status = "stale"
+                    elif age < 2 * interval:
+                        tick_status = "healthy"
+                    elif age < 5 * interval:
+                        tick_status = "degraded"
+                    else:
+                        tick_status = "stale"
+                    entry["tick_status"] = tick_status
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "%s tick-age probe raised: %s", name, exc,
+                    )
             subsystems[name] = entry
 
         _daemon_subsystem(
