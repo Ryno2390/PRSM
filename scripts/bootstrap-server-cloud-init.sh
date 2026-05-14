@@ -33,6 +33,11 @@ set -euxo pipefail
 # ────── CUSTOMIZE ──────
 PRSM_HOSTNAME="CHANGEME.prsm-network.com"
 ADMIN_EMAIL="foundation-ops@prsm-network.com"
+# Sprint 398: surface the deploy region so /health reports
+# accurately. Examples: us-east-1, eu-central-1, ap-
+# northeast-1. Leave as REGION_UNSET to fail-loud rather
+# than silently fall back to the BootstrapConfig default.
+PRSM_REGION="REGION_UNSET"
 # ───────────────────────
 
 PRSM_REPO="https://github.com/prsm-network/PRSM.git"
@@ -66,6 +71,12 @@ ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw allow 8765/tcp
+# Sprint 398: port 8000 carries the bootstrap server's
+# HTTP API + /metrics + /health/detailed surfaces. Without
+# this rule the sprint-388-396 observability work is
+# unreachable from the public internet (dogfood-discovered
+# 2026-05-14 on the freshly-deployed bootstrap-eu droplet).
+ufw allow 8000/tcp
 ufw --force enable
 
 # ── 3. PRSM install ─────────────────────────────────────
@@ -137,6 +148,7 @@ PRSM_MAX_PEERS=500
 PRSM_PEER_TIMEOUT=300
 PRSM_HEARTBEAT_INTERVAL=30
 PRSM_PEER_DB_PATH=$PEER_DB_DIR/peers.db
+PRSM_REGION=$PRSM_REGION
 EOF
 chmod 640 /etc/prsm/bootstrap-server.env
 chown root:ubuntu /etc/prsm/bootstrap-server.env

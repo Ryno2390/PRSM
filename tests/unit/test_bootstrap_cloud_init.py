@@ -36,13 +36,25 @@ def _read_template() -> str:
     return TEMPLATE.read_text()
 
 
-def _render(hostname: str, email: str | None = None) -> str:
-    """Test helper. Passes email through only when caller
-    sets it; otherwise lets the script's own default fire
-    (so we can test the default-email behavior)."""
+def _render(
+    hostname: str,
+    email: str | None = None,
+    region: str | None = None,
+) -> str:
+    """Test helper. Passes email + region through only when
+    caller sets them; otherwise lets the script's own
+    defaults fire."""
     args = ["bash", str(RENDER), hostname]
     if email is not None:
         args.append(email)
+        if region is not None:
+            args.append(region)
+    elif region is not None:
+        # Region is positional arg 3 — if it's provided
+        # without an explicit email, supply the default
+        # email explicitly to preserve arg order.
+        args.append("foundation-ops@prsm-network.com")
+        args.append(region)
     result = subprocess.run(
         args,
         capture_output=True, text=True, timeout=10,
@@ -91,12 +103,15 @@ def test_template_waits_for_apt_lock():
 # ── Firewall ─────────────────────────────────────────
 
 
-def test_template_opens_all_four_canonical_ports():
+def test_template_opens_all_five_canonical_ports():
     """ufw must allow 22 (SSH), 80 (Let's Encrypt HTTP-01),
-    443 (TLS), 8765 (PRSM bootstrap WSS). Missing any of
-    these = silent failure mode."""
+    443 (TLS), 8765 (PRSM bootstrap WSS), and 8000 (PRSM
+    bootstrap HTTP API / observability — added sprint 398
+    after dogfood found `/health/detailed` unreachable from
+    public internet on the live bootstrap-eu droplet).
+    Missing any of these = silent failure mode."""
     text = _read_template()
-    for port in ["22", "80", "443", "8765"]:
+    for port in ["22", "80", "443", "8765", "8000"]:
         assert f"ufw allow {port}/tcp" in text, (
             f"cloud-init missing ufw rule for port {port}"
         )
@@ -120,6 +135,43 @@ def test_env_file_includes_prsm_peer_db_path():
     assert "PRSM_PEER_DB_PATH=" in text
     # Canonical value points at /var/lib/prsm-bootstrap/
     assert "/var/lib/prsm-bootstrap" in text
+
+
+def test_env_file_includes_prsm_region():
+    """Sprint 398 — cloud-init's env file must propagate
+    PRSM_REGION. Pre-fix, /health on bootstrap-eu reported
+    region=us-east-1 (the BootstrapConfig default) despite
+    actually running in eu-central-1. Operators looking at
+    cross-region peer-distribution rely on this field
+    being accurate."""
+    text = _read_template()
+    assert "PRSM_REGION=" in text
+
+
+@pytest.mark.requires_halmos
+def test_render_propagates_region():
+    """Render helper accepts region as positional arg 3 and
+    bakes it into the rendered cloud-init."""
+    out = _render(
+        "bootstrap-eu.prsm-network.com",
+        region="eu-central-1",
+    )
+    assert 'PRSM_REGION="eu-central-1"' in out
+
+
+@pytest.mark.requires_halmos
+def test_render_default_region_is_safe_placeholder():
+    """When region isn't supplied, the rendered output
+    should NOT silently fall back to us-east-1 (the
+    BootstrapConfig default — the very thing this fix
+    targets). Either fail loudly or use an explicit
+    'unknown' placeholder so operators notice."""
+    out = _render("bootstrap-eu.prsm-network.com")
+    # PRSM_REGION must be present in the rendered output
+    assert "PRSM_REGION=" in out
+    # And it must NOT default to us-east-1 (since that's
+    # the bug we're fixing)
+    assert 'PRSM_REGION="us-east-1"' not in out
 
 
 def test_template_does_not_use_app_data():
