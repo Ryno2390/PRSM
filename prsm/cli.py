@@ -6467,5 +6467,102 @@ def bootstrap_server_status(host, port, timeout, detailed, output_format):
     sys.exit(0 if probe.status == bsp_module.ProbeStatus.OK else 1)
 
 
+@node.command("fiat-readiness")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def node_fiat_readiness(output_format):
+    """Probe Phase 5 fiat-surface activation readiness.
+
+    Sprint 422 — wraps sprint-285's
+    `check_fiat_surface_health()` for operator CLI use.
+    Run this BEFORE attempting Phase 5 activation (see
+    `docs/operations/phase-5-fiat-surface-activation-
+    runbook.md`) to verify your env is ready.
+
+    Exit code: 0 = OK or WARN-only findings; non-zero =
+    at least one ERROR finding (activation will fail).
+
+    Default `text` format renders a color-coded findings
+    table with remediation hints. `json` format for ops
+    automation (parseable on both success + failure).
+    """
+    import json as _json
+    import os
+
+    from prsm.economy.web3.fiat_surface_health import (
+        check_fiat_surface_health,
+    )
+
+    findings = check_fiat_surface_health(os.environ)
+
+    has_error = any(
+        getattr(f.severity, "value", str(f.severity)).lower()
+        == "error"
+        for f in findings
+    )
+    has_warn = any(
+        getattr(f.severity, "value", str(f.severity)).lower()
+        == "warn"
+        for f in findings
+    )
+    if has_error:
+        overall = "error"
+    elif has_warn:
+        overall = "warn"
+    else:
+        overall = "ok"
+
+    if output_format == "json":
+        payload = {
+            "overall_status": overall,
+            "findings": [
+                {
+                    "severity": getattr(
+                        f.severity, "value", str(f.severity),
+                    ),
+                    "cause": f.cause,
+                    "remediation": f.remediation,
+                }
+                for f in findings
+            ],
+        }
+        # Plain stdout — Rich's console.print injects ANSI
+        # control chars that break JSON parsers downstream.
+        click.echo(_json.dumps(payload, indent=2))
+        sys.exit(0 if not has_error else 1)
+
+    # Text rendering
+    if overall == "ok":
+        console.print(
+            "[green]✓ Phase 5 fiat surface ready — OK[/green] "
+            "[dim](no findings)[/dim]"
+        )
+        sys.exit(0)
+
+    marker_map = {
+        "error": "[red]✗ ERROR[/red]",
+        "warn": "[yellow]⚠ WARN[/yellow]",
+    }
+    overall_marker = marker_map.get(
+        overall, "[white]?[/white]"
+    )
+    console.print(
+        f"[bold]Phase 5 fiat-readiness[/bold] — "
+        f"{overall_marker}"
+    )
+    console.print()
+    for f in findings:
+        sev = getattr(f.severity, "value", str(f.severity)).lower()
+        marker = marker_map.get(sev, "[white]?[/white]")
+        console.print(f"{marker} [bold]{f.cause}[/bold]")
+        console.print(f"  [dim]{f.remediation}[/dim]")
+        console.print()
+
+    sys.exit(0 if not has_error else 1)
+
+
 if __name__ == "__main__":
     main()
