@@ -222,7 +222,15 @@ PRSM_EXTERNAL_IP=<PUBLIC_IP>
 PRSM_MAX_PEERS=500
 PRSM_PEER_TIMEOUT=300
 PRSM_HEARTBEAT_INTERVAL=30
+# Sprint 383: peer-DB path override — without this the server
+# tries the Docker-conventional /app/data/ default and emits
+# spurious "Read-only file system: '/app'" errors on every
+# peer state change.
+PRSM_PEER_DB_PATH=/var/lib/prsm-bootstrap/peers.db
 EOF
+# Create the peer-DB directory (writable by the service user)
+sudo mkdir -p /var/lib/prsm-bootstrap
+sudo chown ubuntu:ubuntu /var/lib/prsm-bootstrap
 sudo chmod 640 /etc/prsm/bootstrap-server.env
 sudo chown root:ubuntu /etc/prsm/bootstrap-server.env
 ```
@@ -266,7 +274,7 @@ StandardError=append:/var/log/prsm-bootstrap.log
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log
+ReadWritePaths=/var/log /var/lib/prsm-bootstrap
 PrivateTmp=true
 
 [Install]
