@@ -6326,5 +6326,107 @@ def join_testnet(force: bool, no_print_key: bool):
     console.print()
 
 
+@main.group("bootstrap-server")
+def bootstrap_server():
+    """Manage / probe a bootstrap server you are running.
+
+    Sprint 390 — operator-trifecta third corner.
+    Complements `prsm node bootstrap` (this node's
+    registration state) and `prsm node bootstrap-test`
+    (probes canonical fleet from your perspective) with
+    a probe of your OWN bootstrap droplet's HTTP control
+    surface.
+    """
+    pass
+
+
+@bootstrap_server.command("status")
+@click.option(
+    "--host", default="127.0.0.1", show_default=True,
+    help="Bootstrap server host (default localhost; pass a "
+         "hostname / IP for remote probes).",
+)
+@click.option(
+    "--port", default=8000, type=int, show_default=True,
+    help="Bootstrap server API port (BootstrapConfig.api_port).",
+)
+@click.option(
+    "--timeout", default=5.0, type=float, show_default=True,
+    help="HTTP timeout in seconds.",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def bootstrap_server_status(host, port, timeout, output_format):
+    """One-screen ops summary of a running bootstrap server.
+
+    Hits /health and /metrics on the bootstrap server's
+    HTTP API and renders a color-coded summary. Defaults
+    to localhost:8000 — SSH to your droplet and run this.
+    Pass --host for remote probes.
+    """
+    import asyncio
+    import json as _json
+
+    # Late-import so click pulls in nothing at import time
+    from prsm.cli_helpers import bootstrap_server_probe as bsp_module
+
+    probe = asyncio.run(
+        bsp_module.fetch_server_status(
+            host=host, port=port, timeout_seconds=timeout,
+        )
+    )
+
+    if output_format == "json":
+        console.print(_json.dumps(probe.to_dict(), indent=2))
+        sys.exit(0 if probe.status == bsp_module.ProbeStatus.OK else 1)
+
+    # ── Text rendering ────────────────────────────────────
+    status_markers = {
+        bsp_module.ProbeStatus.OK: "[green]✓ healthy[/green]",
+        bsp_module.ProbeStatus.PARTIAL: "[yellow]⚠ partial — metrics unavailable[/yellow]",
+        bsp_module.ProbeStatus.CONNECT_FAIL: "[red]✗ connect refused[/red]",
+        bsp_module.ProbeStatus.TIMEOUT: "[red]✗ timeout[/red]",
+        bsp_module.ProbeStatus.HTTP_ERROR: "[red]✗ http error[/red]",
+        bsp_module.ProbeStatus.UNKNOWN: "[red]✗ unknown[/red]",
+    }
+    marker = status_markers.get(probe.status, "[red]?[/red]")
+    console.print(
+        f"[bold]PRSM Bootstrap Server Status[/bold] — {marker}"
+    )
+    console.print(
+        f"  target: [cyan]{probe.host}:{probe.port}[/cyan]"
+    )
+    if probe.error:
+        console.print(f"  error:  [red]{probe.error}[/red]")
+
+    if probe.health:
+        console.print()
+        console.print("[bold]Health[/bold]")
+        for k, v in probe.health.items():
+            console.print(f"  {k}: {v}")
+
+    if probe.metrics:
+        console.print()
+        console.print("[bold]Metrics[/bold]")
+        # Render flat scalars first, label-dicts last
+        flat = {k: v for k, v in probe.metrics.items()
+                if not isinstance(v, dict)}
+        labeled = {k: v for k, v in probe.metrics.items()
+                   if isinstance(v, dict)}
+        for k, v in flat.items():
+            console.print(f"  {k}: {v}")
+        for k, label_dict in labeled.items():
+            if not label_dict:
+                continue
+            console.print(f"  {k}:")
+            for label, value in label_dict.items():
+                console.print(f"    {label}: {value}")
+
+    sys.exit(0 if probe.status == bsp_module.ProbeStatus.OK else 1)
+
+
 if __name__ == "__main__":
     main()
