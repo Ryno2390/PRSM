@@ -11048,6 +11048,17 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 def _encode_status(sub: Dict[str, Any]) -> int:
                     status = sub.get("status")
                     available = sub.get("available")
+                    # Sprint 402 — incorporate tick_status
+                    # from sprint 399-401 daemon extensions.
+                    # tick_status=stale wins over a basic
+                    # "ok" because a daemon whose task is
+                    # running but ticks are failing is
+                    # observably unhealthy.
+                    tick_status = sub.get("tick_status")
+                    if tick_status == "stale":
+                        return 2
+                    if tick_status == "degraded":
+                        return 1
                     if status == "ok" and available:
                         return 0
                     # Explicit operator-opt-out signals only.
@@ -11076,6 +11087,38 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                         f'prsm_node_subsystem_status'
                         f'{{subsystem="{label}"}} {value}'
                     )
+
+                # Sprint 402 — dedicated tick-age gauge for
+                # daemons that adopted the sprint-399-401
+                # pattern. Mirrors sprint-394's bootstrap-
+                # side prsm_bootstrap_subsystem_heartbeat_
+                # age_seconds. PromQL alerts on heartbeat
+                # age directly:
+                #   prsm_node_subsystem_tick_age_seconds
+                #     {subsystem="heartbeat_scheduler"} > 1800
+                tick_age_lines = []
+                for sub_name, sub_data in subs.items():
+                    if not isinstance(sub_data, dict):
+                        continue
+                    age = sub_data.get("last_tick_age_seconds")
+                    if not isinstance(age, (int, float)):
+                        continue
+                    tick_age_lines.append(
+                        f'prsm_node_subsystem_tick_age_seconds'
+                        f'{{subsystem="{_escape_label(sub_name)}"}}'
+                        f' {age}'
+                    )
+                if tick_age_lines:
+                    lines.append(
+                        "# HELP prsm_node_subsystem_tick_age_seconds "
+                        "Seconds since last successful tick per "
+                        "daemon subsystem"
+                    )
+                    lines.append(
+                        "# TYPE prsm_node_subsystem_tick_age_seconds "
+                        "gauge"
+                    )
+                    lines.extend(tick_age_lines)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "metrics subsystem block failed: %s", exc,

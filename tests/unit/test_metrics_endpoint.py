@@ -285,6 +285,120 @@ class TestMetricsFailSoft:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Sprint 402 — Prometheus labeled gauges for sprint-399-401
+# tick-age tracking on operator-node daemons
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestSubsystemTickAgeGauges:
+    """Sprint 402 — sprint-395's subsystem_status gauge now
+    incorporates tick_status (from sprint 399-401 daemon
+    extensions). A daemon whose task_running=True but
+    tick_status=stale is observably bad — every tick is
+    failing — but pre-sprint-402 it encoded as 0 (healthy)
+    because the entry's top-level status was 'ok'.
+
+    Sprint 402 also adds a dedicated tick-age gauge so
+    PromQL can target heartbeat age directly. Mirrors
+    sprint-394's bootstrap-side
+    prsm_bootstrap_subsystem_heartbeat_age_seconds."""
+
+    def _make_heartbeat_scheduler_node(
+        self, *, age_seconds, interval=900,
+    ):
+        node = _node()
+        scheduler = MagicMock()
+        scheduler.interval_seconds = interval
+        scheduler.last_tick_age_seconds = age_seconds
+        node._heartbeat_scheduler = scheduler
+        fake_task = MagicMock()
+        fake_task.done.return_value = False
+        node._heartbeat_scheduler_task = fake_task
+        return node
+
+    def test_stale_tick_status_encodes_subsystem_as_2(self):
+        # 5000s old, 900s interval = 5.56× → stale
+        node = self._make_heartbeat_scheduler_node(
+            age_seconds=5000, interval=900,
+        )
+        body = _client(node).get("/metrics").text
+        # Subsystem encoded as 2 (unhealthy) because tick is
+        # stale, even though entry status is 'ok'
+        assert (
+            'prsm_node_subsystem_status'
+            '{subsystem="heartbeat_scheduler"} 2'
+        ) in body
+
+    def test_degraded_tick_status_encodes_subsystem_as_1(self):
+        # 2000s old, 900s interval = 2.22× → degraded
+        node = self._make_heartbeat_scheduler_node(
+            age_seconds=2000, interval=900,
+        )
+        body = _client(node).get("/metrics").text
+        assert (
+            'prsm_node_subsystem_status'
+            '{subsystem="heartbeat_scheduler"} 1'
+        ) in body
+
+    def test_healthy_tick_status_keeps_subsystem_at_0(self):
+        # 100s old, 900s interval = 0.11× → healthy
+        node = self._make_heartbeat_scheduler_node(
+            age_seconds=100, interval=900,
+        )
+        body = _client(node).get("/metrics").text
+        assert (
+            'prsm_node_subsystem_status'
+            '{subsystem="heartbeat_scheduler"} 0'
+        ) in body
+
+    def test_tick_age_gauge_emitted(self):
+        node = self._make_heartbeat_scheduler_node(
+            age_seconds=42.5, interval=900,
+        )
+        body = _client(node).get("/metrics").text
+        # Dedicated age gauge surfaces the raw number
+        assert (
+            'prsm_node_subsystem_tick_age_seconds'
+            '{subsystem="heartbeat_scheduler"} 42.5'
+        ) in body
+
+    def test_tick_age_help_and_type_lines_present(self):
+        node = self._make_heartbeat_scheduler_node(
+            age_seconds=42.5,
+        )
+        body = _client(node).get("/metrics").text
+        assert (
+            "# HELP prsm_node_subsystem_tick_age_seconds"
+            in body
+        )
+        assert (
+            "# TYPE prsm_node_subsystem_tick_age_seconds gauge"
+            in body
+        )
+
+    def test_no_tick_age_gauge_when_daemon_lacks_tick_age(self):
+        """Daemons that haven't adopted the tick-age pattern
+        do NOT get a tick_age_seconds gauge entry. Pinned to
+        avoid noise from legacy daemons (e.g. event-watcher
+        observability rings)."""
+        # ftns_ledger doesn't have tick-age semantics
+        node = _node()
+        body = _client(node).get("/metrics").text
+        # ftns_ledger appears in subsystem_status gauge
+        # (sprint 395) but should NOT appear in
+        # tick_age_seconds gauge (sprint 402 opt-in)
+        assert (
+            'prsm_node_subsystem_status'
+            '{subsystem="ftns_ledger"}' in body
+        )
+        # Not in the tick-age gauge
+        assert (
+            'prsm_node_subsystem_tick_age_seconds'
+            '{subsystem="ftns_ledger"}' not in body
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Sprint 395 — Per-subsystem Prometheus labeled gauges
 # ──────────────────────────────────────────────────────────────────────
 
