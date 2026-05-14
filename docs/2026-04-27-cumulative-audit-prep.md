@@ -3521,6 +3521,56 @@ When future events fire (CDP commission, Aerodrome pool seed, fleet kill-switch 
 
 ---
 
+### 7.38 Phase 5 fiat-surface activation readiness — operator surfaces (sprints 421–422, 2026-05-14)
+
+**Scope note.** The 11-sprint Phase 5 commission-ready engineering arc (sprints 276–286) shipped the substance: WaaS adapter + CDP paymaster + onramp/offramp composers + Aerodrome quoter + KYC adapter + KYC quote-gating + audit ring + webhook signature + replay protection + tier-limit enforcement + startup health-check. Activation gates on external-party events outside engineering's control (Coinbase CDP credentials provisioning, KYC vendor agreement signing, Aerodrome pool seeding, Foundation funding decision). §7.38 covers the OPERATOR-FACING activation layer that closes the gap between "commission-ready code" and "operator can actually run the commission when gates clear" — a runbook + a CLI probe.
+
+**Why this is in the cumulative bundle.** Sprint 286 shipped the engineering. Sprint 421 ships the operator-facing step-by-step. Sprint 422 ships the pre-commission probe. An auditor evaluating PRSM's commission-readiness needs to confirm not just that the code works but that operators CAN ACTIVATE it without ambiguity when the external gates clear. The runbook + CLI close that loop.
+
+**Headline guarantees.**
+
+1. **Sprint 421 — Phase 5 fiat-surface activation runbook** (`phase-5-fiat-surface-activation-runbook-merge-ready-20260514`). New `docs/operations/phase-5-fiat-surface-activation-runbook.md` (~330 lines / 6 steps + rollback + audit-trail companion). Pre-flight gate enumeration (Foundation funding, Coinbase CDP, KYC vendor, Aerodrome pool, Base RPC). Canonical env-var set grouped by sprint origin covering all 14 active vars across Coinbase WaaS / Paymaster / Aerodrome / KYC (Persona/Onfido/Plaid) / persistence / jurisdiction, with explicit warnings against the 2 test-only bypass vars (`PRSM_FIAT_HEALTH_CHECK_BYPASS`, `PRSM_KYC_WEBHOOK_VERIFY_DISABLED`). Step 3 finding table cross-references sprint-285's `check_fiat_surface_health()` ERROR causes to operator remediations. Step 5 smoke-test enumeration covers all four canonical surfaces (Aerodrome quote / WaaS provision / KYC handshake / Onramp full path). Non-destructive rollback (empty `KYC_VENDOR` returns surface to un-commissioned state without destroying audit data) preserves the 5-7yr regulator-retention surfaces (compliance ring + KYC store + webhook log) under AUSTRAC/FinCEN/IRS expectations.
+
+2. **Sprint 421 — source-truth-parity pins for the runbook** (same tag). `tests/unit/test_phase_5_activation_runbook.py` — 11 tests pin the runbook to canonical Phase-5 source-of-truth. Notable: `test_runbook_matches_vendor_secret_var_dispatch` imports `_vendor_secret_var()` from `fiat_surface_health.py` and verifies the runbook names every vendor's webhook-secret env var — so adding a new KYC vendor in source triggers a runbook update. Avoids doc-rot of the canonical kind.
+
+3. **Sprint 422 — `prsm node fiat-readiness` CLI probe** (`cli-node-fiat-readiness-merge-ready-20260514`). New CLI subcommand wrapping sprint-285's `check_fiat_surface_health()` for operator pre-commission probing. Matches the operator-trifecta CLI pattern (`prsm node bootstrap-test` sprint 385). Renders findings color-coded with remediation hints inline; `--format json` for ops automation (uses `click.echo` not Rich's `console.print` so JSON output is ANSI-clean and parseable downstream). Exit code 0 on OK or WARN-only, non-zero on at least one ERROR. Direct import of `check_fiat_surface_health()` — no re-implementation, so new env-var additions in source auto-surface through the CLI.
+
+**Trust seams.**
+
+1. **Operator-attested activation order.** The runbook prescribes Step 1 (env vars) → Step 2 (persistence dirs) → Step 3 (restart) → Step 4 (programmatic verify) → Step 5 (smoke test). Operators COULD skip steps (e.g., restart without verifying first, or attempt smoke tests before restart). Sprint-285's `check_fiat_surface_health()` defends most of these via startup gating, but the runbook's ordering is procedurally enforced via documentation, not technically enforced. **Auditor: this is the standard operator-trust contract for activation runbooks — confirm the operator is named + accountable in the Foundation's commissioning playbook.**
+
+2. **CLI runs against caller-process env, not service env.** `prsm node fiat-readiness` reads from `os.environ` of the invoking process. If the operator runs it from a shell with stale env vars while the systemd service runs with current ones (or vice versa), the CLI verdict can disagree with the actual service health. Mitigation: the runbook's Step 4 documents the canonical Python invocation that operators should run on the SAME box / same env where the service runs. Trust seam is procedural.
+
+3. **`KYC_VENDOR=` empty (rollback path) does NOT delete audit trail.** Step "Rollback" sets `KYC_VENDOR=` to revert to un-commissioned state, but compliance-ring + KYC-store directories are NOT touched. This is deliberate — regulators expect retained audit trail across operator state transitions — but an operator expecting clean rollback could be surprised. **Auditor: confirm the runbook explicitly documents this non-destruction semantic + that operator playbooks treat compliance dirs as append-only across rollback events.**
+
+4. **Vendor-specific webhook secret naming is dispatched in source, mirrored in runbook.** Sprint 283's `_vendor_secret_var()` returns `"PERSONA_WEBHOOK_SECRET"` / `"ONFIDO_WEBHOOK_TOKEN"` / `"PLAID_WEBHOOK_SECRET"` for the three supported vendors. Adding a fourth vendor without updating `_vendor_secret_var()` would silently miss the webhook-secret-missing finding (the dispatch falls through to empty string + the check skips). Sprint 421's `test_runbook_matches_vendor_secret_var_dispatch` pins the runbook → dispatch parity, but a future vendor addition that ONLY updates the dispatch without adding a runbook entry would only fire that one test. **Auditor: confirm any future vendor addition triggers BOTH source + runbook + test updates in the same PR.**
+
+5. **No live-fleet smoke surface for Phase 5 yet.** Sprint 407's `scripts/smoke-test-bootstrap-fleet.sh` probes bootstrap-server endpoints; sprint 422's CLI probes operator-node env vars only. There's no analogous live-Phase-5-endpoint probe (`/fiat/quote/onramp` etc.) because no live PRSM node is currently running with Phase 5 configured. Sprint 421's runbook Step 5 documents the curl commands; running them is an operator's manual step at commission time.
+
+**Honest scope deferred.**
+
+- **Aerodrome dry-run simulator.** A mock Aerodrome state that lets operators verify their full onramp/offramp composer paths against simulated pool reserves WITHOUT real onchain spend would catch composer integration bugs before production commission. Today's posture: operators trust the unit tests (399 Phase-5 cross-suite green pre-arc) + the staged smoke tests at activation time. A simulator is honest-scope.
+
+- **Additional KYC vendor adapters.** Today's `_vendor_secret_var()` dispatches Persona / Onfido / Plaid. Other relevant vendors (Veriff, Sumsub, Trulioo, Jumio) could be added if Foundation's KYC vendor decision shifts pre-commission. Each requires a sibling adapter implementing the sprint-282 contract.
+
+- **Multi-jurisdiction tier policies.** `PRSM_FIAT_JURISDICTION=US` defaults to FinCEN MSB tier limits ($1K basic / $10K enhanced). Other jurisdictions (AU AUSTRAC, EU AMLD5/6, JP FSA) have different tier structures. Today's surface accepts arbitrary jurisdiction codes but only US has hardcoded limits; other jurisdictions fall through to defaults. Operator-honest-scope when Phase 5 commissioning expands geographically.
+
+- **End-to-end signed-receipt for Phase 5 fiat events.** Fiat events produce compliance-ring entries + KYC-handshake records + webhook event log — but these aren't cryptographically signed receipts in the §7-receipt sense. A future sprint could extend the §7 verifiable-claim infrastructure (sprints 413–419) to Phase 5 events. Not load-bearing for current AUSTRAC/FinCEN/IRS compliance expectations.
+
+**Auditor reading path (§7.38 delta).**
+
+1. Start with the activation runbook — `docs/operations/phase-5-fiat-surface-activation-runbook.md`. Confirms operator workflow + pre-flight gates + rollback semantics + audit-trail companion.
+2. Then the source-truth-parity pins — `tests/unit/test_phase_5_activation_runbook.py`. Confirms the runbook can't silently drift from canonical env-var set.
+3. Then the CLI probe — `prsm/cli.py:node_fiat_readiness` + `tests/unit/test_cli_node_fiat_readiness.py`. Confirms operator pre-commission verification surface.
+4. Cross-reference §7.23 / §7.24 / §7.25 / §7.26 for the engineering substance + composer-only invariant the runbook activates against.
+5. Cross-reference `prsm/economy/web3/fiat_surface_health.py` — the sprint-285 health check is the canonical truth-source for env-var requirements; the runbook + CLI both consume it.
+
+**Tags.** 2 merge-ready tags: `phase-5-fiat-surface-activation-runbook-merge-ready-20260514` (commit `5c6ee2a8`), `cli-node-fiat-readiness-merge-ready-20260514` (commit `b6e9bea5`). Headline tag: the runbook — it's the load-bearing operator artifact; the CLI is a convenience surface.
+
+**Cumulative count.** Phase 5 fiat-surface arc: engineering substance complete (sprints 276–286, 399 cross-suite green pre-arc). Audit-coverage entries: §7.23 (read-side composer) + §7.24 (write-side composer) + §7.25 (integration tests) + §7.26 (participant-guide refresh) + §7.33 (Aerodrome pool-seed packet) + §7.38 (operator activation surfaces) = 6 audit-prep entries spanning the Phase 5 lifecycle from MCP-composer-layer through to operator-activation-layer. All engineering gates clear; remaining gates are external-party-driven (Coinbase CDP, KYC vendor, Aerodrome pool seed, Foundation funding ratification). The §7.38 surfaces (runbook + CLI) are what makes the eventual commission cleanly runnable.
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
