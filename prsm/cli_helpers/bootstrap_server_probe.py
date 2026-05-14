@@ -37,6 +37,8 @@ class BootstrapServerProbe:
     health: Optional[dict] = None
     metrics: Optional[dict] = None
     error: Optional[str] = None
+    # Sprint 393 — populated when include_subsystems=True
+    health_detailed: Optional[dict] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +48,7 @@ class BootstrapServerProbe:
             "health": self.health,
             "metrics": self.metrics,
             "error": self.error,
+            "health_detailed": self.health_detailed,
         }
 
 
@@ -55,6 +58,7 @@ async def fetch_server_status(
     *,
     timeout_seconds: float = 5.0,
     scheme: str = "http",
+    include_subsystems: bool = False,
 ) -> BootstrapServerProbe:
     """Probe a bootstrap server's HTTP control surface.
 
@@ -69,6 +73,7 @@ async def fetch_server_status(
     timeout = httpx.Timeout(timeout_seconds)
     health_payload: Optional[dict] = None
     metrics_payload: Optional[dict] = None
+    health_detailed_payload: Optional[dict] = None
     error: Optional[str] = None
 
     try:
@@ -118,6 +123,33 @@ async def fetch_server_status(
             ) as e:
                 error = f"/metrics fetch failed: {e}"
 
+            # Sprint 393: /health/detailed — opt-in, also
+            # fail-soft. Subsystem visibility is observability
+            # depth, not load-bearing liveness.
+            if include_subsystems:
+                try:
+                    d_resp = await client.get(
+                        f"{base}/health/detailed",
+                    )
+                    if d_resp.status_code == 200:
+                        health_detailed_payload = d_resp.json()
+                    else:
+                        msg = (
+                            f"/health/detailed returned "
+                            f"{d_resp.status_code}"
+                        )
+                        error = (
+                            f"{error}; {msg}" if error else msg
+                        )
+                except (
+                    httpx.ConnectError,
+                    httpx.ReadTimeout,
+                    httpx.ConnectTimeout,
+                    asyncio.TimeoutError,
+                ) as e:
+                    msg = f"/health/detailed fetch failed: {e}"
+                    error = f"{error}; {msg}" if error else msg
+
     except Exception as e:  # noqa: BLE001
         return BootstrapServerProbe(
             host=host, port=port,
@@ -129,9 +161,12 @@ async def fetch_server_status(
         return BootstrapServerProbe(
             host=host, port=port, status=ProbeStatus.OK,
             health=health_payload, metrics=metrics_payload,
+            health_detailed=health_detailed_payload,
+            error=error,
         )
     return BootstrapServerProbe(
         host=host, port=port, status=ProbeStatus.PARTIAL,
         health=health_payload, metrics=metrics_payload,
+        health_detailed=health_detailed_payload,
         error=error,
     )

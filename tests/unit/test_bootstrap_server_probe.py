@@ -207,6 +207,9 @@ async def test_probe_to_dict_shape_is_stable():
         health={"a": 1}, metrics={"b": 2},
     )
     d = probe.to_dict()
+    # Sprint 393 added health_detailed as an additive field;
+    # defaults to None when caller doesn't set
+    # include_subsystems=True.
     assert d == {
         "host": "x",
         "port": 8000,
@@ -214,4 +217,5 @@ async def test_probe_to_dict_shape_is_stable():
         "health": {"a": 1},
         "metrics": {"b": 2},
         "error": None,
+        "health_detailed": None,
     }

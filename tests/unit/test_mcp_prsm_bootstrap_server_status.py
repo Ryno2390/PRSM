@@ -216,6 +216,70 @@ async def test_default_timeout_is_5s():
 
 
 @pytest.mark.asyncio
+async def test_include_subsystems_propagates_to_probe():
+    """Sprint 393 — include_subsystems flag flips through
+    to fetch_server_status."""
+    captured = {}
+
+    async def fake_probe(host, port, *, timeout_seconds,
+                        include_subsystems=False, **kw):
+        captured["include_subsystems"] = include_subsystems
+        return _ok_probe()
+
+    with patch(
+        "prsm.cli_helpers.bootstrap_server_probe.fetch_server_status",
+        new=fake_probe,
+    ):
+        await handle_prsm_bootstrap_server_status(
+            {"include_subsystems": True},
+        )
+    assert captured["include_subsystems"] is True
+
+
+@pytest.mark.asyncio
+async def test_default_does_not_request_subsystems():
+    captured = {}
+
+    async def fake_probe(host, port, *, timeout_seconds,
+                        include_subsystems=False, **kw):
+        captured["include_subsystems"] = include_subsystems
+        return _ok_probe()
+
+    with patch(
+        "prsm.cli_helpers.bootstrap_server_probe.fetch_server_status",
+        new=fake_probe,
+    ):
+        await handle_prsm_bootstrap_server_status({})
+    assert captured["include_subsystems"] is False
+
+
+@pytest.mark.asyncio
+async def test_health_detailed_renders_when_present():
+    probe = BootstrapServerProbe(
+        host="x", port=8000, status=ProbeStatus.OK,
+        health={"healthy": True}, metrics={"total_connections": 1},
+        health_detailed={
+            "status": "degraded",
+            "subsystems": {
+                "peer_backup": {
+                    "alive": True, "status": "degraded",
+                    "last_heartbeat_age_seconds": 700.0,
+                },
+            },
+        },
+    )
+    with patch(
+        "prsm.cli_helpers.bootstrap_server_probe.fetch_server_status",
+        new=AsyncMock(return_value=probe),
+    ):
+        result = await handle_prsm_bootstrap_server_status(
+            {"include_subsystems": True},
+        )
+    assert "peer_backup" in result
+    assert "degraded" in result.lower()
+
+
+@pytest.mark.asyncio
 async def test_probe_exception_surfaces_as_error_message():
     async def fake_probe(host, port, **kw):
         raise RuntimeError("network down")

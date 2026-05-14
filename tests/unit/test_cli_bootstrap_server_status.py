@@ -203,6 +203,80 @@ def test_status_timeout_param_propagated(runner):
 # ── Partial-state rendering ──────────────────────────────
 
 
+def test_status_detailed_flag_propagates_include_subsystems(runner):
+    """Sprint 393 — `--detailed` flag flips
+    include_subsystems=True on the probe call."""
+    captured = {}
+
+    async def fake_probe(host, port, *, timeout_seconds, include_subsystems=False, **kw):
+        captured["include_subsystems"] = include_subsystems
+        return _ok_probe()
+
+    with patch(
+        "prsm.cli_helpers.bootstrap_server_probe.fetch_server_status",
+        new=fake_probe,
+    ):
+        result = runner.invoke(
+            cli,
+            ["bootstrap-server", "status", "--detailed"],
+        )
+    assert result.exit_code == 0, result.output
+    assert captured["include_subsystems"] is True
+
+
+def test_status_default_does_not_pass_include_subsystems_true(runner):
+    captured = {}
+
+    async def fake_probe(host, port, *, timeout_seconds, include_subsystems=False, **kw):
+        captured["include_subsystems"] = include_subsystems
+        return _ok_probe()
+
+    with patch(
+        "prsm.cli_helpers.bootstrap_server_probe.fetch_server_status",
+        new=fake_probe,
+    ):
+        result = runner.invoke(
+            cli, ["bootstrap-server", "status"],
+        )
+    assert result.exit_code == 0, result.output
+    assert captured["include_subsystems"] is False
+
+
+def test_status_detailed_renders_subsystems_table(runner):
+    probe = BootstrapServerProbe(
+        host="x", port=8000, status=ProbeStatus.OK,
+        health={"healthy": True, "uptime_seconds": 1.0},
+        metrics={"total_connections": 1},
+        health_detailed={
+            "status": "degraded",
+            "subsystems": {
+                "peer_cleanup": {
+                    "alive": True, "status": "healthy",
+                    "last_heartbeat_age_seconds": 1.0,
+                    "expected_interval_seconds": 60.0,
+                },
+                "peer_backup": {
+                    "alive": True, "status": "degraded",
+                    "last_heartbeat_age_seconds": 700.0,
+                    "expected_interval_seconds": 300.0,
+                },
+            },
+        },
+    )
+    with patch(
+        "prsm.cli_helpers.bootstrap_server_probe.fetch_server_status",
+        new=AsyncMock(return_value=probe),
+    ):
+        result = runner.invoke(
+            cli,
+            ["bootstrap-server", "status", "--detailed"],
+        )
+    assert result.exit_code == 0, result.output
+    assert "peer_cleanup" in result.output
+    assert "peer_backup" in result.output
+    assert "degraded" in result.output.lower()
+
+
 def test_status_partial_marker_when_metrics_unavailable(runner):
     partial = BootstrapServerProbe(
         host="x", port=8000, status=ProbeStatus.PARTIAL,

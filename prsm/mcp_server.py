@@ -2567,6 +2567,17 @@ TOOLS = [
                     "maximum": 60,
                     "default": 5,
                 },
+                "include_subsystems": {
+                    "type": "boolean",
+                    "description": (
+                        "Sprint 393 — also fetch "
+                        "/health/detailed (sprint 392) and "
+                        "include per-subsystem readiness in "
+                        "the rendered output. Default false "
+                        "(v1 contract preserved)."
+                    ),
+                    "default": False,
+                },
             },
         },
     ),
@@ -11376,10 +11387,14 @@ async def handle_prsm_bootstrap_server_status(
     host = arguments.get("host") or "127.0.0.1"
     port = int(arguments.get("port") or 8000)
     timeout = float(arguments.get("timeout", 5.0))
+    include_subsystems = bool(
+        arguments.get("include_subsystems", False)
+    )
 
     try:
         probe = await bsp_module.fetch_server_status(
             host=host, port=port, timeout_seconds=timeout,
+            include_subsystems=include_subsystems,
         )
     except Exception as e:  # noqa: BLE001
         return (
@@ -11433,6 +11448,36 @@ async def handle_prsm_bootstrap_server_status(
             lines.append(f"  {k}:")
             for label, value in label_dict.items():
                 lines.append(f"    {label}: {value}")
+
+    if probe.health_detailed:
+        agg = probe.health_detailed.get("status", "?")
+        agg_marker = {
+            "healthy": "✅",
+            "degraded": "⚠",
+            "unhealthy": "❌",
+        }.get(agg, "?")
+        lines.append("")
+        lines.append(
+            f"Subsystems — aggregate: {agg_marker} {agg}"
+        )
+        for sub_name, sub_data in (
+            probe.health_detailed.get("subsystems") or {}
+        ).items():
+            sub_status = sub_data.get("status", "?")
+            sub_marker = {
+                "healthy": "✅",
+                "degraded": "⚠",
+                "stale": "❌",
+            }.get(sub_status, "?")
+            age = sub_data.get("last_heartbeat_age_seconds")
+            age_str = (
+                f"{age:.0f}s"
+                if isinstance(age, (int, float)) else "—"
+            )
+            lines.append(
+                f"  {sub_marker} {sub_name}: "
+                f"{sub_status} (age {age_str})"
+            )
 
     return "\n".join(lines)
 

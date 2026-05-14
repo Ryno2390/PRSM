@@ -6355,11 +6355,17 @@ def bootstrap_server():
     help="HTTP timeout in seconds.",
 )
 @click.option(
+    "--detailed", is_flag=True,
+    help="Also fetch /health/detailed (sprint 392 "
+         "per-subsystem readiness probe) and render the "
+         "subsystem table.",
+)
+@click.option(
     "--format", "output_format",
     type=click.Choice(["text", "json"]), default="text",
     show_default=True,
 )
-def bootstrap_server_status(host, port, timeout, output_format):
+def bootstrap_server_status(host, port, timeout, detailed, output_format):
     """One-screen ops summary of a running bootstrap server.
 
     Hits /health and /metrics on the bootstrap server's
@@ -6376,6 +6382,7 @@ def bootstrap_server_status(host, port, timeout, output_format):
     probe = asyncio.run(
         bsp_module.fetch_server_status(
             host=host, port=port, timeout_seconds=timeout,
+            include_subsystems=detailed,
         )
     )
 
@@ -6424,6 +6431,38 @@ def bootstrap_server_status(host, port, timeout, output_format):
             console.print(f"  {k}:")
             for label, value in label_dict.items():
                 console.print(f"    {label}: {value}")
+
+    if probe.health_detailed:
+        console.print()
+        agg = probe.health_detailed.get("status", "?")
+        agg_color = {
+            "healthy": "green",
+            "degraded": "yellow",
+            "unhealthy": "red",
+        }.get(agg, "white")
+        console.print(
+            f"[bold]Subsystems[/bold] — aggregate: "
+            f"[{agg_color}]{agg}[/{agg_color}]"
+        )
+        for sub_name, sub_data in (
+            probe.health_detailed.get("subsystems") or {}
+        ).items():
+            sub_status = sub_data.get("status", "?")
+            sub_color = {
+                "healthy": "green",
+                "degraded": "yellow",
+                "stale": "red",
+            }.get(sub_status, "white")
+            age = sub_data.get("last_heartbeat_age_seconds")
+            age_str = (
+                f"{age:.0f}s" if isinstance(age, (int, float))
+                else "—"
+            )
+            console.print(
+                f"  {sub_name}: "
+                f"[{sub_color}]{sub_status}[/{sub_color}] "
+                f"(age {age_str})"
+            )
 
     sys.exit(0 if probe.status == bsp_module.ProbeStatus.OK else 1)
 
