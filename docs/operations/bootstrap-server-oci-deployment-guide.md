@@ -372,7 +372,34 @@ prsm node bootstrap
 
 ## 6. Monitoring + observability
 
-The sprint-377 Prometheus surface is already wired into every PRSM operator node — the bootstrap *server* itself doesn't run `/metrics` (it's a registration daemon, not a full node). Server observability is via:
+### 6.0 Bootstrap-server-side Prometheus surface
+
+The bootstrap server runs its own HTTP control surface on `api_port` (default `8000`) with three observability paths:
+
+| Path | Default | What you get |
+|---|---|---|
+| `GET /health` | JSON | Liveness — uptime, active connections, error counters |
+| `GET /metrics` | Content-negotiated | JSON for `Accept: application/json` (or no header); Prometheus exposition for `Accept: text/plain` or `application/openmetrics-text` (the default Prometheus scrape `Accept` header). |
+| `GET /prometheus` | Prometheus text | Explicit always-Prometheus alias — point your scrape config here if you don't want to depend on content negotiation. |
+| `GET /peers` | JSON | Current active-peer list (size capped by `peer_list_size`) |
+| `GET /config` | JSON | Server config (host, port, region, max_peers, etc.) |
+
+**Canonical scrape config:**
+
+```yaml
+scrape_configs:
+  - job_name: prsm-bootstrap-eu
+    metrics_path: /metrics            # content-neg returns Prometheus
+    static_configs:
+      - targets: ['bootstrap-eu.prsm-network.com:8000']
+    # Prometheus default Accept header triggers prometheus exposition
+```
+
+Exposed metric families (post-sprint-389): `prsm_bootstrap_active_connections` (gauge), `prsm_bootstrap_total_connections` (counter), `prsm_bootstrap_failed_connections` (counter), `prsm_bootstrap_rejected_connections` (counter), `prsm_bootstrap_messages_processed` (counter), `prsm_bootstrap_total_peers_served` (counter), `prsm_bootstrap_bytes_sent` (counter), `prsm_bootstrap_bytes_received` (counter), `prsm_bootstrap_avg_response_time_ms` (gauge), `prsm_bootstrap_uptime_seconds` (gauge), `prsm_bootstrap_health_check_failures` (counter), `prsm_bootstrap_errors_count` (counter), plus two labeled gauges: `prsm_bootstrap_peers_by_region{region="..."}` and `prsm_bootstrap_peers_by_capability{capability="..."}`.
+
+### 6.1 Server-side process / systemd observability
+
+For the registration daemon's process-level state (separate from the metric counters):
 
 - **systemd:** `sudo systemctl status prsm-bootstrap`
 - **Log file:** `/var/log/prsm-bootstrap.log` (append-mode; rotate with logrotate if it grows)
@@ -393,7 +420,7 @@ For external reachability monitoring (separate from the operator-side view):
   ```
 - **AI triage** (sprint 387): when an alert fires, invoke `prsm_bootstrap_test` from Claude/Claude Code — the MCP tool surfaces per-layer breakdown (TCP / TLS / WSS) + cert subject/issuer per host so you can localize the failure (DNS? cert? listener?) without SSHing in.
 
-### 6.1 Optional: external uptime monitor
+### 6.2 Optional: external uptime monitor
 
 Cheap-or-free options:
 - **UptimeRobot** free tier — 50 monitors, 5-min check interval, HTTPS check against `https://bootstrap-eu.prsm-network.com:8765` (the WSS server speaks HTTPS handshake on the same port)
@@ -524,3 +551,4 @@ OCI Always Free pool is 4 ARM Ampere A1 cores + 24 GB RAM across all your instan
 |---|---|---|
 | 2026-05-13 | post-381 | Initial guide. Closes the operator-side ops gap that PRSM-CR-2026-05-13-2 §5 non-scope item 6 flagged as "operator-driven, not engineering-driven." When the EU + APAC droplets land, the sprint-375 fallback code path immediately benefits — every cold-start operator in those regions reaches a host before falling back to US. |
 | 2026-05-14 | 385/387 update | §5 + §6 now point at the canonical `prsm node bootstrap-test` CLI (sprint 385) + `prsm_bootstrap_test` MCP tool (sprint 387) as the single-command fleet probe. Manual nc/openssl/python triplet retained as fallback for hosts without the PRSM CLI installed. |
+| 2026-05-14 | 389 | §6 corrected — the bootstrap server *does* run its own observability surface. New §6.0 documents the JSON+Prometheus content-negotiated `/metrics` endpoint, the always-Prometheus `/prometheus` alias, the canonical scrape config, and the 12 flat + 2 labeled metric families exposed by sprint 389. Pre-sprint-389 the bootstrap-server `/metrics` returned JSON for any client (default Prometheus scrapes silently failed); now `Accept: text/plain` or `application/openmetrics-text` triggers exposition format. |

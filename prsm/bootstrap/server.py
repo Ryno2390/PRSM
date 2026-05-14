@@ -812,58 +812,132 @@ class BootstrapServer:
             
             await asyncio.sleep(self.config.federation_sync_interval)
     
-    async def _run_api_server(self) -> None:
-        """Run the HTTP API server for health checks and metrics."""
+    def _render_prometheus_exposition(self) -> str:
+        """Render BootstrapMetrics as Prometheus exposition text.
+
+        Sprint 389 — extracted from inline `/prometheus`
+        handler so both the explicit `/prometheus` path and
+        the content-negotiated `/metrics` path share one
+        renderer. Covers all flat counters/gauges plus the
+        two dict fields (peers_by_region, peers_by_capability)
+        as labeled gauges.
+        """
+        m = self.metrics.to_dict()
+        lines: list[str] = []
+        flat_metric_map = {
+            "active_connections": ("gauge", "Number of active peer connections"),
+            "total_connections": ("counter", "Total peer connections since start"),
+            "failed_connections": ("counter", "Total failed connection attempts"),
+            "rejected_connections": ("counter", "Total rejected connections (rate limit, banned, etc.)"),
+            "messages_processed": ("counter", "Total messages processed"),
+            "total_peers_served": ("counter", "Total unique peers served"),
+            "bytes_sent": ("counter", "Total bytes sent to peers"),
+            "bytes_received": ("counter", "Total bytes received from peers"),
+            "avg_response_time_ms": ("gauge", "Rolling average response time in ms"),
+            "uptime_seconds": ("gauge", "Server uptime in seconds"),
+            "health_check_failures": ("counter", "Total health check failures"),
+            "errors_count": ("counter", "Total errors"),
+        }
+        for key, (mtype, help_text) in flat_metric_map.items():
+            if key in m:
+                lines.append(f"# HELP prsm_bootstrap_{key} {help_text}")
+                lines.append(f"# TYPE prsm_bootstrap_{key} {mtype}")
+                lines.append(f"prsm_bootstrap_{key} {m[key]}")
+
+        labeled_gauge_map = {
+            "peers_by_region": ("region", "Count of peers by geographic region"),
+            "peers_by_capability": ("capability", "Count of peers by advertised capability"),
+        }
+
+        def _escape_label_value(s: str) -> str:
+            return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+        for key, (label_name, help_text) in labeled_gauge_map.items():
+            label_dict = m.get(key) or {}
+            if not label_dict:
+                continue
+            metric_name = f"prsm_bootstrap_{key}"
+            lines.append(f"# HELP {metric_name} {help_text}")
+            lines.append(f"# TYPE {metric_name} gauge")
+            for raw_label, value in label_dict.items():
+                escaped = _escape_label_value(str(raw_label))
+                lines.append(
+                    f'{metric_name}{{{label_name}="{escaped}"}} {value}'
+                )
+
+        nl = chr(10)
+        return nl.join(lines) + nl
+
+    def _build_api_app(self):
+        """Construct + return the FastAPI app for the
+        bootstrap server's HTTP control surface.
+
+        Sprint 389 extracted this from `_run_api_server` so
+        tests can wrap it in a TestClient without binding a
+        port + running uvicorn.
+        """
         if not FASTAPI_AVAILABLE:
-            logger.warning("FastAPI not available, skipping API server")
-            return
-        
+            raise RuntimeError(
+                "FastAPI not available; cannot build API app"
+            )
+
         try:
             from importlib.metadata import version as _pkg_version
             _v = _pkg_version("prsm-network")
         except Exception:  # noqa: BLE001
             _v = "unknown"
         app = FastAPI(title="PRSM Bootstrap Server", version=_v)
-        
+        from fastapi import Request
+        from fastapi.responses import PlainTextResponse, JSONResponse
+
         @app.get("/health")
         async def health():
             return await self.health_check()
-        
+
         @app.get("/metrics")
-        async def metrics():
-            return self.metrics.to_dict()
+        async def metrics(request: Request):
+            # Sprint 389 — content negotiation. Prometheus
+            # scrape clients send Accept: text/plain or
+            # application/openmetrics-text by default.
+            # Anything else (incl. no Accept header) keeps
+            # the pre-sprint-389 JSON behavior for
+            # backwards-compat with operator polling scripts.
+            accept = (request.headers.get("accept") or "").lower()
+            prefers_prometheus = (
+                "text/plain" in accept
+                or "application/openmetrics-text" in accept
+            )
+            if prefers_prometheus:
+                return PlainTextResponse(
+                    self._render_prometheus_exposition(),
+                    media_type="text/plain; version=0.0.4",
+                )
+            return JSONResponse(self.metrics.to_dict())
 
         @app.get("/prometheus")
         async def prometheus_metrics():
-            from fastapi.responses import PlainTextResponse
-            m = self.metrics.to_dict()
-            lines = []
-            metric_map = {
-                "active_connections": ("gauge", "Number of active peer connections"),
-                "total_connections": ("counter", "Total peer connections since start"),
-                "failed_connections": ("counter", "Total failed connection attempts"),
-                "messages_processed": ("counter", "Total messages processed"),
-                "total_peers_served": ("counter", "Total unique peers served"),
-                "uptime_seconds": ("gauge", "Server uptime in seconds"),
-                "health_check_failures": ("counter", "Total health check failures"),
-                "errors_count": ("counter", "Total errors"),
-            }
-            for key, (mtype, help_text) in metric_map.items():
-                if key in m:
-                    lines.append(f"# HELP prsm_bootstrap_{key} {help_text}")
-                    lines.append(f"# TYPE prsm_bootstrap_{key} {mtype}")
-                    lines.append(f"prsm_bootstrap_{key} {m[key]}")
-            nl = chr(10)
-            return PlainTextResponse(nl.join(lines) + nl, media_type="text/plain; version=0.0.4")
+            return PlainTextResponse(
+                self._render_prometheus_exposition(),
+                media_type="text/plain; version=0.0.4",
+            )
 
         @app.get("/peers")
         async def peers():
             return {"peers": await self.get_peer_list()}
-        
+
         @app.get("/config")
         async def config():
             return self.config.to_dict()
-        
+
+        return app
+
+    async def _run_api_server(self) -> None:
+        """Run the HTTP API server for health checks and metrics."""
+        if not FASTAPI_AVAILABLE:
+            logger.warning("FastAPI not available, skipping API server")
+            return
+
+        app = self._build_api_app()
         config = uvicorn.Config(
             app,
             host=self.config.host,
