@@ -78,10 +78,28 @@ Phase 4 wallet SDK has shipped (EIP-4361 SIWE backend verifier + identity-bindin
 #### Step 3: Start Contributing
 
 ```bash
-prsm daemon start              # run in the background
-prsm daemon status             # check it's running
-prsm daemon logs -f            # follow logs
+prsm node start --background   # run in the background
+prsm node status               # check it's running
+prsm node logs -f              # follow logs
 ```
+
+> **First-time-user reality check (2026-05-14).** The canonical query
+> workflow (`prsm_analyze` MCP tool / `POST /compute/forge`) requires the
+> QueryOrchestrator to be wired at node-startup time. Set
+> `PRSM_QUERY_ORCHESTRATOR_ENABLED=1` in your environment BEFORE starting
+> the node. Without it, queries return `"Agent forge not initialized"`.
+>
+> Additionally, a brand-new node has **no content shards** and the default
+> peer-discovery starts at zero — so the first query you submit will
+> typically return `"No content shards above the similarity threshold"`.
+> This is expected: either upload content yourself (see Option B) or join
+> a content-populated peer network. See
+> `docs/operations/2026-05-14-user-dogfood-findings.md` for the full
+> first-time-user journey + known friction points.
+
+> **Note.** `prsm daemon` is deprecated in favor of `prsm node`. The old
+> commands still work (deprecation warning) but will be removed in a
+> future release.
 
 Adjust resource allocation via `prsm config set`:
 
