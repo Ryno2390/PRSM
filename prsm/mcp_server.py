@@ -2519,6 +2519,50 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
+        name="prsm_bootstrap_test",
+        description=(
+            "Probe the canonical PRSM bootstrap fleet (US + "
+            "EU + APAC) from THIS node's vantage point. "
+            "Reports per-host TCP / TLS / WSS handshake "
+            "success + latency + cert subject/issuer + "
+            "aggregate reachability summary. Operator-"
+            "trifecta complement to prsm_bootstrap_status "
+            "(which reports THIS node's registration state) "
+            "and prsm_peers (which reports the network "
+            "graph). Use this to diagnose 'is my regional "
+            "bootstrap up, or is something local blocking "
+            "me?' Doesn't require a running PRSM node — "
+            "probes directly from the MCP server host."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional list of bootstrap URLs to "
+                        "test (wss://host:port). When unset, "
+                        "uses the canonical fleet from "
+                        "prsm/node/config.py "
+                        "(DEFAULT_BOOTSTRAP_NODES + "
+                        "FALLBACK_BOOTSTRAP_NODES)."
+                    ),
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": (
+                        "Per-host probe timeout in seconds. "
+                        "Default 10."
+                    ),
+                    "minimum": 1,
+                    "maximum": 60,
+                    "default": 10,
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_royalty_dispatch_summary",
         description=(
             "Aggregate view over the on-chain content-royalty "
@@ -11264,6 +11308,110 @@ async def handle_prsm_bootstrap_status(
     return "\n".join(lines)
 
 
+async def handle_prsm_bootstrap_test(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 387 — probe canonical bootstrap fleet from
+    this node's vantage point.
+
+    AI-assisted complement to sprint-385's `prsm node
+    bootstrap-test` CLI. Same probe surface (prsm.cli_
+    helpers.bootstrap_probe.probe_fleet), MCP-rendered.
+    Doesn't require a running PRSM node — probes directly
+    from the MCP server host.
+
+    Diagnostic for: 'is my regional bootstrap up, or is
+    something local blocking me?'
+    """
+    from prsm.cli_helpers.bootstrap_probe import (
+        ProbeStatus,
+        canonical_bootstrap_urls,
+        probe_fleet,
+    )
+
+    urls = arguments.get("urls") or []
+    timeout = float(arguments.get("timeout", 10.0))
+
+    if urls:
+        target_urls = list(urls)
+    else:
+        target_urls = canonical_bootstrap_urls()
+
+    if not target_urls:
+        return (
+            "prsm_bootstrap_test: no URLs to probe. "
+            "Pass urls=[\"wss://...\"] or check that "
+            "BOOTSTRAP_PRIMARY / BOOTSTRAP_FALLBACK_* env "
+            "vars resolve."
+        )
+
+    try:
+        fleet = await probe_fleet(
+            target_urls, timeout_seconds=timeout,
+        )
+    except Exception as e:  # noqa: BLE001
+        return (
+            f"prsm_bootstrap_test failed: "
+            f"{type(e).__name__}: {e}"
+        )
+
+    # Header marker
+    if fleet.all_healthy:
+        marker = "✅ all healthy"
+    elif fleet.any_healthy:
+        marker = "⚠ partial"
+    else:
+        marker = "❌ all degraded"
+
+    lines = [
+        (
+            f"PRSM Bootstrap Fleet Probe — {marker} "
+            f"({fleet.healthy_count}/{fleet.total_count} "
+            f"reachable)"
+        ),
+        "",
+    ]
+
+    for h in fleet.hosts:
+        if h.status == ProbeStatus.OK:
+            status_str = "✅ ok"
+        elif h.status == ProbeStatus.TIMEOUT:
+            status_str = "⏱ timeout"
+        else:
+            status_str = f"❌ {h.status.value}"
+        url_short = h.url
+        if "://" in url_short:
+            url_short = url_short.split("://", 1)[1]
+        latency_str = (
+            f"{h.latency_ms:.0f}ms"
+            if h.latency_ms is not None else "-"
+        )
+        lines.append(
+            f"  {status_str}  {url_short}  ({latency_str})"
+        )
+        # Per-layer breakdown
+        layer_marks = []
+        for label, ok in (
+            ("TCP", h.tcp_ok),
+            ("TLS", h.tls_ok),
+            ("WSS", h.wss_ok),
+        ):
+            layer_marks.append(
+                f"✓{label}" if ok else f"·{label}"
+            )
+        layer_line = "      " + " ".join(layer_marks)
+        if h.cert_subject:
+            layer_line += (
+                f"  (cert: {h.cert_subject}"
+                f" / issued by {h.cert_issuer})"
+            )
+        lines.append(layer_line)
+        if h.error:
+            lines.append(f"      error: {h.error}")
+
+    return "\n".join(lines)
+
+
 async def handle_prsm_royalty_dispatch_summary(
     arguments: Dict[str, Any],
 ) -> str:
@@ -13318,6 +13466,7 @@ TOOL_HANDLERS = {
     "prsm_royalty_dispatch_history": handle_prsm_royalty_dispatch_history,
     "prsm_royalty_dispatch_summary": handle_prsm_royalty_dispatch_summary,
     "prsm_bootstrap_status": handle_prsm_bootstrap_status,
+    "prsm_bootstrap_test": handle_prsm_bootstrap_test,
     "prsm_pinned_stats": handle_prsm_pinned_stats,
     "prsm_content_filter": handle_prsm_content_filter,
     "prsm_takedown_notices": handle_prsm_takedown_notices,
