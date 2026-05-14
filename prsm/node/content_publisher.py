@@ -52,7 +52,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from prsm.compute.inference.models import ContentTier
 
@@ -164,6 +164,22 @@ class ContentPublisher:
         # Lazy-resolve from the global singleton if not supplied — keeps
         # the Tier-A construction site backwards compatible with PR 2a.
         self.content_store = content_store
+        # Sprint 428 (F8) — infohash → staged Path map for locally-
+        # published content. Lets ContentRetriever short-circuit the
+        # BT swarm fetch when the same node published the content.
+        # Closes single-node Vision §4 step-8 self-fetch without
+        # touching the BT layer's session-isolation design.
+        self._published_paths: Dict[str, Path] = {}
+
+    def local_publish_path(self, infohash: str) -> Optional[Path]:
+        """Return the staged path for *infohash* if we published it
+        locally, or None.
+
+        Sprint 428 (F8): consumed by ContentRetriever.fetch to short-
+        circuit the BT swarm fetch for content the same node
+        published.
+        """
+        return self._published_paths.get(infohash)
 
     def _resolve_content_store(self) -> "ContentStore":
         """Return the configured ContentStore or raise if unavailable."""
@@ -274,6 +290,11 @@ class ContentPublisher:
             provenance_id,
         )
 
+        # Sprint 428 (F8) — record infohash → staged path so
+        # ContentRetriever can short-circuit the BT swarm for
+        # locally-published content.
+        self._published_paths[manifest.infohash] = staged_path
+
         return PublishedContent(
             torrent_infohash=manifest.infohash,
             staged_path=staged_path,
@@ -351,6 +372,12 @@ class ContentPublisher:
             provenance_id,
         )
 
+        # Sprint 428 (F8) — record infohash → staged dir. Tier B/C
+        # local shortcut is deferred (encrypted shards need
+        # ContentStore round-trip); the entry still helps debug
+        # tooling enumerate locally-published content.
+        self._published_paths[bt_manifest.infohash] = torrent_root
+
         return PublishedContent(
             torrent_infohash=bt_manifest.infohash,
             staged_path=torrent_root,
@@ -383,6 +410,13 @@ class ContentRetriever:
         self.cache_dir = Path(cache_dir).expanduser()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.content_store = content_store
+        # Sprint 428 (F8) — set externally by Node init when both
+        # publisher + retriever are constructed. When wired, `fetch`
+        # short-circuits to the publisher's staged bytes for
+        # locally-published content (no BT swarm round-trip needed).
+        # Closes the single-node self-fetch gap that blocked
+        # Vision §4 step-8 user-validation.
+        self.content_publisher: Optional["ContentPublisher"] = None
 
     def _resolve_content_store(self) -> "ContentStore":
         """Return the configured ContentStore or raise if unavailable."""
@@ -430,6 +464,26 @@ class ContentRetriever:
             If the requester returns ``success=False``, or for Tier B/C
             if a required artefact (manifest, keyshares) is missing.
         """
+        # Sprint 428 (F8) — local-publish shortcut. If the same
+        # node published this infohash, return its staged bytes
+        # directly without involving the BT swarm. Scope: Tier A
+        # only (single-file staged paths). Tier B/C falls through
+        # to the BT path because the encrypted-shards layout needs
+        # the ContentStore reassembly round-trip — that's the
+        # existing _fetch_tier_bc lane and won't be short-circuited
+        # in this sprint.
+        publisher = getattr(self, "content_publisher", None)
+        if publisher is not None:
+            local_path = publisher.local_publish_path(torrent_infohash)
+            if local_path is not None and local_path.is_file():
+                logger.debug(
+                    "ContentRetriever local-publish shortcut: infohash=%s "
+                    "→ %s (no BT round-trip)",
+                    torrent_infohash[:16],
+                    local_path,
+                )
+                return local_path.read_bytes()
+
         save_path = self.cache_dir / torrent_infohash
         save_path.mkdir(parents=True, exist_ok=True)
 

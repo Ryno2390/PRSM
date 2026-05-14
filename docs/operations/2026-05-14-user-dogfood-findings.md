@@ -230,8 +230,36 @@ torrent via DHT) but were not exercised end-to-end in this dogfood.
   Option C reasoning.
 
 **Status.** Surfaced 2026-05-14 sprint 427 live verification of F7
-fix. Same architectural family as F7; deferred pending the same
-storage-layer reconciliation design call.
+fix.
+
+**Update 2026-05-14 (sprint 428).** Closed end-to-end via Option A'.
+`ContentPublisher` now records `infohash → staged_path` on every
+Tier A publish; `ContentRetriever.fetch` short-circuits to the
+publisher's staged bytes when the same node published the
+infohash. No BT swarm round-trip; no libtorrent session changes.
+Wired into Node init right after sprint 427's content_retriever
+binding.
+
+Live verification (single-node, no other peers, daemon running):
+```
+$ curl -X POST .../content/upload -d '{"text": "F8 fix verification..."}'
+{"cid": "c0ddba20746e8a1a4ec2a023a682915bd5f1b69b", ...}
+
+$ curl ".../content/retrieve/c0ddba20746e8a1a4ec2a023a682915bd5f1b69b"
+{"status": "success", "size_bytes": 71, "data": "<base64>", ...}
+
+$ base64 -d  # → "F8 fix verification — sprint 428 — full Vision §4 step-8 roundtrip"
+```
+
+This is the first time the canonical Vision §4 step-8 workflow
+(upload → retrieve → byte-identical roundtrip) has worked on a
+single node. The dogfood arc has now end-to-end-verified the
+core user workflow.
+
+**Tier B/C deferred.** Encrypted publishes still need the BT swarm
+because the staged dir contains encrypted shards + key shares that
+require ContentStore reassembly. Same Option B/C territory — left
+to the storage-layer reconciliation sprint.
 
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
