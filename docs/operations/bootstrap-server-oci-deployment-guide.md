@@ -602,3 +602,18 @@ OCI Always Free pool is 4 ARM Ampere A1 cores + 24 GB RAM across all your instan
 | 2026-05-14 | 385/387 update | §5 + §6 now point at the canonical `prsm node bootstrap-test` CLI (sprint 385) + `prsm_bootstrap_test` MCP tool (sprint 387) as the single-command fleet probe. Manual nc/openssl/python triplet retained as fallback for hosts without the PRSM CLI installed. |
 | 2026-05-14 | 389 | §6 corrected — the bootstrap server *does* run its own observability surface. New §6.0 documents the JSON+Prometheus content-negotiated `/metrics` endpoint, the always-Prometheus `/prometheus` alias, the canonical scrape config, and the 12 flat + 2 labeled metric families exposed by sprint 389. Pre-sprint-389 the bootstrap-server `/metrics` returned JSON for any client (default Prometheus scrapes silently failed); now `Accept: text/plain` or `application/openmetrics-text` triggers exposition format. |
 | 2026-05-14 | 392 / 394 | §6.0 extended — Prometheus exposition now also surfaces per-subsystem readiness (`prsm_bootstrap_subsystem_status{subsystem="..."}` 0/1/2 + `prsm_bootstrap_subsystem_heartbeat_age_seconds`). PromQL alerts can target specific loops (peer_cleanup / peer_backup / federation_sync / health_check_loop / api_server). New §6.0.1 documents the JSON `/health/detailed` surface with status thresholds (<2× healthy, 2-5× degraded, ≥5× stale). Closes a real observability blind spot: pre-sprint-392 a silently-crashed background loop left `/health` reading "healthy" — now operators can alert on individual stuck loops. |
+| 2026-05-14 | 397 | `/health/detailed` status now distinguishes `disabled` (subsystem whose enabling-config isn't met — e.g. `federation_sync` with empty `federation_peers`) from `stale` (silently-dead loop). Disabled does NOT degrade aggregate status. Prometheus encoding: disabled → 1 (alongside degraded — not 2/stale), so default `prsm_bootstrap_subsystem_status >= 2` alerts no longer false-fire on every standalone bootstrap deploy. Dogfood-found: bootstrap-eu reported aggregate=unhealthy 25 min after going live because federation_sync (never instantiated by default) was classified stale. |
+| 2026-05-14 | 398 | Cloud-init template (`scripts/bootstrap-server-cloud-init.sh`) now opens port 8000 in ufw (sprint-388-396 observability surfaces had been unreachable from the public internet) AND propagates `PRSM_REGION` via the env file (pre-fix `/health.region` reported `us-east-1` even on Frankfurt + Tokyo droplets). Render helper accepts region as positional arg 3. Bootstrap-eu + bootstrap-apac runtime-patched in the same session. |
+| 2026-05-14 | 405 | MCP `prsm_bootstrap_server_status` renders `disabled` subsystems with `○` marker (was falling through to `?`). Same dogfood-source as sprint 397. Distinct from ✅/⚠/❌ — non-alarming. |
+
+## Multi-cloud bootstrap fleet status — 2026-05-14
+
+Both EU + APAC bootstrap droplets are live, but the deployment path differed from the OCI-only assumption in §2:
+
+| Region | Provider | Hostname | Public IP | Notes |
+|---|---|---|---|---|
+| US | DigitalOcean | `bootstrap1.prsm-network.com` | (pre-existing) | Live pre-2026-05-14 |
+| EU | **AWS Frankfurt** `eu-central-1` | `bootstrap-eu.prsm-network.com` | `54.93.164.206` | OCI Frankfurt path abandoned after 106 capacity-out attempts; AWS Frankfurt worked first try |
+| APAC | **AWS Tokyo** `ap-northeast-1` | `bootstrap-apac.prsm-network.com` | `54.248.20.193` | Originally OCI ap-tokyo planned; pivoted to AWS for cross-provider failure-mode diversity |
+
+The §2 OCI launch flow remains valid for any future EU/APAC operator. The cloud-init pattern in `scripts/bootstrap-server-cloud-init.sh` proved provider-agnostic across OCI / AWS / DO. Sprint 398's UFW + PRSM_REGION fix is baked in.
