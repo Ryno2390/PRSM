@@ -168,10 +168,19 @@ class BootstrapConfig:
     """Mapping of region names to bootstrap server addresses."""
     
     def __post_init__(self):
-        """Validate and process configuration after initialization."""
+        """Validate and process configuration after initialization.
+
+        Sprint 383 — reorder: env-loading must run BEFORE
+        path validation so any operator-overridden paths
+        (e.g., PRSM_PEER_DB_PATH) are what get validated +
+        mkdir'd, not the Docker-conventional defaults.
+        Pre-fix sequence emitted spurious "Could not create
+        peer database directory" warnings on every bare-
+        metal install + left the validated path stale.
+        """
+        self._load_from_environment()
         self._validate_paths()
         self._validate_values()
-        self._load_from_environment()
     
     def _validate_paths(self) -> None:
         """Validate that required paths exist or can be created."""
@@ -236,6 +245,18 @@ class BootstrapConfig:
             self.peer_timeout = int(os.environ["PRSM_PEER_TIMEOUT"])
         if os.environ.get("PRSM_HEARTBEAT_INTERVAL"):
             self.heartbeat_interval = int(os.environ["PRSM_HEARTBEAT_INTERVAL"])
+
+        # Persistence settings (sprint 383 — closes the
+        # bare-metal-install bug surfaced during sprint 382
+        # AWS Tokyo deployment where /app/data was a Docker-
+        # conventional path that doesn't exist on a plain
+        # Ubuntu host, producing spurious peer-DB warnings).
+        if os.environ.get("PRSM_PEER_DB_PATH"):
+            self.peer_db_path = os.environ["PRSM_PEER_DB_PATH"]
+        if os.environ.get("PRSM_PERSIST_PEERS"):
+            self.persist_peers = os.environ[
+                "PRSM_PERSIST_PEERS"
+            ].lower() in ("true", "1", "yes")
         
         # Security settings
         if os.environ.get("PRSM_AUTH_SECRET"):
