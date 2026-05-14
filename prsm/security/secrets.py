@@ -724,7 +724,21 @@ class SecretsManager:
         if self.backend == SecretBackend.ENV:
             return EnvironmentBackend(prefix=self._kwargs.get("prefix", ""))
         elif self.backend == SecretBackend.FILE:
-            return FileBackend(secrets_dir=self._kwargs.get("secrets_dir", "/run/secrets"))
+            # Sprint 386 — env-var fallback closes a
+            # sprint-383-class bug: pre-fix, this hardcoded
+            # the Docker-conventional /run/secrets without
+            # an env-var override, while sibling factories
+            # below (Vault, AWS, GCP) all used env-var
+            # fallbacks. Bare-metal operators using
+            # SECRETS_BACKEND=file silently saw None for
+            # every secret because /run/secrets doesn't
+            # exist on non-Docker hosts.
+            return FileBackend(
+                secrets_dir=self._kwargs.get(
+                    "secrets_dir",
+                    os.getenv("PRSM_SECRETS_DIR", "/run/secrets"),
+                )
+            )
         elif self.backend == SecretBackend.VAULT:
             return VaultBackend(
                 url=self._kwargs.get("url", os.getenv("VAULT_ADDR", "http://localhost:8200")),
