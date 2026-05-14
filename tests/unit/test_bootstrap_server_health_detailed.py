@@ -226,6 +226,74 @@ def test_aggregate_unhealthy_when_one_subsystem_stale(
     assert body["status"] == "unhealthy"
 
 
+# ── Sprint 397: disabled-loop semantics ─────────────────────
+
+
+class TestDisabledLoopSemantics:
+    """A background loop whose enabling-config isn't met
+    (e.g., federation_sync with federation_peers=[]) is
+    NOT a silent-death failure — it's an operator
+    configuration choice. Surface as 'disabled', and don't
+    degrade aggregate status.
+
+    Pre-sprint-397, bootstrap-eu went LIVE on AWS Frankfurt
+    and immediately reported aggregate='unhealthy' because
+    federation_sync had no heartbeat. The loop was never
+    instantiated (server.py:292 gates create_task on
+    federation_enabled AND federation_peers).
+    """
+
+    def test_federation_sync_disabled_when_no_peers(
+        self, server, client,
+    ):
+        # Default config has federation_peers=[] →
+        # federation_sync loop is never started.
+        # Pre-sprint-397: this manifested as status="stale"
+        # + aggregate="unhealthy".
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        server._loop_heartbeats = {
+            "peer_cleanup": now,
+            "peer_backup": now,
+            "health_check_loop": now,
+            # federation_sync intentionally NOT bumped
+        }
+        # Ensure federation isn't enabled
+        server.config.federation_peers = []
+        resp = client.get("/health/detailed")
+        body = resp.json()
+        sub = body["subsystems"]["federation_sync"]
+        assert sub["status"] == "disabled"
+        # Disabled is distinct from stale: alive should
+        # reflect the fact that it's intentionally off
+        assert sub["alive"] is False
+        # And critically — aggregate must stay healthy
+        assert body["status"] == "healthy"
+
+    def test_federation_sync_stale_when_peers_configured_but_loop_dead(
+        self, server, client,
+    ):
+        """If federation IS configured but heartbeat is
+        missing, that IS a silent-death case — keep the
+        stale semantics."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        server._loop_heartbeats = {
+            "peer_cleanup": now,
+            "peer_backup": now,
+            "health_check_loop": now,
+        }
+        # Federation IS configured — loop SHOULD be running
+        server.config.federation_peers = [
+            "https://other-foundation.example.com",
+        ]
+        resp = client.get("/health/detailed")
+        body = resp.json()
+        sub = body["subsystems"]["federation_sync"]
+        assert sub["status"] == "stale"
+        assert body["status"] == "unhealthy"
+
+
 # ── api_server semantics (always healthy if we're answering) ─
 
 

@@ -852,11 +852,39 @@ class BootstrapServer:
             "federation_sync": float(self.config.federation_sync_interval),
             "health_check_loop": float(self.config.health_check_interval),
         }
+        # Sprint 397 — loops whose enabling-config isn't met
+        # (e.g., federation_sync when federation_peers is
+        # empty) are NEVER instantiated at start() (see
+        # server.py:292 for federation_sync). Surface those
+        # as "disabled" instead of "stale" so a default
+        # standalone bootstrap doesn't read as "unhealthy".
+        def _loop_is_configured(name: str) -> bool:
+            if name == "federation_sync":
+                return bool(
+                    self.config.federation_enabled
+                    and self.config.federation_peers
+                )
+            if name == "peer_backup":
+                return bool(
+                    self.config.persist_peers and self.db
+                )
+            # peer_cleanup + health_check_loop always start
+            return True
+
         subsystems: Dict[str, Dict[str, Any]] = {}
         worst = "healthy"
         for name, interval in subsystem_intervals.items():
             last = self._loop_heartbeats.get(name)
             if last is None:
+                if not _loop_is_configured(name):
+                    # Operator-disabled, not silently dead
+                    subsystems[name] = {
+                        "alive": False,
+                        "status": "disabled",
+                        "last_heartbeat_age_seconds": None,
+                        "expected_interval_seconds": interval,
+                    }
+                    continue
                 subsystems[name] = {
                     "alive": False,
                     "status": "stale",
@@ -977,7 +1005,15 @@ class BootstrapServer:
             lines.append(f"# TYPE {age_metric} gauge")
             status_encoding = {
                 "healthy": 0,
+                # Sprint 397 — "disabled" (operator opt-out)
+                # encodes as 1 alongside "degraded" so
+                # Prometheus alerts on `status >= 2` fire
+                # only for silent-death/stale subsystems,
+                # not for never-instantiated configured-off
+                # loops. Mirrors sprint-395 operator-node
+                # opt-out semantics.
                 "degraded": 1,
+                "disabled": 1,
                 "stale": 2,
             }
             for sub_name, sub_data in subsystems.items():

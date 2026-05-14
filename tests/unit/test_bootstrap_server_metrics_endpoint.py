@@ -343,6 +343,29 @@ class TestSubsystemPrometheusGauges:
             '{subsystem="peer_cleanup"} 2'
         ) in text
 
+    def test_disabled_subsystem_encoded_as_1_not_2(
+        self, server, client,
+    ):
+        """Sprint 397 — federation_sync with empty
+        federation_peers reports status='disabled' (opt-out,
+        not silent death). Prometheus encoding for opt-out
+        is 1, matching sprint-395 operator-node-side
+        convention. Encoding it as 2 would fire stale-loop
+        alerts for default standalone bootstraps."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        server._loop_heartbeats = {
+            "peer_cleanup": now,
+            "peer_backup": now,
+            "health_check_loop": now,
+        }
+        server.config.federation_peers = []
+        resp = client.get("/prometheus")
+        assert (
+            'prsm_bootstrap_subsystem_status'
+            '{subsystem="federation_sync"} 1'
+        ) in resp.text
+
     def test_subsystem_help_and_type_lines_present(
         self, server, client,
     ):
