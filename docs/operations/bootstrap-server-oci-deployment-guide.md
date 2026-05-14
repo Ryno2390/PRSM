@@ -302,7 +302,32 @@ sudo tail -f /var/log/prsm-bootstrap.log
 
 ## 5. End-to-end verification from a separate node
 
-From your laptop (or any PRSM-installed machine):
+**Canonical one-shot (sprint 385).** From your laptop (or any PRSM-installed machine), run the fleet probe — TCP + TLS + WSS layers across every canonical bootstrap host in a single command:
+
+```bash
+prsm node bootstrap-test
+# Expect (after this guide ships EU online):
+#   PRSM Bootstrap Fleet Probe — ✓ all healthy (3/3 reachable)
+#   ✓ bootstrap1.prsm-network.com:8765    TCP ✓  TLS ✓  WSS ✓   42ms
+#   ✓ bootstrap-eu.prsm-network.com:8765  TCP ✓  TLS ✓  WSS ✓   88ms
+#   ✓ bootstrap-apac.prsm-network.com:8765 TCP ✓  TLS ✓  WSS ✓ 150ms
+```
+
+JSON output for ops automation:
+
+```bash
+prsm node bootstrap-test --format json
+# {"status": "all_healthy", "hosts": [...]}
+```
+
+AI-assisted triage from inside Claude (sprint 387 MCP tool):
+
+```
+prsm_bootstrap_test
+# Same probe, rendered for the side panel, with per-host TCP/TLS/WSS markers + cert subject/issuer.
+```
+
+**Manual fallback** (only if `prsm` CLI isn't installed on the probe host):
 
 ```bash
 # 1. TCP reachability
@@ -357,6 +382,16 @@ For fleet-side observability of "is the EU bootstrap being used":
 
 - Run an instance of `prsm_bootstrap_status` MCP against any node — operators connecting via EU show `active_url: wss://bootstrap-eu.prsm-network.com:8765`
 - Prometheus-side: `count by (url) (prsm_bootstrap_active)` across the operator fleet — EU shows up as a non-zero label when operators in EU regions cold-start
+
+For external reachability monitoring (separate from the operator-side view):
+
+- **Canonical CLI** (sprint 385): `prsm node bootstrap-test --format json` from a cron job on any PRSM-installed host. Stable JSON shape (`status`, `hosts[].{tcp_ok,tls_ok,wss_ok,latency_ms}`) suitable for piping into a monitoring agent — alert on `status != "all_healthy"` or any per-host `wss_ok: false`.
+- **Cron snippet** (e.g., on a US-east probe host):
+  ```cron
+  */5 * * * * /usr/local/bin/prsm node bootstrap-test --format json \
+      | /opt/prsm-ops/bin/alert-on-fleet-degradation.sh
+  ```
+- **AI triage** (sprint 387): when an alert fires, invoke `prsm_bootstrap_test` from Claude/Claude Code — the MCP tool surfaces per-layer breakdown (TCP / TLS / WSS) + cert subject/issuer per host so you can localize the failure (DNS? cert? listener?) without SSHing in.
 
 ### 6.1 Optional: external uptime monitor
 
@@ -474,6 +509,9 @@ OCI Always Free pool is 4 ARM Ampere A1 cores + 24 GB RAM across all your instan
 
 - `prsm/node/config.py:20-29` — `DEFAULT_BOOTSTRAP_NODES` + `FALLBACK_BOOTSTRAP_NODES` consume these URLs
 - `prsm/node/libp2p_discovery.py` — sprint 375 fallback-iteration code path
+- `prsm/cli_helpers/bootstrap_probe.py` — sprint 385 TCP+TLS+WSS layered probe (CLI + MCP shared backend)
+- `prsm/cli.py` `node bootstrap-test` — sprint 385 operator CLI surface
+- `prsm/mcp_server.py` `prsm_bootstrap_test` — sprint 387 AI-side-panel surface
 - `docs/operations/fleet-kill-switch-operator-runbook.md` — sister operator runbook (§7.21 honest-scope closer)
 - `docs/2026-04-27-cumulative-audit-prep.md` §7.29 + §7.35 — multi-bootstrap arc audit-prep entries
 - `docs/governance/PRSM-CR-2026-05-13-2.md` §5 non-scope item 6 — explicit acknowledgment that EU+APAC droplets are operator-driven
@@ -485,3 +523,4 @@ OCI Always Free pool is 4 ARM Ampere A1 cores + 24 GB RAM across all your instan
 | Date | Sprint | Change |
 |---|---|---|
 | 2026-05-13 | post-381 | Initial guide. Closes the operator-side ops gap that PRSM-CR-2026-05-13-2 §5 non-scope item 6 flagged as "operator-driven, not engineering-driven." When the EU + APAC droplets land, the sprint-375 fallback code path immediately benefits — every cold-start operator in those regions reaches a host before falling back to US. |
+| 2026-05-14 | 385/387 update | §5 + §6 now point at the canonical `prsm node bootstrap-test` CLI (sprint 385) + `prsm_bootstrap_test` MCP tool (sprint 387) as the single-command fleet probe. Manual nc/openssl/python triplet retained as fallback for hosts without the PRSM CLI installed. |
