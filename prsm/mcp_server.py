@@ -11490,6 +11490,13 @@ async def handle_prsm_bootstrap_server_status(
                 "healthy": "✅",
                 "degraded": "⚠",
                 "stale": "❌",
+                # Sprint 405 — "disabled" surfaces sprint-397
+                # config-opt-out state (e.g., federation_sync
+                # when federation_peers is empty). Distinct
+                # from healthy (it's not running) AND from
+                # alert states (operator chose this).
+                # Non-alarming marker.
+                "disabled": "○",
             }.get(sub_status, "?")
             age = sub_data.get("last_heartbeat_age_seconds")
             age_str = (

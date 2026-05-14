@@ -280,6 +280,89 @@ async def test_health_detailed_renders_when_present():
 
 
 @pytest.mark.asyncio
+async def test_disabled_subsystem_renders_clean_marker():
+    """Sprint 405 — sprint-397 added 'disabled' status for
+    bootstrap-server subsystems whose enabling-config isn't
+    met (e.g., federation_sync with empty federation_peers).
+    Pre-sprint-405 the MCP renderer marker dict lacked
+    'disabled' so live operators saw `?  federation_sync:
+    disabled` instead of a clean marker. Dogfood-found
+    against the live bootstrap-eu droplet on 2026-05-14
+    after the operator-trifecta arc."""
+    probe = BootstrapServerProbe(
+        host="x", port=8000, status=ProbeStatus.OK,
+        health={"healthy": True}, metrics={"total_connections": 1},
+        health_detailed={
+            "status": "healthy",
+            "subsystems": {
+                "federation_sync": {
+                    "alive": False, "status": "disabled",
+                    "last_heartbeat_age_seconds": None,
+                },
+                "peer_cleanup": {
+                    "alive": True, "status": "healthy",
+                    "last_heartbeat_age_seconds": 10.0,
+                },
+            },
+        },
+    )
+    with patch(
+        "prsm.cli_helpers.bootstrap_server_probe.fetch_server_status",
+        new=AsyncMock(return_value=probe),
+    ):
+        result = await handle_prsm_bootstrap_server_status(
+            {"include_subsystems": True},
+        )
+    assert "federation_sync" in result
+    assert "disabled" in result.lower()
+    # The fall-through "?" marker MUST NOT appear next to
+    # the disabled federation_sync entry. Strict-line scan
+    # for the disabled subsystem line.
+    disabled_lines = [
+        ln for ln in result.splitlines()
+        if "federation_sync" in ln
+    ]
+    assert len(disabled_lines) == 1
+    assert "?" not in disabled_lines[0]
+
+
+@pytest.mark.asyncio
+async def test_disabled_marker_distinct_from_other_statuses():
+    """The disabled marker should be visually distinct from
+    healthy (✅), degraded (⚠), and stale (❌). Operators
+    glancing at the side panel see disabled subsystems are
+    NOT alerts."""
+    probe = BootstrapServerProbe(
+        host="x", port=8000, status=ProbeStatus.OK,
+        health={"healthy": True}, metrics={"total_connections": 1},
+        health_detailed={
+            "status": "healthy",
+            "subsystems": {
+                "federation_sync": {
+                    "alive": False, "status": "disabled",
+                    "last_heartbeat_age_seconds": None,
+                },
+            },
+        },
+    )
+    with patch(
+        "prsm.cli_helpers.bootstrap_server_probe.fetch_server_status",
+        new=AsyncMock(return_value=probe),
+    ):
+        result = await handle_prsm_bootstrap_server_status(
+            {"include_subsystems": True},
+        )
+    fed_line = next(
+        ln for ln in result.splitlines() if "federation_sync" in ln
+    )
+    # NOT an alert-equivalent marker — ✅ would be wrong
+    # (disabled is not healthy); ❌ would be wrong (it's not
+    # a failure). Some non-alarming marker is expected.
+    # Strictly: marker isn't the stale-failure marker.
+    assert "❌" not in fed_line
+
+
+@pytest.mark.asyncio
 async def test_probe_exception_surfaces_as_error_message():
     async def fake_probe(host, port, **kw):
         raise RuntimeError("network down")
