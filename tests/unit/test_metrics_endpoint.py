@@ -282,3 +282,68 @@ class TestMetricsFailSoft:
         resp = _client(node).get("/metrics")
         # Endpoint must NOT 500 — emit 0 or omit royalties gauge.
         assert resp.status_code == 200
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Sprint 395 — Per-subsystem Prometheus labeled gauges
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestSubsystemLabeledGauges:
+    """Mirrors sprint 394's bootstrap-server-side labeled
+    gauges on the operator-node side. /health/detailed
+    exposes per-subsystem readiness as JSON; before sprint
+    395 PromQL alerts could only see aggregate health.
+    Now each subsystem has its own labeled gauge."""
+
+    def test_subsystem_status_gauge_emitted_for_core(self):
+        node = _node()
+        body = _client(node).get("/metrics").text
+        # ftns_ledger is core, available → status=0 (healthy)
+        assert (
+            'prsm_node_subsystem_status'
+            '{subsystem="ftns_ledger"} 0'
+        ) in body
+
+    def test_help_and_type_lines_present(self):
+        node = _node()
+        body = _client(node).get("/metrics").text
+        assert "# HELP prsm_node_subsystem_status" in body
+        assert "# TYPE prsm_node_subsystem_status gauge" in body
+
+    def test_not_wired_subsystem_encoded_as_1(self):
+        node = _node()
+        # job_history is optional; not-wired surfaces as 1
+        # (= optional-opt-out, distinct from hard failure).
+        node._job_history = None
+        body = _client(node).get("/metrics").text
+        assert (
+            'prsm_node_subsystem_status'
+            '{subsystem="job_history"} 1'
+        ) in body
+
+    def test_unhealthy_core_subsystem_encoded_as_2(self):
+        node = _node()
+        # ftns_ledger not initialized → status="uninitialized"
+        # → encoded as 2 (= unhealthy/not-available core).
+        node.ftns_ledger._is_initialized = False
+        body = _client(node).get("/metrics").text
+        assert (
+            'prsm_node_subsystem_status'
+            '{subsystem="ftns_ledger"} 2'
+        ) in body
+
+    def test_subsystem_block_does_not_500_endpoint(self):
+        """Fail-soft per sprint-389 convention — if the
+        /health/detailed call raises mid-iteration, the
+        subsystem block omits but /metrics still 200s."""
+        node = _node()
+        # Break the closure by overriding ftns_ledger with
+        # a property-raising mock.
+        broken = MagicMock()
+        type(broken)._is_initialized = property(
+            lambda self: (_ for _ in ()).throw(RuntimeError("boom"))
+        )
+        node.ftns_ledger = broken
+        resp = _client(node).get("/metrics")
+        assert resp.status_code == 200

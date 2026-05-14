@@ -11024,6 +11024,63 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "UUPS upgrade proposal record count",
         )
 
+        # Sprint 395 — Per-subsystem labeled gauges sourced
+        # from /health/detailed. Mirrors sprint-394 on the
+        # bootstrap-server side. Encoding:
+        #   0 = healthy / available (status="ok")
+        #   1 = optional-opt-out (not_wired / disabled /
+        #       uninitialized — distinct from hard failure)
+        #   2 = error / unhealthy / unknown
+        # Wrapped in try/except per the fail-soft per-metric
+        # convention — a /health/detailed crash MUST NOT
+        # 500 the /metrics endpoint.
+        try:
+            detailed = await health_detailed()
+            subs = detailed.get("subsystems") or {}
+            if subs:
+                def _escape_label(s: str) -> str:
+                    return (
+                        s.replace("\\", "\\\\")
+                         .replace('"', '\\"')
+                         .replace("\n", "\\n")
+                    )
+
+                def _encode_status(sub: Dict[str, Any]) -> int:
+                    status = sub.get("status")
+                    available = sub.get("available")
+                    if status == "ok" and available:
+                        return 0
+                    # Explicit operator-opt-out signals only.
+                    # "uninitialized" is NOT opt-out — it
+                    # means a core subsystem hasn't connected,
+                    # which is a hard failure for that node.
+                    if status in ("not_wired", "disabled"):
+                        return 1
+                    return 2
+
+                lines.append(
+                    "# HELP prsm_node_subsystem_status "
+                    "Per-subsystem readiness "
+                    "(0=healthy, 1=optional-opt-out, "
+                    "2=unhealthy)"
+                )
+                lines.append(
+                    "# TYPE prsm_node_subsystem_status gauge"
+                )
+                for sub_name, sub_data in subs.items():
+                    if not isinstance(sub_data, dict):
+                        continue
+                    label = _escape_label(sub_name)
+                    value = _encode_status(sub_data)
+                    lines.append(
+                        f'prsm_node_subsystem_status'
+                        f'{{subsystem="{label}"}} {value}'
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "metrics subsystem block failed: %s", exc,
+            )
+
         # Always emit at least one metric so probes have something
         # to scrape. The "up" gauge is canonical for this.
         lines.append("# HELP prsm_node_up Node-up indicator")
