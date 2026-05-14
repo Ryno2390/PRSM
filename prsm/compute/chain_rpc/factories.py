@@ -111,7 +111,8 @@ def make_rpc_chain_executor(
     chunk_threshold_bytes: int = CHUNK_THRESHOLD_BYTES,
     chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
     default_deadline_seconds: float = 30.0,
-) -> RpcChainExecutor:
+    wrap_topology_aware: bool = True,
+) -> Any:
     """Build an ``RpcChainExecutor`` with production-friendly defaults.
 
     Required:
@@ -163,7 +164,7 @@ def make_rpc_chain_executor(
             "wrapping the model's actual tokenizer + de-tokenizer. "
             "See factories.py docstring for details."
         )
-    return RpcChainExecutor(
+    base = RpcChainExecutor(
         settler_identity=settler_identity,
         send_message=send_message,
         streamed_send_message=streamed_send_message,
@@ -175,6 +176,19 @@ def make_rpc_chain_executor(
         chunk_bytes=chunk_bytes,
         default_deadline_seconds=default_deadline_seconds,
     )
+    if not wrap_topology_aware:
+        return base
+    # Sprint 417 — wrap with sprint-414's
+    # TopologyAwareChainExecutor by default so live
+    # InferenceReceipts immediately carry a verifiable
+    # topology_assignment hash. Operators wanting the raw
+    # executor (e.g., for unit-test fixtures that assert
+    # on the bare receipt shape) pass
+    # wrap_topology_aware=False.
+    from prsm.compute.inference.topology_aware_executor import (
+        TopologyAwareChainExecutor,
+    )
+    return TopologyAwareChainExecutor(inner=base)
 
 
 # ──────────────────────────────────────────────────────────────────────────
