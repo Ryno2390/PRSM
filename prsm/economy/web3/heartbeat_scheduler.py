@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional, Union
 
 from prsm.economy.web3.provenance_registry import (
@@ -119,6 +120,16 @@ class HeartbeatScheduler:
         self._stop_event = asyncio.Event()
         self.success_count = 0
         self.failure_count = 0
+        # Sprint 399 — track last successful tick timestamp.
+        # /health/detailed and Prometheus surface this so
+        # operators can distinguish "task running but no
+        # forward progress" (chain RPC failing every tick)
+        # from "task running healthily." Mirrors sprint 392's
+        # observability discipline from the bootstrap-server
+        # side onto operator-node daemons. None until first
+        # successful tick. Bumped ONLY on success — RPC
+        # failure paths leave it stale, which is the signal.
+        self.last_tick_at: Optional[datetime] = None
 
     @classmethod
     def _auto_tune_from_client(cls, client) -> float:
@@ -165,6 +176,17 @@ class HeartbeatScheduler:
     @property
     def interval_seconds(self) -> float:
         return self._interval
+
+    @property
+    def last_tick_age_seconds(self) -> Optional[float]:
+        """Seconds since last successful tick, or None if no
+        tick has ever succeeded. Surfaced via /health/detailed
+        and Prometheus subsystem labeled gauge."""
+        if self.last_tick_at is None:
+            return None
+        return (
+            datetime.now(timezone.utc) - self.last_tick_at
+        ).total_seconds()
 
     async def run_forever(self) -> None:
         """Run the heartbeat loop until ``stop()`` is called."""
@@ -220,6 +242,11 @@ class HeartbeatScheduler:
             return
 
         self.success_count += 1
+        # Sprint 399 — only bump on actual on-chain success.
+        # All failure paths above return early without
+        # updating this timestamp, which is what lets ops
+        # alerts catch "loop running but no forward progress."
+        self.last_tick_at = datetime.now(timezone.utc)
         logger.info("heartbeat ok: %s", tx_hash)
 
         if self._on_success is not None:

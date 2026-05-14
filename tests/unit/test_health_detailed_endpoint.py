@@ -394,6 +394,98 @@ class TestHeartbeatSchedulerSubsystem:
             assert hb["available"] is False
 
 
+class TestHeartbeatSchedulerTickAge:
+    """Sprint 399 — surface heartbeat scheduler's last
+    tick age + status alongside the existing task_running
+    field. Closes the silent-economic-failure gap that
+    sprint 392 closed bootstrap-side: a daemon whose task
+    is running but never makes forward progress (chain RPC
+    failing every tick = no heartbeat = no compensation
+    epoch credit).
+
+    Status thresholds match sprint 392:
+      age < 2 × interval     → healthy
+      2 ≤ age < 5 × interval → degraded
+      age ≥ 5 × interval     → stale
+      age is None            → stale
+
+    Aggregate top-level status NOT affected by tick_status
+    (pure-additive change to preserve existing test
+    semantics).
+    """
+
+    def _setup(self, age_seconds, interval=900):
+        from datetime import datetime, timezone, timedelta
+        node = _node_full()
+        scheduler = MagicMock()
+        scheduler.interval_seconds = interval
+        if age_seconds is None:
+            scheduler.last_tick_age_seconds = None
+            scheduler.last_tick_at = None
+        else:
+            scheduler.last_tick_age_seconds = age_seconds
+            scheduler.last_tick_at = (
+                datetime.now(timezone.utc)
+                - timedelta(seconds=age_seconds)
+            )
+        node._heartbeat_scheduler = scheduler
+        fake_task = MagicMock()
+        fake_task.done.return_value = False
+        node._heartbeat_scheduler_task = fake_task
+        return node
+
+    def test_age_field_surfaced_when_scheduler_has_ticked(self):
+        node = self._setup(age_seconds=12.4)
+        resp = _client(node).get("/health/detailed")
+        hb = resp.json()["subsystems"]["heartbeat_scheduler"]
+        assert hb["last_tick_age_seconds"] == 12.4
+
+    def test_recent_tick_classified_healthy(self):
+        # 100s old, interval 900s → 0.11× interval → healthy
+        node = self._setup(age_seconds=100, interval=900)
+        resp = _client(node).get("/health/detailed")
+        hb = resp.json()["subsystems"]["heartbeat_scheduler"]
+        assert hb["tick_status"] == "healthy"
+
+    def test_two_to_five_x_interval_classified_degraded(self):
+        # 2000s old, interval 900s → 2.22× interval → degraded
+        node = self._setup(age_seconds=2000, interval=900)
+        resp = _client(node).get("/health/detailed")
+        hb = resp.json()["subsystems"]["heartbeat_scheduler"]
+        assert hb["tick_status"] == "degraded"
+
+    def test_over_five_x_interval_classified_stale(self):
+        # 5000s old, interval 900s → 5.56× interval → stale
+        node = self._setup(age_seconds=5000, interval=900)
+        resp = _client(node).get("/health/detailed")
+        hb = resp.json()["subsystems"]["heartbeat_scheduler"]
+        assert hb["tick_status"] == "stale"
+
+    def test_none_age_classified_stale(self):
+        """No successful tick yet → operationally
+        indistinguishable from stale. Operators alerting
+        on `tick_status=stale` should see brand-new
+        scheduler in same bucket as silently-dead one."""
+        node = self._setup(age_seconds=None)
+        resp = _client(node).get("/health/detailed")
+        hb = resp.json()["subsystems"]["heartbeat_scheduler"]
+        assert hb["tick_status"] == "stale"
+        assert hb["last_tick_age_seconds"] is None
+
+    def test_aggregate_status_unchanged_by_tick_status(self):
+        """Pure-additive change — sprint 399 must NOT flip
+        the aggregate top-level status based on heartbeat
+        tick_status. Operators set their own alert
+        thresholds on the new field."""
+        node = self._setup(age_seconds=5000, interval=900)
+        resp = _client(node).get("/health/detailed")
+        body = resp.json()
+        # Even with heartbeat scheduler stale, aggregate
+        # status reflects the pre-sprint-399 logic
+        # (depends on core subsystems + optionals)
+        assert body["status"] in ("healthy", "degraded")
+
+
 class TestRemainingDaemonSubsystems:
     """Same daemon-lifecycle pattern applied to the remaining 4
     long-running tasks: compensation_scheduler + 3 event watchers

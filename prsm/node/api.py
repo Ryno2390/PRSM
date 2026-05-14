@@ -11493,9 +11493,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         heartbeat = getattr(node, "_heartbeat_scheduler", None)
         if heartbeat is not None:
             entry = {"available": True, "status": "ok"}
-            entry["interval_seconds"] = getattr(
+            interval = getattr(
                 heartbeat, "interval_seconds", None,
             )
+            entry["interval_seconds"] = interval
             hb_task = getattr(node, "_heartbeat_scheduler_task", None)
             if hb_task is not None:
                 try:
@@ -11504,6 +11505,32 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     logger.debug(
                         "heartbeat task probe raised: %s", exc,
                     )
+            # Sprint 399 — surface heartbeat-scheduler's
+            # last-tick age + status. Catches the silent-
+            # economic-failure mode where the task is
+            # running but the chain RPC has been failing
+            # every tick (no compensation epoch credit).
+            # Pure-additive — does NOT modify the
+            # aggregate top-level status (operators set
+            # their own alert thresholds on tick_status).
+            try:
+                age = getattr(
+                    heartbeat, "last_tick_age_seconds", None,
+                )
+                entry["last_tick_age_seconds"] = age
+                if age is None or not isinstance(interval, (int, float)) or interval <= 0:
+                    tick_status = "stale"
+                elif age < 2 * interval:
+                    tick_status = "healthy"
+                elif age < 5 * interval:
+                    tick_status = "degraded"
+                else:
+                    tick_status = "stale"
+                entry["tick_status"] = tick_status
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "heartbeat tick-age probe raised: %s", exc,
+                )
             subsystems["heartbeat_scheduler"] = entry
         elif hasattr(node, "_heartbeat_scheduler"):
             # Explicitly None means "operator opted out / unwired"

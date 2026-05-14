@@ -183,6 +183,106 @@ class TestSingleTick:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Sprint 399 — last_tick_at heartbeat tracking
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestLastTickAtTracking:
+    """The daemon's task can be running (asyncio task not
+    done) yet not making forward progress because the
+    underlying chain RPC is failing every tick. Sprint
+    392's hard-won observability lesson on the bootstrap-
+    server side: surface heartbeat AGE, not just
+    'is-running'. Mirrors that on the operator-node side
+    starting with HeartbeatScheduler — the canonical
+    silent-economic-failure case (no chain heartbeat =
+    no compensation epoch credit)."""
+
+    def test_last_tick_at_initially_none(self):
+        client = _FakeSlashingClient()
+        scheduler = HeartbeatScheduler(client=client)
+        assert scheduler.last_tick_at is None
+
+    @pytest.mark.asyncio
+    async def test_successful_tick_bumps_last_tick_at(self):
+        from datetime import datetime, timezone
+        before = datetime.now(timezone.utc)
+        client = _FakeSlashingClient()
+        scheduler = HeartbeatScheduler(client=client)
+        await scheduler.tick()
+        after = datetime.now(timezone.utc)
+        assert scheduler.last_tick_at is not None
+        assert before <= scheduler.last_tick_at <= after
+
+    @pytest.mark.asyncio
+    async def test_broadcast_failure_does_not_bump_last_tick_at(self):
+        """If the chain RPC fails, the daemon hasn't actually
+        recorded a heartbeat on-chain. last_tick_at should
+        NOT advance — otherwise operators looking at the
+        timestamp think things are fine while their node
+        misses compensation epochs."""
+        client = _FakeSlashingClient(outcomes=[BroadcastFailedError])
+        scheduler = HeartbeatScheduler(client=client)
+        await scheduler.tick()
+        assert scheduler.last_tick_at is None
+
+    @pytest.mark.asyncio
+    async def test_pending_error_does_not_bump_last_tick_at(self):
+        """Same logic as broadcast failure — receipt unknown
+        = forward progress unknown = don't claim success."""
+        client = _FakeSlashingClient(
+            outcomes=[OnChainPendingError("pending", tx_hash="0xdead")],
+        )
+        scheduler = HeartbeatScheduler(client=client)
+        await scheduler.tick()
+        assert scheduler.last_tick_at is None
+
+    @pytest.mark.asyncio
+    async def test_reverted_error_does_not_bump_last_tick_at(self):
+        client = _FakeSlashingClient(outcomes=[OnChainRevertedError])
+        scheduler = HeartbeatScheduler(client=client)
+        await scheduler.tick()
+        assert scheduler.last_tick_at is None
+
+    @pytest.mark.asyncio
+    async def test_unexpected_exception_does_not_bump_last_tick_at(self):
+        client = _FakeSlashingClient(outcomes=[RuntimeError("weird")])
+        scheduler = HeartbeatScheduler(client=client)
+        await scheduler.tick()
+        assert scheduler.last_tick_at is None
+
+    @pytest.mark.asyncio
+    async def test_multiple_successes_advance_last_tick_at(self):
+        """Each successful tick should advance the timestamp,
+        not stay frozen at the first success."""
+        client = _FakeSlashingClient()
+        scheduler = HeartbeatScheduler(client=client)
+        await scheduler.tick()
+        first = scheduler.last_tick_at
+        # Force a small gap so timestamps are distinguishable
+        import asyncio as _asyncio
+        await _asyncio.sleep(0.001)
+        await scheduler.tick()
+        second = scheduler.last_tick_at
+        assert second > first
+
+    def test_last_tick_age_seconds_none_when_never_ticked(self):
+        client = _FakeSlashingClient()
+        scheduler = HeartbeatScheduler(client=client)
+        assert scheduler.last_tick_age_seconds is None
+
+    @pytest.mark.asyncio
+    async def test_last_tick_age_seconds_after_tick(self):
+        client = _FakeSlashingClient()
+        scheduler = HeartbeatScheduler(client=client)
+        await scheduler.tick()
+        age = scheduler.last_tick_age_seconds
+        assert age is not None
+        # Just ticked — age should be small
+        assert 0 <= age < 1.0
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Run loop
 # ──────────────────────────────────────────────────────────────────────
 
