@@ -3427,6 +3427,52 @@ When future events fire (CDP commission, Aerodrome pool seed, fleet kill-switch 
 
 ---
 
+### 7.36 §7 Private Inference — topology pathway end-to-end (sprints 413–415, 2026-05-14)
+
+**Scope note.** Sprint 297 capstone (§7.27) shipped the SCHEMA + signing-payload conditional encoding for `activation_noise_trace` + `topology_assignment` Optional fields on `InferenceReceipt`, but explicitly deferred the LIVE-INFERENCE wiring of those fields. Sprints 413–415 close that deferral end-to-end for the **topology side** — sprint 415 demonstrates a strict-topology operator policy (`require_topology_rotation=True` against the sprint-292 verifier) now succeeds against real signed receipts produced by the production parallax executor path. Activation-DP-side wiring remains deferred (intrusive change to dispatch loop; tracked as honest-scope below).
+
+**Why this is in the cumulative bundle.** The sprint 292 verifier (`verify_receipt_privacy_claim`) is the operator-facing surface that enforces §7 Private Inference's verifiable-claim guarantees. Until sprint 413–415, the `require_topology_rotation=True` mode was theoretically correct but practically unusable: every live receipt returned `None` for `topology_assignment` (sprint 297 schema was in place but no producer was wired), so strict-topology operators couldn't run the check without false-positives on legitimate receipts. Sprints 413–415 close the producer side of that gap.
+
+**Headline guarantees.**
+
+1. **Sprint 413 — `ChainExecutionResult` + parallax receipt-build wiring** (`parallax-receipt-privacy-wiring-merge-ready-20260514`). `ChainExecutionResult` gains two Optional fields (`activation_noise_trace`, `topology_assignment`) defaulting to `None` — pure-additive contract preserves pre-sprint-413 ChainExecutors. `ParallaxScheduledExecutor._build_signed_receipt` threads them into the `InferenceReceipt` via `getattr` (defensive against legacy Protocol implementers). Sprint 297's conditional signing-payload encoding makes the on-wire bytes byte-identical to pre-sprint-413 receipts when both fields are `None` — pinned by `test_signing_payload_unchanged_when_fields_none`.
+
+2. **Sprint 414 — `TopologyAwareChainExecutor` decorator** (`topology-aware-chain-executor-decorator-merge-ready-20260514`). New module `prsm/compute/inference/topology_aware_executor.py`. Wraps any inner `ChainExecutor`; after `inner.execute_chain` returns, builds a `TopologyAssignment` from `chain.stages` (one slot per stage) and populates `outcome.topology_assignment` via `dataclasses.replace()`. The assignment is a STRUCTURAL fact about which nodes handled which `(stage, slot)` — verifiable by any party with the chain definition by rebuilding the same assignment and checking `stable_hash()` matches. Composition contract: respects pre-existing `topology_assignment` from upstream decorator (never clobbers), propagates inner exceptions unchanged, preserves inner result fields verbatim (output / duration / TEE attestation / epsilon_spent / activation_noise_trace).
+
+3. **Sprint 415 — end-to-end signed-receipt verification** (`topology-end-to-end-signed-receipt-merge-ready-20260514`). `tests/unit/test_topology_end_to_end_signed_receipt.py` exercises the full pipeline against a real `ed25519` settler identity: mock inner ChainExecutor → sprint-414 decorator → sprint-413 receipt-build → `sign_receipt` → `verify_receipt_privacy_claim(require_topology_rotation=True)`. Four headline cases: (1) full pipeline returns `ok=True` + `topology_structurally_valid=True`; (2) regression pin — skip the sprint-414 decorator, verify fails with `"topology_assignment missing"` reason (literal demonstration that sprint 414 was the load-bearing fix); (3) sprint-296 anti-repeat — pre-loaded `TopologyHistory` rejects the receipt as `"repeats an entry in supplied history"`; (4) backwards-compat — permissive default verify (no `require_*` flags) still passes receipts without topology.
+
+**Trust seams.**
+
+1. **Topology assignment authenticity depends on the producer running BEFORE dispatch.** The sprint-414 decorator reads `chain.stages` after `inner.execute_chain` returns. If a malicious inner executor swapped stages mid-dispatch but reported the original list, the recorded assignment would not reflect what actually happened. Mitigation: the inner executor's per-stage attestations (sprint 3.x.7 Task 5 multi-stage envelope) commit to each stage's node_id; a swap would break the attestation chain. The topology field is a convenience surface for verifiers, not a primary integrity gate.
+
+2. **Anti-repeat history is operator-supplied, not chain-bound.** `verify_receipt_privacy_claim`'s `topology_history` parameter is whatever the verifying operator chooses to maintain — there's no canonical fleet-wide history. An attacker who can see only one receipt at a time can't be caught by anti-repeat. The defense is meaningful only when an operator (or settler) is checking a stream of receipts from a single source. The sprint-296 `TopologyRotationPolicy` (beacon_seeded / anti_repeat strategies) is the producer-side defense; this verifier check is the consumer-side complement.
+
+3. **Decorator composition order is operator-attested.** Wiring `TopologyAwareChainExecutor` ABOVE a future `ActivationDPAwareChainExecutor` (or vice versa) determines which fields land first; both decorators are designed to commute via the sprint-413 `replace()`-based pass-through pattern. But the actual wiring at node-construction time isn't enforced by the runtime — operators choose composition order in their node-build factory. Mitigation: end-to-end integration test (sprint 415) verifies the canonical order works; further runbook documentation in the operator deploy guides is honest-scope.
+
+4. **Single-slot assumption baked into sprint 414's decorator.** `slots_per_stage = 1` is hard-coded. A future multi-slot redundancy model (re-execute the same stage on K nodes for honest-majority correctness) would need a different decorator or extended params. Mitigation: explicit in the decorator + tests; not a regression risk for the current single-slot fleet.
+
+**Honest scope deferred.**
+
+- **Activation-DP-side wiring.** Sprint 295's `ActivationDPInjector` (per-stage Gaussian noise + composition tracking) is shipped; the corresponding `ActivationDPAwareChainExecutor` decorator is NOT. Unlike topology (which can be recorded by a pure outer wrapper because the structural fact is observable post-dispatch), DP injection has to happen INSIDE the chain executor's dispatch loop — noise is applied to each activation transfer between stages. Wiring this requires extending `RpcChainExecutor._dispatch_stage` to accept an injector callback. Tracked as the natural sibling of sprint 414.
+
+- **Node-construction default wiring.** Sprints 413–415 ship the components but don't change the default factory wiring at `prsm/compute/chain_rpc/factories.py:make_rpc_chain_executor` — operators must explicitly wrap with `TopologyAwareChainExecutor` to populate the field. This is deliberate (avoids changing default behavior of an established factory without a CR), but means today's production receipts still report `topology_assignment=None` until an operator opts in. Future sprint could either flip the default OR document explicit operator wiring in deploy guides.
+
+- **Multi-stage attestation envelope integration.** The per-stage TEE attestations (sprint 3.x.7 Task 5) and the topology assignment are independent observables today. A verifier checking both has to cross-reference manually. A future tighter binding (e.g., the topology assignment's stable_hash committed inside the multi-stage attestation envelope) would shrink the attack surface by an additional discrete factor. Not load-bearing for current sprint-292 verifier checks.
+
+**Auditor reading path (§7.36 delta).**
+
+1. Start with the sprint-415 integration test — `tests/unit/test_topology_end_to_end_signed_receipt.py` shows the full pathway end-to-end.
+2. Then the sprint-414 decorator — `prsm/compute/inference/topology_aware_executor.py` + `tests/unit/test_topology_aware_chain_executor.py`.
+3. Then the sprint-413 schema-pass-through — `prsm/compute/inference/parallax_executor.py:_build_signed_receipt` + `tests/unit/test_parallax_executor_receipt_privacy_wiring.py`.
+4. Cross-reference §7.27's sprint 297 capstone (the schema producer + signing-payload conditional encoding that this arc consumes).
+5. Cross-reference the sprint-292 verifier — `prsm/compute/inference/privacy_verification.py:verify_receipt_privacy_claim` (the consumer of `topology_assignment` that becomes practically usable post-§7.36).
+
+**Tags.** 3 merge-ready tags (`parallax-receipt-privacy-wiring-...`, `topology-aware-chain-executor-decorator-...`, `topology-end-to-end-signed-receipt-...`), all dated `20260514`. Headline tag: `topology-end-to-end-signed-receipt-merge-ready-20260514` (commit `d307a5b2`) — the load-bearing end-to-end demonstration.
+
+**Cumulative count.** §7 verifiable-claim pathway: 6 sprints (292 verifier, 293–295 attestation backends + DP injector, 296 rotation policy, 297 receipt schema + signing-payload encoding, 413–415 topology-side end-to-end closure). Activation-DP-side wiring remains as the sibling deferral. Cross-suite 91 green across the §7-relevant test surface (`topology_end_to_end_signed_receipt + topology_aware_chain_executor + parallax_executor_receipt_privacy_wiring + receipt_privacy_capstone + topology_rotation + activation_dp`).
+
+---
+
 ## 8. Auditor handoff checklist
 
 When the Foundation signs the auditor contract:
