@@ -951,6 +951,51 @@ class BootstrapServer:
                     f'{metric_name}{{{label_name}="{escaped}"}} {value}'
                 )
 
+        # Sprint 394 — per-subsystem status + heartbeat age
+        # as labeled gauges so Prometheus alerts can fire on
+        # a specific stuck loop. Status encoded numerically
+        # (Prometheus convention for enum metrics):
+        #   0 = healthy, 1 = degraded, 2 = stale
+        detailed = self.health_check_detailed()
+        subsystems = detailed.get("subsystems") or {}
+        if subsystems:
+            status_metric = "prsm_bootstrap_subsystem_status"
+            age_metric = (
+                "prsm_bootstrap_subsystem_heartbeat_age_seconds"
+            )
+            lines.append(
+                f"# HELP {status_metric} "
+                f"Per-subsystem readiness "
+                f"(0=healthy, 1=degraded, 2=stale)"
+            )
+            lines.append(f"# TYPE {status_metric} gauge")
+            lines.append(
+                f"# HELP {age_metric} "
+                f"Seconds since last successful heartbeat "
+                f"per subsystem"
+            )
+            lines.append(f"# TYPE {age_metric} gauge")
+            status_encoding = {
+                "healthy": 0,
+                "degraded": 1,
+                "stale": 2,
+            }
+            for sub_name, sub_data in subsystems.items():
+                escaped = _escape_label_value(sub_name)
+                sub_status_val = status_encoding.get(
+                    sub_data.get("status"), 2,
+                )
+                lines.append(
+                    f'{status_metric}{{subsystem="{escaped}"}}'
+                    f' {sub_status_val}'
+                )
+                age = sub_data.get("last_heartbeat_age_seconds")
+                if isinstance(age, (int, float)):
+                    lines.append(
+                        f'{age_metric}{{subsystem="{escaped}"}}'
+                        f' {age}'
+                    )
+
         nl = chr(10)
         return nl.join(lines) + nl
 

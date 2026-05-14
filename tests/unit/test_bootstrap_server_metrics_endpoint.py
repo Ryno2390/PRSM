@@ -258,6 +258,115 @@ class TestLabeledGauges:
 # ── Pre-existing endpoints still work ────────────────────
 
 
+class TestSubsystemPrometheusGauges:
+    """Sprint 394 — /health/detailed's per-subsystem state
+    surfaces in the Prometheus exposition as two labeled
+    gauges so operators can alert on specific stuck loops.
+    """
+
+    def test_subsystem_status_gauge_emitted(
+        self, server, client,
+    ):
+        from datetime import datetime, timezone
+        # Force every subsystem to a known state by bumping
+        # the heartbeat registry directly
+        now = datetime.now(timezone.utc)
+        server._loop_heartbeats = {
+            "peer_cleanup": now,
+            "peer_backup": now,
+            "federation_sync": now,
+            "health_check_loop": now,
+        }
+        resp = client.get("/prometheus")
+        text = resp.text
+        # Encoding: 0 = healthy, 1 = degraded, 2 = stale
+        for sub in (
+            "peer_cleanup", "peer_backup",
+            "federation_sync", "health_check_loop",
+            "api_server",
+        ):
+            assert (
+                f'prsm_bootstrap_subsystem_status'
+                f'{{subsystem="{sub}"}} 0'
+            ) in text, (
+                f"missing healthy gauge for {sub} in: "
+                f"{text[:500]}..."
+            )
+
+    def test_subsystem_heartbeat_age_gauge_emitted(
+        self, server, client,
+    ):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        server._loop_heartbeats = {
+            "peer_cleanup": now - timedelta(seconds=10),
+            "peer_backup": now,
+            "federation_sync": now,
+            "health_check_loop": now,
+        }
+        resp = client.get("/prometheus")
+        text = resp.text
+        # The age gauge for peer_cleanup should be ≥ 10
+        # Find the line + parse the value
+        prefix = (
+            'prsm_bootstrap_subsystem_heartbeat_age_seconds'
+            '{subsystem="peer_cleanup"} '
+        )
+        line = next(
+            (l for l in text.splitlines() if l.startswith(prefix)),
+            None,
+        )
+        assert line is not None, (
+            f"missing peer_cleanup heartbeat-age gauge: "
+            f"{text[:500]}..."
+        )
+        value = float(line.split(" ", 1)[1])
+        assert value >= 10.0
+
+    def test_subsystem_status_stale_encoded_as_2(
+        self, server, client,
+    ):
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        # peer_cleanup interval = peer_timeout (default 300s).
+        # 1800s old = 6× interval → stale.
+        server._loop_heartbeats = {
+            "peer_cleanup": now - timedelta(seconds=1800),
+            "peer_backup": now,
+            "federation_sync": now,
+            "health_check_loop": now,
+        }
+        resp = client.get("/prometheus")
+        text = resp.text
+        assert (
+            'prsm_bootstrap_subsystem_status'
+            '{subsystem="peer_cleanup"} 2'
+        ) in text
+
+    def test_subsystem_help_and_type_lines_present(
+        self, server, client,
+    ):
+        from datetime import datetime, timezone
+        server._loop_heartbeats = {
+            "peer_cleanup": datetime.now(timezone.utc),
+        }
+        resp = client.get("/prometheus")
+        text = resp.text
+        # HELP + TYPE for the metric families
+        assert (
+            "# HELP prsm_bootstrap_subsystem_status"
+            in text
+        )
+        assert (
+            "# TYPE prsm_bootstrap_subsystem_status gauge"
+            in text
+        )
+        assert (
+            "# HELP prsm_bootstrap_subsystem_heartbeat_age_seconds"
+            in text
+        )
+
+
 class TestPreExistingEndpointsPreserved:
     def test_health_endpoint_still_works(self, server, client):
         resp = client.get("/health")
