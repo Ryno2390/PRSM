@@ -1912,6 +1912,133 @@ def node_bootstrap(api_port: int, output_format: str):
             console.print(f"    {marker} {n}")
 
 
+@node.command("bootstrap-test")
+@click.option(
+    "--url", "urls", multiple=True,
+    help=(
+        "Bootstrap URL(s) to test. Repeatable. When unset, "
+        "tests the canonical fleet (US + EU + APAC defaults "
+        "from prsm/node/config.py)."
+    ),
+)
+@click.option(
+    "--timeout", default=10.0, type=float,
+    help="Per-host probe timeout in seconds (default 10)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+)
+def node_bootstrap_test(urls, timeout, output_format):
+    """Probe canonical bootstrap fleet from this machine.
+
+    Sprint 385 — operator-trifecta complement to
+    `prsm node bootstrap` (sprint 380). That one shows
+    THIS node's bootstrap-registration state. This one
+    probes ALL canonical bootstraps from wherever the
+    operator is standing and reports TCP / TLS / WSS
+    health for each. Diagnostic for "is my regional
+    bootstrap up, or is something local broken?"
+
+    Doesn't require a running PRSM node.
+    """
+    import asyncio
+    import json
+    from prsm.cli_helpers.bootstrap_probe import (
+        ProbeStatus,
+        canonical_bootstrap_urls,
+        probe_fleet,
+    )
+
+    target_urls = list(urls) if urls else (
+        canonical_bootstrap_urls()
+    )
+    if not target_urls:
+        console.print(
+            "[red]No bootstrap URLs to test.[/red]\n"
+            "[dim]Pass --url <wss://...> or check your "
+            "BOOTSTRAP_PRIMARY env vars.[/dim]"
+        )
+        sys.exit(2)
+
+    fleet = asyncio.run(
+        probe_fleet(target_urls, timeout_seconds=timeout),
+    )
+
+    if output_format == "json":
+        console.print(json.dumps(fleet.to_dict(), indent=2))
+        sys.exit(0 if fleet.all_healthy else 1)
+
+    # Header marker
+    if fleet.all_healthy:
+        marker = "[green]✓ all healthy[/green]"
+    elif fleet.any_healthy:
+        marker = "[yellow]⚠ partial[/yellow]"
+    else:
+        marker = "[red]⚠ all degraded[/red]"
+    console.print(
+        f"[bold]PRSM Bootstrap Fleet Probe[/bold] — "
+        f"{marker} "
+        f"({fleet.healthy_count}/{fleet.total_count} reachable)"
+    )
+    console.print()
+
+    for h in fleet.hosts:
+        if h.status == ProbeStatus.OK:
+            status_str = "[green]✓ ok[/green]"
+        elif h.status == ProbeStatus.TIMEOUT:
+            status_str = "[yellow]⚠ timeout[/yellow]"
+        else:
+            status_str = (
+                f"[red]✗ {h.status.value}[/red]"
+            )
+        url_short = h.url
+        if "://" in url_short:
+            url_short = url_short.split("://", 1)[1]
+        latency_str = (
+            f"{h.latency_ms:.0f}ms"
+            if h.latency_ms is not None else "-"
+        )
+        console.print(
+            f"  {status_str:<22}  {url_short:<50}  "
+            f"{latency_str}"
+        )
+        # Per-layer detail line
+        layer_marks = []
+        for label, ok in (
+            ("TCP", h.tcp_ok),
+            ("TLS", h.tls_ok),
+            ("WSS", h.wss_ok),
+        ):
+            if ok:
+                layer_marks.append(
+                    f"[green]{label}[/green]"
+                )
+            else:
+                layer_marks.append(f"[dim]{label}[/dim]")
+        console.print(
+            "    " + " · ".join(layer_marks)
+            + (
+                f"  ([dim]cert: {h.cert_subject} "
+                f"issued by {h.cert_issuer}[/dim])"
+                if h.cert_subject else ""
+            )
+        )
+        if h.error:
+            console.print(f"    [red]error:[/red] {h.error}")
+
+    # Exit code mirrors the CI-friendly contract:
+    #   0 = all reachable
+    #   1 = some degraded
+    #   2 = all degraded
+    if fleet.all_healthy:
+        sys.exit(0)
+    elif fleet.any_healthy:
+        sys.exit(1)
+    else:
+        sys.exit(2)
+
+
 def _node_admin_trigger(*, api_port: int, path: str, label: str):
     """Shared helper for action triggers — POSTs to admin
     endpoints, renders tx_hash + status."""
