@@ -2519,6 +2519,58 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
+        name="prsm_bootstrap_server_status",
+        description=(
+            "Probe a bootstrap *server* you are running (your "
+            "own droplet — not a canonical bootstrap node you "
+            "are connecting to). Hits the server's HTTP "
+            "control surface at host:port (default "
+            "127.0.0.1:8000 — BootstrapConfig.api_port) and "
+            "returns /health + /metrics rendered for triage. "
+            "AI-assisted complement to the sprint-390 CLI "
+            "`prsm bootstrap-server status`. Operator-"
+            "trifecta third corner: prsm_bootstrap_status "
+            "reports THIS node's registration state; "
+            "prsm_bootstrap_test probes canonical fleet from "
+            "MY vantage; prsm_bootstrap_server_status probes "
+            "MY OWN bootstrap server. Use when operating a "
+            "bootstrap droplet to verify the registration "
+            "daemon is healthy + observability surface live."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "host": {
+                    "type": "string",
+                    "description": (
+                        "Bootstrap server host. Default "
+                        "127.0.0.1 — pass a hostname / IP "
+                        "for remote probes."
+                    ),
+                },
+                "port": {
+                    "type": "integer",
+                    "description": (
+                        "Bootstrap server api_port. Default "
+                        "8000."
+                    ),
+                    "minimum": 1,
+                    "maximum": 65535,
+                    "default": 8000,
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": (
+                        "HTTP timeout in seconds. Default 5."
+                    ),
+                    "minimum": 1,
+                    "maximum": 60,
+                    "default": 5,
+                },
+            },
+        },
+    ),
+    Tool(
         name="prsm_bootstrap_test",
         description=(
             "Probe the canonical PRSM bootstrap fleet (US + "
@@ -11308,6 +11360,83 @@ async def handle_prsm_bootstrap_status(
     return "\n".join(lines)
 
 
+async def handle_prsm_bootstrap_server_status(
+    arguments: Dict[str, Any],
+) -> str:
+    """Sprint 391 — probe a bootstrap *server* you are
+    running (your droplet, not a canonical fleet node).
+
+    AI-assisted complement to sprint-390's `prsm
+    bootstrap-server status` CLI. Same probe core
+    (prsm.cli_helpers.bootstrap_server_probe.
+    fetch_server_status), MCP-rendered.
+    """
+    from prsm.cli_helpers import bootstrap_server_probe as bsp_module
+
+    host = arguments.get("host") or "127.0.0.1"
+    port = int(arguments.get("port") or 8000)
+    timeout = float(arguments.get("timeout", 5.0))
+
+    try:
+        probe = await bsp_module.fetch_server_status(
+            host=host, port=port, timeout_seconds=timeout,
+        )
+    except Exception as e:  # noqa: BLE001
+        return (
+            f"prsm_bootstrap_server_status failed: "
+            f"{type(e).__name__}: {e}"
+        )
+
+    status_markers = {
+        bsp_module.ProbeStatus.OK: "✅ healthy",
+        bsp_module.ProbeStatus.PARTIAL: (
+            "⚠ partial — metrics unavailable"
+        ),
+        bsp_module.ProbeStatus.CONNECT_FAIL: (
+            "❌ connect refused"
+        ),
+        bsp_module.ProbeStatus.TIMEOUT: "❌ timeout",
+        bsp_module.ProbeStatus.HTTP_ERROR: "❌ http error",
+        bsp_module.ProbeStatus.UNKNOWN: "❌ unknown",
+    }
+    marker = status_markers.get(probe.status, "❌ ?")
+
+    lines = [
+        f"PRSM Bootstrap Server Status — {marker}",
+        f"  target: {probe.host}:{probe.port}",
+    ]
+    if probe.error:
+        lines.append(f"  error: {probe.error}")
+
+    if probe.health:
+        lines.append("")
+        lines.append("Health:")
+        for k, v in probe.health.items():
+            lines.append(f"  {k}: {v}")
+
+    if probe.metrics:
+        lines.append("")
+        lines.append("Metrics:")
+        flat = {
+            k: v for k, v in probe.metrics.items()
+            if not isinstance(v, dict)
+        }
+        labeled = {
+            k: v for k, v in probe.metrics.items()
+            if isinstance(v, dict)
+        }
+        for k, v in flat.items():
+            lines.append(f"  {k}: {v}")
+        for k, label_dict in labeled.items():
+            if not label_dict:
+                continue
+            lines.append(f"  {k}:")
+            for label, value in label_dict.items():
+                lines.append(f"    {label}: {value}")
+
+    return "\n".join(lines)
+
+
 async def handle_prsm_bootstrap_test(
     arguments: Dict[str, Any],
 ) -> str:
@@ -13467,6 +13596,7 @@ TOOL_HANDLERS = {
     "prsm_royalty_dispatch_summary": handle_prsm_royalty_dispatch_summary,
     "prsm_bootstrap_status": handle_prsm_bootstrap_status,
     "prsm_bootstrap_test": handle_prsm_bootstrap_test,
+    "prsm_bootstrap_server_status": handle_prsm_bootstrap_server_status,
     "prsm_pinned_stats": handle_prsm_pinned_stats,
     "prsm_content_filter": handle_prsm_content_filter,
     "prsm_takedown_notices": handle_prsm_takedown_notices,
