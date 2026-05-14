@@ -597,6 +597,7 @@ class RpcChainExecutor:
         *,
         request: InferenceRequest,
         chain: GPUChain,
+        post_stage_hook: Optional[Callable[[Any, int], Any]] = None,
     ) -> ChainExecutionResult:
         if not chain.stages:
             raise ChainExecutionError(
@@ -660,6 +661,21 @@ class RpcChainExecutor:
                 tee_type=response.tee_type,
                 epsilon_spent=response.epsilon_spent,
             ))
+
+            # Sprint 418 — optional per-stage activation
+            # post-processing hook. Fires after the stage's
+            # response has been verified + StageOutcome
+            # recorded, before the activation is passed to
+            # the next stage. Use case: sprint-295 activation
+            # DP injection (a future ActivationDPAware
+            # decorator wires its injector here so noise
+            # gets applied between stages on the live data
+            # path). The hook is per-call (not constructor)
+            # so per-request state — like sprint-295's
+            # ActivationDPInjector's double-spend protection
+            # — works correctly across concurrent requests.
+            if post_stage_hook is not None:
+                activation = post_stage_hook(activation, stage_index)
 
         # Step 4: decode final activation → output string.
         try:

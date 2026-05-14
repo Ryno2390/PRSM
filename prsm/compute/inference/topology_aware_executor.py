@@ -82,12 +82,15 @@ class TopologyAwareChainExecutor:
         self._inner = inner
 
     def execute_chain(
-        self, *, request: Any, chain: Any,
+        self, *, request: Any, chain: Any, **kwargs: Any,
     ) -> ChainExecutionResult:
-        # Pass through to inner — let any ChainExecutionError
-        # propagate unchanged
+        # Sprint 418 — pass-through arbitrary kwargs so a
+        # future DP-aware sibling decorator can stack above
+        # us and thread its post_stage_hook through to the
+        # inner RpcChainExecutor. Topology decorator itself
+        # doesn't consume any kwargs — it's purely outer.
         result = self._inner.execute_chain(
-            request=request, chain=chain,
+            request=request, chain=chain, **kwargs,
         )
 
         # If the inner already populated topology_assignment,

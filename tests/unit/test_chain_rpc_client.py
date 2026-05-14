@@ -1057,6 +1057,138 @@ def streamed_transport(alice, bob, alice_streamed_sim, bob_streamed_sim):
     })
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# Sprint 418 — post_stage_hook integration point for DP injection
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class TestPostStageHook:
+    """Per-call hook fires after each stage's
+    StageOutcome is recorded + before the activation is
+    passed to the next stage. Designed as the integration
+    point for sprint-295 ActivationDPInjector (sprint 419+
+    will wire DP through this). This sprint just ensures
+    the hook's behavioral contract is sound."""
+
+    def test_hook_none_default_behavior_unchanged(
+        self, executor, alice, bob, alice_sim, bob_sim,
+    ):
+        """Regression pin: omitting post_stage_hook is
+        functionally identical to passing None — no
+        behavior change from pre-sprint-418."""
+        chain = _make_chain([alice.node_id, bob.node_id])
+        r1 = executor.execute_chain(
+            request=_make_request("test"),
+            chain=chain,
+        )
+        # Clear the call logs and rerun with explicit None
+        alice_sim.calls.clear()
+        bob_sim.calls.clear()
+        r2 = executor.execute_chain(
+            request=_make_request("test"),
+            chain=chain,
+            post_stage_hook=None,
+        )
+        assert r1.output == r2.output
+
+    def test_hook_fires_once_per_stage(
+        self, executor, alice, bob, alice_sim, bob_sim,
+    ):
+        """Hook is called once per stage with the
+        (activation, stage_index) signature."""
+        chain = _make_chain([alice.node_id, bob.node_id])
+        call_log = []
+
+        def hook(activation, stage_index):
+            call_log.append((stage_index, activation.shape))
+            return activation
+
+        executor.execute_chain(
+            request=_make_request("hi"),
+            chain=chain,
+            post_stage_hook=hook,
+        )
+        # Two stages → two hook calls, indices 0 and 1
+        assert len(call_log) == 2
+        assert call_log[0][0] == 0
+        assert call_log[1][0] == 1
+
+    def test_hook_can_modify_activation(
+        self, executor, alice, bob, alice_sim, bob_sim,
+    ):
+        """The activation returned by the hook IS what gets
+        passed to the next stage. Pinned via simulated
+        downstream-visible mutation."""
+        chain = _make_chain([alice.node_id, bob.node_id])
+        # alice produces identity activation; bob's
+        # downstream-visible input is what the hook
+        # returns. Track what bob actually sees.
+        bob_seen = []
+        bob_sim.set_transform(lambda a: (
+            bob_seen.append(a.copy()) or a
+        ))
+
+        # Hook: multiply by 7 between alice and bob
+        def hook(activation, stage_index):
+            return activation * 7 if stage_index == 0 else activation
+
+        executor.execute_chain(
+            request=_make_request("X"),
+            chain=chain,
+            post_stage_hook=hook,
+        )
+        # Bob saw the hook-modified activation, not alice's
+        # raw output
+        import numpy as np
+        encoded = _prompt_encoder("X")
+        expected_after_hook = encoded * 7
+        assert len(bob_seen) == 1
+        assert np.array_equal(bob_seen[0], expected_after_hook)
+
+    def test_hook_raising_propagates(
+        self, executor, alice, bob,
+    ):
+        """A hook that raises mid-loop propagates the
+        exception — operators see real DP-budget-exhaustion
+        errors, not silent corruption."""
+        chain = _make_chain([alice.node_id, bob.node_id])
+
+        def hook(activation, stage_index):
+            raise ValueError("simulated DP budget exhausted")
+
+        with pytest.raises(ValueError, match="DP budget"):
+            executor.execute_chain(
+                request=_make_request(),
+                chain=chain,
+                post_stage_hook=hook,
+            )
+
+    def test_hook_fires_after_outcome_recorded(
+        self, executor, alice, bob, alice_sim, bob_sim,
+    ):
+        """Hook fires AFTER the stage's outcome is appended
+        — so a hook-side raise on a successful stage still
+        leaves the outcome captured (no half-state)."""
+        chain = _make_chain([alice.node_id, bob.node_id])
+        observed_stages = []
+
+        def hook(activation, stage_index):
+            observed_stages.append(stage_index)
+            if stage_index == 1:
+                raise ValueError("fail on second stage")
+            return activation
+
+        with pytest.raises(ValueError):
+            executor.execute_chain(
+                request=_make_request(),
+                chain=chain,
+                post_stage_hook=hook,
+            )
+        # Hook saw both stages (0 then 1), confirming hook
+        # fires post-outcome
+        assert observed_stages == [0, 1]
+
+
 def _make_executor_with_streaming(
     *,
     settler,

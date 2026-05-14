@@ -285,6 +285,28 @@ def test_single_stage_chain():
     }
 
 
+def test_passes_through_arbitrary_kwargs_to_inner():
+    """Sprint 418 — TopologyAwareChainExecutor must
+    pass-through arbitrary kwargs (like post_stage_hook)
+    to the inner executor so a future DP-aware sibling
+    decorator can stack above us and thread its hook
+    down to the RpcChainExecutor."""
+    from prsm.compute.inference.topology_aware_executor import (
+        TopologyAwareChainExecutor,
+    )
+    inner = _inner_executor()
+    decorator = TopologyAwareChainExecutor(inner=inner)
+    sentinel_hook = lambda a, i: a  # noqa: E731
+    decorator.execute_chain(
+        request=_request(),
+        chain=_chain(["n1"]),
+        post_stage_hook=sentinel_hook,
+    )
+    # Inner saw the kwarg verbatim
+    call = inner.execute_chain.call_args
+    assert call.kwargs.get("post_stage_hook") is sentinel_hook
+
+
 def test_does_not_overwrite_inner_topology_assignment():
     """If the inner executor (e.g., a future DP-aware
     decorator that also computes a topology) already
