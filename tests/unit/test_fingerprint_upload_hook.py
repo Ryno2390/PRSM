@@ -40,8 +40,14 @@ class _FakeUploader:
         self.content_publisher = MagicMock()
 
     async def upload_text(self, **kwargs):
+        # Mirror the real ``UploadedContent`` dataclass field
+        # names — in particular ``content_id`` not ``cid``.
+        # Sprint 425 fixture-drift lesson: MagicMock makes
+        # any attribute access succeed silently, so the wrong
+        # name silently masked the production bug at
+        # ``api.py:5861``.
         result = MagicMock()
-        result.cid = "bafy-xyz"
+        result.content_id = "bafy-xyz"
         result.filename = kwargs.get("filename", "f.bin")
         result.size_bytes = 1024
         result.content_hash = self.content_hash

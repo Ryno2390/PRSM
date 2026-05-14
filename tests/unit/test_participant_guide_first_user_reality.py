@@ -112,10 +112,12 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_six_frictions():
-    """The findings doc enumerates F1-F6. If a finding is
-    silently removed (without an explicit closure note),
-    surface that."""
+def test_findings_doc_documents_all_seven_frictions():
+    """The findings doc enumerates F1-F7. F7 added 2026-05-14
+    after sprint 425 closed F4 end-to-end and surfaced
+    locally-uploaded content not being self-served on
+    retrieve. If a finding is silently removed (without an
+    explicit closure note), surface that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -124,10 +126,24 @@ def test_findings_doc_documents_all_six_frictions():
         "F4 — Content upload fails",
         "F5 — Quote endpoint",
         "F6 — `/onboarding/`",
+        "F7 — Locally-uploaded content not retrievable",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"
         )
+
+
+def test_f4_closure_documented():
+    """Sprint 425 closed F4 end-to-end via 4 layered fixes
+    (bencodepy required dep, libtorrent system-install
+    docs, content_publisher_wired field on /info,
+    result.cid → result.content_id at api.py:5861). The
+    closure note must stay attached to F4 so future
+    readers can trace the fix arc."""
+    text = FINDINGS.read_text()
+    assert "Update 2026-05-14 (sprint 425)" in text
+    assert "result.cid" in text  # the actual production bug
+    assert "content_publisher_wired" in text
 
 
 def test_findings_doc_has_positive_findings():

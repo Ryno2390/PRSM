@@ -97,6 +97,39 @@ prsm node logs -f              # follow logs
 > `docs/operations/2026-05-14-user-dogfood-findings.md` for the full
 > first-time-user journey + known friction points.
 
+#### Installing the BitTorrent layer (required for content hosting)
+
+PRSM's content layer uses `libtorrent` (the Rasterbar implementation) for
+P2P content distribution. **This is a SYSTEM-LEVEL dependency**, not a pip
+package — `pip install libtorrent` does NOT work because the PyPI name
+resolves to an unrelated package. Use your platform's native channel:
+
+| Platform | Install command |
+|---|---|
+| macOS (Homebrew) | `brew install libtorrent-rasterbar` |
+| Debian / Ubuntu | `sudo apt install python3-libtorrent` |
+| Fedora / RHEL | `sudo dnf install rb_libtorrent-python3` |
+| Arch | `sudo pacman -S libtorrent-rasterbar` |
+| Windows | See [libtorrent docs](https://www.libtorrent.org/python_binding.html) — pre-built wheels not available; build-from-source required |
+
+After installing, verify by running `python -c "import libtorrent;
+print(libtorrent.version)"`. If you use `pipx` (the recommended PRSM
+install path), libtorrent must be available to the pipx venv — on macOS
+the Homebrew install drops it into the global Python site-packages
+which the pipx venv inherits.
+
+**Without libtorrent installed:**
+- The PRSM node still runs and accepts queries
+- `GET /balance`, `GET /info`, MCP query tools all work
+- BUT: content uploads via `POST /content/upload` will fail with the
+  error `"upload_text returned None ... content_publisher unwired"`
+- AND: queries against an empty local content index will return
+  `"No content shards above the similarity threshold"`
+
+In other words, you can be a **query consumer** without libtorrent but
+you cannot be a **content host** without it. Most contributors will want
+both, so install libtorrent up front.
+
 > **Note.** `prsm daemon` is deprecated in favor of `prsm node`. The old
 > commands still work (deprecation warning) but will be removed in a
 > future release.

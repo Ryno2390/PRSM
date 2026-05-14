@@ -40,8 +40,18 @@ from prsm.node.api import create_api_app
 
 
 class _FakeUploadResult:
+    """Mirrors the real ``UploadedContent`` dataclass field
+    names at ``prsm/node/content_uploader.py:478`` — in
+    particular ``content_id`` (NOT ``cid``). Sprint 425
+    surfaced a production bug at ``api.py:5861`` that
+    referenced ``result.cid`` and would have been caught by
+    these tests had the fake been shape-correct."""
+
     def __init__(self, cid, filename, size_bytes):
-        self.cid = cid
+        # Endpoint advertises the field as "cid" in JSON but
+        # the dataclass attribute is ``content_id``. Mirror
+        # the real shape so endpoint regressions surface.
+        self.content_id = cid
         self.filename = filename
         self.size_bytes = size_bytes
         self.content_hash = None
@@ -118,7 +128,15 @@ def test_plain_upload_without_recipients_still_works():
     assert resp.status_code == 200
     # The original text passed through unchanged
     assert uploader.last_text == "hello world"
-    assert resp.json().get("encrypted") in (None, False)
+    body = resp.json()
+    assert body.get("encrypted") in (None, False)
+    # Sprint 425 regression pin: the endpoint MUST source
+    # the "cid" response value from
+    # ``UploadedContent.content_id`` — not a phantom
+    # ``.cid`` attribute. Pre-fix this raised
+    # AttributeError → 500 in production.
+    assert body["cid"] == "Qm" + "a" * 44
+    assert body["filename"] == "note.txt"
 
 
 # ── Encrypted upload ────────────────────────────────

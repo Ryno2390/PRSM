@@ -5858,7 +5858,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 )
 
         return {
-            "cid": result.cid,
+            "cid": result.content_id,
             "filename": result.filename,
             "size_bytes": result.size_bytes,
             "content_hash": result.content_hash,
@@ -10516,6 +10516,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # wired adapter — vs silently falling back to None on a missing
         # primitive. Boolean: True iff agent_forge is set + non-None.
         body["agent_forge_wired"] = bool(getattr(node, "agent_forge", None))
+        # Sprint 425 — surface BitTorrent / content_publisher
+        # wiring status. Pre-fix, operators discovered the
+        # gap only after attempting an upload + hitting a
+        # cryptic 500 error. Now visible in /info so the
+        # operator knows BEFORE attempting content workflows.
+        # Three layers checked: libtorrent (system dep),
+        # bt_client (initialized), content_publisher (attached
+        # to ContentUploader). All three must be True for
+        # content uploads to succeed.
+        content_uploader = getattr(node, "content_uploader", None)
+        body["content_publisher_wired"] = bool(
+            content_uploader is not None
+            and getattr(content_uploader, "content_publisher", None)
+            is not None
+        )
         # Diagnostic state + error reason (set by
         # `_build_query_orchestrator_or_none` in node.py). Lets operators
         # see WHY agent_forge_wired=False without scraping logs.

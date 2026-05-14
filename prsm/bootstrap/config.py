@@ -120,6 +120,7 @@ class BootstrapConfig:
     persist_peers: bool = True
     """Persist peer list to disk."""
     
+    # Sprint 383: PRSM_PEER_DB_PATH env var overrides this.
     peer_db_path: str = "/app/data/bootstrap_peers.db"
     """Path to peer database file."""
     

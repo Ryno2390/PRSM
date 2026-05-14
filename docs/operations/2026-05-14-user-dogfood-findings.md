@@ -101,6 +101,56 @@ upload" runbook for operators who want to host content.
 **Status.** Documented as honest-scope in PARTICIPANT_GUIDE; the underlying
 wiring fix is a separate sprint candidate.
 
+**Update 2026-05-14 (sprint 425).** Closed end-to-end. Required four
+distinct fixes layered together:
+
+1. `bencodepy` added to required `dependencies` in `pyproject.toml`
+   (was [bittorrent] extra only — broke real publish path).
+2. `libtorrent` documented as a SYSTEM-LEVEL dep with per-platform
+   install instructions in PARTICIPANT_GUIDE (it isn't a PyPI package
+   despite the existing [bittorrent] extra implying so).
+3. `/info` endpoint extended to surface `content_publisher_wired: bool`
+   so operators can verify the wiring at a glance.
+4. `prsm/node/api.py:5861` referenced a phantom `result.cid` attribute
+   that doesn't exist on the real `UploadedContent` dataclass (correct
+   field is `content_id`). Test fixture `_FakeUploadResult` masked the
+   bug by exposing a `.cid` attribute that doesn't match production.
+   Fixed both production code AND the fake.
+
+Live verification:
+```
+$ curl -X POST http://127.0.0.1:8000/content/upload \
+    -d '{"text": "hello PRSM world", "filename": "test.txt"}'
+{"cid": "376274399c21...", "filename": "test.txt", "size_bytes": 45,
+ "content_hash": "9b9021edcf16...", "creator_id": "cdefb8e5...",
+ "royalty_rate": 0.01, "encrypted": false}
+```
+
+### F7 — Locally-uploaded content not retrievable on same node
+
+**Symptom.** Upload returns success + a CID, but immediately querying
+`/content/retrieve/{cid}` returns:
+
+```
+{"status": "not_found", "providers_tried": 0,
+ "error": "Content not found on any available provider"}
+```
+
+The retrieve path goes through DHT/provider lookup; the local node's
+own upload doesn't register itself as a self-provider for retrieval.
+
+**Severity.** High for the single-node user-validation flow — Vision §4
+step 8 (the query path against uploaded content) can't be exercised
+without at least two nodes OR a self-provider shim. Doesn't block
+multi-node operation but breaks the canonical user-onboarding workflow
+on a single machine.
+
+**Status.** Surfaced 2026-05-14. Deferred — needs design call on
+whether the upload path should auto-register the local node as a
+provider for content it uploaded (likely yes), OR whether retrieve
+should consult the local content_store before going to DHT (also
+likely yes).
+
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
 **Symptom.** Following the "MCP tools" hint in PARTICIPANT_GUIDE, a user

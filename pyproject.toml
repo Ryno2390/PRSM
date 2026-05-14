@@ -86,9 +86,18 @@ dependencies = [
     "streamlit>=1.28.0",
 
     "numpy>=1.24.0",
-    
+
     # Async file I/O (required by IPFS client)
     "aiofiles>=23.0.0",
+
+    # Bencode (PyPI-installable; used by the BitTorrent
+    # manifest layer alongside the system `libtorrent`
+    # binding). Sprint 425 — pulled out of the `[bittorrent]`
+    # optional extra into required deps so the BT manifest
+    # store works even when libtorrent itself isn't yet
+    # installed (operator can install libtorrent later and
+    # the rest of the BT layer is already pip-available).
+    "bencodepy>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -168,8 +177,21 @@ distillation = [
 ]
 
 bittorrent = [
-    # BitTorrent support for P2P file distribution
-    "libtorrent>=2.0.9",
+    # The `libtorrent` Python binding is a SYSTEM-LEVEL
+    # dependency on most platforms — `pip install libtorrent`
+    # does NOT work because the PyPI name resolves to an
+    # unrelated/unmaintained package. Install via the
+    # platform-native channel:
+    #   macOS:    brew install libtorrent-rasterbar
+    #             (drops `libtorrent.so` into site-packages)
+    #   Debian:   apt install python3-libtorrent
+    #   Fedora:   dnf install rb_libtorrent-python3
+    # See `docs/PARTICIPANT_GUIDE.md` "Installing the
+    # BitTorrent layer" sub-section for the canonical
+    # per-platform install steps (sprint 425).
+    # This extra is intentionally empty of `libtorrent`
+    # itself — listing it here would cause `pip install
+    # prsm-network[bittorrent]` to fail.
     "bencodepy>=4.0.0",
 ]
 

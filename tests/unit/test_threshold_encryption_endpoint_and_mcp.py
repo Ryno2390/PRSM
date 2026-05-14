@@ -34,8 +34,13 @@ from prsm.node.api import create_api_app
 
 
 class _FakeUploadResult:
+    """Mirrors the real ``UploadedContent`` dataclass shape
+    at ``prsm/node/content_uploader.py:478`` — including the
+    ``content_id`` field name (NOT ``cid``). Sprint 425
+    fixture-drift lesson."""
+
     def __init__(self, cid, filename, size_bytes):
-        self.cid = cid
+        self.content_id = cid
         self.filename = filename
         self.size_bytes = size_bytes
         self.content_hash = None
