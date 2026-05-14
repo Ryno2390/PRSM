@@ -397,6 +397,55 @@ scrape_configs:
 
 Exposed metric families (post-sprint-389): `prsm_bootstrap_active_connections` (gauge), `prsm_bootstrap_total_connections` (counter), `prsm_bootstrap_failed_connections` (counter), `prsm_bootstrap_rejected_connections` (counter), `prsm_bootstrap_messages_processed` (counter), `prsm_bootstrap_total_peers_served` (counter), `prsm_bootstrap_bytes_sent` (counter), `prsm_bootstrap_bytes_received` (counter), `prsm_bootstrap_avg_response_time_ms` (gauge), `prsm_bootstrap_uptime_seconds` (gauge), `prsm_bootstrap_health_check_failures` (counter), `prsm_bootstrap_errors_count` (counter), plus two labeled gauges: `prsm_bootstrap_peers_by_region{region="..."}` and `prsm_bootstrap_peers_by_capability{capability="..."}`.
 
+Post-sprint-394, the Prometheus exposition also surfaces per-subsystem readiness as two labeled gauges sourced from `/health/detailed`:
+
+- `prsm_bootstrap_subsystem_status{subsystem="..."}` — encoded `0=healthy`, `1=degraded`, `2=stale`. Subsystems: `peer_cleanup`, `peer_backup`, `federation_sync`, `health_check_loop`, `api_server`.
+- `prsm_bootstrap_subsystem_heartbeat_age_seconds{subsystem="..."}` — seconds since the loop's last successful iteration. Stuck-loop detection.
+
+This unlocks PromQL alerts that target specific loops, not just aggregate health:
+
+```promql
+# Alert: peer_backup loop has gone stale (>5× expected interval)
+prsm_bootstrap_subsystem_status{subsystem="peer_backup"} == 2
+
+# Alert: any subsystem degraded
+max(prsm_bootstrap_subsystem_status) >= 1
+
+# Stuck-loop detection — heartbeat age way over threshold
+prsm_bootstrap_subsystem_heartbeat_age_seconds > 1800
+```
+
+### 6.0.1 New JSON surface: `/health/detailed` (sprint 392)
+
+For ops consumers that want the full per-subsystem object (not just the Prometheus-friendly encoded gauges), the bootstrap server also exposes:
+
+```bash
+curl http://localhost:8000/health/detailed
+```
+
+Returns:
+
+```json
+{
+  "status": "healthy|degraded|unhealthy",
+  "subsystems": {
+    "peer_cleanup":        {"alive": true, "status": "healthy",  "last_heartbeat_age_seconds": 30.0,  "expected_interval_seconds": 60.0},
+    "peer_backup":         {"alive": true, "status": "healthy",  "last_heartbeat_age_seconds": 120.0, "expected_interval_seconds": 300.0},
+    "federation_sync":     {"alive": true, "status": "healthy",  "last_heartbeat_age_seconds": 200.0, "expected_interval_seconds": 900.0},
+    "health_check_loop":   {"alive": true, "status": "healthy",  "last_heartbeat_age_seconds": 5.0,   "expected_interval_seconds": 30.0},
+    "api_server":          {"alive": true, "status": "healthy",  "last_heartbeat_age_seconds": 0.0,   "expected_interval_seconds": null}
+  },
+  "server_time": "2026-05-14T..."
+}
+```
+
+Status thresholds (sprint 392):
+- `age < 2 × expected_interval` → healthy
+- `2 ≤ age < 5 × expected_interval` → degraded
+- `age ≥ 5 × expected_interval` OR missing entry → stale
+
+Aggregate `status` mirrors the worst subsystem (healthy < degraded < unhealthy).
+
 ### 6.1 Server-side process / systemd observability
 
 For the registration daemon's process-level state (separate from the metric counters):
@@ -552,3 +601,4 @@ OCI Always Free pool is 4 ARM Ampere A1 cores + 24 GB RAM across all your instan
 | 2026-05-13 | post-381 | Initial guide. Closes the operator-side ops gap that PRSM-CR-2026-05-13-2 §5 non-scope item 6 flagged as "operator-driven, not engineering-driven." When the EU + APAC droplets land, the sprint-375 fallback code path immediately benefits — every cold-start operator in those regions reaches a host before falling back to US. |
 | 2026-05-14 | 385/387 update | §5 + §6 now point at the canonical `prsm node bootstrap-test` CLI (sprint 385) + `prsm_bootstrap_test` MCP tool (sprint 387) as the single-command fleet probe. Manual nc/openssl/python triplet retained as fallback for hosts without the PRSM CLI installed. |
 | 2026-05-14 | 389 | §6 corrected — the bootstrap server *does* run its own observability surface. New §6.0 documents the JSON+Prometheus content-negotiated `/metrics` endpoint, the always-Prometheus `/prometheus` alias, the canonical scrape config, and the 12 flat + 2 labeled metric families exposed by sprint 389. Pre-sprint-389 the bootstrap-server `/metrics` returned JSON for any client (default Prometheus scrapes silently failed); now `Accept: text/plain` or `application/openmetrics-text` triggers exposition format. |
+| 2026-05-14 | 392 / 394 | §6.0 extended — Prometheus exposition now also surfaces per-subsystem readiness (`prsm_bootstrap_subsystem_status{subsystem="..."}` 0/1/2 + `prsm_bootstrap_subsystem_heartbeat_age_seconds`). PromQL alerts can target specific loops (peer_cleanup / peer_backup / federation_sync / health_check_loop / api_server). New §6.0.1 documents the JSON `/health/detailed` surface with status thresholds (<2× healthy, 2-5× degraded, ≥5× stale). Closes a real observability blind spot: pre-sprint-392 a silently-crashed background loop left `/health` reading "healthy" — now operators can alert on individual stuck loops. |
