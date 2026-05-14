@@ -112,12 +112,13 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_seven_frictions():
-    """The findings doc enumerates F1-F7. F7 added 2026-05-14
-    after sprint 425 closed F4 end-to-end and surfaced
-    locally-uploaded content not being self-served on
-    retrieve. If a finding is silently removed (without an
-    explicit closure note), surface that."""
+def test_findings_doc_documents_all_eight_frictions():
+    """The findings doc enumerates F1-F8. F8 added 2026-05-14
+    sprint 427 after the F7 structural shim revealed a
+    next-layer-down BT session-isolation issue still
+    blocking single-node retrieve. If a finding is silently
+    removed (without an explicit closure note), surface
+    that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -127,6 +128,7 @@ def test_findings_doc_documents_all_seven_frictions():
         "F5 — Quote endpoint",
         "F6 — `/onboarding/`",
         "F7 — Locally-uploaded content not retrievable",
+        "F8 — BT publisher/requester session isolation",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"

@@ -2206,6 +2206,17 @@ class PRSMNode:
             )
             self.content_uploader.content_publisher = self.content_publisher
             self.content_uploader.content_retriever = self.content_retriever
+            # Sprint 427 (F7) — also wire the retriever into the
+            # ContentProvider so _fetch_local can fall back to the BT
+            # swarm for cids that are structurally invalid for
+            # ContentHash.from_hex (e.g., 40-char BT v1 infohashes
+            # produced by Tier A publishes). Closes the locally-uploaded-
+            # content-not-retrievable-on-same-node gap that blocked
+            # Vision §4 step 8 single-node user-validation.
+            if self.content_provider is not None:
+                self.content_provider.content_retriever = (
+                    self.content_retriever
+                )
             logger.info(
                 "ContentUploader wired through ContentPublisher (Tier A) — "
                 "uploads now distribute via the BitTorrent layer."

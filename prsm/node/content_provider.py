@@ -381,6 +381,17 @@ class ContentProvider:
         # HTTP session for cross-node gateway fetches
         self._http_session: Optional[Any] = None
 
+        # Sprint 427 (F7) — BT-infohash fallback for _fetch_local.
+        # Set externally by Node init when the BitTorrent layer
+        # is available. When wired, _fetch_local falls back to
+        # ``content_retriever.fetch(infohash)`` for cids that are
+        # in ``_local_content`` but structurally invalid for
+        # ``ContentHash.from_hex`` (e.g., 40-char BT v1
+        # infohashes). Pre-sprint-427 these cids returned None
+        # from _fetch_local even though the bytes were locally
+        # available via the BT swarm.
+        self.content_retriever: Optional[Any] = None
+
         # Telemetry
         self._telemetry: Dict[str, Any] = {
             "requests_received": 0,
@@ -843,6 +854,13 @@ class ContentProvider:
 
         Returns None (never raises) for any of: ContentStore unavailable,
         malformed CID hex, missing content, or underlying storage errors.
+
+        Sprint 427 (F7): falls back to ``self.content_retriever.fetch``
+        when the cid is structurally invalid for ``ContentHash.from_hex``
+        OR ContentStore returns None, and the cid is in
+        ``_local_content``. Closes the BT-infohash vs ContentHash storage
+        split documented in
+        ``docs/operations/2026-05-14-user-dogfood-findings.md`` F7.
         """
         try:
             from prsm.storage import ContentHash, get_content_store
@@ -853,16 +871,49 @@ class ContentProvider:
                 logger.debug(
                     f"ContentStore not available, cannot retrieve {content_id[:12]}..."
                 )
-                return None
-            return await store.retrieve_local(ContentHash.from_hex(content_id))
-        except ValueError:
-            # Malformed content hash hex (bad algorithm prefix, wrong length).
-            logger.debug(f"Malformed content id: {content_id[:12]}...")
+                return await self._fetch_local_via_bt(content_id)
+            try:
+                bytes_ = await store.retrieve_local(
+                    ContentHash.from_hex(content_id),
+                )
+                if bytes_ is not None:
+                    return bytes_
+            except ValueError:
+                # Malformed for ContentStore — fall through to BT.
+                logger.debug(
+                    f"cid not ContentHash-shaped: {content_id[:12]}... "
+                    "— trying BT fallback"
+                )
         except ContentNotFoundError:
             logger.debug(f"Content not found in ContentStore for {content_id[:12]}...")
         except (StorageError, OSError) as e:
             logger.error(f"ContentStore retrieve failed for {content_id[:12]}...: {e}")
-        return None
+        return await self._fetch_local_via_bt(content_id)
+
+    async def _fetch_local_via_bt(
+        self, content_id: str,
+    ) -> Optional[bytes]:
+        """Sprint 427 (F7): fetch via the wired ``ContentRetriever``.
+
+        Fires only for cids that are in ``_local_content`` — guards
+        against accidentally swarming the BT layer for unknown cids
+        when the local-lookup path is meant to be a fast no-op.
+
+        Returns None (never raises) for: no retriever wired, cid not
+        in ``_local_content``, or retriever errors.
+        """
+        retriever = getattr(self, "content_retriever", None)
+        if retriever is None:
+            return None
+        if content_id not in self._local_content:
+            return None
+        try:
+            return await retriever.fetch(content_id)
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                f"BT fallback retrieve failed for {content_id[:12]}...: {e}"
+            )
+            return None
 
     async def _fetch_from_url(self, gateway_url: str) -> Optional[bytes]:
         """Fetch content via HTTP from a peer-supplied gateway URL.

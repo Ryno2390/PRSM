@@ -181,8 +181,57 @@ Option A is the natural minimum-viable fix; B or C is the eventual
 right answer. Decision belongs in a separate sprint with the
 native-storage-migration owner.
 
-**Status.** Surfaced 2026-05-14 sprint 425 live diagnosis. Deferred
-pending design call on storage-layer reconciliation.
+**Status.** Surfaced 2026-05-14 sprint 425 live diagnosis. Sprint 427
+shipped the Option A structural shim (`_fetch_local` now falls back
+to `content_retriever.fetch` for cids in `_local_content` that fail
+`ContentHash.from_hex`). The shim is correct — see F8 for the
+next-layer-down issue that still blocks single-node retrieve.
+
+### F8 — BT publisher/requester session isolation prevents single-node self-fetch
+
+**Symptom.** With the sprint 427 F7 shim in place, the retrieve path
+now correctly routes through the BitTorrent fallback for BT-infohash
+cids. But the request still fails:
+
+```
+BT fallback retrieve failed for 57f2d3ac5442...:
+  BitTorrent fetch failed for infohash=57f2d3ac5442...:
+  Torrent not found
+```
+
+**Root cause.** `content_publisher` (which seeded the torrent on
+upload) and `content_retriever` (which the shim calls) use separate
+libtorrent sessions / instances. The locally-seeded torrent in the
+publisher's session is invisible to the requester's session. Even
+the libtorrent swarm-level lookup fails because in single-node mode
+there's no swarm — no other peer announces the infohash.
+
+**Severity.** Closes the door that sprint 427's shim opened. Vision
+§4 step 8 single-node user-validation remains blocked. Multi-node
+setups should work in theory (other nodes can find the seeded
+torrent via DHT) but were not exercised end-to-end in this dogfood.
+
+**Fix candidates (deferred to its own sprint):**
+
+- **Option A':** `ContentRetriever.fetch` checks `bt_provider`'s
+  locally-published torrents BEFORE handing off to `bt_requester`.
+  If the provider knows the infohash, return its file directly from
+  the publisher's content directory. Minimum-viable; symmetric with
+  sprint 427's pattern.
+- **Option B':** Unify bt_provider + bt_requester into a single
+  libtorrent session so locally-seeded torrents are visible to local
+  fetches. Conceptually cleaner; may interact with peer-isolation
+  assumptions elsewhere.
+- **Option C':** Track this differently — write the publisher's
+  bytes into ContentStore at publish time under a derived
+  ContentHash so the existing native-storage retrieve path Just
+  Works without any BT layer involvement. Aligns with the
+  native-storage-migration arc; eventual right answer per the F7
+  Option C reasoning.
+
+**Status.** Surfaced 2026-05-14 sprint 427 live verification of F7
+fix. Same architectural family as F7; deferred pending the same
+storage-layer reconciliation design call.
 
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
