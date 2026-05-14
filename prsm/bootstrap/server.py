@@ -192,7 +192,14 @@ class BootstrapServer:
         
         # Background tasks
         self._tasks: Set[asyncio.Task] = set()
-        
+
+        # Sprint 392: per-loop heartbeat registry. Each
+        # background loop bumps its key on every successful
+        # iteration; /health/detailed reads these to detect
+        # silent loop failures (a loop that crashed will
+        # have a stale or missing entry).
+        self._loop_heartbeats: Dict[str, datetime] = {}
+
         # SSL context
         self._ssl_context: Optional[ssl.SSLContext] = None
         
@@ -717,49 +724,51 @@ class BootstrapServer:
             try:
                 health = await self.health_check()
                 logger.debug(f"Health check: {health['status']}, peers: {health['total_peers']}")
+                self._record_loop_heartbeat("health_check_loop")
             except Exception as e:
                 logger.error(f"Health check error: {e}")
-            
+
             await asyncio.sleep(self.config.health_check_interval)
-    
+
     async def _peer_cleanup_loop(self) -> None:
         """Periodic peer cleanup loop."""
         while self.running:
             try:
                 now = datetime.now(timezone.utc)
                 stale_peers = []
-                
+
                 for peer_id, peer in list(self.peers.items()):
                     elapsed = (now - peer.last_seen).total_seconds()
-                    
+
                     if elapsed > self.config.peer_timeout:
                         peer.status = PeerStatus.IDLE
-                    
+
                     if elapsed > self.config.peer_timeout * 3:
                         stale_peers.append(peer_id)
-                
+
                 # Remove stale peers
                 for peer_id in stale_peers:
                     del self.peers[peer_id]
                     logger.debug(f"Removed stale peer: {peer_id}")
-                
+
                 if stale_peers:
                     logger.info(f"Cleaned up {len(stale_peers)} stale peers")
-                
+                self._record_loop_heartbeat("peer_cleanup")
             except Exception as e:
                 logger.error(f"Peer cleanup error: {e}")
-            
+
             await asyncio.sleep(self.config.peer_timeout)
-    
+
     async def _peer_backup_loop(self) -> None:
         """Periodic peer database backup loop."""
         while self.running:
             try:
                 if self.db:
                     self.db.save()
+                self._record_loop_heartbeat("peer_backup")
             except Exception as e:
                 logger.error(f"Peer backup error: {e}")
-            
+
             await asyncio.sleep(self.config.peer_db_backup_interval)
     
     async def _federation_sync_loop(self) -> None:
@@ -807,11 +816,88 @@ class BootstrapServer:
                                     logger.warning(f"Federation sync failed with {fed_peer}: HTTP {response.status}")
                         except Exception as peer_err:
                             logger.error(f"Failed to sync with federation peer {fed_peer}: {peer_err}")
+                self._record_loop_heartbeat("federation_sync")
             except Exception as e:
                 logger.error(f"Federation sync error: {e}")
-            
+
             await asyncio.sleep(self.config.federation_sync_interval)
-    
+
+    def _record_loop_heartbeat(self, name: str) -> None:
+        """Sprint 392 — bump a loop's last-iteration timestamp
+        in the heartbeat registry. /health/detailed reads
+        this to detect silently-dead loops.
+        """
+        self._loop_heartbeats[name] = datetime.now(timezone.utc)
+
+    def health_check_detailed(self) -> Dict[str, Any]:
+        """Sprint 392 — per-subsystem readiness probe.
+
+        Each background loop is classified relative to its
+        expected iteration interval:
+          age < 2 × interval → healthy
+          2 ≤ age < 5 × interval → degraded
+          age ≥ 5 × interval OR missing → stale
+
+        Aggregate `status` mirrors the worst subsystem:
+          all healthy → healthy
+          any degraded but none stale → degraded
+          any stale → unhealthy
+        """
+        now = datetime.now(timezone.utc)
+        # Subsystem name → expected interval seconds. Pulled
+        # from the same config knobs the loops await on.
+        subsystem_intervals = {
+            "peer_cleanup": float(self.config.peer_timeout),
+            "peer_backup": float(self.config.peer_db_backup_interval),
+            "federation_sync": float(self.config.federation_sync_interval),
+            "health_check_loop": float(self.config.health_check_interval),
+        }
+        subsystems: Dict[str, Dict[str, Any]] = {}
+        worst = "healthy"
+        for name, interval in subsystem_intervals.items():
+            last = self._loop_heartbeats.get(name)
+            if last is None:
+                subsystems[name] = {
+                    "alive": False,
+                    "status": "stale",
+                    "last_heartbeat_age_seconds": None,
+                    "expected_interval_seconds": interval,
+                }
+                worst = "unhealthy"
+                continue
+            age = (now - last).total_seconds()
+            if age < 2 * interval:
+                status = "healthy"
+            elif age < 5 * interval:
+                status = "degraded"
+            else:
+                status = "stale"
+            subsystems[name] = {
+                "alive": status != "stale",
+                "status": status,
+                "last_heartbeat_age_seconds": age,
+                "expected_interval_seconds": interval,
+            }
+            if status == "stale":
+                worst = "unhealthy"
+            elif status == "degraded" and worst == "healthy":
+                worst = "degraded"
+
+        # api_server: if /health/detailed is returning a
+        # response, by definition the API server is alive.
+        subsystems["api_server"] = {
+            "alive": True,
+            "status": "healthy",
+            "last_heartbeat_age_seconds": 0.0,
+            "expected_interval_seconds": None,
+        }
+
+        return {
+            "status": worst,
+            "subsystems": subsystems,
+            "server_time": now.isoformat(),
+        }
+
     def _render_prometheus_exposition(self) -> str:
         """Render BootstrapMetrics as Prometheus exposition text.
 
@@ -893,6 +979,10 @@ class BootstrapServer:
         @app.get("/health")
         async def health():
             return await self.health_check()
+
+        @app.get("/health/detailed")
+        async def health_detailed():
+            return self.health_check_detailed()
 
         @app.get("/metrics")
         async def metrics(request: Request):
