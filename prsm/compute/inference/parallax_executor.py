@@ -104,11 +104,22 @@ class ChainExecutionResult:
     """What a ``ChainExecutor`` returns to the scheduler.
 
     Fields:
-      output            Generated text.
-      duration_seconds  Wall-clock time for the chain dispatch.
-      tee_attestation   Attestation bytes from the executing chain head.
-      tee_type          Effective TEE type (worst case across stages).
-      epsilon_spent     DP epsilon recorded by the privacy budget.
+      output                  Generated text.
+      duration_seconds        Wall-clock time for the chain dispatch.
+      tee_attestation         Attestation bytes from the chain head.
+      tee_type                Effective TEE type (worst case across stages).
+      epsilon_spent           DP epsilon recorded by the privacy budget.
+      activation_noise_trace  (sprint 413) Optional sprint-295 DP trace
+                              when the chain executor invoked per-stage
+                              noise injection. Threaded into the
+                              InferenceReceipt by the scheduler.
+      topology_assignment     (sprint 413) Optional sprint-296 chain-
+                              rotation assignment hash. Same wiring
+                              path as activation_noise_trace.
+
+    The two privacy fields default to None so pre-sprint-413
+    ChainExecutors that don't populate them continue to work
+    unchanged — pure-additive contract.
     """
 
     output: str
@@ -116,6 +127,8 @@ class ChainExecutionResult:
     tee_attestation: bytes
     tee_type: TEEType
     epsilon_spent: float
+    activation_noise_trace: Optional[Any] = None
+    topology_assignment: Optional[Any] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -903,6 +916,13 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         """
         output_hash = hashlib.sha256(outcome.output.encode("utf-8")).digest()
         prefix = "parallax-stream-job" if streamed else "parallax-job"
+        # Sprint 413 — thread sprint-297 privacy fields from
+        # the chain executor's outcome into the InferenceReceipt.
+        # When the chain executor doesn't populate them
+        # (pre-sprint-413 callers OR chains running without DP),
+        # the Optional fields stay None and the receipt
+        # signing-payload is byte-identical to pre-sprint-413
+        # receipts (sprint 297 conditional encoding handles this).
         unsigned = InferenceReceipt(
             job_id=f"{prefix}-{uuid.uuid4().hex[:12]}",
             request_id=request.request_id,
@@ -916,5 +936,11 @@ class ParallaxScheduledExecutor(InferenceExecutor):
             duration_seconds=outcome.duration_seconds,
             cost_ftns=cost,
             streamed_output=streamed,
+            activation_noise_trace=getattr(
+                outcome, "activation_noise_trace", None,
+            ),
+            topology_assignment=getattr(
+                outcome, "topology_assignment", None,
+            ),
         )
         return sign_receipt(unsigned, self._identity)
