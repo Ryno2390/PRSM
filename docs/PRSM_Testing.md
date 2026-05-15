@@ -184,8 +184,12 @@ journey. Each step should be live-verifiable on a single node.
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | Local balance | `GET /balance` | ✅ | — | Verified live in dogfood arc |
-| On-chain balance | `GET /balance/onchain` | 🟢 | — | Endpoint exists |
+| On-chain balance | `GET /balance/onchain` | ✅ | 464 | Live: queries Base mainnet FTNS contract `0x5276a37...` for derived wallet address (0x2Fd48D… in this test); returns balance_wei + balance_ftns + claimable + escrowed |
 | Transaction history | `GET /transactions` | ✅ | — | Verified live (sprint 198 bounds-validated `limit`) |
+| Wallet spend (30d summary) | `GET /wallet/spend` | ✅ | 464 | Live with FTNS_WALLET_PRIVATE_KEY: returns {address, days, total_spent_ftns, escrows_count} for derived wallet |
+| Wallet escrows | `GET /wallet/escrows` | ✅ | 464 | Live with wallet: paginated empty-state for the wallet address |
+| `prsm wallet info` CLI | CLI | ✅ | 464 | Live with FTNS_WALLET_PRIVATE_KEY: shows network (testnet vs mainnet), address, explorer URL, balance, foundation-config warnings |
+| `prsm node earnings` CLI (with wallet) | CLI | ✅ | 464 | Live: operator address surfaced; Royalty/Heartbeat/Distribution categories ready to wire |
 | Transfer (gasless via paymaster) | `POST /wallet/transfer/gasless` | 🟢 | Phase 5 | Endpoint exists; live activation external-gated |
 | WaaS provision | `POST /wallet/waas/provision` | 🟢 | Phase 5 | Endpoint exists; requires CDP credentials |
 | Paymaster status | `GET /wallet/paymaster/status` | 🟢 | Phase 5 | Endpoint exists |
@@ -704,6 +708,33 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-15 sprint 464** — On-chain wallet integration (Level C —
+  loading + address-derivation, no on-chain TX). Generated fresh
+  test wallet (private key + address `0x2Fd48D…`), set
+  `FTNS_WALLET_PRIVATE_KEY` env var, restarted daemon. Verified:
+  - `/health/detailed.ftns_ledger.connected_address` populated
+    with derived address; `canonical_match: True` against
+    Base mainnet FTNS contract `0x5276a37...`
+  - `/balance/onchain` queries the LIVE mainnet contract for the
+    wallet's balance (returns 0 — correct, empty wallet) — full
+    {address, balance_wei, balance_ftns, usd_rate,
+    claimable_royalties_ftns, escrowed_ftns} envelope
+  - `/wallet/spend` + `/wallet/escrows` previously 503'd without
+    wallet; now return clean address-scoped data
+  - `/marketplace/creator-stake/<addr>` returns full schema for
+    the new wallet (balance 0, not high-tier-eligible)
+  - `prsm wallet info` CLI shows: chainId 84532 (testnet default
+    — discovered PRSM already has Base Sepolia contracts
+    deployed), explorer URL, foundation-config warnings,
+    halving-curve testnet vs mainnet differences
+  - `prsm node earnings` CLI now shows `Operator: 0x2Fd48D…`
+    (was "PRSM_OPERATOR_ADDRESS unset")
+  Wallet-loading is purely local + side-effect-free (no
+  on-chain TX). Sprint 465+ candidate: Level A (fund wallet
+  with small Base mainnet ETH for real stake/claim TX) or
+  Level B (deploy test contracts to Sepolia + use testnet
+  faucet — PRSM already has Sepolia FTNS at 0x7F5f00FA…
+  apparently).
 - **2026-05-15 sprint 446** — Operator CLI surface live-verified.
   Walked the §13 operator-trifecta CLI lane and confirmed each
   surface returns clean actionable output:
