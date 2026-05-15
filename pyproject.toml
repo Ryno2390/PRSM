@@ -97,7 +97,7 @@ dependencies = [
     # store works even when libtorrent itself isn't yet
     # installed (operator can install libtorrent later and
     # the rest of the BT layer is already pip-available).
-    "bencodepy>=4.0.0",
+    "bencodepy>=0.9",
 ]
 
 [project.optional-dependencies]
@@ -192,7 +192,7 @@ bittorrent = [
     # This extra is intentionally empty of `libtorrent`
     # itself — listing it here would cause `pip install
     # prsm-network[bittorrent]` to fail.
-    "bencodepy>=4.0.0",
+    "bencodepy>=0.9",
 ]
 
 server = [
