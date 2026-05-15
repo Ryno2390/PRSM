@@ -7145,5 +7145,244 @@ def node_tee_evaluate(
             console.print(f"    • {r}")
 
 
+# ──────────────────────────────────────────────────────────────
+# Sprint 437 — `prsm node federated ...` + `prsm node pipeline ...`
+# CLI trifecta gap closure (read-only admin triage).
+#
+# Both surfaces are deep (~7 endpoints each — list/details/execute/
+# round/aggregate/issue-round/update). This sprint closes the
+# read-only triage path (list + details) — the operator subset
+# needed at incident time. Mutating commands stay deferred per
+# the sprint-434 incident-CLI pattern.
+# ──────────────────────────────────────────────────────────────
+
+
+def _node_admin_list_details(
+    *, group_name, list_path, details_path_template,
+    api_port, output_format, filter_status,
+    json_records_key,
+    record_id_field,
+):
+    """Shared shape between federated + pipeline list commands.
+
+    Both follow: GET /admin/<group>/job[?status=X] returns a
+    {jobs|records: [...]} envelope; details endpoint takes a
+    job_id path param.
+    """
+    import json as _json
+    import urllib.parse
+    import urllib.request
+
+    qs = ""
+    if filter_status:
+        qs = "?" + urllib.parse.urlencode(
+            {"status": filter_status},
+        )
+    url = f"http://127.0.0.1:{api_port}{list_path}{qs}"
+
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            payload = _json.loads(r.read())
+    except Exception as exc:  # noqa: BLE001
+        click.echo(
+            f"Failed to fetch {group_name} jobs: {exc}", err=True,
+        )
+        sys.exit(2)
+
+    records = payload.get(json_records_key, [])
+    if output_format == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    if not records:
+        console.print(
+            f"[green]✓ No active {group_name} jobs.[/green]"
+        )
+        return
+
+    console.print(
+        f"[bold]{group_name.capitalize()} jobs "
+        f"({len(records)}):[/bold]\n"
+    )
+    for r in records:
+        rid = r.get(record_id_field, "?")
+        status = r.get("status", "?")
+        console.print(
+            f"  [bold]{rid}[/bold] "
+            f"status=[cyan]{status}[/cyan]"
+        )
+
+
+@node.group("federated", invoke_without_command=False)
+def node_federated_group():
+    """Federated-learning admin triage commands (read-only).
+
+    Maps to /admin/federated/* REST endpoints. Mutating
+    commands (issue-round, aggregate, update) deferred —
+    operators use the REST surface or `prsm_federated_learning`
+    MCP for those.
+    """
+
+
+@node_federated_group.command("list")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+@click.option(
+    "--status", default=None,
+    help="Filter by JobStatus (pending, active, completed, ...).",
+)
+def node_federated_list(api_port, output_format, status):
+    """List federated-learning jobs on this node."""
+    _node_admin_list_details(
+        group_name="federated",
+        list_path="/admin/federated/job",
+        details_path_template="/admin/federated/job/{}",
+        api_port=api_port, output_format=output_format,
+        filter_status=status,
+        json_records_key="jobs",
+        record_id_field="job_id",
+    )
+
+
+@node_federated_group.command("details")
+@click.argument("job_id")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def node_federated_details(job_id, api_port, output_format):
+    """Show details for one federated-learning job."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    url = (
+        f"http://127.0.0.1:{api_port}/admin/federated/"
+        f"job/{job_id}"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            payload = _json.loads(r.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            click.echo(
+                f"Federated job {job_id!r} not found.", err=True,
+            )
+            sys.exit(1)
+        click.echo(
+            f"Failed: HTTP {exc.code}: "
+            f"{exc.read().decode()[:200]}",
+            err=True,
+        )
+        sys.exit(2)
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"Failed: {exc}", err=True)
+        sys.exit(2)
+
+    if output_format == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    console.print(
+        f"[bold]Federated job {payload.get('job_id', '?')}[/bold]"
+    )
+    for k, v in payload.items():
+        if k == "job_id":
+            continue
+        if isinstance(v, (list, dict)):
+            v_str = _json.dumps(v, indent=2)[:200]
+        else:
+            v_str = str(v)
+        console.print(f"  {k}: [cyan]{v_str}[/cyan]")
+
+
+@node.group("pipeline", invoke_without_command=False)
+def node_pipeline_group():
+    """Pipeline-inference admin triage commands (read-only).
+
+    Maps to /admin/inference/pipeline/* REST endpoints.
+    """
+
+
+@node_pipeline_group.command("list")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def node_pipeline_list(api_port, output_format):
+    """List pipeline-inference jobs on this node."""
+    _node_admin_list_details(
+        group_name="pipeline",
+        list_path="/admin/inference/pipeline/job",
+        details_path_template="/admin/inference/pipeline/job/{}",
+        api_port=api_port, output_format=output_format,
+        filter_status=None,  # endpoint doesn't accept filter
+        json_records_key="jobs",
+        record_id_field="job_id",
+    )
+
+
+@node_pipeline_group.command("details")
+@click.argument("job_id")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def node_pipeline_details(job_id, api_port, output_format):
+    """Show details for one pipeline-inference job."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    url = (
+        f"http://127.0.0.1:{api_port}/admin/inference/"
+        f"pipeline/job/{job_id}"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            payload = _json.loads(r.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            click.echo(
+                f"Pipeline job {job_id!r} not found.", err=True,
+            )
+            sys.exit(1)
+        click.echo(
+            f"Failed: HTTP {exc.code}: "
+            f"{exc.read().decode()[:200]}",
+            err=True,
+        )
+        sys.exit(2)
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"Failed: {exc}", err=True)
+        sys.exit(2)
+
+    if output_format == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    console.print(
+        f"[bold]Pipeline job {payload.get('job_id', '?')}[/bold]"
+    )
+    for k, v in payload.items():
+        if k == "job_id":
+            continue
+        if isinstance(v, (list, dict)):
+            v_str = _json.dumps(v, indent=2)[:200]
+        else:
+            v_str = str(v)
+        console.print(f"  {k}: [cyan]{v_str}[/cyan]")
+
+
 if __name__ == "__main__":
     main()

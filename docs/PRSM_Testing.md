@@ -424,8 +424,8 @@ fill them.
 | Incident response (triage) | ✅ | ✅ Sprint 434 (read-only) | ✅ | Trifecta-complete for read path; mutating commands deferred |
 | Insurance fund status + recovery compose | ✅ | ✅ Sprint 435 | 🟢 | Trifecta-complete: `prsm node insurance status/compose-recovery` |
 | TEE policy status + evaluate | ✅ | ✅ Sprint 436 | 🟢 | Trifecta-complete: `prsm node tee status/evaluate` |
-| Federated learning admin | ✅ | ❌ | 🟢 | CLI gap |
-| Pipeline inference admin | ✅ | ❌ | 🟢 | CLI gap |
+| Federated learning admin | ✅ | ✅ Sprint 437 (read-only) | 🟢 | Trifecta-complete: `prsm node federated list/details` |
+| Pipeline inference admin | ✅ | ✅ Sprint 437 (read-only) | 🟢 | Trifecta-complete: `prsm node pipeline list/details` |
 | Bridge deposit/withdraw | ✅ | ✅ | 🟢 | Trifecta-complete |
 | `prsm node fiat-readiness` | (uses sprint-285 function) | ✅ | 🟢 (`prsm_fiat_surface_health`) | Trifecta-complete |
 
@@ -520,6 +520,23 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 437** — Federated + pipeline CLI trifecta
+  closures (last two from the priority queue). Added
+  `prsm node federated list/details` + `prsm node pipeline list/
+  details` (read-only triage; mutating endpoints deferred per
+  the sprint-434 incident-CLI pattern). Shared
+  `_node_admin_list_details` helper between both groups —
+  same shape (GET /admin/<group>/job[?status=X] → records list;
+  details endpoint takes job_id). Live-verified: federated list
+  returns empty (no active jobs); pipeline list returns 503
+  (orchestrator not wired in this env, expected); federated
+  details on fake-id → 404 + exit 1. 8 pin tests covering both
+  groups: registered; status filter vocabulary documented; help
+  text mentions read-only scope; required args enforced.
+  Operator-trifecta CLI gap status: ALL FIVE gaps closed (incident /
+  insurance / TEE / federated / pipeline). PRSM_Testing.md §13
+  "Operator-trifecta gaps" table now has zero CLI gaps.
+  Tag `cli-node-federated-pipeline-merge-ready-20260515`.
 - **2026-05-15 sprint 436** — TEE policy CLI trifecta closure.
   Added `prsm node tee` group with `status` + `evaluate`
   subcommands. `status` shows this node's effective attestation
