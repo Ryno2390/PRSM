@@ -316,8 +316,8 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Node peers | `/peers` | `prsm node peers` | `prsm_peers` | ✅ |
 | Bootstrap status | `/bootstrap/status` | — | `prsm_bootstrap_status` | ✅ Sprint 447 (live: connected to wss://bootstrap1.prsm-network.com:8765, 28/16 reconnect attempts/successes, multi-fallback US/EU/APAC enabled) |
 | Bootstrap test (probe canonical fleet) | — | `prsm node bootstrap-test` | `prsm_bootstrap_test` | ✅ Sprint 385/387 |
-| Bootstrap server status | `/admin/bootstrap-server/status` | `prsm bootstrap-server status` | `prsm_bootstrap_server_status` | ✅ Sprint 388-396 |
-| Metrics (Prometheus) | `/metrics` | — | `prsm_metrics_summary` | ✅ |
+| Bootstrap server status | `/admin/bootstrap-server/status` | `prsm bootstrap-server status` | `prsm_bootstrap_server_status` | ✅ Sprint 388-396, 454 (live-probed `bootstrap1.prsm-network.com:8000` → ✓ healthy, 84036s uptime, 1 active conn, 63 total, region nyc3, version 1.0.0) |
+| Metrics (Prometheus) | `/metrics` | — | `prsm_metrics_summary` | ✅ Sprint 454 (live: full Prometheus exposition format with 9+ gauges — pending_escrow_count, total_locked_ftns, job_history_size, receipt_store_size, royalty_dispatch_ring_size, escrow_cleanup_task_running=1, build_info{version="1.7.0"}, slash/heartbeat/distribution log counts) |
 | Resources (read/write) | `GET/PUT /node/resources` | — | `prsm_node_resources` | ✅ Sprint 450 (GET live: cpu/mem/storage/gpu allocation pcts + bandwidth/active-hours/effective-resources fully reported) |
 
 ### Earnings + ledger
@@ -535,6 +535,26 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 454** — §13 /metrics + bootstrap-server live-probe.
+  GET /metrics returns full Prometheus exposition format (9+ gauges:
+  pending_escrow_count, total_locked_ftns, job_history_size,
+  receipt_store_size, royalty_dispatch_ring_size,
+  escrow_cleanup_task_running=1, build_info{version="1.7.0"},
+  slash/heartbeat/distribution log counts). `prsm bootstrap-server
+  status --host bootstrap1.prsm-network.com --port 8000` live-
+  probed the **canonical DigitalOcean droplet** running the live
+  PRSM bootstrap fleet:
+    ✓ healthy
+    uptime: 84036 seconds (~23 hours)
+    active_connections: 1 (my session)
+    total_connections: 63 (cumulative)
+    failed_connections: 0
+    messages_processed: 1548
+    region: nyc3
+    version: 1.0.0
+  This is **live mainnet bootstrap-fleet attestation**: the public
+  PRSM network entry point is operationally healthy. 2 §13 rows
+  promoted. Doc-only sprint.
 - **2026-05-15 sprint 453** — F13 fix + §13 MCP-tool sweep. The
   MCP-tool live-verification swept 114 registered MCP tools
   (exceeds Vision §11's "73+" claim). Caught **F13 production-
