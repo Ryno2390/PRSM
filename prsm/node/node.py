@@ -1728,7 +1728,36 @@ class PRSMNode:
         if _HAS_EMBEDDING_API:
             try:
                 _embed_api = RealEmbeddingAPI()
-                _embedding_fn = _embed_api.generate_embedding
+                # Sprint 431 (F9 fix) — embedding-dimension parity
+                # invariant. The query orchestrator's embedder is
+                # pinned to `sentence-transformers/all-MiniLM-L6-v2`
+                # (384-dim) at the production wiring site. If the
+                # upload-side RealEmbeddingAPI falls through to a
+                # different provider (notably OpenAI ada-002 at
+                # 1536-dim when `OPENAI_API_KEY` is set), stored
+                # shard embeddings live in a different vector space
+                # than query embeddings → numpy dot-product raises
+                # "shapes (384,) and (1536,) not aligned" → forge
+                # pipeline blows up entirely.
+                #
+                # Fix: pin the upload-side to the local
+                # sentence_transformers provider via functools.partial
+                # so both lanes share one model. To opt back into
+                # OpenAI uploads (currently breaks query-side parity
+                # until the orchestrator grows an OpenAI-sync path),
+                # set PRSM_UPLOAD_EMBEDDING_PROVIDER explicitly.
+                #
+                # F9 was surfaced 2026-05-15 during sprint 431's
+                # forge E2E verification. See dogfood-findings doc.
+                import functools
+                _pref_provider = os.environ.get(
+                    "PRSM_UPLOAD_EMBEDDING_PROVIDER",
+                    "sentence_transformers",
+                )
+                _embedding_fn = functools.partial(
+                    _embed_api.generate_embedding,
+                    preferred_provider=_pref_provider,
+                )
                 # T3.6 (PRSM-PROV-1): the model_id used to key the
                 # cross-node EmbeddingDHT. Sourced from the same
                 # RealEmbeddingAPI that produces vectors here so the
@@ -1739,6 +1768,26 @@ class PRSMNode:
                 _embedding_model_id = getattr(
                     _embed_api, "_st_model_name", None,
                 )
+                # Sprint 431 — warn loudly if the operator has
+                # OPENAI_API_KEY set but didn't override the upload
+                # provider. The dim mismatch is silent at upload
+                # time; surfaces only at forge time as a cryptic
+                # numpy shape error. Make the trade-off explicit.
+                if (
+                    os.environ.get("OPENAI_API_KEY")
+                    and _pref_provider == "sentence_transformers"
+                ):
+                    logger.info(
+                        "Upload-side embeddings pinned to "
+                        "sentence_transformers (384-dim) for "
+                        "parity with the query orchestrator, "
+                        "even though OPENAI_API_KEY is set. "
+                        "Override with PRSM_UPLOAD_EMBEDDING_"
+                        "PROVIDER=openai if you've also wired an "
+                        "OpenAI-compatible orchestrator embedder "
+                        "(currently not supported — would break "
+                        "forge queries)."
+                    )
             except Exception as _e:
                 logger.debug(f"Embedding API unavailable, semantic dedup disabled: {_e}")
 

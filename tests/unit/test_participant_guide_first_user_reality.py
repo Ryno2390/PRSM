@@ -112,13 +112,14 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_eight_frictions():
-    """The findings doc enumerates F1-F8. F8 added 2026-05-14
-    sprint 427 after the F7 structural shim revealed a
-    next-layer-down BT session-isolation issue still
-    blocking single-node retrieve. If a finding is silently
-    removed (without an explicit closure note), surface
-    that."""
+def test_findings_doc_documents_all_ten_frictions():
+    """The findings doc enumerates F1-F10. F9 + F10 added
+    2026-05-15 during sprint 431's forge E2E verification:
+    F9 = embedding-dim mismatch when OPENAI_API_KEY is set
+    (production-blocking, fixed in 431); F10 = empty
+    aggregator pool blocks single-node forge (deferred).
+    If a finding is silently removed (without an explicit
+    closure note), surface that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -129,6 +130,8 @@ def test_findings_doc_documents_all_eight_frictions():
         "F6 — `/onboarding/`",
         "F7 — Locally-uploaded content not retrievable",
         "F8 — BT publisher/requester session isolation",
+        "F9 — Upload + query embedding-dim mismatch",
+        "F10 — Single-node forge query blocked",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"

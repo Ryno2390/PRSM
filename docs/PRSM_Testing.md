@@ -65,8 +65,9 @@ journey. Each step should be live-verifiable on a single node.
 | 6 | Upload encrypted content (recipient encryption) | `POST /content/upload` + recipients | ✅ | 430 | X25519+XChaCha20 encrypt-then-publish; live byte-identical roundtrip |
 | 7 | Retrieve encrypted content (same node) | `GET /content/retrieve/{cid}` + decrypt | ✅ | 430 | Live-verified: 431-byte ciphertext → decrypt → byte-identical plaintext |
 | 7a | Tier B/C Shamir multi-shard lane (infrastructure) | `ContentPublisher.publish(tier=B)` | 🟢 | 430 | Local-publish shortcut wired (routes staged dir to `_fetch_tier_bc`); not yet exposed in `/content/upload` (always Tier A today) |
-| 8 | Query against uploaded content | `POST /compute/forge` | ⚠️ | — | Endpoint live; needs `PRSM_QUERY_ORCHESTRATOR_ENABLED=1`; full single-node E2E not yet exercised |
+| 8 | Query against uploaded content | `POST /compute/forge` | ⚠️ | 431 | Embedding stage passes (F9 fixed); aggregator-pool stage blocked by F10 single-node gap; multi-node E2E pending |
 | 8a | Quote query cost | `POST /compute/forge/quote` | ✅ | — | Verified during dogfood arc — works on fresh node |
+| 8b | Forge embedding-stage parity | `_embedding_fn` vs `SentenceTransformerEmbedder` | ✅ | 431 | F9 closed: upload-side pinned to sentence_transformers; 384-dim parity verified live with `OPENAI_API_KEY` set |
 | 9 | Receive FTNS settlement | `GET /balance` + RoyaltyDistributor | 🔬 | — | Requires cross-node query + on-chain dispatch; not exercised single-node |
 
 ---
@@ -504,3 +505,16 @@ arc proved we need.
   for the future Shamir-exposing upload endpoint). 6 unit tests
   pinned; 2 new (Tier B/C dir routes locally; malformed dir raises
   not falls through).
+- **2026-05-15 sprint 431** — F9 fix: upload-side embedding-provider
+  parity. Forge pipeline live-tested + surfaced cryptic
+  "shapes (384,) and (1536,) not aligned" error when
+  `OPENAI_API_KEY` is set. Root cause: upload-side `_embedding_fn`
+  fell through to OpenAI ada-002 (1536-dim) while query-side is
+  hard-pinned to MiniLM (384-dim). Fix: node.py binds
+  `preferred_provider="sentence_transformers"` via functools.partial.
+  Default install works out of the box; operator-overridable via
+  `PRSM_UPLOAD_EMBEDDING_PROVIDER`. Live-verified: 384-dim
+  embeddings stored even with OpenAI key set; forge pipeline
+  passes the embedding stage. Surfaced F10 (single-node empty
+  aggregator pool) as the next bottleneck. 4 new tests / 78
+  cross-suite green.

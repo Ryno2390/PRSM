@@ -261,6 +261,94 @@ because the staged dir contains encrypted shards + key shares that
 require ContentStore reassembly. Same Option B/C territory — left
 to the storage-layer reconciliation sprint.
 
+**2026-05-15 sprint 430:** Tier B/C local-publish shortcut shipped
++ recipient-encryption (sprint 304's path) live-verified byte-
+identical end-to-end. Tier B/C Shamir lane wired but not exposed
+in `/content/upload` (always Tier A today).
+
+### F9 — Upload + query embedding-dim mismatch when OPENAI_API_KEY is set
+
+**Symptom.** `POST /compute/forge` fails with cryptic numpy error:
+
+```
+Forge pipeline error: shapes (384,) and (1536,) not aligned:
+  384 (dim 0) != 1536 (dim 0)
+```
+
+**Root cause (live-diagnosed sprint 431).** Two embedding providers
+in different lanes:
+
+- Upload side: `RealEmbeddingAPI` (prsm/data/embeddings/
+  real_embedding_api.py) has a fallback order
+  `[openai, sentence_transformers, mock]`. When `OPENAI_API_KEY` is
+  set, OpenAI ada-002 wins → stored shard embeddings are 1536-dim.
+- Query side: `SentenceTransformerEmbedder` (prsm/compute/
+  query_orchestrator/sentence_transformer_embedder.py) is HARD-PINNED
+  to `sentence-transformers/all-MiniLM-L6-v2` (384-dim). The
+  docstring explicitly cites the parity invariant but the upload
+  side wasn't honoring it.
+
+Result: every query against content uploaded with OpenAI key set
+fails at `numpy.dot(query_vec, shard_vec)` with a shape mismatch.
+
+**Severity.** Production-blocking for any operator who has
+`OPENAI_API_KEY` in their env (common dev pattern). The forge
+pipeline is completely broken in this configuration; the bug is
+silent at upload time and only surfaces at query time.
+
+**Fix shipped sprint 431.** node.py:1726ff now binds
+`preferred_provider="sentence_transformers"` via functools.partial
+when constructing `_embedding_fn`. The pin defaults to the local
+provider so the canonical install works out of the box. Operators
+can override via `PRSM_UPLOAD_EMBEDDING_PROVIDER=openai` if they
+ALSO wire an OpenAI-compatible orchestrator embedder (currently
+unsupported — would re-break queries).
+
+Live verification: upload with `OPENAI_API_KEY` set → stored
+embedding is 384-dim (was 1536-dim pre-fix); forge pipeline gets
+past the embedding stage and hits the next bottleneck (F10).
+
+Tag `upload-embedding-provider-pinned-merge-ready-20260515`.
+
+### F10 — Single-node forge query blocked by empty aggregator pool
+
+**Symptom.** After F9 is fixed, `POST /compute/forge` proceeds past
+the embedding step and now fails:
+
+```
+Forge pipeline error: no eligible aggregator after filtering
+  (prompter=cdefb8e5..., pool_size=0, requires_tee=False,
+   denylist_size=0)
+```
+
+**Root cause.** The forge pipeline's aggregator selection step
+(Vision §5.2 step 4: "staked T2+ aggregator selection via beacon-
+randomized commit-reveal") requires a pool of staked aggregator
+nodes. A single-node test setup has zero peers → pool_size=0 →
+no eligible aggregator.
+
+**Severity.** Blocks the canonical Vision §4 step-8 single-node
+verification flow. Not a regression — the forge pipeline correctly
+assumes multi-node operation; this is a "single-node test mode"
+gap. Multi-node setups should work in theory but were not
+exercised here.
+
+**Fix candidates (deferred to its own sprint):**
+
+- **Option A:** Add a `PRSM_FORGE_ALLOW_SELF_AGGREGATOR=1` env-gate
+  that lets the local node serve as its own aggregator in
+  single-node test setups. Smallest blast radius; explicitly
+  scoped to verification flows.
+- **Option B:** Spin up a second daemon as a stub T2+ aggregator
+  during the verification campaign. More representative of real
+  production but requires test orchestration.
+- **Option C:** Accept the gap and defer step-8 verification to a
+  multi-node test bench (separate from the dogfood arc).
+
+**Status.** Surfaced 2026-05-15 sprint 431 live verification of F9
+fix. Belongs to the same "single-node verification" family as F7's
+self-fetch gap — likely Option A is the right pragmatic answer.
+
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
 **Symptom.** Following the "MCP tools" hint in PARTICIPANT_GUIDE, a user
