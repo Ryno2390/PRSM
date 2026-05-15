@@ -255,7 +255,8 @@ journey. Each step should be live-verifiable on a single node.
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | `InferenceReceipt` schema (with activation_noise_trace + topology_assignment) | dataclass | ✅ | 297 | Pure-additive, byte-identical pre-arc |
-| Receipt verification | `POST /compute/receipt/verify` | ✅ | 292 | First independent-verify path |
+| Receipt verification | `POST /compute/receipt/verify` | ✅ | 292/433 | Sprint 433 live-verified: honest signs ok, tampered fails. ed25519 over signing_payload |
+| Receipt tamper-detection (signature) | `POST /compute/receipt/verify` | ✅ | 433 | Live tampered `epsilon_spent` → `signature_valid: false`, reason="signature failed cryptographic verification" |
 | Receipt verify MCP | `prsm_verify_inference_privacy` | ✅ | 292 | |
 | End-to-end topology pathway (RpcChainExecutor → TopologyAwareChainExecutor → ParallaxScheduledExecutor → signed receipt) | composition | ✅ | 415 | 91 cross-suite green |
 | End-to-end DP pathway (ActivationDPAwareChainExecutor) | composition | ✅ | 419 | Mirrors topology side |
@@ -518,6 +519,28 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 433** — Priority #4 closed: §7 receipt
+  verification live-tested end-to-end. Generated ed25519 keypair,
+  built `InferenceReceipt` (job + request + model + tier + ε +
+  TEE attestation + output hash + duration + cost), signed
+  `signing_payload()`, POSTed to `/compute/receipt/verify`.
+  - Honest receipt with matching ε for tier → `ok=true`,
+    `signature_valid=true`, `reasons=[]`, all 6 §7 truth-surfacing
+    fields (DP-noise / hardware-attestation / multi-stage /
+    activation-noise-trace / topology-structural / topology-
+    distinct) green.
+  - Tampered receipt (epsilon flipped 0.5→99.9) → `ok=false`,
+    `signature_valid=false`, `reasons=["signature failed
+    cryptographic verification", ...]`.
+  Confirms §7 truth-surfacing claim works as advertised: callers
+  can independently verify the chain of custody on inference
+  receipts. `attestation_vendor_verified=false` per the documented
+  honest-scope deferral (real DCAP/KDS not wired).
+  Pin tests (6 new in test_compute_receipt_verify_e2e.py): honest
+  passes; tampered epsilon fails; tampered output_hash fails;
+  wrong pubkey fails; attestation vendor honest-scope; signing
+  payload excludes signature. PRSM_Testing.md §7 rows promoted.
+  Tag `compute-receipt-verify-e2e-merge-ready-20260515`.
 - **2026-05-15 sprint 432** — F10 design-review closure + F11 fix.
   F10 (single-node forge blocked by empty aggregator pool) marked
   as design limitation — A2 invariant ("prompter never selects
