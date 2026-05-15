@@ -6964,5 +6964,186 @@ def node_insurance_compose_recovery(
         console.print(f"  {k}: [cyan]{v}[/cyan]")
 
 
+# ──────────────────────────────────────────────────────────────
+# Sprint 436 — `prsm node tee ...` CLI trifecta gap closure
+#
+# Two endpoints on the REST surface:
+#   GET  /admin/tee-policy/node-status — this node's own
+#        attestation tier (operators use this to pre-screen
+#        before dispatching workloads)
+#   POST /admin/tee-policy/evaluate — evaluate an
+#        attestation blob against a policy
+# ──────────────────────────────────────────────────────────────
+
+
+@node.group("tee", invoke_without_command=False)
+def node_tee_group():
+    """TEE attestation + policy evaluation commands.
+
+    Maps to /admin/tee-policy/* REST endpoints.
+    """
+
+
+@node_tee_group.command("status")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def node_tee_status(api_port, output_format):
+    """Show this node's TEE attestation tier.
+
+    Wraps GET /admin/tee-policy/node-status. Enterprises
+    use this to pre-screen which nodes are eligible to
+    participate in a given workload before dispatching.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    url = (
+        f"http://127.0.0.1:{api_port}/admin/tee-policy/"
+        f"node-status"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            payload = _json.loads(r.read())
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"Failed: {exc}", err=True)
+        sys.exit(2)
+
+    if output_format == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    tier = payload.get("effective_tier", "?")
+    vendor = payload.get("vendor", "?")
+    verified = payload.get("vendor_verified", False)
+    tier_color = {
+        "tee-hardware": "green",
+        "tee-software": "yellow",
+        "none": "red",
+    }.get(tier, "white")
+    verified_marker = (
+        "[green]✓ vendor-verified[/green]" if verified
+        else "[yellow]⚠ not vendor-verified[/yellow]"
+    )
+    console.print("[bold]TEE Node Status[/bold]")
+    console.print(
+        f"  effective_tier: [{tier_color}]{tier}[/{tier_color}]"
+    )
+    console.print(f"  vendor: [cyan]{vendor}[/cyan]")
+    console.print(f"  {verified_marker}")
+    if payload.get("diagnostic"):
+        console.print(
+            f"  diagnostic: [dim]{payload['diagnostic']}[/dim]"
+        )
+
+
+@node_tee_group.command("evaluate")
+@click.option(
+    "--policy-file", required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help=(
+        "Path to a JSON file containing the TEEPolicy "
+        "(min_tier, allowed_vendors, require_vendor_verified, "
+        "etc.). See prsm.enterprise.tee_policy.TEEPolicy for "
+        "the full schema."
+    ),
+)
+@click.option(
+    "--attestation-b64", default=None,
+    help=(
+        "Base64-encoded attestation blob to evaluate. If "
+        "omitted, the policy is evaluated against a missing-"
+        "attestation case (useful for pre-flight policy "
+        "validation)."
+    ),
+)
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def node_tee_evaluate(
+    policy_file, attestation_b64, api_port, output_format,
+):
+    """Evaluate an attestation blob against a TEE policy.
+
+    Wraps POST /admin/tee-policy/evaluate. Returns the
+    evaluation result with effective_tier, policy_passed,
+    reasons, etc.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    try:
+        with open(policy_file) as f:
+            policy = _json.load(f)
+    except _json.JSONDecodeError as exc:
+        click.echo(
+            f"Policy file is not valid JSON: {exc}", err=True,
+        )
+        sys.exit(1)
+
+    body = {"policy": policy}
+    if attestation_b64:
+        body["attestation_b64"] = attestation_b64
+
+    url = (
+        f"http://127.0.0.1:{api_port}/admin/tee-policy/evaluate"
+    )
+    req = urllib.request.Request(
+        url, data=_json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            result = _json.loads(r.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 422:
+            click.echo(
+                f"Invalid policy or attestation: "
+                f"{exc.read().decode()[:300]}",
+                err=True,
+            )
+            sys.exit(1)
+        click.echo(
+            f"Failed: HTTP {exc.code}: "
+            f"{exc.read().decode()[:200]}",
+            err=True,
+        )
+        sys.exit(2)
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"Failed: {exc}", err=True)
+        sys.exit(2)
+
+    if output_format == "json":
+        click.echo(_json.dumps(result, indent=2))
+        return
+
+    passed = result.get("policy_passed", False)
+    marker = (
+        "[green]✓ POLICY PASSED[/green]" if passed
+        else "[red]✗ POLICY FAILED[/red]"
+    )
+    console.print(f"[bold]TEE Policy Evaluation[/bold] — {marker}\n")
+    console.print(
+        f"  effective_tier: "
+        f"[cyan]{result.get('effective_tier', '?')}[/cyan]"
+    )
+    if result.get("vendor"):
+        console.print(f"  vendor: {result['vendor']}")
+    reasons = result.get("reasons") or []
+    if reasons:
+        console.print("\n  Reasons:")
+        for r in reasons:
+            console.print(f"    • {r}")
+
+
 if __name__ == "__main__":
     main()

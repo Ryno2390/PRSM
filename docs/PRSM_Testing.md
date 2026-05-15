@@ -423,7 +423,7 @@ fill them.
 |---------|----------|---------|---------|-------|
 | Incident response (triage) | ✅ | ✅ Sprint 434 (read-only) | ✅ | Trifecta-complete for read path; mutating commands deferred |
 | Insurance fund status + recovery compose | ✅ | ✅ Sprint 435 | 🟢 | Trifecta-complete: `prsm node insurance status/compose-recovery` |
-| TEE policy evaluate | ✅ | ❌ | 🟢 | CLI gap |
+| TEE policy status + evaluate | ✅ | ✅ Sprint 436 | 🟢 | Trifecta-complete: `prsm node tee status/evaluate` |
 | Federated learning admin | ✅ | ❌ | 🟢 | CLI gap |
 | Pipeline inference admin | ✅ | ❌ | 🟢 | CLI gap |
 | Bridge deposit/withdraw | ✅ | ✅ | 🟢 | Trifecta-complete |
@@ -520,6 +520,21 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 436** — TEE policy CLI trifecta closure.
+  Added `prsm node tee` group with `status` + `evaluate`
+  subcommands. `status` shows this node's effective attestation
+  tier (operators pre-screen workload eligibility); `evaluate`
+  takes a TEEPolicy JSON file + optional attestation_b64 and
+  returns evaluation result. Live-verified: status shows
+  effective_tier=none / vendor=unknown / no-blob diagnostic;
+  evaluate against a permissive policy returns expected
+  loud-fail on empty allowed_vendors (by-design). Broken-JSON
+  policy → clean error + exit 1. 7 pin tests including: --policy-
+  file required (security footgun guard against default-permissive);
+  attestation-b64 optional (pre-flight validation); help text
+  documents TEEPolicy schema + pre-screen purpose. §13 row
+  promoted: REST ✅ + CLI ✅. Tag
+  `cli-node-tee-policy-merge-ready-20260515`.
 - **2026-05-15 sprint 435** — Insurance-fund CLI trifecta closure.
   Added `prsm node insurance` group with `status` + `compose-recovery`
   subcommands. compose-recovery PRODUCES the multi-sig-uploadable
