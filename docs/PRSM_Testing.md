@@ -325,9 +325,9 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Feature | REST | CLI | MCP | Status |
 |---------|------|-----|-----|--------|
 | Earnings summary | `/admin/earnings-summary` | `prsm node earnings` | `prsm_earnings_summary` | ✅ Sprint 446 (CLI live: actionable empty-state when PRSM_OPERATOR_ADDRESS unset) |
-| Slash history | `/admin/slash-history` | `prsm node slash-history` | `prsm_slash_history` | ✅ |
-| Heartbeats | `/admin/heartbeat-history` | `prsm node heartbeats` | `prsm_heartbeat_history` | ✅ Sprint 446 (CLI live: "No entries" empty-state) |
-| Distributions | `/admin/distribution-history` | `prsm node distributions` | `prsm_distribution_history` | ✅ |
+| Slash history | `/admin/slash-history` | `prsm node slash-history` | `prsm_slash_history` | ✅ Sprint 455 (live: paginated {entries, total, offset, limit} empty-state) |
+| Heartbeats | `/admin/heartbeat-history` | `prsm node heartbeats` | `prsm_heartbeat_history` | ✅ Sprint 446, 455 (CLI live: "No entries" empty-state) |
+| Distributions | `/admin/distribution-history` | `prsm node distributions` | `prsm_distribution_history` | ✅ Sprint 455 (live: paginated envelope) |
 | Webhooks | `/admin/webhook-history` | `prsm node webhooks` | `prsm_webhook_history` | ✅ Sprint 446 (CLI live: "set PRSM_WEBHOOK_URL to enable" actionable empty-state) |
 | Trigger heartbeat | `/admin/heartbeat/trigger` | `prsm node trigger-heartbeat` | `prsm_heartbeat_trigger` | ✅ |
 | Trigger distribution | `/admin/distribution/trigger` | `prsm node trigger-distribution` | `prsm_distribution_trigger` | ✅ |
@@ -360,8 +360,8 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Feature | REST | CLI | MCP | Status |
 |---------|------|-----|-----|--------|
 | Incident open / advance / log event | `/admin/incident/...` | `prsm node incident list/details/playbook` (read-only) | `prsm_incident` | ✅ Sprint 434 (trifecta closure, read-only triage) |
-| Insurance fund | `/admin/insurance-fund/status` | — | `prsm_insurance_fund` | 🟢 |
-| Emergency pause | `/admin/emergency-pause/...` | — | `prsm_emergency_pause` | 🟢 |
+| Insurance fund status | `/admin/insurance-fund/status` | — | `prsm_insurance_fund` | ✅ Sprint 455 (live: treasury_address=Foundation Safe 0x91b0e6F8…, target_bps=500 reserve target, commissioned=false in dev env) |
+| Emergency pause status (mainnet contracts) | `/admin/emergency-pause/status` | — | `prsm_emergency_pause` | ✅ Sprint 455 (live: ftns_token + royalty_distributor + BSR + EscrowPool + StakeBond + Ed25519Verifier + StorageSlashing + KeyDistribution + EmissionController all reported with paused state + commissioned flag against chain_id=8453 Base mainnet) |
 | Upgrade proposal | `/admin/upgrade/...` | — | `prsm_upgrade` | 🟢 |
 | TEE policy | `/admin/tee-policy/evaluate` | — | `prsm_tee_policy` | 🟢 |
 | Vulnerability disclosure | `/admin/disclosure/...` | — | `prsm_disclosure` | 🟢 |
@@ -535,6 +535,24 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 455** — §13 admin operator surface sweep.
+  Live-verified the remaining §13 admin operator endpoints:
+  /admin/slash-history (paginated empty-state),
+  /admin/heartbeat-history (idem), /admin/distribution-history
+  (idem), /admin/insurance-fund/status (treasury_address=
+  Foundation Safe `0x91b0e6F8...`, target_bps=500 reserve
+  target, commissioned=false in dev env), /admin/emergency-
+  pause/status (live readback of ALL 9 mainnet contracts —
+  ftns_token / royalty_distributor / BSR / EscrowPool /
+  StakeBond / Ed25519Verifier / StorageSlashing /
+  KeyDistribution / EmissionController — with paused state +
+  commissioned=true for each on chain_id=8453 Base mainnet),
+  /admin/takedown-notices (empty-state), /admin/corp/issuer
+  (empty-state). The emergency-pause readback is the
+  **safety-critical operator surface** for §14 smart-contract
+  exploit response — operators check this BEFORE attempting
+  a pause to know which contracts can/can't be paused. 5 §13
+  rows promoted ✅. Doc-only.
 - **2026-05-15 sprint 454** — §13 /metrics + bootstrap-server live-probe.
   GET /metrics returns full Prometheus exposition format (9+ gauges:
   pending_escrow_count, total_locked_ftns, job_history_size,
