@@ -664,6 +664,31 @@ bootstrap server's 2GB-RAM droplet risks the canonical
 bootstrap-fleet entry point's stability. Cleaner path:
 fresh small droplet OR Option A code fix.
 
+**Update sprint 460 — Option A SHIPPED.** Made the
+`sentence_transformers` import lazy inside
+`SentenceTransformerEmbedder._ensure_loaded()`. Constructor
+no longer triggers any ML-stack import; only `encode()` does
+(via lazy `from sentence_transformers import SentenceTransformer`
+inside the function body). When the dep is absent, raises a
+clear actionable ImportError pointing at `pip install -e '.[ml]'`.
+
+Local verification: class importable + instantiable without
+sentence_transformers installed; `_model` stays None after
+construction; encode() raises clean ImportError with pip
+instruction.
+
+4 pin tests in
+`tests/unit/test_sentence_transformer_embedder_lazy_import.py`:
+- Module top-level has no unguarded `import
+  sentence_transformers` (source-grep invariant)
+- Class instantiable without ML stack present
+- _ensure_loaded raises ImportError with pip-install message
+  when dep absent
+- Parent orchestrator package imports cleanly without ML stack
+
+Now any 1GB-RAM droplet (DO Basic $4/mo) can run an operator
+daemon. Tag `fix-sentence-transformers-lazy-import-merge-ready-20260515`.
+
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
 **Symptom.** Following the "MCP tools" hint in PARTICIPANT_GUIDE, a user

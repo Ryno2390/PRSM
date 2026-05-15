@@ -24,10 +24,22 @@ start fast for nodes that never serve queries.
 from __future__ import annotations
 
 import pathlib
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+# Sprint 460 (F18 fix) — sentence_transformers is a heavy
+# ML dep (~2GB on disk with torch + transformers + huggingface_hub).
+# Importing at module top-level forced every PRSM operator to
+# install it just to BOOT a node, even if the operator never
+# served forge queries (sprint 458's bootstrap1 deploy halted
+# here). The class is now importable + instantiable without
+# sentence_transformers installed; the dep is pulled in
+# lazily inside `_ensure_loaded()`, which only runs on
+# `encode()` — the first time the operator actually serves a
+# query.
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -67,7 +79,11 @@ class SentenceTransformerEmbedder:
         self._model_name = model_name
         self._device = device
         self._cache_path = cache_path
-        self._model: Optional[SentenceTransformer] = None
+        # Use Any rather than the SentenceTransformer type so
+        # operators who never installed the heavy ML dep can
+        # still import + instantiate this class. The model
+        # object itself only materializes on first encode().
+        self._model: Optional[Any] = None
 
     # ------------------------------------------------------------------
     # Embedder Protocol
@@ -103,14 +119,33 @@ class SentenceTransformerEmbedder:
     # Internals
     # ------------------------------------------------------------------
 
-    def _ensure_loaded(self) -> SentenceTransformer:
+    def _ensure_loaded(self) -> Any:
         """Idempotent lazy-load. Subsequent calls reuse the same model
-        object."""
+        object.
+
+        Sprint 460 (F18 fix) — the import of `sentence_transformers`
+        itself is also lazy now (inside this method), not at module
+        top-level. Operators who never call encode() never pay the
+        ~2GB ML-stack install cost. Raises a clear actionable error
+        if the optional dep isn't installed.
+        """
         if self._model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError as exc:
+                raise ImportError(
+                    "sentence_transformers is required to encode "
+                    "queries. Install via "
+                    "`pip install -e '.[ml]'` (or pip install "
+                    "sentence-transformers torch directly) and "
+                    "restart the node."
+                ) from exc
             kwargs = {}
             if self._device is not None:
                 kwargs["device"] = self._device
             if self._cache_path is not None:
                 kwargs["cache_folder"] = str(self._cache_path)
-            self._model = SentenceTransformer(self._model_name, **kwargs)
+            self._model = SentenceTransformer(
+                self._model_name, **kwargs,
+            )
         return self._model
