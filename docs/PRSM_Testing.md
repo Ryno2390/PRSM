@@ -349,7 +349,7 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 
 | Feature | REST | CLI | MCP | Status |
 |---------|------|-----|-----|--------|
-| Incident open / advance / log event | `/admin/incident/...` | — | `prsm_incident` | 🟢 |
+| Incident open / advance / log event | `/admin/incident/...` | `prsm node incident list/details/playbook` (read-only) | `prsm_incident` | ✅ Sprint 434 (trifecta closure, read-only triage) |
 | Insurance fund | `/admin/insurance-fund/status` | — | `prsm_insurance_fund` | 🟢 |
 | Emergency pause | `/admin/emergency-pause/...` | — | `prsm_emergency_pause` | 🟢 |
 | Upgrade proposal | `/admin/upgrade/...` | — | `prsm_upgrade` | 🟢 |
@@ -421,6 +421,7 @@ fill them.
 
 | Feature | Has REST | Has CLI | Has MCP | Notes |
 |---------|----------|---------|---------|-------|
+| Incident response (triage) | ✅ | ✅ Sprint 434 (read-only) | ✅ | Trifecta-complete for read path; mutating commands deferred |
 | Insurance fund recovery compose | ✅ | ❌ | 🟢 | CLI gap |
 | TEE policy evaluate | ✅ | ❌ | 🟢 | CLI gap |
 | Federated learning admin | ✅ | ❌ | 🟢 | CLI gap |
@@ -519,6 +520,25 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 434** — Priority #5 partial closure: incident-
+  response CLI trifecta gap closed (read-only triage commands).
+  Added `prsm node incident` group with three subcommands:
+  - `list` — wraps `GET /admin/incident` with severity/phase filters
+  - `details <incident_id>` — wraps `GET /admin/incident/{id}` with
+    404 handling
+  - `playbook` — wraps `GET /admin/incident/playbook` (Vision §14:
+    response plan published BEFORE any incident)
+  Both text + JSON output formats; severity color-coded
+  (s0/s1=red, s2=yellow, s3=cyan). Live-verified against running
+  daemon: playbook surfaces canonical decision-tree; list returns
+  empty (no active incidents); details 404s cleanly on unknown id.
+  Mutating commands (open/advance/log-event) deferred — they need
+  more careful input-parameter UX; operators use REST or
+  `prsm_incident` MCP for those.
+  Pin tests (5 new): group registered; help text surfaces canonical
+  severity vocabulary (s0/s1/s2/s3, NOT minor/major/critical which
+  would silently 422); --format option present everywhere.
+  Tag `cli-node-incident-readonly-triage-merge-ready-20260515`.
 - **2026-05-15 sprint 433** — Priority #4 closed: §7 receipt
   verification live-tested end-to-end. Generated ed25519 keypair,
   built `InferenceReceipt` (job + request + model + tier + ε +

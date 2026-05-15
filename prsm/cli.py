@@ -6564,5 +6564,243 @@ def node_fiat_readiness(output_format):
     sys.exit(0 if not has_error else 1)
 
 
+# ──────────────────────────────────────────────────────────────
+# Sprint 434 — `prsm node incident ...` CLI trifecta gap
+#
+# The /admin/incident/* REST surface (sprint <pre-roadmap>) +
+# `prsm_incident` MCP tool exist; the CLI lane was the gap per
+# PRSM_Testing.md §13 "Operator-trifecta gaps". This block adds
+# the read-only triage commands an operator needs at incident
+# time: list active incidents, view one in detail, print the
+# canonical playbook. The mutating commands (open / advance /
+# log-event) need more thought about input-parameter UX and
+# stay deferred — operators can hit those via the REST surface
+# or `prsm_incident` MCP.
+# ──────────────────────────────────────────────────────────────
+
+
+@node.group("incident", invoke_without_command=False)
+def node_incident_group():
+    """Incident-response triage commands (read-only).
+
+    Maps to /admin/incident/* REST endpoints. For the
+    mutating actions (open / advance / log-event), use
+    `prsm_incident` MCP or the REST surface directly.
+    """
+
+
+@node_incident_group.command("list")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+@click.option(
+    "--severity", default=None,
+    help=(
+        "Filter by severity: s0 (catastrophic), s1 "
+        "(critical), s2 (high), s3 (low)."
+    ),
+)
+@click.option(
+    "--phase", default=None,
+    help=(
+        "Filter by phase: detected, triaged, contained, "
+        "mitigated, postmortem."
+    ),
+)
+def node_incident_list(api_port, output_format, severity, phase):
+    """List active incidents on this node.
+
+    Wraps GET /admin/incident. Color-codes by severity in
+    text mode; emits JSON-stable payload for ops automation.
+    """
+    import json as _json
+    import urllib.parse
+    import urllib.request
+
+    params = {}
+    if severity:
+        params["severity"] = severity
+    if phase:
+        params["phase"] = phase
+    qs = ("?" + urllib.parse.urlencode(params)) if params else ""
+    url = f"http://127.0.0.1:{api_port}/admin/incident{qs}"
+
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            payload = _json.loads(r.read())
+    except Exception as exc:  # noqa: BLE001
+        click.echo(
+            f"Failed to fetch incidents: {exc}", err=True,
+        )
+        sys.exit(2)
+
+    records = payload.get("records", [])
+    if output_format == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    count = payload.get("count", len(records))
+    if count == 0:
+        console.print(
+            "[green]✓ No active incidents.[/green]"
+        )
+        return
+
+    sev_color = {
+        "s0": "red",          # catastrophic
+        "s1": "red",          # critical
+        "s2": "yellow",       # high
+        "s3": "cyan",         # low
+    }
+    console.print(
+        f"[bold]Active incidents ({count}):[/bold]\n"
+    )
+    for r in records:
+        sev = (r.get("severity") or "").lower()
+        color = sev_color.get(sev, "white")
+        console.print(
+            f"[{color}]{sev.upper():<8}[/{color}] "
+            f"[bold]{r.get('incident_id', '?')}[/bold] "
+            f"phase=[dim]{r.get('phase', '?')}[/dim] "
+            f"kind=[dim]{r.get('kind', '?')}[/dim]"
+        )
+        title = r.get("title") or r.get("description")
+        if title:
+            console.print(f"  [dim]{title}[/dim]")
+
+
+@node_incident_group.command("details")
+@click.argument("incident_id")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def node_incident_details(incident_id, api_port, output_format):
+    """Show full detail for a single incident.
+
+    Wraps GET /admin/incident/{incident_id}.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    url = (
+        f"http://127.0.0.1:{api_port}/admin/incident/"
+        f"{incident_id}"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            payload = _json.loads(r.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            click.echo(
+                f"Incident {incident_id!r} not found.", err=True,
+            )
+            sys.exit(1)
+        click.echo(
+            f"Failed: HTTP {exc.code}: {exc.read().decode()[:200]}",
+            err=True,
+        )
+        sys.exit(2)
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"Failed to fetch: {exc}", err=True)
+        sys.exit(2)
+
+    if output_format == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    console.print(
+        f"[bold]Incident {payload.get('incident_id', '?')}[/bold]"
+    )
+    console.print(
+        f"  severity:  {payload.get('severity', '?')}"
+    )
+    console.print(
+        f"  phase:     {payload.get('phase', '?')}"
+    )
+    console.print(
+        f"  kind:      {payload.get('kind', '?')}"
+    )
+    if payload.get("title"):
+        console.print(f"  title:     {payload['title']}")
+    if payload.get("description"):
+        console.print(
+            f"  desc:      {payload['description']}"
+        )
+    events = payload.get("events") or []
+    if events:
+        console.print(f"\n  Events ({len(events)}):")
+        for e in events:
+            console.print(
+                f"    - [dim]{e.get('timestamp', '?')}[/dim] "
+                f"{e.get('event_type', '?')}: "
+                f"{e.get('description', '')}"
+            )
+
+
+@node_incident_group.command("playbook")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+@click.option(
+    "--severity", default=None,
+    help="Filter playbook to one severity level.",
+)
+def node_incident_playbook(api_port, output_format, severity):
+    """Show the canonical incident-response playbook.
+
+    Wraps GET /admin/incident/playbook. Per Vision §14:
+    the playbook is published BEFORE any incident — this
+    command makes it readable from the operator terminal.
+    """
+    import json as _json
+    import urllib.request
+
+    url = (
+        f"http://127.0.0.1:{api_port}/admin/incident/playbook"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            payload = _json.loads(r.read())
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"Failed to fetch: {exc}", err=True)
+        sys.exit(2)
+
+    if output_format == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    decision_tree = payload.get("decision_tree", [])
+    if severity:
+        decision_tree = [
+            d for d in decision_tree
+            if d.get("severity", "").lower() == severity.lower()
+        ]
+    console.print("[bold]Incident Response Playbook[/bold]\n")
+    console.print(
+        f"[bold]Decision tree ({len(decision_tree)} entries):"
+        "[/bold]"
+    )
+    for d in decision_tree:
+        sev = d.get("severity", "?")
+        phase = d.get("phase", "?")
+        recs = d.get("recommendations", [])
+        console.print(
+            f"\n  [bold]{sev.upper()}[/bold] / [dim]{phase}"
+            f"[/dim]"
+        )
+        for rec in recs:
+            console.print(f"    • {rec}")
+
+
 if __name__ == "__main__":
     main()
