@@ -6802,5 +6802,167 @@ def node_incident_playbook(api_port, output_format, severity):
             console.print(f"    • {rec}")
 
 
+# ──────────────────────────────────────────────────────────────
+# Sprint 435 — `prsm node insurance ...` CLI trifecta gap
+#
+# Two endpoints on the REST surface:
+#   GET  /admin/insurance-fund/status — current fund state
+#   POST /admin/insurance-fund/compose-recovery — produce a
+#        multi-sig-uploadable transfer tx payload
+#
+# Both safe in CLI form: status is read-only; compose-recovery
+# only PRODUCES the tx bytes (does NOT execute — Foundation Safe
+# holds the actual transfer privilege per Vision §14). Operator
+# pipes the JSON output into the multi-sig signing tool of choice.
+# ──────────────────────────────────────────────────────────────
+
+
+@node.group("insurance", invoke_without_command=False)
+def node_insurance_group():
+    """Insurance-fund triage + recovery-tx composition.
+
+    Maps to /admin/insurance-fund/* REST endpoints.
+    """
+
+
+@node_insurance_group.command("status")
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def node_insurance_status(api_port, output_format):
+    """Show current insurance-fund status (balance, recent
+    recoveries, etc.).
+
+    Wraps GET /admin/insurance-fund/status. 503 if the
+    tracker isn't wired on this node.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    url = f"http://127.0.0.1:{api_port}/admin/insurance-fund/status"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            payload = _json.loads(r.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 503:
+            click.echo(
+                "Insurance fund tracker not initialized on "
+                "this node.",
+                err=True,
+            )
+            sys.exit(1)
+        click.echo(
+            f"Failed: HTTP {exc.code}: {exc.read().decode()[:200]}",
+            err=True,
+        )
+        sys.exit(2)
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"Failed to fetch: {exc}", err=True)
+        sys.exit(2)
+
+    if output_format == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    console.print("[bold]Insurance Fund Status[/bold]")
+    for k, v in payload.items():
+        console.print(f"  {k}: [cyan]{v}[/cyan]")
+
+
+@node_insurance_group.command("compose-recovery")
+@click.option(
+    "--recipient", required=True,
+    help="0x-prefixed Ethereum address to receive funds.",
+)
+@click.option(
+    "--amount-wei", required=True, type=int,
+    help="Amount to transfer, in wei (integer).",
+)
+@click.option(
+    "--reason", required=True,
+    help=(
+        "Recovery reason (logged + included in the audit "
+        "trail; e.g., 'Sprint 435 user-X reimbursement')."
+    ),
+)
+@click.option("--api-port", default=8000, type=int)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="json",
+    show_default=True,
+    help=(
+        "Default JSON so operators can pipe directly into "
+        "multi-sig signing tools."
+    ),
+)
+def node_insurance_compose_recovery(
+    recipient, amount_wei, reason, api_port, output_format,
+):
+    """Compose a multi-sig-uploadable insurance-fund recovery tx.
+
+    Does NOT execute — produces the tx-payload bytes that the
+    Foundation Safe operator uploads to their multi-sig
+    signing tool. Per Vision §14 invariant: PRSM never executes
+    the transfer directly; Foundation Safe holds the privilege.
+
+    Output defaults to JSON so the payload can be piped into
+    `safe-cli` or similar. Use --format text for human-readable
+    summary.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    body = {
+        "recipient": recipient,
+        "amount_wei": amount_wei,
+        "reason": reason,
+    }
+    url = (
+        f"http://127.0.0.1:{api_port}/admin/insurance-fund/"
+        f"compose-recovery"
+    )
+    req = urllib.request.Request(
+        url, data=_json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            tx = _json.loads(r.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code in (422, 503):
+            click.echo(
+                f"Compose failed: {exc.read().decode()[:300]}",
+                err=True,
+            )
+            sys.exit(1)
+        click.echo(
+            f"Failed: HTTP {exc.code}: {exc.read().decode()[:200]}",
+            err=True,
+        )
+        sys.exit(2)
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"Failed: {exc}", err=True)
+        sys.exit(2)
+
+    if output_format == "json":
+        # Default JSON output → operator can pipe to safe-cli.
+        # click.echo (not console.print) keeps ANSI clean.
+        click.echo(_json.dumps(tx, indent=2))
+        return
+
+    console.print(
+        "[bold]Recovery TX composed[/bold] "
+        "[dim](not executed — multi-sig must sign)[/dim]\n"
+    )
+    for k, v in tx.items():
+        console.print(f"  {k}: [cyan]{v}[/cyan]")
+
+
 if __name__ == "__main__":
     main()

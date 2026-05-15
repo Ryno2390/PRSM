@@ -422,7 +422,7 @@ fill them.
 | Feature | Has REST | Has CLI | Has MCP | Notes |
 |---------|----------|---------|---------|-------|
 | Incident response (triage) | ✅ | ✅ Sprint 434 (read-only) | ✅ | Trifecta-complete for read path; mutating commands deferred |
-| Insurance fund recovery compose | ✅ | ❌ | 🟢 | CLI gap |
+| Insurance fund status + recovery compose | ✅ | ✅ Sprint 435 | 🟢 | Trifecta-complete: `prsm node insurance status/compose-recovery` |
 | TEE policy evaluate | ✅ | ❌ | 🟢 | CLI gap |
 | Federated learning admin | ✅ | ❌ | 🟢 | CLI gap |
 | Pipeline inference admin | ✅ | ❌ | 🟢 | CLI gap |
@@ -520,6 +520,18 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 435** — Insurance-fund CLI trifecta closure.
+  Added `prsm node insurance` group with `status` + `compose-recovery`
+  subcommands. compose-recovery PRODUCES the multi-sig-uploadable
+  recovery tx but does NOT execute (Vision §14: Foundation Safe
+  holds the transfer privilege). Default JSON output so operators
+  can pipe directly into safe-cli. Live-verified: status returns
+  fund_address + treasury_address; compose-recovery surfaces
+  clean "insurance fund address not configured" error in dev env.
+  6 new pin tests including invariant test that the CLI help text
+  states "does not execute" / "multi-sig must sign". §13 row
+  promoted: REST ✅ + CLI ✅. Tag
+  `cli-node-insurance-recovery-merge-ready-20260515`.
 - **2026-05-15 sprint 434** — Priority #5 partial closure: incident-
   response CLI trifecta gap closed (read-only triage commands).
   Added `prsm node incident` group with three subcommands:
