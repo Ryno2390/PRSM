@@ -62,8 +62,9 @@ journey. Each step should be live-verifiable on a single node.
 | 3 | Start node | `prsm node start --background` | ✅ | 424 | Sprint 424 fixed deprecated `prsm daemon` path |
 | 4 | Upload content (plain, Tier A) | `POST /content/upload` | ✅ | 425/428 | Live roundtrip green; sprint 425 fixed `result.cid` bug |
 | 5 | Verify retrieval (same node, Tier A) | `GET /content/retrieve/{cid}` | ✅ | 428 | First end-to-end single-node roundtrip; byte-identical |
-| 6 | Upload content (encrypted, Tier B/C) | `POST /content/upload` + recipients | 🟢 | 304 | Encryption math live-tested; full retrieve roundtrip on single node untested |
-| 7 | Retrieve encrypted content (Tier B/C, same node) | `GET /content/retrieve/{cid}` | 🔬 | — | F8 shortcut is Tier-A-only; Tier B/C retrieve needs encrypted-shard reassembly via ContentStore |
+| 6 | Upload encrypted content (recipient encryption) | `POST /content/upload` + recipients | ✅ | 430 | X25519+XChaCha20 encrypt-then-publish; live byte-identical roundtrip |
+| 7 | Retrieve encrypted content (same node) | `GET /content/retrieve/{cid}` + decrypt | ✅ | 430 | Live-verified: 431-byte ciphertext → decrypt → byte-identical plaintext |
+| 7a | Tier B/C Shamir multi-shard lane (infrastructure) | `ContentPublisher.publish(tier=B)` | 🟢 | 430 | Local-publish shortcut wired (routes staged dir to `_fetch_tier_bc`); not yet exposed in `/content/upload` (always Tier A today) |
 | 8 | Query against uploaded content | `POST /compute/forge` | ⚠️ | — | Endpoint live; needs `PRSM_QUERY_ORCHESTRATOR_ENABLED=1`; full single-node E2E not yet exercised |
 | 8a | Quote query cost | `POST /compute/forge/quote` | ✅ | — | Verified during dogfood arc — works on fresh node |
 | 9 | Receive FTNS settlement | `GET /balance` + RoyaltyDistributor | 🔬 | — | Requires cross-node query + on-chain dispatch; not exercised single-node |
@@ -77,10 +78,11 @@ journey. Each step should be live-verifiable on a single node.
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | Upload plain text/bytes (Tier A) | `POST /content/upload` | ✅ | 425/428 | E2E |
-| Upload encrypted (Tier B/C) | `POST /content/upload` w/ recipients | 🟢 | 304 | Math green; full roundtrip untested |
+| Upload encrypted (recipient encryption) | `POST /content/upload` w/ recipients | ✅ | 430 | Live byte-identical roundtrip |
 | Retrieve by CID (Tier A, same node) | `GET /content/retrieve/{cid}` | ✅ | 428 | Local-publish shortcut |
+| Retrieve + decrypt (recipient-encrypted, same node) | `GET /content/retrieve/{cid}` + `decrypt_for_recipient` | ✅ | 430 | E2E live-tested |
 | Retrieve by CID (Tier A, cross-node) | `GET /content/retrieve/{cid}` | 🔬 | — | Single-node setup can't exercise BT swarm |
-| Retrieve by CID (Tier B/C) | `GET /content/retrieve/{cid}` | 🔬 | — | Needs ContentStore artifact reassembly |
+| Retrieve by CID (Tier B/C Shamir, same node) | `ContentRetriever.fetch` | 🟢 | 430 | Routing pinned; infrastructure-only — `/content/upload` doesn't reach this lane today |
 | Upload shard | `POST /content/upload/shard` | 🟢 | 102 | Size cap test pinned; E2E untested |
 | Recipient manifest | `GET /content/recipient-manifest/{cid}` | 🟢 | 304 | Test-pinned |
 | Content metadata | `GET /content/{cid}` | 🟢 | — | Endpoint exists; usage path untested |
@@ -104,6 +106,7 @@ journey. Each step should be live-verifiable on a single node.
 | Tier A publish | `ContentPublisher.publish` | ✅ | 428 | Sprint 428 wired infohash → staged_path map |
 | Tier B/C publish | `ContentPublisher.publish` | 🟢 | — | Multi-file torrent layout tested in `_legacy/` suite |
 | Tier A local-publish shortcut | `ContentRetriever.fetch` | ✅ | 428 | First single-node self-fetch path |
+| Tier B/C local-publish shortcut (Shamir dir) | `ContentRetriever.fetch` → `_fetch_tier_bc` | 🟢 | 430 | Routes staged dir to existing Tier B/C reassembly; unit-pinned |
 | BT swarm fetch (cross-node) | `bt_requester.request_content` | 🔬 | — | Not exercised in dogfood single-node setup |
 | CLI: torrent create/add/list | `prsm torrent ...` | 🟢 | — | Commands exist; operator workflow untested |
 
@@ -279,7 +282,7 @@ journey. Each step should be live-verifiable on a single node.
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Recipient encryption (X25519 + XChaCha20) | `POST /content/upload` w/ recipients | 🟢 | 304 | Math green; full roundtrip untested |
+| Recipient encryption (X25519 + XChaCha20) | `POST /content/upload` w/ recipients | ✅ | 430 | Live byte-identical roundtrip; sprint 430 |
 | Recipient manifest read | `GET /content/recipient-manifest/{cid}` | 🟢 | 304 | |
 | Threshold encryption | (multi-endpoint) | 🟢 | — | Math green |
 | `prsm_enterprise_recipient` MCP | MCP | 🟢 | 304 | |
@@ -493,3 +496,11 @@ arc proved we need.
   sections. Status snapshot reflects the post-sprint-428 state of
   the codebase. Vision §4 step-5 (single-node retrieve) marked ✅
   for the first time.
+- **2026-05-15 sprint 430** — Tier B/C encrypted-content roundtrip
+  closed. Vision §4 steps 6 + 7 (recipient encryption upload +
+  retrieve + decrypt) promoted 🟢 → ✅ via live byte-identical
+  end-to-end test. ContentRetriever local-publish shortcut extended
+  to route Tier B/C staged dirs to `_fetch_tier_bc` (infrastructure
+  for the future Shamir-exposing upload endpoint). 6 unit tests
+  pinned; 2 new (Tier B/C dir routes locally; malformed dir raises
+  not falls through).

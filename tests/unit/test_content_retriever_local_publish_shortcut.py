@@ -149,29 +149,75 @@ async def test_local_shortcut_skips_when_staged_path_missing(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_local_shortcut_skips_when_staged_path_is_directory(tmp_path):
-    """Tier B/C publishes produce a multi-file staging dir,
-    not a single file. The local shortcut is Tier A only —
-    if the staged path is a directory, fall through to BT
-    rather than trying to read a dir as bytes (would either
-    OSError or silently return wrong content)."""
+async def test_local_shortcut_tier_bc_dir_routes_to_fetch_tier_bc(tmp_path):
+    """Sprint 430 — Tier B/C extension. The local-publish
+    shortcut now handles encrypted publishes too: a staged
+    dir gets routed through `_fetch_tier_bc` (same path as
+    a post-BT-download Tier B/C reassembly) so the encrypted
+    roundtrip works on a single node. This test pins that a
+    valid-shaped Tier B/C staging dir DOES NOT fall through
+    to the BT requester."""
     publisher = _FakeTierAPublisher()
     tier_bc_dir = tmp_path / "tier-bc-staged-root"
     tier_bc_dir.mkdir()
-    (tier_bc_dir / "manifest.bin").write_bytes(b"encrypted")
+    # Real shape: manifest.bin + keyshares.json + shard-NNNN.bin
+    (tier_bc_dir / "manifest.bin").write_bytes(b"encrypted-manifest")
+    (tier_bc_dir / "keyshares.json").write_bytes(b"[]")
+    (tier_bc_dir / "shard-0000.bin").write_bytes(b"shard0")
     publisher.register(
         "57f2d3ac5442df7ac500b87b38b0ecfa78d76124",
         tier_bc_dir,
     )
-    bt_result = MagicMock()
-    bt_result.success = False
-    bt_result.error = "stub"
     retriever, requester = _make_retriever(
-        tmp_path, with_publisher=publisher, bt_result=bt_result,
+        tmp_path, with_publisher=publisher,
     )
 
-    with pytest.raises(RuntimeError):
+    # _fetch_tier_bc will call ContentStore.retrieve_with_artifacts
+    # which requires real keyshares + valid encryption. We patch it
+    # to a stub so we can pin the routing without standing up the
+    # full crypto stack — the routing is what matters here, the
+    # full encrypted-roundtrip is verified in the live-daemon test
+    # below the unit suite.
+    expected_bytes = b"plaintext via local Tier B/C shortcut"
+
+    async def stub_fetch_tier_bc(root, *, infohash):
+        return expected_bytes
+
+    retriever._fetch_tier_bc = stub_fetch_tier_bc
+
+    result = await retriever.fetch(
+        "57f2d3ac5442df7ac500b87b38b0ecfa78d76124",
+    )
+    assert result == expected_bytes
+    requester.request_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_local_shortcut_malformed_tier_bc_dir_raises_not_falls_through(tmp_path):
+    """Sprint 430 — defense against silent miscorrection. If
+    the publisher claims to have the infohash + the staged
+    path is a dir but the Tier B/C artifacts are broken
+    (missing manifest / keyshares / shards), raise instead
+    of falling through to BT. Falling through would hide
+    real bugs in the publisher; the right answer is to
+    surface the inconsistency loudly."""
+    publisher = _FakeTierAPublisher()
+    broken_dir = tmp_path / "broken-tier-bc"
+    broken_dir.mkdir()
+    # Only manifest.bin, no keyshares + no shards — broken Tier B/C.
+    (broken_dir / "manifest.bin").write_bytes(b"x")
+    publisher.register(
+        "57f2d3ac5442df7ac500b87b38b0ecfa78d76124",
+        broken_dir,
+    )
+    retriever, requester = _make_retriever(
+        tmp_path, with_publisher=publisher,
+    )
+
+    with pytest.raises(RuntimeError, match="keyshares|missing"):
         await retriever.fetch(
             "57f2d3ac5442df7ac500b87b38b0ecfa78d76124",
         )
-    requester.request_content.assert_awaited_once()
+    # Critically: did NOT fall through to BT — broken local
+    # state surfaces loudly.
+    requester.request_content.assert_not_awaited()

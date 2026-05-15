@@ -464,25 +464,41 @@ class ContentRetriever:
             If the requester returns ``success=False``, or for Tier B/C
             if a required artefact (manifest, keyshares) is missing.
         """
-        # Sprint 428 (F8) — local-publish shortcut. If the same
-        # node published this infohash, return its staged bytes
-        # directly without involving the BT swarm. Scope: Tier A
-        # only (single-file staged paths). Tier B/C falls through
-        # to the BT path because the encrypted-shards layout needs
-        # the ContentStore reassembly round-trip — that's the
-        # existing _fetch_tier_bc lane and won't be short-circuited
-        # in this sprint.
+        # Sprint 428 (F8) + Sprint 430 (Tier B/C extension) —
+        # local-publish shortcut. If the same node published this
+        # infohash, serve from the staged path directly without
+        # involving the BT swarm.
+        #
+        # Tier A: staged_path is a single file → return its bytes.
+        # Tier B/C: staged_path is the multi-file torrent root
+        # (manifest.bin + keyshares.json + shard-NNNN.bin) →
+        # reassemble + decrypt via _fetch_tier_bc, the same lane
+        # used by the post-BT-download path.
+        #
+        # Malformed Tier B/C staged dirs raise from _fetch_tier_bc
+        # rather than falling through to BT — silent miscorrection
+        # would hide real publisher bugs.
         publisher = getattr(self, "content_publisher", None)
         if publisher is not None:
             local_path = publisher.local_publish_path(torrent_infohash)
             if local_path is not None and local_path.is_file():
                 logger.debug(
-                    "ContentRetriever local-publish shortcut: infohash=%s "
-                    "→ %s (no BT round-trip)",
+                    "ContentRetriever local-publish shortcut (Tier A): "
+                    "infohash=%s → %s (no BT round-trip)",
                     torrent_infohash[:16],
                     local_path,
                 )
                 return local_path.read_bytes()
+            if local_path is not None and local_path.is_dir():
+                logger.debug(
+                    "ContentRetriever local-publish shortcut (Tier B/C): "
+                    "infohash=%s → %s (no BT round-trip)",
+                    torrent_infohash[:16],
+                    local_path,
+                )
+                return await self._fetch_tier_bc(
+                    local_path, infohash=torrent_infohash,
+                )
 
         save_path = self.cache_dir / torrent_infohash
         save_path.mkdir(parents=True, exist_ok=True)
