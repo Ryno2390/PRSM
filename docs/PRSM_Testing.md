@@ -162,7 +162,7 @@ journey. Each step should be live-verifiable on a single node.
 | Stale escrow cleanup | `POST /compute/cleanup-stale` | 🟢 | — | Endpoint exists |
 | Training jobs | `POST /compute/train` | 🟢 | — | Endpoint exists |
 | Compute stats | `GET /compute/stats` | 🟢 | — | Endpoint exists |
-| Available models | `GET /compute/models` | 🟢 | — | Endpoint exists |
+| Available models | `GET /compute/models` | ✅ | 450 | Live: returns 3 mock models (mock-llama-3-8b / mock-mistral-7b / mock-phi-3) registered by MockInferenceExecutor (sprint 438) |
 | Receipts list (persistence across daemon restart) | `GET /compute/receipts` | ✅ | 447 | Live: sprint 438's mock-inference receipts persist; epsilon_spent=0.0 (F12 fix holds); full settler_signature intact |
 | Receipt details | `GET /compute/receipt/{job_id}` | 🟢 | — | Endpoint exists |
 
@@ -170,7 +170,7 @@ journey. Each step should be live-verifiable on a single node.
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Hardware benchmark | `prsm node benchmark` | 🟢 | — | T1-T4 classification |
+| Hardware benchmark | `prsm node benchmark` | ✅ | 450 | Live: Apple M4 → Tier T1, 4.60 TFLOPS FP32, thermal=sustained; full CPU/GPU/VRAM/RAM profile rendered |
 
 ---
 
@@ -316,7 +316,7 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Bootstrap test (probe canonical fleet) | — | `prsm node bootstrap-test` | `prsm_bootstrap_test` | ✅ Sprint 385/387 |
 | Bootstrap server status | `/admin/bootstrap-server/status` | `prsm bootstrap-server status` | `prsm_bootstrap_server_status` | ✅ Sprint 388-396 |
 | Metrics (Prometheus) | `/metrics` | — | `prsm_metrics_summary` | ✅ |
-| Resources (read/write) | `GET/PUT /node/resources` | — | `prsm_node_resources` | 🟢 |
+| Resources (read/write) | `GET/PUT /node/resources` | — | `prsm_node_resources` | ✅ Sprint 450 (GET live: cpu/mem/storage/gpu allocation pcts + bandwidth/active-hours/effective-resources fully reported) |
 
 ### Earnings + ledger
 
@@ -533,6 +533,17 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 450** — Hardware classification + supported-models
+  + resources live-verified. `prsm node benchmark` returns full
+  hardware profile (Apple M4 / 10 cores / 16GB VRAM/RAM / 4.60 TFLOPS
+  FP32 / thermal=sustained) → Compute Tier T1 classification. GET
+  /compute/models returns the 3 mock models (mock-llama-3-8b /
+  mock-mistral-7b / mock-phi-3) registered by sprint 438's
+  MockInferenceExecutor — cross-confirms the executor wiring is
+  active. GET /node/resources returns full canonical schema with
+  cpu/mem/storage/gpu allocation percentages, bandwidth limits,
+  active hours, and computed effective-resources. 3 rows promoted
+  🟢 → ✅. Doc-only.
 - **2026-05-15 sprint 449** — §5.1 storage + content stat surfaces
   live-verified. /storage/stats returns full canonical schema
   (storage_available, pledged_gb=10.0, used_gb=0.0,
