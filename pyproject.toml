@@ -108,6 +108,56 @@ dependencies = [
     # operator installs. Caught during sprint 458's
     # bootstrap1 deploy.
     "zfec>=1.5.8",
+
+    # ── Sprint 461 dep-audit additions (F17 + siblings) ─────
+    # Six deps that PRSM's core code imports at module top-
+    # level but were undeclared in pyproject.toml. Caught by
+    # sprint 461's grep-all-imports-vs-declared-deps audit
+    # (Path A — close the dep-bug class that surfaced F15/F16
+    # /F17/F18 during bootstrap1 deploys). Each entry below
+    # cites the top-level import site that requires it.
+
+    # pycryptodome — Shamir secret-sharing for Tier B/C key
+    # distribution. Imported at prsm/storage/key_sharing.py:39
+    # by `from Crypto.Protocol.SecretSharing import Shamir`.
+    # F17 — surfaced during sprint 458's bootstrap1 deploy
+    # (workaround was direct pip install; this is the
+    # permanent fix).
+    "pycryptodome>=3.19.0",
+
+    # PyYAML — required by 4+ config loaders at top-level
+    # (prsm/core/config/manager.py:11, loaders.py:11,
+    # model_config_manager.py:18, compute/performance/
+    # scaling.py:15). The most-load-bearing missing dep —
+    # config-load is on EVERY node-start path.
+    "pyyaml>=6.0",
+
+    # python-jose — JWT handling in enhanced authentication
+    # (prsm/core/security/enhanced_authentication.py:11).
+    # Siblings: pyjwt is already declared at line 75; jose
+    # is the auth-middleware library used in parallel.
+    "python-jose>=3.3.0",
+
+    # networkx — graph algorithms used by federation
+    # topology + agent-based economic model + selective
+    # parallelism engine. Top-level imports in three
+    # core modules; node-startup path hits at least one.
+    "networkx>=3.0",
+
+    # starlette — FastAPI's underlying ASGI lib. Imported
+    # explicitly by prsm/api/auth_middleware.py:16-17 and
+    # prsm/node/api_hardening.py:27-29 for the canonical
+    # BaseHTTPMiddleware / Request / Response classes.
+    # Defensively-declared even though fastapi pulls it in
+    # transitively — explicit avoids version-skew surprises.
+    "starlette>=0.27.0",
+
+    # eth-abi — ABI encoding for the on-chain settlement
+    # merkle proofs (prsm/settlement/merkle.py:30).
+    # Sibling to web3 + eth-account (both in [blockchain]
+    # extra) but used at top-level by the settlement
+    # module which is on the core startup path.
+    "eth-abi>=4.0.0",
 ]
 
 [project.optional-dependencies]
