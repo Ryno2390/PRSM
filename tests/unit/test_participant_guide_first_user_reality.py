@@ -112,13 +112,15 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_thirteen_frictions():
-    """The findings doc enumerates F1-F13. F13 added
-    2026-05-15 during sprint 453's MCP-tool sweep: post-
-    sprint-173 QueryOrchestrator-shaped agent_forge lacks
-    `.traces`, breaking /rings/status + prsm_node_status MCP.
-    Fixed sprint 453. If a finding is silently removed
-    (without an explicit closure note), surface that."""
+def test_findings_doc_documents_all_fourteen_frictions():
+    """The findings doc enumerates F1-F14. F14 added
+    2026-05-15 during sprint 456's multi-node test bench:
+    two daemons on same host discover each other via
+    bootstrap server but NAT-loopback prevents direct P2P.
+    Discovery layer (sprints 319-329) verified working;
+    cross-host test bench is the eventual right answer.
+    If a finding is silently removed (without an explicit
+    closure note), surface that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -134,6 +136,7 @@ def test_findings_doc_documents_all_thirteen_frictions():
         "F11 — StakingManager TypeError on claim",
         "F12 — Mock executor's ε=∞ for NONE tier",
         "F13 — `/rings/status` 500 breaks `prsm_node_status`",
+        "F14 — Multi-node single-host test bench",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"

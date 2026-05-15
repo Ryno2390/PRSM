@@ -483,6 +483,55 @@ Live verification:
 
 Tag `dashboard-metrics-query-orchestrator-compat-merge-ready-20260515`.
 
+### F14 — Multi-node single-host test bench: NAT-loopback blocks direct P2P
+
+**Symptom.** Sprint 456 stood up daemon #2 on the same host as daemon
+#1 with separate `HOME`/data_dir/identity/ports (daemon #2 on
+api=8001, p2p=9011). Both daemons connect to the canonical
+bootstrap server and DISCOVER each other (symmetric `known[]`
+entries + `peer_join_events: 1` on both sides). But:
+
+- `connected_count: 0` on both sides
+- Cross-node content retrieve: daemon #2 attempts to retrieve a
+  CID daemon #1 just uploaded → `status: not_found,
+  providers_tried: 0`
+
+**Root cause (live-diagnosed sprint 456).** Both daemons announce
+their **external NAT-translated public IP** (`146.70.202.118`) as
+their P2P address — that's correct for cross-host setups but on a
+single host, traffic out to 146.70.202.118 doesn't loop back to
+local listeners. Standard NAT-loopback gotcha.
+
+The peer-discovery layer (sprints 319-329) works correctly —
+nodes find each other via bootstrap-server peer-list gossip. The
+direct WebSocket P2P connection fails silently because the
+announced address isn't reachable from the same host.
+
+**Severity.** Blocks single-host multi-node test bench. Doesn't
+affect real multi-host deployments. Single-host operators
+verifying their setup will see "peer discovery works but content
+fetches don't" — an honest-scope distinction.
+
+**Fix candidates (deferred to its own sprint):**
+
+- **Option A:** PRSM_ADVERTISE_ADDRESS env var that overrides the
+  externally-announced peer address. Single-host operators set it
+  to `127.0.0.1:<port>` to force loopback. Minimum-viable.
+- **Option B:** STUN-style peer-NAT detection — daemons can
+  detect they share a NAT and use the LAN address. Heavier.
+- **Option C:** Use a different host for daemon #2 entirely
+  (cloud VM, OCI free tier, etc.). Most-representative; matches
+  real production but requires external resources.
+
+For this verification campaign, the multi-host setup (Option C)
+is the eventual right test bench. Single-host (Option A shim)
+would unlock most operator-side single-host verification.
+
+**Status.** Surfaced 2026-05-15 sprint 456. Documented but
+deferred. The discovery-layer half of multi-node already
+verified (bootstrap-mediated peer-list works ✅); content-fetch
+half blocked behind P2P-connection establishment.
+
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
 **Symptom.** Following the "MCP tools" hint in PARTICIPANT_GUIDE, a user

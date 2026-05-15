@@ -82,7 +82,9 @@ journey. Each step should be live-verifiable on a single node.
 | Upload encrypted (recipient encryption) | `POST /content/upload` w/ recipients | ✅ | 430 | Live byte-identical roundtrip |
 | Retrieve by CID (Tier A, same node) | `GET /content/retrieve/{cid}` | ✅ | 428 | Local-publish shortcut |
 | Retrieve + decrypt (recipient-encrypted, same node) | `GET /content/retrieve/{cid}` + `decrypt_for_recipient` | ✅ | 430 | E2E live-tested |
-| Retrieve by CID (Tier A, cross-node) | `GET /content/retrieve/{cid}` | 🔬 | — | Single-node setup can't exercise BT swarm |
+| Bootstrap-mediated peer discovery (multi-node) | bootstrap-server peer-list | ✅ | 456 | Live: 2 daemons on same host, symmetric `known[]` entries with node_id + external IP + last_seen; `peer_join_events: 1` on both sides |
+| Direct P2P connection (single-host) | WebSocket transport | ⏸️ | 456 | F14: NAT-loopback blocks single-host direct connection (announced addrs are external IP); multi-host bench is the right test |
+| Retrieve by CID (Tier A, cross-node) | `GET /content/retrieve/{cid}` | 🔬 | — | Requires F14 fix or multi-host test bench |
 | Retrieve by CID (Tier B/C Shamir, same node) | `ContentRetriever.fetch` | 🟢 | 430 | Routing pinned; infrastructure-only — `/content/upload` doesn't reach this lane today |
 | Upload shard | `POST /content/upload/shard` | 🟢 | 102 | Size cap test pinned; E2E untested |
 | Recipient manifest | `GET /content/recipient-manifest/{cid}` | 🟢 | 304 | Test-pinned |
@@ -535,6 +537,25 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 456** — Multi-node test bench. Stood up
+  daemon #2 on same host with separate `HOME=/tmp/prsm-node-2`,
+  api=8001, p2p=9011. Both connected to canonical bootstrap
+  server. **Symmetric peer discovery verified**:
+  - Daemon #1 (cdefb8e5…) and daemon #2 (147e19a0…) each have
+    the other in their `known[]` list with node_id + address
+    + last_seen
+  - `peer_join_events: 1` on both sides
+  - sprint 320-329 P2P discovery hardening operationally
+    confirmed working
+  But: **F14 surfaced** — both daemons announce their external
+  NAT-translated public IP (146.70.202.118), so single-host
+  loopback to each other fails. `connected_count: 0` on both
+  sides; cross-node content retrieve → `not_found,
+  providers_tried: 0`. Three Option A/B/C candidates documented;
+  multi-host test bench (Option C, cloud VM) is the eventual
+  right answer. 1 row promoted (peer discovery ✅), 1 row
+  deferred-with-F14-attribution (direct P2P), 1 row stays 🔬
+  (cross-node retrieve).
 - **2026-05-15 sprint 455** — §13 admin operator surface sweep.
   Live-verified the remaining §13 admin operator endpoints:
   /admin/slash-history (paginated empty-state),
