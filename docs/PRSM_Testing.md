@@ -184,7 +184,9 @@ journey. Each step should be live-verifiable on a single node.
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | Local balance | `GET /balance` | ✅ | — | Verified live in dogfood arc |
-| On-chain balance | `GET /balance/onchain` | ✅ | 464 | Live: queries Base mainnet FTNS contract `0x5276a37...` for derived wallet address (0x2Fd48D… in this test); returns balance_wei + balance_ftns + claimable + escrowed |
+| On-chain balance (mainnet) | `GET /balance/onchain` | ✅ | 464 | Live: queries Base mainnet FTNS contract `0x5276a37...` for derived wallet address (0x2Fd48D… in this test); returns balance_wei + balance_ftns + claimable + escrowed |
+| On-chain balance (Sepolia testnet) | `GET /balance/onchain` | ✅ | 465 | Live: with `PRSM_NETWORK=testnet` + `BASE_SEPOLIA_RPC_URL` + `PRSM_ONCHAIN_FTNS=1` + `FTNS_TOKEN_ADDRESS` env vars, queries Base Sepolia FTNS contract `0x7F5f00FA…`; canonical_match True; returns 0 for empty wallet |
+| Network switching (mainnet ↔ testnet) | `PRSM_NETWORK` env | ✅ | 465 | Live: daemon respects PRSM_NETWORK; chain_id 84532 + network "testnet" + rpc_host sepolia.base.org reported in `/info` |
 | Transaction history | `GET /transactions` | ✅ | — | Verified live (sprint 198 bounds-validated `limit`) |
 | Wallet spend (30d summary) | `GET /wallet/spend` | ✅ | 464 | Live with FTNS_WALLET_PRIVATE_KEY: returns {address, days, total_spent_ftns, escrows_count} for derived wallet |
 | Wallet escrows | `GET /wallet/escrows` | ✅ | 464 | Live with wallet: paginated empty-state for the wallet address |
@@ -708,6 +710,29 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-15 sprint 465** — Level B Sepolia testnet wiring (TX
+  pending wallet funding). Switched daemon from Base mainnet
+  (chain_id 8453) to Base Sepolia (chain_id 84532) via four
+  env vars: `PRSM_NETWORK=testnet`, `BASE_SEPOLIA_RPC_URL=
+  https://base-sepolia-rpc.publicnode.com`, `PRSM_ONCHAIN_FTNS=1`,
+  `FTNS_TOKEN_ADDRESS=0x7F5f00FA…`. Verified:
+  - `/info` reports chain_id 84532, network "testnet",
+    rpc_host sepolia.base.org, canonical FTNS 0x7F5f00FA…
+  - `/health/detailed.ftns_ledger.canonical_match: True` — daemon
+    is talking to the **live Base Sepolia FTNS contract**
+  - `/balance/onchain` queries Sepolia for the wallet address,
+    returns 0 (correct — wallet unfunded)
+  - Default public RPC `https://sepolia.base.org` is unreachable
+    from this network; `https://base-sepolia-rpc.publicnode.com`
+    works reliably (latest block 41558920+ at test time)
+  Schema-discovery during the test: env-var precedence for
+  testnet RPC is `BASE_SEPOLIA_RPC_URL` (not the mainnet-named
+  `BASE_RPC_URL`). The first attempt with `BASE_RPC_URL` got
+  ignored — the dual-env-name dispatch is per `prsm.config.
+  networks.resolve_endpoints()` lines 270-283.
+  TX exercise (transfer, stake, etc.) pending wallet funding via
+  Sepolia faucet. The wiring layer is fully verified; the
+  funded-TX layer is the natural next sprint.
 - **2026-05-15 sprint 464** — On-chain wallet integration (Level C —
   loading + address-derivation, no on-chain TX). Generated fresh
   test wallet (private key + address `0x2Fd48D…`), set
