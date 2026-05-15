@@ -112,12 +112,12 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_eleven_frictions():
-    """The findings doc enumerates F1-F11. F11 added
-    2026-05-15 during sprint 432's stake → claim
-    verification: production-blocking datetime tz-aware
-    mismatch (SQLite drops tz info on load → naive vs
-    aware subtraction raises TypeError). Fixed sprint 432.
+def test_findings_doc_documents_all_twelve_frictions():
+    """The findings doc enumerates F1-F12. F12 added
+    2026-05-15 during sprint 438's §5.2 inference E2E
+    verification: production-blocking JSON-roundtrip
+    mismatch (float("inf") → null → 0.0 → signature mismatch).
+    Fixed sprint 438.
     If a finding is silently removed (without an explicit
     closure note), surface that."""
     text = FINDINGS.read_text()
@@ -133,6 +133,7 @@ def test_findings_doc_documents_all_eleven_frictions():
         "F9 — Upload + query embedding-dim mismatch",
         "F10 — Single-node forge query blocked",
         "F11 — StakingManager TypeError on claim",
+        "F12 — Mock executor's ε=∞ for NONE tier",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"

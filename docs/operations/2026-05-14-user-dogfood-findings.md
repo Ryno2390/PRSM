@@ -396,6 +396,45 @@ Live verification:
 
 Tag `staking-manager-tz-aware-datetimes-merge-ready-20260515`.
 
+### F12 — Mock executor's ε=∞ for NONE tier breaks receipt verify (JSON round-trip)
+
+**Symptom.** During sprint 438 live §5.2 inference E2E test:
+inference with `privacy_tier=none` returned `epsilon_spent: null`
+in the JSON receipt; subsequent verify call returned
+`signature_valid: false, reasons=["signature failed
+cryptographic verification"]`.
+
+**Root cause (live-diagnosed sprint 438).**
+`MockInferenceExecutor._epsilon_for_level(PrivacyLevel.NONE)`
+returned `float("inf")`. The signing payload includes
+`f"{epsilon_spent:.10f}"` → for ∞ this is `"inf"`. The receipt
+gets signed with those bytes. But `json.dumps(float("inf"))`
+emits `Infinity` (Python default; not strictly JSON spec); FastAPI
+post-processes to `null`. The verifier round-trips JSON → null
+gets reconstructed as `0.0` → signing payload becomes
+`"0.0000000000"` → bytes mismatch → signature_valid=false.
+
+**Severity.** Every NONE-tier inference receipt fails the
+verify check. Production-blocking for the §5.2-§7 integration
+claim (a major Vision §7 truth-surfacing promise: "callers can
+independently verify the chain of custody on inference
+receipts"). NONE tier is the common-case path for non-private
+inference; the bug breaks the most common workflow.
+
+**Fix shipped sprint 438.** `_epsilon_for_level(NONE)` returns
+`0.0` (not `inf`). Semantically honest: NONE tier means "no DP
+guarantee provided", so "0 DP budget consumed" is the right
+encoding. All tiers now produce finite, JSON-clean ε values.
+
+Live verification:
+- Pre-fix: NONE-tier verify → `signature_valid: false`
+- Post-fix: NONE-tier verify → `ok=true, signature_valid=true,
+  reasons=[]`
+
+Full inference → verify chain now passes for ALL privacy tiers
+(none/standard/high/maximum). Tag
+`inference-mock-executor-epsilon-finite-merge-ready-20260515`.
+
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
 **Symptom.** Following the "MCP tools" hint in PARTICIPANT_GUIDE, a user

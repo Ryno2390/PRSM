@@ -2281,6 +2281,33 @@ class PRSMNode:
             self.content_publisher = None
             self.content_retriever = None
 
+        # ── Inference Executor (Sprint 438) ───────────────────────
+        # /compute/inference returns 503 "Inference executor not
+        # initialized" by default because production-grade inference
+        # requires operator-supplied executor (model files + TEE
+        # attestation backend). For verification-campaign + dogfood
+        # paths, operators opt in to the deterministic mock via
+        # PRSM_INFERENCE_EXECUTOR=mock. The mock zero-fills the
+        # cryptographic fields and MUST NOT be trusted by real
+        # verifiers — that's the explicit honest-scope.
+        _exec_kind = os.environ.get(
+            "PRSM_INFERENCE_EXECUTOR", "",
+        ).strip().lower()
+        if _exec_kind == "mock":
+            from prsm.compute.inference import (
+                MockInferenceExecutor,
+            )
+            self.inference_executor = MockInferenceExecutor()
+            logger.info(
+                "Inference executor: MockInferenceExecutor "
+                "(opt-in via PRSM_INFERENCE_EXECUTOR=mock). "
+                "Synthetic outputs only — zero-filled crypto "
+                "fields. Real production deployments must wire "
+                "their own InferenceExecutor."
+            )
+        else:
+            self.inference_executor = None
+
         # ── Payment Escrow & Result Consensus ─────────────────────
         from prsm.node.payment_escrow import PaymentEscrow
         from prsm.node.result_consensus import ResultConsensus

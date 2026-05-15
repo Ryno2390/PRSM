@@ -202,9 +202,21 @@ class MockInferenceExecutor(InferenceExecutor):
 
         Real executor pulls this from the ``ConfidentialExecutor.dp_config``
         once inference completes. Mock uses the canonical mapping.
+
+        Sprint 438 (F12 fix): NONE tier uses 0.0 (not float("inf")).
+        Pre-fix, float("inf") was JSON-serialized as ``null`` at the
+        /compute/inference response layer; verifiers that round-
+        tripped the receipt through JSON saw epsilon_spent=null →
+        reconstructed as 0.0, producing different signing-payload
+        bytes than the executor signed (which had inf). Signature
+        verify failed for every NONE-tier inference. The semantic
+        meaning is preserved: NONE tier means "no DP applied", so
+        ε=0 ("zero DP budget consumed") is the honest reading
+        anyway — float("inf") was always a strange way to encode
+        "no privacy guarantee provided".
         """
         return {
-            PrivacyLevel.NONE: float("inf"),
+            PrivacyLevel.NONE: 0.0,
             PrivacyLevel.STANDARD: 8.0,
             PrivacyLevel.HIGH: 4.0,
             PrivacyLevel.MAXIMUM: 1.0,

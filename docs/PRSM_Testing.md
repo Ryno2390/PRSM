@@ -130,8 +130,10 @@ journey. Each step should be live-verifiable on a single node.
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Inference quote | `POST /compute/inference/quote` | 🟢 | — | Test-pinned |
-| Submit inference | `POST /compute/inference` | 🟢 | — | Endpoint exists; E2E single-node untested |
+| Inference quote | `POST /compute/inference/quote` | ✅ | 438 | Live-verified with `PRSM_INFERENCE_EXECUTOR=mock` |
+| Submit inference (NONE tier) | `POST /compute/inference` | ✅ | 438 | Live E2E + F12 fix: ε=0.0 (not inf), receipt JSON-clean, verify passes |
+| Submit inference (standard/high/maximum) | `POST /compute/inference` | ✅ | 438 | Live E2E: signed receipt verifies cleanly via sprint-433 verify path |
+| Inference → receipt → verify chain | end-to-end | ✅ | 438 | First time the full §5.2+§7 chain works on single node |
 | Streaming inference | `POST /compute/inference/stream` | 🟢 | 3.x.8 | Audit-prep §7.4-§7.8 pin via tags |
 | Tensor parallel sharding | `POST /compute/inference/tensor_parallel/shard` | 🟢 | — | Endpoint exists |
 | Pipeline stage setup | `POST /compute/inference/pipeline/stage` | 🟢 | — | Endpoint exists |
@@ -520,6 +522,22 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 438** — §5.2 inference E2E + F12 fix.
+  Promoted §5.2 inference rows from 🟢 to ✅. Wired
+  MockInferenceExecutor as opt-in via `PRSM_INFERENCE_EXECUTOR=mock`
+  in node.py (zero-filled crypto, MUST NOT trust in prod —
+  honest-scope). Live-verified full inference → signed receipt →
+  /compute/receipt/verify chain. Caught production-blocker F12:
+  mock executor's `_epsilon_for_level(NONE)` returned float("inf");
+  JSON serialization mapped Infinity → null; verifier reconstructed
+  as 0.0 → signing-payload bytes mismatch → signature_valid=false
+  for every NONE-tier inference. Fix: NONE tier uses 0.0 (honest
+  semantic — NONE means "no DP applied", so "0 budget consumed"
+  is the right encoding). Live-verified: all four privacy tiers
+  (none/standard/high/maximum) now pass the verify roundtrip
+  cleanly. 4 new pin tests including F12 invariant + env-gate
+  documentation pin. PRSM_Testing.md §5.2 rows promoted.
+  Tag `inference-mock-executor-epsilon-finite-merge-ready-20260515`.
 - **2026-05-15 sprint 437** — Federated + pipeline CLI trifecta
   closures (last two from the priority queue). Added
   `prsm node federated list/details` + `prsm node pipeline list/
