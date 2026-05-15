@@ -199,11 +199,12 @@ journey. Each step should be live-verifiable on a single node.
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Settlement stats | `GET /settlement/stats` | 🟢 | — | Endpoint exists |
+| Settlement stats | `GET /settlement/stats` | ✅ | 444 | Live: returns canonical schema (empty-state correct) |
 | Pending settlements | `GET /settlement/pending` | 🟢 | — | Endpoint exists |
 | Flush batch | `POST /settlement/flush` | 🟢 | — | Endpoint exists |
 | Settlement history | `GET /settlement/history` | 🟢 | — | Endpoint exists |
-| Settler registry (register / unbond / sign batch) | `/settler/...` | 🟢 | — | Multi-endpoint registry; not exercised E2E |
+| Settler registry (list-active surface) | `GET /settler/list/active` | ✅ | 444 | Live: returns `[]` for fresh node; register/unbond/sign-batch flows 🟢 |
+| Settler registry (register / unbond / sign batch) | `/settler/...` | 🟢 | — | Multi-step registry flows not exercised E2E |
 
 ### Phase 5 fiat surface (commission-ready, external-gated)
 
@@ -225,8 +226,8 @@ journey. Each step should be live-verifiable on a single node.
 |---------|---------|--------|--------|-------|
 | RoyaltyDistributor v2 (atomic 70/25/5) | mainnet `0x3E82…D6c2` | ✅ | A-08 | Mainnet ceremony 2026-05-09 |
 | On-chain content-access royalty leg | env-gated by `PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1` | 🟢 | 243-261 | 19-sprint arc; live activation requires creator addresses on uploaded content |
-| Royalty dispatch summary | `GET /admin/royalty-dispatch-summary` | 🟢 | — | Endpoint exists |
-| Royalty dispatch history | `GET /admin/royalty-dispatch-history` | 🟢 | — | Endpoint exists |
+| Royalty dispatch summary | `GET /admin/royalty-dispatch-summary` | ✅ | 444 | Live: returns canonical schema (total, status_counts, total_sent_wei, by_allocation_mode, earliest_ts, latest_ts) |
+| Royalty dispatch history | `GET /admin/royalty-dispatch-history` | ✅ | 444 | Live: paginated `{entries, total, offset, limit}` envelope |
 | Claim royalty | `POST /wallet/royalty/claim` + `prsm node claim-royalty` | 🟢 | — | Multi-step ledger flow untested E2E |
 
 ---
@@ -527,6 +528,18 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 444** — §5.3 royalty + settlement admin surface
+  live-verified. /admin/royalty-dispatch-summary returns canonical
+  schema (total, status_counts, total_sent_wei, by_allocation_mode,
+  earliest_ts, latest_ts). /admin/royalty-dispatch-history returns
+  paginated envelope. /ledger/sync/stats returns 5-field stats
+  (txs_broadcast/received/rejected, reconciliations_run,
+  discrepancies_found). /settlement/stats + /settler/list/active
+  return clean empty-state. 4 PRSM_Testing.md rows promoted 🟢 → ✅.
+  Empty-state verification is a real value-add: it confirms the
+  endpoints don't 500 / 404 / 503 in absence of data — operators
+  integrating against these endpoints get the canonical shape on
+  day 1. Doc-only.
 - **2026-05-15 sprint 443** — §5.4 formal-verification surface live-
   verified. Hit /admin/formal-verification/invariants — returns the
   full list of 20 critical invariants with severity / spec_text /
