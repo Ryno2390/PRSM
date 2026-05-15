@@ -435,6 +435,54 @@ Full inference → verify chain now passes for ALL privacy tiers
 (none/standard/high/maximum). Tag
 `inference-mock-executor-epsilon-finite-merge-ready-20260515`.
 
+### F13 — `/rings/status` 500 breaks `prsm_node_status` MCP tool
+
+**Symptom.** Sprint 453 §13 MCP-tool live-verification sweep
+hit `prsm_node_status` and got:
+
+```
+Cannot reach PRSM node: 500, message='Attempt to decode JSON
+  with unexpected mimetype: text/plain; charset=utf-8',
+  url='http://localhost:8000/rings/status'
+```
+
+The canonical "is this node healthy" AI-assistant probe broken;
+opaque 500 makes operator triage impossible.
+
+**Root cause (live-diagnosed sprint 453).** Sprint 173 swapped
+`node.agent_forge` from the legacy AgentForge module (had
+`.traces`) to a QueryOrchestrator instance (doesn't). The
+`/rings/status` endpoint calls
+`DashboardMetrics(node=node).get_summary()` which reads:
+
+```python
+len(self._node.agent_forge.traces)
+```
+
+at two sites — `collect_ring_status` (line 51) + `get_summary`
+(line 91). Both raise `AttributeError: 'QueryOrchestrator'
+object has no attribute 'traces'`. FastAPI's default 500
+handler emits `text/plain "Internal Server Error"` (not JSON).
+
+**Severity.** Production-blocking for AI-triage path. Operators
+using Claude/GPT to triage their node hit the cryptic 500 even
+when node is perfectly healthy. `prsm_node_status` MCP exits
+with "Cannot reach PRSM node" — falsely implies node is down.
+
+**Fix shipped sprint 453.** Defensive `getattr(forge, 'traces',
+[]) or []` at both call sites. When QueryOrchestrator is wired
+(production default post-sprint-173), traces_collected reports
+0 — semantically honest: QueryOrchestrator doesn't track
+per-query traces in the legacy AgentForge sense. Legacy
+AgentForge backwards-compat preserved if `.traces` IS present.
+
+Live verification:
+- Pre-fix: GET /rings/status → 500 "Internal Server Error"
+- Post-fix: GET /rings/status → 200 + JSON; prsm_node_status
+  MCP renders full Ring 1-10 status table
+
+Tag `dashboard-metrics-query-orchestrator-compat-merge-ready-20260515`.
+
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
 **Symptom.** Following the "MCP tools" hint in PARTICIPANT_GUIDE, a user

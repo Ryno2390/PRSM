@@ -535,6 +535,22 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 453** — F13 fix + §13 MCP-tool sweep. The
+  MCP-tool live-verification swept 114 registered MCP tools
+  (exceeds Vision §11's "73+" claim). Caught **F13 production-
+  blocker**: `prsm_node_status` MCP returned cryptic
+  "Cannot reach PRSM node: 500" because `/rings/status` 500'd
+  on `AttributeError: 'QueryOrchestrator' object has no
+  attribute 'traces'`. Root cause: sprint 173's agent_forge
+  swap left dashboard_metrics.py reading the legacy
+  AgentForge `.traces` attribute. Fixed: defensive
+  `getattr(forge, 'traces', []) or []` at both call sites.
+  Live-verified post-fix: /rings/status returns full Ring 1-10
+  JSON; prsm_node_status renders the full health table.
+  4 new pin tests + F1-F13 dogfood-findings count updated.
+  Also sample-verified `prsm_info / prsm_peers / prsm_node_health
+  / prsm_metrics_summary` MCP tools — all return clean output.
+  Tag `dashboard-metrics-query-orchestrator-compat-merge-ready-20260515`.
 - **2026-05-15 sprint 452** — KYC surface + fiat-readiness CLI live-
   verified. POST /wallet/kyc/initiate with {user_id, email, tier}
   returns PENDING_COMMISSION envelope (vendor=null in dev env per

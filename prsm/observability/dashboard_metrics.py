@@ -48,7 +48,9 @@ class DashboardMetrics:
             RingStatus(5, "The Brain",
                       initialized=getattr(self._node, 'agent_forge', None) is not None,
                       healthy=getattr(self._node, 'agent_forge', None) is not None,
-                      metrics={"traces": len(getattr(self._node, 'agent_forge', None).traces) if getattr(self._node, 'agent_forge', None) else 0}),
+                      metrics={"traces": len(getattr(
+                          getattr(self._node, 'agent_forge', None),
+                          'traces', []) or [])}),
             RingStatus(6, "The Polish", initialized=True, healthy=True),
             RingStatus(7, "The Vault",
                       initialized=getattr(self._node, 'confidential_executor', None) is not None),
@@ -82,11 +84,16 @@ class DashboardMetrics:
         if self._node and getattr(self._node, 'privacy_budget', None):
             privacy_metrics = self._node.privacy_budget.get_audit_report()
 
-        # Collect forge metrics
+        # Collect forge metrics. Sprint 453 (F13 fix): post-sprint-173
+        # node.agent_forge is a QueryOrchestrator which does not have
+        # a `.traces` attribute (legacy AgentForge-only telemetry).
+        # Defensive: read via getattr with default [] so /rings/status
+        # doesn't 500 on production-default deployments.
         forge_metrics = {}
-        if self._node and getattr(self._node, 'agent_forge', None):
+        forge = getattr(self._node, 'agent_forge', None) if self._node else None
+        if forge:
             forge_metrics = {
-                "traces_collected": len(self._node.agent_forge.traces),
+                "traces_collected": len(getattr(forge, 'traces', []) or []),
             }
 
         return {
