@@ -380,7 +380,8 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Creator reputation tracker (auto-record on retrieve) | hook in `/content/retrieve` | 🟢 | 287-291 | Wired correctly; live update gated by operator wallet config (`FTNS_WALLET_PRIVATE_KEY`) — dev env can't trigger |
 | Tier classification (new/low/medium/high) | reputation tier auto-records on retrieve | 🟢 | 287-291 | Same wallet-gate as above |
 | Search filter by tier | `GET /content/search?min_tier=...&exclude_new=...` | ✅ | 440 | Live: query params accepted cleanly; tier-filter codepath active |
-| Creator stake gate (HIGH tier requires bonded FTNS) | on-chain `StakeBond` | 🟢 | 287-291 | Demotes HIGH→MEDIUM when unstaked |
+| Creator stake lookup | `GET /marketplace/creator-stake/{id}` | ✅ | 442 | Live: returns clean schema (balance_wei, high_tier_eligible, min_high_tier_stake_wei, commissioned); unknown creator defaults to balance_wei=0 + high_tier_eligible=false |
+| Creator stake gate (commissioning) | on-chain `StakeBond` + `commissioned` flag | 🟢 | 287-291 | Lookup surface ready; live stake/slash flow gated by on-chain wallet + StakeBond contract address (dev env: `commissioned: false`) |
 | Content fingerprint registry (first-upload registers) | `POST /content/upload` hook | ✅ | 441 | Live E2E: content_hash registered with canonical_creator |
 | Content fingerprint registry (duplicate detection) | `POST /content/upload` re-upload | ✅ | 441 | Live E2E: re-upload with different creator surfaces `duplicate_of_creator`; first-creator-wins invariant verified |
 | Fingerprint registry (dedup-attempt counter) | `GET /marketplace/fingerprint/{hash}` | ✅ | 441 | `duplicate_attempt_count` increments on each re-upload attempt |
@@ -525,6 +526,15 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 442** — §14 creator-stake lookup live-verified.
+  `GET /marketplace/creator-stake/{id}` returns clean schema with
+  balance_wei + high_tier_eligible + min_high_tier_stake_wei +
+  commissioned fields. Unknown creator → balance_wei=0 +
+  high_tier_eligible=false (correct default). `commissioned: false`
+  in dev env reflects the honest-scope: live stake/slash flow needs
+  on-chain wallet + StakeBond contract address; lookup surface is
+  ready regardless. PRSM_Testing.md row split: lookup ✅, full
+  commissioning 🟢 with explicit gate-condition note. Doc-only.
 - **2026-05-15 sprint 441** — §14 content-fingerprint dedup chain live-
   verified. Full Sybil-resistance evidence chain works end-to-end:
   1. Upload content with creator A → `content_hash` registered;
