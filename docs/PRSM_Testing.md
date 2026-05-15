@@ -366,10 +366,10 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Operator content filter (CID blocklist) | `/admin/content-filter/cids` | 🟢 | 269-274 | 451 status response live-tested in retrieve path |
+| Operator content filter (CID blocklist) | `/admin/content-filter/cids` | ✅ | 439 | Live E2E: POST cids → 451 on retrieve verified |
 | Operator content filter (tag blocklist) | `/admin/content-filter/tags` | 🟢 | 269-274 | |
-| Foundation takedown notice intake (info-only) | `/admin/takedown-notice` | 🟢 | 269-274 | |
-| Notice → filter bridge | `/admin/content-filter/from-notice/{id}` | 🟢 | 269-274 | Operator-initiated, voluntary |
+| Foundation takedown notice intake (info-only) | `/admin/takedown-notice` | ✅ | 439 | Live-verified: target_cid+sender+jurisdiction+basis required (§14 attribution invariant) |
+| Notice → filter bridge | `/admin/content-filter/from-notice/{id}` | ✅ | 439 | Live E2E: notice → bridge → CID auto-added; notice status flips to "acknowledged" |
 | Notice lifecycle status transitions | `/admin/takedown-notices/{id}/status` | 🟢 | 269-274 | |
 
 ### Data quality + Sybil resistance
@@ -522,6 +522,26 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 439** — §14 content-moderation chain E2E.
+  Promoted §14 content-moderation rows from 🟢 to ✅ via the live
+  end-to-end test:
+  1. POST /admin/content-filter/cids → blocklist updated (2 CIDs)
+  2. GET /content/retrieve/<blocked-cid> → 451 (RFC 7725 Unavailable
+     For Legal Reasons — canonical "policy-blocked" code, not 403/404)
+  3. POST /admin/takedown-notice with {target_cid, sender,
+     jurisdiction, basis, description} → notice received
+  4. POST /admin/content-filter/from-notice/<id> → CID auto-added
+     to blocklist; notice status flips to "acknowledged"
+  5. GET /admin/content-filter → blocked list now includes the
+     bridged CID
+  Caught a schema discovery during live test: takedown notice
+  requires target_cid+sender+jurisdiction+basis (NOT the older
+  filer_name+filer_email+claim_basis names from an earlier draft).
+  4 new pin tests including: 451 status code is the canonical
+  blocked-content code; notice→filter bridge is explicit
+  operator-initiated (no auto-bridge — Vision §14 Foundation-
+  never-compels invariant); refuse is the default action_on_match.
+  Tag `content-moderation-chain-e2e-merge-ready-20260515`.
 - **2026-05-15 sprint 438** — §5.2 inference E2E + F12 fix.
   Promoted §5.2 inference rows from 🟢 to ✅. Wired
   MockInferenceExecutor as opt-in via `PRSM_INFERENCE_EXECUTOR=mock`
