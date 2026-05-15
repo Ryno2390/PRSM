@@ -134,7 +134,10 @@ journey. Each step should be live-verifiable on a single node.
 | Submit inference (NONE tier) | `POST /compute/inference` | ✅ | 438 | Live E2E + F12 fix: ε=0.0 (not inf), receipt JSON-clean, verify passes |
 | Submit inference (standard/high/maximum) | `POST /compute/inference` | ✅ | 438 | Live E2E: signed receipt verifies cleanly via sprint-433 verify path |
 | Inference → receipt → verify chain | end-to-end | ✅ | 438 | First time the full §5.2+§7 chain works on single node |
-| Streaming inference | `POST /compute/inference/stream` | 🟢 | 3.x.8 | Audit-prep §7.4-§7.8 pin via tags |
+| Streaming inference (endpoint UX) | `POST /compute/inference/stream` | ✅ | 445 | Live: returns 503 + clean refusal "wire a ParallaxScheduledExecutor" when streaming-capable executor not present (UX path verified) |
+| Streaming inference (full E2E) | `POST /compute/inference/stream` | 🟢 | 3.x.8 | Audit-prep §7.4-§7.8 unit-pinned; full E2E needs ParallaxScheduledExecutor wiring |
+| Privacy budget | `GET /privacy/budget` | ✅ | 445 | Live: returns {max_epsilon, total_spent, remaining, num_operations, spends} |
+| Arbitration queue | `GET /content/arbitration/queue` | ✅ | 445 | Live: returns {pending, total} empty-state |
 | Tensor parallel sharding | `POST /compute/inference/tensor_parallel/shard` | 🟢 | — | Endpoint exists |
 | Pipeline stage setup | `POST /compute/inference/pipeline/stage` | 🟢 | — | Endpoint exists |
 
@@ -528,6 +531,16 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 445** — Streaming-inference UX path + §7 privacy
+  budget + arbitration queue live-verified. /compute/inference/stream
+  returns clean 503 "Inference executor does not support streaming.
+  Wire a ParallaxScheduledExecutor (Phase 3.x.8.1) to enable
+  /compute/inference/stream." — the UX guides operators to the
+  correct wiring action. Full streaming E2E remains 🟢 (Parallax
+  executor wiring out of scope). /privacy/budget returns canonical
+  schema {max_epsilon, total_spent, remaining, num_operations,
+  spends}. /content/arbitration/queue returns empty-state cleanly.
+  4 rows updated/added in PRSM_Testing.md. Doc-only.
 - **2026-05-15 sprint 444** — §5.3 royalty + settlement admin surface
   live-verified. /admin/royalty-dispatch-summary returns canonical
   schema (total, status_counts, total_sent_wei, by_allocation_mode,
