@@ -143,6 +143,36 @@ def _read_declared_pypi():
     return declared
 
 
+def _read_required_pypi():
+    """Sprint 463: parse pyproject.toml and return only
+    REQUIRED PyPI package names (not in any extra). The
+    tightened invariant: imports on the node-startup path
+    must be in this set, not just any extra."""
+    import tomllib
+    data = tomllib.loads(
+        (REPO_ROOT / "pyproject.toml").read_text(),
+    )
+    required = set()
+    for dep in data["project"].get("dependencies", []):
+        pkg = re.split(r'[<>=!~\s\[]', dep, maxsplit=1)[0]
+        if pkg:
+            required.add(pkg.lower())
+    return required
+
+
+def _required_module_set():
+    """Sprint 463: return the set of Python module names
+    provided by REQUIRED deps only (no extras)."""
+    required_pypi = _read_required_pypi()
+    provided = set()
+    for pkg in required_pypi:
+        provided.add(pkg)
+        provided.add(pkg.replace("-", "_"))
+        if pkg in PYPI_TO_MODULE:
+            provided.add(PYPI_TO_MODULE[pkg])
+    return {m.lower() for m in provided}
+
+
 def _resolved_module_set(declared_pypi):
     """Expand declared PyPI names into Python-module names."""
     provided = set()
@@ -172,6 +202,152 @@ def _is_skipped_path(py_path):
     return any(skip in s for skip in _SKIP_DIRS)
 
 
+# Sprint 463: real transitive trace of the node-startup
+# import chain. Starts from canonical root files + follows
+# `from prsm.X import Y` chains AT MODULE TOP-LEVEL until
+# fixed-point. The resulting set is the modules that
+# actually get loaded when `prsm node start` runs.
+#
+# Compared to a directory-prefix heuristic, this trace
+# correctly handles:
+#   - Lazy imports (inside function bodies) NOT included
+#   - Files in a startup-dir but not imported by anything
+#     (e.g., compute/inference/tensor_parallel.py) NOT included
+#   - Transitive chains across directory boundaries
+#
+# The roots are the canonical entry points: node startup +
+# API surface + CLI entry. If the operator runs `prsm node
+# start`, eventually one of these is the first prsm module
+# loaded.
+_STARTUP_ROOTS = (
+    "prsm.cli",
+    "prsm.node.node",
+    "prsm.node.api",
+    # prsm.mcp_server is intentionally NOT a startup root:
+    # it's an OPT-IN entry (`prsm mcp start`) that requires
+    # `pip install -e '.[mcp]'`. The dep-audit invariant
+    # scopes to the canonical `prsm node start` chain so it
+    # doesn't false-flag deps in the [mcp] extra. Operators
+    # who want MCP install the extra explicitly per docs.
+)
+
+
+def _resolve_module_to_file(mod_name):
+    """Map a dotted module name (prsm.X.Y) to its .py path."""
+    parts = mod_name.split(".")
+    candidate = REPO_ROOT.joinpath(*parts).with_suffix(".py")
+    if candidate.is_file():
+        return candidate
+    # Package: look for __init__.py
+    pkg_init = REPO_ROOT.joinpath(*parts) / "__init__.py"
+    if pkg_init.is_file():
+        return pkg_init
+    return None
+
+
+def _resolve_relative_import(from_module, source_file):
+    """Map `from .X import Y` to its dotted module name.
+
+    `source_file` is the file containing the import; the
+    `from_module` may start with dots indicating relative
+    import depth. Returns dotted module name.
+    """
+    if not from_module.startswith("."):
+        return from_module
+    # Count leading dots
+    depth = 0
+    while depth < len(from_module) and from_module[depth] == ".":
+        depth += 1
+    tail = from_module[depth:]
+    # source_file is REPO_ROOT/prsm/.../foo.py
+    # Its package is the parent dir as a dotted name.
+    rel = source_file.relative_to(REPO_ROOT)
+    pkg_parts = list(rel.parts[:-1])  # drop file name
+    # Climb `depth - 1` levels (depth=1 means same package)
+    if depth > 1:
+        pkg_parts = pkg_parts[:-(depth - 1)]
+    if tail:
+        return ".".join(pkg_parts + tail.split("."))
+    return ".".join(pkg_parts)
+
+
+def _trace_startup_imports():
+    """Sprint 463: BFS from _STARTUP_ROOTS, follow top-level
+    `from prsm.X.Y import Z` (and `import prsm.X.Y`) chains.
+    Returns set of dotted prsm.* module names reachable on
+    the startup chain."""
+    re_from = re.compile(
+        r'^from\s+([a-zA-Z_][a-zA-Z0-9_.]*)\s+import',
+    )
+    re_import = re.compile(
+        r'^import\s+([a-zA-Z_][a-zA-Z0-9_.]*)',
+    )
+    reachable = set()
+    worklist = list(_STARTUP_ROOTS)
+    while worklist:
+        mod = worklist.pop()
+        if mod in reachable:
+            continue
+        reachable.add(mod)
+        path = _resolve_module_to_file(mod)
+        if path is None:
+            continue
+        try:
+            text = path.read_text()
+        except Exception:
+            continue
+        for line in text.splitlines():
+            if line.startswith((" ", "\t", "#")):
+                continue  # lazy / commented
+            m_from = re_from.match(line)
+            m_imp = re_import.match(line)
+            target = None
+            if m_from:
+                target = _resolve_relative_import(
+                    m_from.group(1), path,
+                )
+            elif m_imp:
+                target = m_imp.group(1)
+            if target is None:
+                continue
+            # Only follow prsm.* chains; external modules
+            # are leaves
+            if target.startswith("prsm."):
+                # Drop the trailing symbol if present
+                worklist.append(target)
+                # Also add parent packages (their __init__
+                # runs on import)
+                parts = target.split(".")
+                for i in range(2, len(parts) + 1):
+                    worklist.append(".".join(parts[:i]))
+    return reachable
+
+
+def _startup_path_files():
+    """Sprint 463: set of .py paths on the canonical startup
+    chain (after transitive trace from _STARTUP_ROOTS)."""
+    reachable = _trace_startup_imports()
+    files = set()
+    for mod in reachable:
+        path = _resolve_module_to_file(mod)
+        if path is not None:
+            files.add(path)
+    return files
+
+
+def _is_startup_path(py_path):
+    """Sprint 463: True iff this file is on the canonical
+    node-startup chain (transitive-trace result). Cached
+    because the trace is O(N) over prsm/."""
+    global _STARTUP_FILES_CACHE
+    if _STARTUP_FILES_CACHE is None:
+        _STARTUP_FILES_CACHE = _startup_path_files()
+    return py_path in _STARTUP_FILES_CACHE
+
+
+_STARTUP_FILES_CACHE = None
+
+
 def _top_level_imports_in_prsm():
     """Walk prsm/ and collect every module imported at TOP-LEVEL
     (column 0, no indent). Returns set of top-level package names.
@@ -199,6 +375,42 @@ def _top_level_imports_in_prsm():
             if mod == "prsm":
                 continue
             found.add(mod)
+    return found
+
+
+def _startup_path_top_level_imports():
+    """Sprint 463: collect top-level imports keyed by file,
+    only for files on the canonical node-startup chain.
+
+    Returns: dict[mod_name] -> list of (file, line) pairs.
+    Used by the tightened invariant test to find any
+    startup-path top-level import whose package isn't in
+    REQUIRED deps."""
+    re_top = re.compile(
+        r'^(import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)',
+    )
+    found = {}
+    for py in (REPO_ROOT / "prsm").rglob("*.py"):
+        if _is_skipped_path(py):
+            continue
+        if not _is_startup_path(py):
+            continue
+        try:
+            text = py.read_text()
+        except Exception:
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if line.startswith((" ", "\t", "#")):
+                continue
+            m = re_top.match(line)
+            if not m:
+                continue
+            mod = m.group(2)
+            if mod == "prsm":
+                continue
+            found.setdefault(mod, []).append(
+                (str(py.relative_to(REPO_ROOT)), lineno),
+            )
     return found
 
 
@@ -233,6 +445,72 @@ def test_every_top_level_external_import_is_declared():
         f"inside a function body, not module top-level)\n"
         f"  3. If genuinely false-positive, add to "
         f"ALLOWED_UNDECLARED_TOP_LEVEL with a comment explaining"
+    )
+
+
+def test_sprint_463_startup_path_imports_in_required_deps():
+    """Sprint 463 tightened invariant — F16/F19 class closure.
+
+    F16 (zfec) and F19 (bleach) both passed sprint 461's
+    invariant because the package WAS declared somewhere in
+    pyproject.toml — just in an OPTIONAL extra ([blockchain]
+    and [server] respectively). Both were imported at top-
+    level by files on the node-startup path. Operators doing
+    a default `pip install -e .` (no extras) got a fresh-venv
+    install that crashed at `prsm node start`.
+
+    This test fires when a top-level import in any
+    `_STARTUP_PATH_PREFIXES` file resolves to a package that's
+    in an EXTRA but not REQUIRED. Closes the F16/F19 class
+    at the CI level — no more sibling bugs of that pattern.
+
+    To fix a violation: either (a) move the dep from the
+    extra to required `dependencies`, or (b) make the import
+    lazy (sprint 460/462 pattern), or (c) move the importing
+    file out of the startup path (rare).
+    """
+    required_modules = _required_module_set()
+    all_declared = _resolved_module_set(_read_declared_pypi())
+    stdlib = set(getattr(sys, "stdlib_module_names", set()))
+
+    startup_imports = _startup_path_top_level_imports()
+
+    violations = []
+    for mod, hits in startup_imports.items():
+        if mod in stdlib:
+            continue
+        if mod in ALLOWED_UNDECLARED_TOP_LEVEL:
+            continue
+        mod_lower = mod.lower()
+        if mod_lower in required_modules:
+            continue  # OK: in required deps
+        # Not in required. Two sub-cases:
+        # (a) Declared in an extra (the F16/F19 bug class)
+        # (b) Not declared anywhere (caught by the broader
+        #     test_every_top_level_external_import_is_declared
+        #     — leave that to fire instead of duplicating)
+        if mod_lower in all_declared:
+            violations.append((mod, hits))
+
+    assert not violations, (
+        "Sprint 463 tightened invariant violated. Top-level "
+        "imports on the node-startup path that resolve to "
+        "packages declared in optional extras (NOT required "
+        "deps). Same class as F16 (zfec) + F19 (bleach):\n\n"
+        + "\n".join(
+            f"  {mod} (in some optional extra):\n"
+            + "\n".join(f"    - {f}:{ln}" for f, ln in hits[:3])
+            for mod, hits in violations
+        )
+        + "\n\nFix options:\n"
+        + "  1. Move the dep from the extra into required "
+        + "`dependencies` (preferred for true-required deps)\n"
+        + "  2. Make the import lazy (sprint 460/462 pattern — "
+        + "import inside function body, not top-level)\n"
+        + "  3. Add the file's directory to _SKIP_DIRS if it's "
+        + "actually a standalone script\n"
+        + "  4. Remove the path from _STARTUP_PATH_PREFIXES if "
+        + "it's truly not on the startup chain (rare)\n"
     )
 
 
