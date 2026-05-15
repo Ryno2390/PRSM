@@ -273,8 +273,9 @@ journey. Each step should be live-verifiable on a single node.
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Intel ASP (SGX v3 + TDX v4) structural parse | `IntelASPBackend` | ✅ | 293 | MRENCLAVE/MRSIGNER/MRTD/RTMR0 |
-| AMD KDS (SEV-SNP v2) structural parse | `AMDKDSBackend` | ✅ | 294 | MEASUREMENT/REPORT_DATA/CHIP_ID |
+| Intel ASP (SGX v3 + TDX v4) structural parse | `IntelASPBackend` | ✅ | 293, 448 | Live: parses v3 structural probe → vendor="intel-sgx"; vendor_data populated with version/mrenclave_hex/mrsigner_hex/structural_only |
+| AMD KDS (SEV-SNP v2) structural parse | `AMDKDSBackend` | ✅ | 294, 448 | Live: parses v2 structural probe → vendor="amd-sev-snp"; vendor_data populated with version/guest_svn/measurement_hex/report_data_hex/chip_id_hex |
+| Attestation registry dispatcher | `verify_attestation()` | ✅ | 448 | Live: routes Intel v3 probe → intel-sgx; AMD v2 probe → amd-sev-snp (correct vendor-detection from quote-version bytes) |
 | Real cryptographic signing-chain verification | (deferred) | ⏸️ | — | Structural-only today; `vendor_verified=True` requires real DCAP/KDS keys |
 | Apple SEP backend | (deferred) | ⏸️ | — | If iOS-side compute joins the supply tier mix |
 
@@ -531,6 +532,24 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 448** — §7 attestation backends live-verified.
+  `IntelASPBackend` parses SGX v3 structural probe → vendor=
+  "intel-sgx" with `version/mrenclave_hex/mrsigner_hex/
+  structural_only` populated in vendor_data. `AMDKDSBackend`
+  parses SEV-SNP v2 structural probe → vendor="amd-sev-snp"
+  with `version/guest_svn/measurement_hex/report_data_hex/
+  chip_id_hex` populated. `verify_attestation()` registry
+  dispatcher correctly routes by quote-version bytes — Intel
+  v3 → intel backend; AMD v2 → amd backend.
+  `vendor_verified: false` on both — the documented honest-
+  scope: real DCAP/KDS signing-chain verification deferred
+  until those vendor SDKs are wired. The structural parse IS
+  the value-add for sprint-444's live-mainnet-attestation
+  pattern: the on-chain probe verifies WHAT is registered;
+  the structural parse verifies the registered attestation
+  bytes are well-formed under the vendor's published quote
+  layout. 3 §7 attestation-backend rows promoted to ✅ with
+  live-evidence attribution. Doc-only.
 - **2026-05-15 sprint 447** — Bootstrap connectivity + health/detailed +
   receipt-persistence live-verified. /bootstrap/status shows the node
   is actively connected to `wss://bootstrap1.prsm-network.com:8765`
