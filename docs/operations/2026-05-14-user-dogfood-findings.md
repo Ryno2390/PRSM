@@ -532,6 +532,138 @@ deferred. The discovery-layer half of multi-node already
 verified (bootstrap-mediated peer-list works ✅); content-fetch
 half blocked behind P2P-connection establishment.
 
+### F15 — `bencodepy>=4.0.0` constraint impossible to satisfy (sprint 425 typo)
+
+**Symptom.** Sprint 458's clean-venv deploy on bootstrap1
+droplet:
+
+```
+$ pip install -e .
+ERROR: Could not find a version that satisfies the requirement
+  bencodepy>=4.0.0 (from prsm-network) (from versions: 0.9.4, 0.9.5)
+```
+
+**Root cause.** Sprint 425 added `bencodepy>=4.0.0` to
+pyproject.toml. PyPI has TWO packages:
+- `bencodepy` (no dot) — versions [0.9.4, 0.9.5] only
+- `bencode.py` (with dot) — version 4.0.0
+
+Sprint 425 typed the wrong package name + version combination.
+PRSM's code imports `bencodepy` (no dot) at
+prsm/core/bittorrent_manifest.py:24 → the canonical package
+IS bencodepy.
+
+**Why this didn't fire locally:** Sprint 425's dogfood path
+installed `bencodepy` 0.9.5 via `pip install --break-system-
+packages` in a prior session. pip saw an existing satisfying
+install + skipped the constraint check.
+
+**Severity.** Production-blocking for any fresh PRSM install.
+Caught only by clean-venv deploys.
+
+**Fix shipped sprint 459.** Both occurrences changed
+`>=4.0.0` → `>=0.9`. bencodepy 0.9.5's API is stable for the
+bencode operations PRSM uses.
+
+Tag `fix-bencodepy-constraint-merge-ready-20260515`.
+
+### F16 — `zfec` in `[blockchain]` extra but required by node startup
+
+**Symptom.** After F15 fix:
+
+```
+ModuleNotFoundError: No module named 'zfec'
+File "/opt/prsm-operator/prsm/storage/erasure.py", line 38
+    import zfec
+```
+
+Daemon crashes during node startup because erasure.py is on
+the import path of the content-store initialization.
+
+**Root cause.** `zfec>=1.5.8` was in the `[blockchain]`
+optional extra in pyproject.toml. But zfec is Reed-Solomon
+erasure coding, not blockchain — it's miscategorized. And
+`import zfec` is unconditional at erasure.py:38 (module load
+time, not lazy).
+
+**Severity.** Production-blocking. Every fresh
+`pip install -e .` followed by `prsm node start` crashes.
+
+**Fix shipped sprint 459.** Moved `zfec>=1.5.8` from
+`[blockchain]` extra to required `dependencies` in
+pyproject.toml. zfec wheels available on PyPI for cpython
+3.7+ on common platforms.
+
+Tag `fix-zfec-required-dep-merge-ready-20260515`.
+
+### F17 — `pycryptodome` missing from required deps
+
+**Symptom.** After F16 fix:
+
+```
+ModuleNotFoundError: No module named 'Crypto'
+File ".../prsm/storage/key_sharing.py", line 39
+    from Crypto.Protocol.SecretSharing import Shamir
+```
+
+**Root cause.** `pycryptodome` (which provides the `Crypto`
+module) is not declared in pyproject.toml at all — neither
+required deps nor any extra. Used by Shamir secret-sharing
+in the Tier B/C key-distribution module.
+
+**Severity.** Production-blocking. Same class as F16 —
+required for node startup, not declared.
+
+**Status.** Fix deferred — needs a clean-room dependency
+audit (sprint 425's miscategorization-class bugs may have
+more siblings). Workaround on the droplet: `pip install
+pycryptodome` works. Permanent fix: add to pyproject.toml's
+required dependencies.
+
+### F18 — Query orchestrator package imports `sentence_transformers` eagerly
+
+**Symptom.** After F17 workaround:
+
+```
+ModuleNotFoundError: No module named 'sentence_transformers'
+File ".../prsm/compute/query_orchestrator/__init__.py", line 60
+    from prsm.compute.query_orchestrator.sentence_transformer_embedder
+```
+
+Setting `PRSM_QUERY_ORCHESTRATOR_ENABLED=0` (or unsetting it)
+does NOT prevent the import — the orchestrator package's
+`__init__.py` does an unconditional top-level import that
+pulls in sentence_transformers regardless of whether the
+orchestrator is actually instantiated.
+
+**Severity.** Two-fold:
+- Cosmetic: even operators NOT using the forge surface must
+  install ~2GB of ML deps (sentence-transformers + torch +
+  transformers + huggingface_hub) to boot a node.
+- Resource pressure: 2GB-RAM droplets (typical operator
+  hardware) risk OOM during the install.
+
+**Fix candidates (deferred):**
+
+- **Option A:** Make the sentence_transformer_embedder import
+  lazy in __init__.py (import inside function, not top-level).
+- **Option B:** Add an `import sentence_transformers` try/except
+  in sentence_transformer_embedder.py with a clear error pointing
+  at the [ml] extra.
+- **Option C:** Move the heavy ML deps to a required dep block
+  (~2GB install cost everywhere — operator-hostile).
+
+Option A is the right answer; the orchestrator is opt-in by
+design and shouldn't impose ML-stack install on operators
+who only want to peer + serve content.
+
+**Status.** Surfaced sprint 458/459. Deferred to its own
+sprint. Sprint 458's daemon-#2 deploy on bootstrap1 droplet
+halted at this point — installing 2GB of ML deps on the
+bootstrap server's 2GB-RAM droplet risks the canonical
+bootstrap-fleet entry point's stability. Cleaner path:
+fresh small droplet OR Option A code fix.
+
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
 **Symptom.** Following the "MCP tools" hint in PARTICIPANT_GUIDE, a user

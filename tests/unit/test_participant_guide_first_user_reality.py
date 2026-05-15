@@ -112,15 +112,16 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_fourteen_frictions():
-    """The findings doc enumerates F1-F14. F14 added
-    2026-05-15 during sprint 456's multi-node test bench:
-    two daemons on same host discover each other via
-    bootstrap server but NAT-loopback prevents direct P2P.
-    Discovery layer (sprints 319-329) verified working;
-    cross-host test bench is the eventual right answer.
-    If a finding is silently removed (without an explicit
-    closure note), surface that."""
+def test_findings_doc_documents_all_eighteen_frictions():
+    """The findings doc enumerates F1-F18. F15-F18 added
+    2026-05-15 sprint 458/459 during the bootstrap1 droplet
+    deploy: a cascade of sprint-425-class missing/wrong
+    dependency declarations only visible in a fresh venv
+    (local Mac dev had stale packages masking them).
+    F15 bencodepy constraint + F16 zfec extra fixed in 459;
+    F17 pycryptodome + F18 sentence_transformers eager import
+    deferred. If a finding is silently removed (without an
+    explicit closure note), surface that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -137,6 +138,10 @@ def test_findings_doc_documents_all_fourteen_frictions():
         "F12 — Mock executor's ε=∞ for NONE tier",
         "F13 — `/rings/status` 500 breaks `prsm_node_status`",
         "F14 — Multi-node single-host test bench",
+        "F15 — `bencodepy>=4.0.0` constraint impossible",
+        "F16 — `zfec` in `[blockchain]` extra",
+        "F17 — `pycryptodome` missing from required deps",
+        "F18 — Query orchestrator package imports `sentence_transformers` eagerly",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"
