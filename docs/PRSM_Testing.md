@@ -381,7 +381,9 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Tier classification (new/low/medium/high) | reputation tier auto-records on retrieve | 🟢 | 287-291 | Same wallet-gate as above |
 | Search filter by tier | `GET /content/search?min_tier=...&exclude_new=...` | ✅ | 440 | Live: query params accepted cleanly; tier-filter codepath active |
 | Creator stake gate (HIGH tier requires bonded FTNS) | on-chain `StakeBond` | 🟢 | 287-291 | Demotes HIGH→MEDIUM when unstaked |
-| Content fingerprint registry | `POST /content/upload` hook | 🟢 | 291 | Sprint 425 fixed fixture-drift |
+| Content fingerprint registry (first-upload registers) | `POST /content/upload` hook | ✅ | 441 | Live E2E: content_hash registered with canonical_creator |
+| Content fingerprint registry (duplicate detection) | `POST /content/upload` re-upload | ✅ | 441 | Live E2E: re-upload with different creator surfaces `duplicate_of_creator`; first-creator-wins invariant verified |
+| Fingerprint registry (dedup-attempt counter) | `GET /marketplace/fingerprint/{hash}` | ✅ | 441 | `duplicate_attempt_count` increments on each re-upload attempt |
 
 ### Formal verification
 
@@ -523,6 +525,19 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 441** — §14 content-fingerprint dedup chain live-
+  verified. Full Sybil-resistance evidence chain works end-to-end:
+  1. Upload content with creator A → `content_hash` registered;
+     `canonical_creator=A`; `duplicate_of_creator=None`.
+  2. Re-upload SAME text with creator B → same `content_hash`;
+     `canonical_creator=A` (preserved — first-creator-wins);
+     `duplicate_of_creator=A` (correctly flagged).
+  3. GET `/marketplace/fingerprint/{hash}` → `duplicate_attempt_count: 1`
+     (counter incremented on the re-upload).
+  This demonstrates the §14 anti-Sybil invariant operationally:
+  identity rotation can't claim canonical creator status for
+  content someone else already registered. Three PRSM_Testing.md
+  rows promoted 🟢 → ✅ (registry / dedup / counter). Doc-only.
 - **2026-05-15 sprint 440** — §14 data-quality reputation surface live
   partial-verification. `/marketplace/creator-reputation/{id}` returns
   clean default for unknown creators (known:false, score:0.5,
