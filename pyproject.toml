@@ -158,6 +158,15 @@ dependencies = [
     # extra) but used at top-level by the settlement
     # module which is on the core startup path.
     "eth-abi>=4.0.0",
+
+    # bleach — HTML sanitization for input validation.
+    # F19 fix (sprint 462): was in [server] extra but
+    # prsm/core/security/input_sanitization.py:12 imports
+    # at top-level + the security package re-exports it
+    # via __init__.py, so it's on the node-startup path.
+    # Same class as F16 (zfec in [blockchain] extra) —
+    # moved to required deps.
+    "bleach>=6.0.0",
 ]
 
 [project.optional-dependencies]
@@ -258,8 +267,10 @@ bittorrent = [
 ]
 
 server = [
-    # Full API server dependencies (optional routers)
-    "bleach>=6.0.0",
+    # Full API server dependencies (optional routers).
+    # bleach moved to required deps in sprint 462 (F19 fix —
+    # input_sanitization.py imports at top-level, on
+    # node-startup path via core/security/__init__).
     "psutil>=5.9.0",
     "jinja2>=3.1.0",
     "greenlet>=3.0.0",
