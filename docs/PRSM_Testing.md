@@ -83,6 +83,7 @@ journey. Each step should be live-verifiable on a single node.
 | Retrieve by CID (Tier A, same node) | `GET /content/retrieve/{cid}` | ✅ | 428 | Local-publish shortcut |
 | Retrieve + decrypt (recipient-encrypted, same node) | `GET /content/retrieve/{cid}` + `decrypt_for_recipient` | ✅ | 430 | E2E live-tested |
 | Bootstrap-mediated peer discovery (multi-node) | bootstrap-server peer-list | ✅ | 456 | Live: 2 daemons on same host, symmetric `known[]` entries with node_id + external IP + last_seen; `peer_join_events: 1` on both sides |
+| Peer lifecycle: peer_leave propagation | bootstrap-server peer-list | ✅ | 457 | Live: killed daemon #2 → 21s later daemon #1 received peer_leave → `peer_leave_events: 1`, `known_count: 0`, `discovered_peer_count: 0`. Sprint 320-329 hardening operationally verified |
 | Direct P2P connection (single-host) | WebSocket transport | ⏸️ | 456 | F14: NAT-loopback blocks single-host direct connection (announced addrs are external IP); multi-host bench is the right test |
 | Retrieve by CID (Tier A, cross-node) | `GET /content/retrieve/{cid}` | 🔬 | — | Requires F14 fix or multi-host test bench |
 | Retrieve by CID (Tier B/C Shamir, same node) | `ContentRetriever.fetch` | 🟢 | 430 | Routing pinned; infrastructure-only — `/content/upload` doesn't reach this lane today |
@@ -537,6 +538,17 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 457** — Peer-lifecycle live verification.
+  Followed sprint 456's two-daemon bench: killed daemon #2,
+  polled daemon #1's /bootstrap/status. **peer_leave propagated
+  in 21 seconds** (well under bootstrap heartbeat interval +
+  detection grace). Counters reflected the full lifecycle:
+  `peer_join_events: 1` (from sprint 456) → `peer_leave_events: 1`,
+  `discovered_peer_count: 1 → 0`, `known_count: 1 → 0`. Sprint
+  320-329 P2P discovery hardening's peer-lifecycle handling is
+  operationally verified end-to-end (join + leave both fire,
+  bootstrap-server propagation works). 1 PRSM_Testing.md row
+  added. Doc-only sprint.
 - **2026-05-15 sprint 456** — Multi-node test bench. Stood up
   daemon #2 on same host with separate `HOME=/tmp/prsm-node-2`,
   api=8001, p2p=9011. Both connected to canonical bootstrap
