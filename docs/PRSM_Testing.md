@@ -94,10 +94,11 @@ journey. Each step should be live-verifiable on a single node.
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Storage stats | `GET /storage/stats` | 🟢 | — | Endpoint exists |
-| Pinned content stats | `GET /storage/pinned-stats` | 🟢 | — | Endpoint exists |
-| Provider reputations | `GET /storage/provider-reputations` | 🟢 | — | Endpoint exists |
-| Content index stats | `GET /content/index/stats` | 🟢 | — | Endpoint exists |
+| Storage stats | `GET /storage/stats` | ✅ | 449 | Live: returns full schema (storage_available, pledged_gb, used_gb, available_gb, pinned_cids, reward_rate, challenge_config + challenge_stats nested) |
+| Pinned content stats | `GET /storage/pinned-stats` | ✅ | 449 | Live: returns `{pinned: [], count: 0}` empty-state |
+| Provider reputations | `GET /storage/provider-reputations` | ✅ | 449 | Live: returns `{providers: {}, count: 0}` empty-state |
+| Content index stats | `GET /content/index/stats` | ✅ | 449 | Live: returns `{indexed_cids, unique_providers, keyword_entries}` |
+| Content mine (own uploads) | `GET /content/mine` | ✅ | 449 | Live: returns sprint 441's fingerprint-test uploads with content_id/filename/size_bytes/content_hash/creator_id/royalty_rate/access_count |
 | Provider stats | `GET /content/provider-stats` | ✅ | 428 | Used during F8 diagnosis to verify register_local_content fired |
 
 ### BitTorrent layer
@@ -532,6 +533,17 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 449** — §5.1 storage + content stat surfaces
+  live-verified. /storage/stats returns full canonical schema
+  (storage_available, pledged_gb=10.0, used_gb=0.0,
+  challenge_config + challenge_stats nested). /storage/pinned-
+  stats + /storage/provider-reputations return clean empty-state.
+  /content/index/stats returns the 3-key telemetry envelope.
+  /content/provider-stats reports `local_content_count: 3` —
+  cross-confirms sprint 441's fingerprint-test uploads are
+  tracked correctly. /content/mine returns the cross-restart-
+  persisted uploads with full field coverage. 5 §5.1 rows
+  promoted 🟢 → ✅. Doc-only.
 - **2026-05-15 sprint 448** — §7 attestation backends live-verified.
   `IntelASPBackend` parses SGX v3 structural probe → vendor=
   "intel-sgx" with `version/mrenclave_hex/mrsigner_hex/
