@@ -65,7 +65,7 @@ journey. Each step should be live-verifiable on a single node.
 | 6 | Upload encrypted content (recipient encryption) | `POST /content/upload` + recipients | ✅ | 430 | X25519+XChaCha20 encrypt-then-publish; live byte-identical roundtrip |
 | 7 | Retrieve encrypted content (same node) | `GET /content/retrieve/{cid}` + decrypt | ✅ | 430 | Live-verified: 431-byte ciphertext → decrypt → byte-identical plaintext |
 | 7a | Tier B/C Shamir multi-shard lane (infrastructure) | `ContentPublisher.publish(tier=B)` | 🟢 | 430 | Local-publish shortcut wired (routes staged dir to `_fetch_tier_bc`); not yet exposed in `/content/upload` (always Tier A today) |
-| 8 | Query against uploaded content | `POST /compute/forge` | ⚠️ | 431 | Embedding stage passes (F9 fixed); aggregator-pool stage blocked by F10 single-node gap; multi-node E2E pending |
+| 8 | Query against uploaded content (multi-node only by design) | `POST /compute/forge` | 🟢 | 431 | Embedding stage ✅ verified live (F9 closed); aggregator stage is multi-node-only by A2 design invariant (F10); needs multi-node test bench |
 | 8a | Quote query cost | `POST /compute/forge/quote` | ✅ | — | Verified during dogfood arc — works on fresh node |
 | 8b | Forge embedding-stage parity | `_embedding_fn` vs `SentenceTransformerEmbedder` | ✅ | 431 | F9 closed: upload-side pinned to sentence_transformers; 384-dim parity verified live with `OPENAI_API_KEY` set |
 | 9 | Receive FTNS settlement | `GET /balance` + RoyaltyDistributor | 🔬 | — | Requires cross-node query + on-chain dispatch; not exercised single-node |
@@ -185,10 +185,10 @@ journey. Each step should be live-verifiable on a single node.
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Stake | `POST /staking/stake` | 🟢 | — | Endpoint exists |
+| Stake | `POST /staking/stake` | ✅ | 432 | Live-verified: 1000 FTNS staked; total_staked reflects new amount |
 | Unstake request | `POST /staking/unstake` | 🟢 | — | Endpoint exists |
-| Stake status | `GET /staking/status` | 🟢 | — | Endpoint exists |
-| Claim rewards | `POST /staking/claim-rewards` | 🟢 | — | Endpoint exists |
+| Stake status | `GET /staking/status` | ✅ | 432 | Live-verified end-to-end with active stake |
+| Claim rewards | `POST /staking/claim-rewards` | ✅ | 432 | F11 fixed: tz-aware datetime subtraction now works (was 500 on every claim) |
 | Withdraw unstaked | `POST /staking/withdraw/{id}` | 🟢 | — | Endpoint exists |
 | Cancel unstake | `POST /staking/cancel-unstake/{id}` | 🟢 | — | Endpoint exists |
 | Single-user stake → claim E2E | (multi-step) | 🔬 | — | Multi-step ledger flow not exercised end-to-end |
@@ -518,3 +518,22 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 432** — F10 design-review closure + F11 fix.
+  F10 (single-node forge blocked by empty aggregator pool) marked
+  as design limitation — A2 invariant ("prompter never selects
+  itself") is load-bearing security; bypassing it would add a
+  production backdoor. Multi-node test bench is the eventual
+  right answer.
+  F11 (production-blocking): StakingManager.claim_rewards raised
+  "can't subtract offset-naive and offset-aware datetimes" on
+  every call. Root cause: SQLite drops tz info on datetime
+  persistence; `now - last_reward_calculation` mixed aware + naive.
+  Fix: `_ensure_utc` helper re-tags naive DB values as UTC
+  (sound — writers all use `datetime.now(timezone.utc)`).
+  Live-verified end-to-end §5.3 stake → claim flow:
+  - Faucet to 1042 FTNS
+  - Stake 1000 → `total_staked: 1000.0`
+  - Claim → `{"total_rewards_claimed": 0.0, "stakes_processed": 1}`
+    (0 reward because stake < 24h min_stake_age, correct behavior)
+  PRSM_Testing.md §5.3 staking rows promoted to ✅. 5 new tests /
+  88 cross-suite green.

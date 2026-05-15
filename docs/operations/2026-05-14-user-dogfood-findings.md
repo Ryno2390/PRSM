@@ -346,8 +346,55 @@ exercised here.
   multi-node test bench (separate from the dogfood arc).
 
 **Status.** Surfaced 2026-05-15 sprint 431 live verification of F9
-fix. Belongs to the same "single-node verification" family as F7's
-self-fetch gap — likely Option A is the right pragmatic answer.
+fix.
+
+### F11 — StakingManager TypeError on claim ("can't subtract offset-naive and offset-aware datetimes")
+
+**Symptom.** `POST /staking/claim-rewards` returns 500:
+
+```
+{"detail": "Claim rewards failed: can't subtract offset-naive
+ and offset-aware datetimes"}
+```
+
+Every claim call fails. Production-blocking for the §5.3 staking
+economic loop.
+
+**Root cause (live-diagnosed sprint 432).** SQLite (the default
+backend) drops tz info when persisting datetimes. The writers
+(`stake`, `_update_last_reward_calculation`, etc.) all use
+`datetime.now(timezone.utc)` so the stored values ARE UTC — but
+SQLite returns naive datetimes on load. The reward calculation
+at `prsm/economy/tokenomics/staking_manager.py:893` does:
+
+```python
+time_staked = (now - stake.last_reward_calculation).total_seconds()
+```
+
+where `now` is tz-aware UTC and `stake.last_reward_calculation`
+is the naive DB-loaded value. Python raises TypeError on the
+subtraction.
+
+**Severity.** Production-blocking. Every claim_rewards call fails
+on any deployment using SQLite (which is the default). Postgres
+TIMESTAMPTZ would round-trip cleanly, masking the bug in tests
+that use Postgres but breaking production-default deployments.
+
+**Fix shipped sprint 432.** Added `StakingManager._ensure_utc`
+helper that re-tags naive datetimes as UTC (sound because all
+writers use UTC). Applied at the row→record conversion site
+(`_stake_row_to_record`) for both `staked_at` and
+`last_reward_calculation` fields. No clock arithmetic — just
+tagging.
+
+Live verification:
+- Pre-fix: POST /staking/claim-rewards → 500 with TypeError
+- Post-fix: POST /staking/claim-rewards → 200 with
+  `{"total_rewards_claimed": 0.0, "stakes_processed": 1}`
+  (0 reward because stake is < min_stake_age_for_rewards_seconds
+  = 24h; that's correct behavior)
+
+Tag `staking-manager-tz-aware-datetimes-merge-ready-20260515`.
 
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 

@@ -245,7 +245,34 @@ class StakingManager:
         )
     
     # === Conversion Helper Methods ===
-    
+
+    @staticmethod
+    def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        """Sprint 432 (F11 fix): normalize naive datetimes from the
+        DB to tz-aware UTC.
+
+        SQLite (the default backend) drops tz info when persisting
+        datetimes, so a value stored as ``datetime.now(timezone.utc)``
+        comes back as a naive datetime on load. The reward
+        calculation does ``datetime.now(timezone.utc) - last_calc``,
+        which raises ``TypeError: can't subtract offset-naive and
+        offset-aware datetimes`` — silently breaking every call to
+        ``claim_rewards`` until the first claim returns 0 rewards
+        AND throws a 500. Production-blocking bug surfaced during
+        sprint 432 stake → claim verification.
+
+        Stored values are UTC by construction (all writers use
+        ``datetime.now(timezone.utc)``), so re-tagging the loaded
+        value as UTC is sound — no clock arithmetic. Postgres
+        TIMESTAMPTZ would round-trip the tz cleanly; this helper
+        is the SQLite-compatibility shim.
+        """
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
     def _stake_row_to_record(self, row: StakeModel) -> StakeRecord:
         """Convert StakeModel database row to StakeRecord dataclass."""
         return StakeRecord(
@@ -253,10 +280,12 @@ class StakingManager:
             user_id=row.user_id,
             amount=Decimal(str(row.amount)),
             stake_type=StakeType(row.stake_type),
-            staked_at=row.staked_at,
+            staked_at=self._ensure_utc(row.staked_at),
             rewards_earned=Decimal(str(row.rewards_earned)),
             rewards_claimed=Decimal(str(row.rewards_claimed)),
-            last_reward_calculation=row.last_reward_calculation,
+            last_reward_calculation=self._ensure_utc(
+                row.last_reward_calculation,
+            ),
             status=StakeStatus(row.status),
             lock_reason=row.lock_reason,
             metadata=row.stake_metadata or {},
