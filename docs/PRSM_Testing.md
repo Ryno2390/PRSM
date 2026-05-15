@@ -219,10 +219,11 @@ journey. Each step should be live-verifiable on a single node.
 | Pool quote (Aerodrome) | `GET /wallet/pool/quote` | 🟢 | 276-286 | Read-only quoter; live pool external-gated |
 | Pool state | `GET /wallet/pool/state` | ✅ | 451 | Live: reports `NOT_CONFIGURED` with operator-actionable note pointing to AERODROME_USDC_FTNS_POOL_ADDRESS env var + seeding ceremony date |
 | Fiat compliance audit ring (auto-record) | `GET /admin/fiat-compliance/summary` | ✅ | 451 | Live: my single onramp-quote call auto-recorded as `{onramp_quote: {count: 1, total_usd: 100.0}}` — Vision §11's AUSTRAC/FinCEN/IRS-ready claim attested |
-| KYC initiate | `POST /wallet/kyc/initiate` | 🟢 | Phase 5 | Vendor adapter scaffolds (Persona/Onfido/Plaid) |
-| KYC webhook | `POST /wallet/kyc/webhook/{vendor}` | 🟢 | Phase 5 | HMAC-SHA256 + replay protection |
+| KYC initiate | `POST /wallet/kyc/initiate` | ✅ | 452 | Live (schema: user_id+email+tier): returns clean PENDING_COMMISSION envelope with vendor=null in dev env (per sprint-285 commissioning pattern) |
+| KYC status (lookup) | `GET /wallet/kyc/status` | ✅ | 452 | Live: `{commissioned: false, vendor: null, supported_vendors: ["persona","onfido","plaid"], record_count: N}` |
+| KYC webhook | `POST /wallet/kyc/webhook/{vendor}` | 🟢 | Phase 5 | HMAC-SHA256 + replay protection — requires real vendor signed payload to live-verify |
 | Fiat-surface health | `GET /admin/fiat-surface/health` | ✅ | 285/422 | `check_fiat_surface_health()` live-verified |
-| Fiat-readiness CLI | `prsm node fiat-readiness` | ✅ | 422 | Live-verified on current env (returns OK) |
+| Fiat-readiness CLI | `prsm node fiat-readiness` | ✅ | 422, 452 | Live: text → "✓ Phase 5 fiat surface ready — OK (no findings)"; JSON → `{overall_status: "ok", findings: []}` |
 | Activation runbook | `docs/operations/phase-5-fiat-surface-activation-runbook.md` | ✅ | 421 | Pinned by 11 source-truth-parity tests |
 
 ### On-chain royalty distribution
@@ -534,6 +535,16 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 452** — KYC surface + fiat-readiness CLI live-
+  verified. POST /wallet/kyc/initiate with {user_id, email, tier}
+  returns PENDING_COMMISSION envelope (vendor=null in dev env per
+  sprint-285's commissioning pattern). GET /wallet/kyc/status
+  returns {commissioned: false, vendor: null, supported_vendors:
+  ["persona","onfido","plaid"], record_count}. `prsm node
+  fiat-readiness` returns "✓ Phase 5 fiat surface ready — OK
+  (no findings)" in text mode, `{overall_status: "ok",
+  findings: []}` in JSON. Sprint 422's CLI works against live
+  env. 4 §8/Phase-5 rows promoted/refreshed. Doc-only.
 - **2026-05-15 sprint 451** — §8 + Phase 5 fiat surface live-verified.
   POST /wallet/onramp/quote with {usd_amount: 100,
   destination_address: 0x...} returns full quote: requested_usd,
