@@ -162,7 +162,7 @@ journey. Each step should be live-verifiable on a single node.
 | Training jobs | `POST /compute/train` | 🟢 | — | Endpoint exists |
 | Compute stats | `GET /compute/stats` | 🟢 | — | Endpoint exists |
 | Available models | `GET /compute/models` | 🟢 | — | Endpoint exists |
-| Receipts list | `GET /compute/receipts` | 🟢 | — | Endpoint exists |
+| Receipts list (persistence across daemon restart) | `GET /compute/receipts` | ✅ | 447 | Live: sprint 438's mock-inference receipts persist; epsilon_spent=0.0 (F12 fix holds); full settler_signature intact |
 | Receipt details | `GET /compute/receipt/{job_id}` | 🟢 | — | Endpoint exists |
 
 ### Hardware classification
@@ -307,10 +307,10 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Feature | REST | CLI | MCP | Status |
 |---------|------|-----|-----|--------|
 | Node status | `/status` | `prsm node status` | `prsm_node_status` | ✅ |
-| Node health (detailed, 14 subsystems) | `/health/detailed` | — | `prsm_node_health` | ✅ Sprint 342-345 |
+| Node health (detailed, 14 subsystems) | `/health/detailed` | — | `prsm_node_health` | ✅ Sprint 342-345, 447 (live: ftns_ledger/payment_escrow/job_history/receipt_store all status:ok; canonical_match:true on wired contract address) |
 | Node info | `/info` | `prsm node info` | `prsm_info` | ✅ |
 | Node peers | `/peers` | `prsm node peers` | `prsm_peers` | ✅ |
-| Bootstrap status | `/bootstrap/status` | — | `prsm_bootstrap_status` | ✅ |
+| Bootstrap status | `/bootstrap/status` | — | `prsm_bootstrap_status` | ✅ Sprint 447 (live: connected to wss://bootstrap1.prsm-network.com:8765, 28/16 reconnect attempts/successes, multi-fallback US/EU/APAC enabled) |
 | Bootstrap test (probe canonical fleet) | — | `prsm node bootstrap-test` | `prsm_bootstrap_test` | ✅ Sprint 385/387 |
 | Bootstrap server status | `/admin/bootstrap-server/status` | `prsm bootstrap-server status` | `prsm_bootstrap_server_status` | ✅ Sprint 388-396 |
 | Metrics (Prometheus) | `/metrics` | — | `prsm_metrics_summary` | ✅ |
@@ -531,6 +531,22 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 447** — Bootstrap connectivity + health/detailed +
+  receipt-persistence live-verified. /bootstrap/status shows the node
+  is actively connected to `wss://bootstrap1.prsm-network.com:8765`
+  with 28 reconnect attempts + 16 successes over the session,
+  client_state="connected", multi-fallback (US/EU/APAC) enabled
+  per sprint 375. /health/detailed reports 14 subsystems including
+  ftns_ledger (canonical_match=true on the wired contract address),
+  payment_escrow (cleanup_task_running), job_history (count=1),
+  receipt_store (count=1). GET /compute/receipts confirms the
+  sprint 438 mock-inference receipts PERSIST across daemon restart
+  with full fidelity: epsilon_spent=0.0 (F12 fix holds), 64-byte
+  settler_signature intact, output_hash intact, tee_attestation
+  zero-filled as expected for the mock. **Cross-restart receipt
+  persistence is the production reliability guarantee** — operators
+  expect signed receipts to survive restarts; this sprint
+  verified that operationally. 3 §13 rows attributed to sprint 447.
 - **2026-05-15 sprint 446** — Operator CLI surface live-verified.
   Walked the §13 operator-trifecta CLI lane and confirmed each
   surface returns clean actionable output:
