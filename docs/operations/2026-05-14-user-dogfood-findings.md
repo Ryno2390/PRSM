@@ -689,6 +689,35 @@ instruction.
 Now any 1GB-RAM droplet (DO Basic $4/mo) can run an operator
 daemon. Tag `fix-sentence-transformers-lazy-import-merge-ready-20260515`.
 
+**Live verification on bootstrap1 droplet (sprint 460 cont.).**
+Resumed the sprint 458/459 deploy after F18 fix. Daemon #2
+booted cleanly:
+
+- Memory delta: ~130MB (from ~650MB to ~780MB used) on the
+  2GB-RAM droplet. **The F18 fix saved ~1.5-2GB of would-be ML-
+  stack overhead.** The droplet remains in the ~60% available
+  RAM zone.
+- Boot time: ~25 seconds to fully active service
+- Bootstrap registration: connected via loopback
+  `wss://127.0.0.1:8765` (success_node correctly reported).
+  Outbound to public-IP `bootstrap1.prsm-network.com:8765`
+  failed via NAT-hairpin from inside the droplet — operators
+  on the same droplet as bootstrap-server must use 127.0.0.1
+  for the bootstrap URL.
+- All 13 mainnet contract canonical addresses surfaced from
+  daemon #2 (chain_id=8453).
+
+Daemon #2 confirmed running with PRSM_TRANSPORT_BACKEND=
+websocket. Total cost: $0 (co-located on existing droplet).
+F18 unblocked the deploy that sprint 458/459 had halted on.
+
+Pin tests: 4 in
+`tests/unit/test_sentence_transformer_embedder_lazy_import.py`
+defend the source-level invariants (no unguarded top-level
+`import sentence_transformers`; class instantiable without
+the dep; clear error on missing dep with pip-install hint;
+package-level import doesn't pull in ML stack).
+
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
 **Symptom.** Following the "MCP tools" hint in PARTICIPANT_GUIDE, a user
