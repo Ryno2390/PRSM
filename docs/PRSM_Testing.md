@@ -390,8 +390,9 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Runtime invariants probe (7 contracts, 20 invariants) | `/admin/formal-verification/check` | ✅ | 302-359 | |
-| Halmos symbolic-execution lane (5 specs, 28 proofs) | `/admin/formal-verification/symbolic` | ✅ | 360-364 | 16/20 invariants symbolically pinned |
+| Runtime invariants probe (7 contracts, 20 invariants) | `/admin/formal-verification/check?contract=X` | ✅ | 302-359, 443 | Live: INV-RD-3 (Foundation Safe owns RoyaltyDistributor v2) PASS against mainnet; harness fail-soft on missing-selector skips |
+| Invariants registry (full list) | `/admin/formal-verification/invariants` | ✅ | 443 | Live: returns all 20 invariants with severity / spec_text / kind / selector / expected |
+| Halmos symbolic-execution lane (5 specs, 28 proofs) | `/admin/formal-verification/symbolic` | ✅ | 360-364, 443 | Live: endpoint lists 5 specs with mirrors_runtime_contract + runtime_invariants linkage |
 | `@pytest.mark.requires_halmos` CI marker | conftest | ✅ | 366 | |
 | Halmos streaming-inference extension | `SpeculationRollbackMathSpec` | ✅ | 367 | First off-chain Python algorithm |
 | Halmos H1 bounded iterator | `ChunkStreamingBoundsSpec` | ✅ | 368 | |
@@ -526,6 +527,19 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 443** — §5.4 formal-verification surface live-
+  verified. Hit /admin/formal-verification/invariants — returns the
+  full list of 20 critical invariants with severity / spec_text /
+  kind / selector / expected_value. Hit /admin/formal-verification/
+  check?contract=royalty_distributor — `INV-RD-3` (contract owner ==
+  Foundation Safe 0x91b0e6F8...) PASSED against the live Base
+  mainnet contract `0xfEa9aeB9...`. Other invariants fail-soft to
+  "skipped" with diagnostic "backend returned None" — the harness
+  doesn't crash on selectors the dev RPC client doesn't have. Hit
+  /admin/formal-verification/symbolic — returns 5 halmos specs with
+  mirrors_runtime_contract + runtime_invariants linkage. The
+  symbolic→runtime mapping is queryable. 3 PRSM_Testing.md rows
+  promoted/added. Doc-only.
 - **2026-05-15 sprint 442** — §14 creator-stake lookup live-verified.
   `GET /marketplace/creator-stake/{id}` returns clean schema with
   balance_wei + high_tier_eligible + min_high_tier_stake_wei +
