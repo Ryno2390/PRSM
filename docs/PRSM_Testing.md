@@ -214,10 +214,11 @@ journey. Each step should be live-verifiable on a single node.
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Onramp quote | `POST /wallet/onramp/quote` | 🟢 | 276-286 | 399 cross-suite tests; commission gated by KYC vendor + CDP keys |
-| Offramp quote | `POST /wallet/offramp/quote` | 🟢 | 276-286 | Same gate |
+| Onramp quote | `POST /wallet/onramp/quote` | ✅ | 451 | Live (schema: usd_amount+destination_address): returns full quote with coinbase-cdp onramp_route + aerodrome swap_route + KYC + tier-limit fields |
+| Offramp quote | `POST /wallet/offramp/quote` | ✅ | 451 | Live: clean operator-readable balance breakdown when destination has 0 balance ("requested $X, available $Y...") |
 | Pool quote (Aerodrome) | `GET /wallet/pool/quote` | 🟢 | 276-286 | Read-only quoter; live pool external-gated |
-| Pool state | `GET /wallet/pool/state` | 🟢 | 276-286 | Same |
+| Pool state | `GET /wallet/pool/state` | ✅ | 451 | Live: reports `NOT_CONFIGURED` with operator-actionable note pointing to AERODROME_USDC_FTNS_POOL_ADDRESS env var + seeding ceremony date |
+| Fiat compliance audit ring (auto-record) | `GET /admin/fiat-compliance/summary` | ✅ | 451 | Live: my single onramp-quote call auto-recorded as `{onramp_quote: {count: 1, total_usd: 100.0}}` — Vision §11's AUSTRAC/FinCEN/IRS-ready claim attested |
 | KYC initiate | `POST /wallet/kyc/initiate` | 🟢 | Phase 5 | Vendor adapter scaffolds (Persona/Onfido/Plaid) |
 | KYC webhook | `POST /wallet/kyc/webhook/{vendor}` | 🟢 | Phase 5 | HMAC-SHA256 + replay protection |
 | Fiat-surface health | `GET /admin/fiat-surface/health` | ✅ | 285/422 | `check_fiat_surface_health()` live-verified |
@@ -533,6 +534,22 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 451** — §8 + Phase 5 fiat surface live-verified.
+  POST /wallet/onramp/quote with {usd_amount: 100,
+  destination_address: 0x...} returns full quote: requested_usd,
+  ftns_to_receive, usd_rate, kyc_required, kyc_status,
+  tier_level, tier_limit_usd, tier_limit_remaining_usd,
+  tier_limit_exceeded + quote.{usd_in, usdc_acquired,
+  ftns_received, onramp_route: "coinbase-cdp", swap_route:
+  "aerodrome", payment_method_alias}. POST /wallet/offramp/quote
+  returns operator-readable balance breakdown when
+  destination has 0 balance ("requested $X, available $Y…").
+  GET /wallet/pool/state reports `NOT_CONFIGURED` with
+  actionable env-var + seeding-ceremony-date note. GET
+  /admin/fiat-compliance/summary auto-recorded my onramp-quote
+  call as `{onramp_quote: {count: 1, total_usd: 100.0}}` —
+  the Vision §11 AUSTRAC/FinCEN/IRS-ready auto-record claim
+  is **live-attested**. 5 §8/Phase-5 rows promoted ✅. Doc-only.
 - **2026-05-15 sprint 450** — Hardware classification + supported-models
   + resources live-verified. `prsm node benchmark` returns full
   hardware profile (Apple M4 / 10 cores / 16GB VRAM/RAM / 4.60 TFLOPS
