@@ -320,11 +320,11 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 
 | Feature | REST | CLI | MCP | Status |
 |---------|------|-----|-----|--------|
-| Earnings summary | `/admin/earnings-summary` | `prsm node earnings` | `prsm_earnings_summary` | ✅ |
+| Earnings summary | `/admin/earnings-summary` | `prsm node earnings` | `prsm_earnings_summary` | ✅ Sprint 446 (CLI live: actionable empty-state when PRSM_OPERATOR_ADDRESS unset) |
 | Slash history | `/admin/slash-history` | `prsm node slash-history` | `prsm_slash_history` | ✅ |
-| Heartbeats | `/admin/heartbeat-history` | `prsm node heartbeats` | `prsm_heartbeat_history` | ✅ |
+| Heartbeats | `/admin/heartbeat-history` | `prsm node heartbeats` | `prsm_heartbeat_history` | ✅ Sprint 446 (CLI live: "No entries" empty-state) |
 | Distributions | `/admin/distribution-history` | `prsm node distributions` | `prsm_distribution_history` | ✅ |
-| Webhooks | `/admin/webhook-history` | `prsm node webhooks` | `prsm_webhook_history` | ✅ |
+| Webhooks | `/admin/webhook-history` | `prsm node webhooks` | `prsm_webhook_history` | ✅ Sprint 446 (CLI live: "set PRSM_WEBHOOK_URL to enable" actionable empty-state) |
 | Trigger heartbeat | `/admin/heartbeat/trigger` | `prsm node trigger-heartbeat` | `prsm_heartbeat_trigger` | ✅ |
 | Trigger distribution | `/admin/distribution/trigger` | `prsm node trigger-distribution` | `prsm_distribution_trigger` | ✅ |
 | Claim royalty | `/wallet/royalty/claim` | `prsm node claim-royalty` | `prsm_royalty_claim` | 🟢 |
@@ -531,6 +531,23 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 446** — Operator CLI surface live-verified.
+  Walked the §13 operator-trifecta CLI lane and confirmed each
+  surface returns clean actionable output:
+  - `prsm node info` → full Rich table (Node ID, Display Name,
+    Public Key, Roles, P2P/API Port, Data Dir, Bootstrap Nodes)
+  - `prsm node earnings` → clean "(PRSM_OPERATOR_ADDRESS unset)"
+    + "not wired" rows for royalty/heartbeat/distribution
+  - `prsm node heartbeats` → "No entries" (correct empty-state)
+  - `prsm node webhooks` → "set PRSM_WEBHOOK_URL to enable"
+    (actionable)
+  - `prsm wallet info` → "no address available — set PRIVATE_KEY
+    env var or pass --address" (actionable)
+  Three §13 trifecta rows attributed to sprint 446 with "CLI live"
+  notes documenting the actionable empty-state messages. This is
+  the operator-UX truth-surfacing the dogfood arc was designed
+  for: the CLI doesn't crash + doesn't lie about state + tells
+  the operator what env var to set. Doc-only.
 - **2026-05-15 sprint 445** — Streaming-inference UX path + §7 privacy
   budget + arbitration queue live-verified. /compute/inference/stream
   returns clean 503 "Inference executor does not support streaming.
