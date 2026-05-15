@@ -15,9 +15,26 @@ import redis.asyncio as aioredis
 import logging
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from plotly.utils import PlotlyJSONEncoder
+# Sprint 462 (F18-pattern lazy refactor) — plotly is a heavy
+# dashboard-rendering dep. Moved into the only call site
+# (generate_dashboard_html) so operators who never render the
+# security dashboard never pay the install cost.
 
 logger = logging.getLogger(__name__)
+
+
+def _import_plotly_json_encoder():
+    """Sprint 462: lazy-import plotly's PlotlyJSONEncoder with
+    actionable error. Used only by generate_dashboard_html."""
+    try:
+        from plotly.utils import PlotlyJSONEncoder
+        return PlotlyJSONEncoder
+    except ImportError as exc:
+        raise ImportError(
+            "plotly is required to render the security "
+            "dashboard. Install via `pip install plotly` "
+            "and restart the node."
+        ) from exc
 
 
 class MetricType(Enum):
@@ -733,6 +750,7 @@ class SecurityDashboard:
     
     async def generate_dashboard_html(self) -> str:
         """Generate HTML dashboard"""
+        PlotlyJSONEncoder = _import_plotly_json_encoder()
         dashboard_data = await self.generate_dashboard_data()
         
         html = f"""

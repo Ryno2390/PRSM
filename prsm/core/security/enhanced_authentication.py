@@ -14,8 +14,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import secrets
 import hashlib
 import hmac
-import pyotp
-import qrcode
+# Sprint 462 (F18-pattern lazy refactor) — pyotp + qrcode are
+# 2FA-only deps. Import lazily inside generate_totp_secret() /
+# generate_qr_code() / verify_totp_token() so operators who
+# don't enable 2FA never pay the install cost. Same pattern as
+# sprint 460's sentence_transformers fix.
 import io
 import redis.asyncio as aioredis
 import logging
@@ -193,21 +196,53 @@ class EnhancedPasswordValidator:
 
 class MFAManager:
     """Multi-factor authentication manager"""
-    
+
     def __init__(self):
         self.issuer_name = "PRSM API"
-        
+
+    @staticmethod
+    def _import_pyotp():
+        """Sprint 462 (F18-pattern): lazy-import pyotp with
+        actionable error if missing. 2FA is opt-in; operators
+        who never enable it shouldn't pay the install cost."""
+        try:
+            import pyotp
+            return pyotp
+        except ImportError as exc:
+            raise ImportError(
+                "pyotp is required for 2FA TOTP operations. "
+                "Install via `pip install pyotp` and restart "
+                "the node."
+            ) from exc
+
+    @staticmethod
+    def _import_qrcode():
+        """Sprint 462 (F18-pattern): lazy-import qrcode with
+        actionable error. Same rationale as _import_pyotp."""
+        try:
+            import qrcode
+            return qrcode
+        except ImportError as exc:
+            raise ImportError(
+                "qrcode is required to render 2FA setup QR "
+                "codes. Install via `pip install qrcode[pil]` "
+                "and restart the node."
+            ) from exc
+
     def generate_totp_secret(self) -> str:
         """Generate TOTP secret key"""
+        pyotp = self._import_pyotp()
         return pyotp.random_base32()
-    
+
     def generate_qr_code(self, user_email: str, secret: str) -> bytes:
         """Generate QR code for TOTP setup"""
+        pyotp = self._import_pyotp()
+        qrcode = self._import_qrcode()
         totp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
             name=user_email,
             issuer_name=self.issuer_name
         )
-        
+
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -216,16 +251,17 @@ class MFAManager:
         )
         qr.add_data(totp_uri)
         qr.make(fit=True)
-        
+
         img = qr.make_image(fill_color="black", back_color="white")
-        
+
         # Convert to bytes
         img_buffer = io.BytesIO()
         img.save(img_buffer, format='PNG')
         return img_buffer.getvalue()
-    
+
     def verify_totp_token(self, secret: str, token: str, window: int = 1) -> bool:
         """Verify TOTP token"""
+        pyotp = self._import_pyotp()
         totp = pyotp.TOTP(secret)
         return totp.verify(token, valid_window=window)
     

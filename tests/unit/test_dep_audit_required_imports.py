@@ -61,17 +61,20 @@ PYPI_TO_MODULE = {
 # Allow-list of imports that ARE at top-level but only fire on
 # optional features. These need lazy-import refactors (sprint-460
 # pattern) — TRACKED here as known debt, NOT ignored.
+#
+# Sprint 462 lazy-refactor closures:
+#   - pyotp, qrcode → enhanced_authentication.py: now lazy inside
+#     MFAManager._import_pyotp() / _import_qrcode()
+#   - stem → anonymous_networking.py: now lazy inside
+#     _import_stem_controller()
+#   - plotly (security_analytics) → now lazy inside
+#     _import_plotly_json_encoder() — fires only when
+#     generate_dashboard_html() is called
+#   - plotly (performance_dashboard.py) → standalone streamlit
+#     script, excluded from audit walk (see _SKIP_DIRS below)
+#   - PIL → false positive from sprint 461 (no top-level
+#     imports in prsm/ after closer inspection)
 ALLOWED_UNDECLARED_TOP_LEVEL = {
-    # PIL — image-fingerprint paths only; not on node-start
-    # (prsm/marketplace/binary_fingerprint*.py imports at top)
-    "PIL",
-    # plotly — dashboard rendering only
-    "plotly",
-    # pyotp + qrcode — 2FA setup paths (enhanced_authentication)
-    "pyotp",
-    "qrcode",
-    # stem — Tor / anonymous_networking
-    "stem",
     # tomli — Python <3.11 stdlib backport (3.11+ has tomllib)
     "tomli",
     # The "fancy regex false positives" group — these aren't
@@ -151,15 +154,36 @@ def _resolved_module_set(declared_pypi):
     return {m.lower() for m in provided}
 
 
+# Sprint 462: paths excluded from the dep-audit walk. These are
+# standalone scripts (run via `streamlit run` or `python script.py`)
+# that are NOT imported by the prsm package — their top-level
+# imports don't fire during `prsm node start`, so they don't
+# trigger the F15/F16/F17/F18 bug class.
+_SKIP_DIRS = (
+    "_legacy",
+    # Streamlit dashboards are run directly, not imported.
+    # Their requirements.txt covers their deps separately.
+    "interface/dashboard",
+)
+
+
+def _is_skipped_path(py_path):
+    s = str(py_path)
+    return any(skip in s for skip in _SKIP_DIRS)
+
+
 def _top_level_imports_in_prsm():
     """Walk prsm/ and collect every module imported at TOP-LEVEL
-    (column 0, no indent). Returns set of top-level package names."""
+    (column 0, no indent). Returns set of top-level package names.
+
+    Skips standalone-script directories (_legacy/, dashboards) —
+    those are run directly, not imported by node startup."""
     re_top = re.compile(
         r'^(import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)',
     )
     found = set()
     for py in (REPO_ROOT / "prsm").rglob("*.py"):
-        if "_legacy" in str(py):
+        if _is_skipped_path(py):
             continue
         try:
             text = py.read_text()
@@ -237,21 +261,52 @@ def test_sprint_461_required_deps_are_present():
     )
 
 
-def test_allow_list_is_not_empty_signals_known_debt():
-    """The allow-list is known-debt. As future sprints lazy-
-    import-refactor those modules (per sprint-460 pattern), the
-    allow-list shrinks. This test surfaces the current count
-    so it's visible in test output — NOT a hard ceiling. If
-    it grows past ~50, the dep-audit is regressing."""
-    # Real (non-false-positive) entries on the lazy-import-refactor
-    # todo list
-    real_lazy_targets = {
-        "PIL", "plotly", "pyotp", "qrcode", "stem",
+def test_sprint_462_lazy_refactors_closed():
+    """Sprint 462 closed the 5 known lazy-import debts from
+    sprint 461's allow-list:
+      - pyotp / qrcode → enhanced_authentication.py
+      - stem → anonymous_networking.py
+      - plotly (security_analytics) → lazy in
+        generate_dashboard_html
+      - plotly (performance_dashboard) → standalone streamlit
+        script; excluded via _SKIP_DIRS
+      - PIL → was a false positive
+
+    This test verifies the refactored modules have NO unguarded
+    top-level imports of these heavy deps. A regression that
+    re-adds the import at module top breaks operator UX for the
+    ~80% who don't use these features.
+    """
+    re_top_import = re.compile(
+        r'^(import|from)\s+(stem|pyotp|qrcode|plotly|PIL)',
+    )
+    targets = {
+        REPO_ROOT / "prsm" / "core" / "privacy" / "anonymous_networking.py":
+            {"stem"},
+        REPO_ROOT / "prsm" / "core" / "security" / "enhanced_authentication.py":
+            {"pyotp", "qrcode"},
+        REPO_ROOT / "prsm" / "core" / "security" / "security_analytics.py":
+            {"plotly"},
     }
-    # All of these should be in the allow-list — that's the
-    # signal that we know about them and intend to fix.
-    for t in real_lazy_targets:
-        assert t in ALLOWED_UNDECLARED_TOP_LEVEL, (
-            f"{t} is a known lazy-import-refactor target but "
-            f"missing from ALLOWED_UNDECLARED_TOP_LEVEL"
-        )
+    for path, deps in targets.items():
+        if not path.exists():
+            continue
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            # Only fail on TOP-LEVEL (column 0) — comments and
+            # indented lazy-imports are fine
+            if line.startswith((" ", "\t", "#")):
+                continue
+            m = re_top_import.match(line)
+            if not m:
+                continue
+            mod = m.group(2)
+            if mod in deps:
+                raise AssertionError(
+                    f"Sprint 462 lazy-refactor regression: "
+                    f"{path.relative_to(REPO_ROOT)}:{lineno} has "
+                    f"top-level `import {mod}` — must be moved "
+                    f"inside a function body. Pre-sprint-462 "
+                    f"this pattern broke operator UX for the "
+                    f"~80% who don't use the {mod}-dependent "
+                    f"feature."
+                )

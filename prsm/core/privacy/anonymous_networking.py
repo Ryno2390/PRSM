@@ -24,12 +24,29 @@ from uuid import UUID, uuid4
 from dataclasses import dataclass
 from decimal import Decimal
 
-from stem.control import Controller
+# Sprint 462 (F18-pattern lazy refactor) — `stem` (Tor controller
+# library) is only needed by `_initialize_tor()`. Operators who
+# never enable Tor anonymous-networking shouldn't pay the install
+# cost. Lazy-import inside the function below.
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from pydantic import BaseModel, Field
+
+
+def _import_stem_controller():
+    """Sprint 462: lazy-import stem.control.Controller with
+    actionable error. Tor anonymous-networking is opt-in."""
+    try:
+        from stem.control import Controller
+        return Controller
+    except ImportError as exc:
+        raise ImportError(
+            "stem is required for Tor anonymous-networking. "
+            "Install via `pip install stem` and ensure a Tor "
+            "daemon is running on port 9051."
+        ) from exc
 
 
 class PrivacyLevel(str, Enum):
@@ -166,8 +183,10 @@ class AnonymousNetworkManager:
         self.relay_nodes: Dict[UUID, RelayNode] = {}
         self.active_sessions: Dict[UUID, PrivateSession] = {}
         
-        # Tor controller
-        self.tor_controller: Optional[Controller] = None
+        # Tor controller — type kept as Any so the class can be
+        # constructed without `stem` installed (sprint 462 lazy-
+        # refactor). Materialized in `_initialize_tor()`.
+        self.tor_controller: Optional[Any] = None
         self.tor_socks_port = 9050
         
         # I2P configuration
@@ -407,14 +426,19 @@ class AnonymousNetworkManager:
     async def _initialize_tor(self):
         """Initialize Tor network connection"""
         try:
+            # Sprint 462: lazy-import the stem dep here, only
+            # when Tor is actually being initialized.
+            Controller = _import_stem_controller()
             # Try to connect to existing Tor controller
             self.tor_controller = Controller.from_port(port=9051)
             self.tor_controller.authenticate()
-            
+
             print("🧅 Connected to existing Tor daemon")
-            
+
         except Exception:
-            # If no existing Tor, we would start one in production
+            # If no existing Tor (or stem not installed), we
+            # would start one in production. Operators without
+            # Tor enabled stay on this branch.
             print("⚠️ No Tor daemon found - would start embedded Tor in production")
             self.tor_controller = None
     
