@@ -376,9 +376,10 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Creator reputation tracker | `/marketplace/creator-reputation/{id}` | 🟢 | 287-291 | Reach + repeat-purchase signal |
-| Tier classification (new/low/medium/high) | reputation tier auto-records on retrieve | 🟢 | 287-291 | |
-| Search filter by tier | `GET /content/search?min_tier=...` | 🟢 | 287-291 | |
+| Creator reputation tracker (lookup) | `/marketplace/creator-reputation/{id}` | ✅ | 440 | Live: returns clean default (known:false, score:0.5, tier:"new") for unknown creators |
+| Creator reputation tracker (auto-record on retrieve) | hook in `/content/retrieve` | 🟢 | 287-291 | Wired correctly; live update gated by operator wallet config (`FTNS_WALLET_PRIVATE_KEY`) — dev env can't trigger |
+| Tier classification (new/low/medium/high) | reputation tier auto-records on retrieve | 🟢 | 287-291 | Same wallet-gate as above |
+| Search filter by tier | `GET /content/search?min_tier=...&exclude_new=...` | ✅ | 440 | Live: query params accepted cleanly; tier-filter codepath active |
 | Creator stake gate (HIGH tier requires bonded FTNS) | on-chain `StakeBond` | 🟢 | 287-291 | Demotes HIGH→MEDIUM when unstaked |
 | Content fingerprint registry | `POST /content/upload` hook | 🟢 | 291 | Sprint 425 fixed fixture-drift |
 
@@ -522,6 +523,17 @@ arc proved we need.
   passes the embedding stage. Surfaced F10 (single-node empty
   aggregator pool) as the next bottleneck. 4 new tests / 78
   cross-suite green.
+- **2026-05-15 sprint 440** — §14 data-quality reputation surface live
+  partial-verification. `/marketplace/creator-reputation/{id}` returns
+  clean default for unknown creators (known:false, score:0.5,
+  tier:"new") — promoted to ✅. `/content/search?min_tier=X&
+  exclude_new=true` accepts the §14 tier-filter query params cleanly
+  — promoted to ✅. Auto-record on retrieve REMAINS 🟢 — wired
+  correctly but live update is gated by operator wallet config
+  (`FTNS_WALLET_PRIVATE_KEY`); dev env can't exercise the full
+  reputation-accrual path without a real on-chain wallet. Honest-
+  scope deferral documented inline. PRSM_Testing.md row updated with
+  the dev-vs-live distinction.
 - **2026-05-15 sprint 439** — §14 content-moderation chain E2E.
   Promoted §14 content-moderation rows from 🟢 to ✅ via the live
   end-to-end test:
