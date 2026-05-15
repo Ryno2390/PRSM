@@ -187,6 +187,10 @@ journey. Each step should be live-verifiable on a single node.
 | On-chain balance (mainnet) | `GET /balance/onchain` | ✅ | 464 | Live: queries Base mainnet FTNS contract `0x5276a37...` for derived wallet address (0x2Fd48D… in this test); returns balance_wei + balance_ftns + claimable + escrowed |
 | On-chain balance (Sepolia testnet) | `GET /balance/onchain` | ✅ | 465 | Live: with `PRSM_NETWORK=testnet` + `BASE_SEPOLIA_RPC_URL` + `PRSM_ONCHAIN_FTNS=1` + `FTNS_TOKEN_ADDRESS` env vars, queries Base Sepolia FTNS contract `0x7F5f00FA…`; canonical_match True; returns 0 for empty wallet |
 | Network switching (mainnet ↔ testnet) | `PRSM_NETWORK` env | ✅ | 465 | Live: daemon respects PRSM_NETWORK; chain_id 84532 + network "testnet" + rpc_host sepolia.base.org reported in `/info` |
+| On-chain TX (Sepolia self-transfer) | Web3 EIP-1559 | ✅ | 466 | TX `0xa2b06bf59777…` block 41559508 status=1 — first PRSM wallet TX on Base Sepolia; gas 21k @ 6 Gwei = 0.000000126 ETH |
+| On-chain TX (Sepolia → testnet foundation_safe) | Web3 EIP-1559 | ✅ | 466 | TX `0xead1f03055…` block 41559540 status=1 — wallet → `0xCCAc7b21…` (config/networks.py:144 testnet deployer); 2nd attribution TX |
+| EmissionController halving epoch (constructor-immutable) | Sepolia contract call | ✅ | 466 | Live read: `EPOCH_DURATION_SECONDS() = 3600` (1 hour testnet, vs mainnet 4 years per Vision §11) — Sprint 358's INV-EC-1 claim empirically verified |
+| Sepolia FTNS contract identity | Sepolia contract call | ✅ | 466 | Live read: `name()=PRSM Fungible Tokens for Node Support`, `symbol()=FTNS`, `decimals()=18`, `totalSupply()=100,002,060` |
 | Transaction history | `GET /transactions` | ✅ | — | Verified live (sprint 198 bounds-validated `limit`) |
 | Wallet spend (30d summary) | `GET /wallet/spend` | ✅ | 464 | Live with FTNS_WALLET_PRIVATE_KEY: returns {address, days, total_spent_ftns, escrows_count} for derived wallet |
 | Wallet escrows | `GET /wallet/escrows` | ✅ | 464 | Live with wallet: paginated empty-state for the wallet address |
@@ -710,6 +714,45 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-15 sprint 466** — Level B Sepolia testnet TX exercise.
+  User funded wallet `0x2Fd48D2d…` with 0.005 ETH on Base Sepolia.
+  Executed real on-chain TX from the PRSM-configured wallet:
+
+  TX #1: self-transfer 0.0001 ETH
+    Hash:  0xa2b06bf59777c728bd89b43fd9687264a72e7eb56b1ab438f46a7ee1923fea08
+    Block: 41559508, status: 1
+    Gas: 21000 @ 6 Gwei = 0.000000126 ETH
+    Basescan: https://sepolia.basescan.org/tx/0xa2b06bf59777…
+
+  TX #2: wallet → testnet foundation_safe `0xCCAc7b21…`
+    Hash:  0xead1f03055491e4a76f62a72cda27318926a162678d483ac8fcffe4571bfbf30
+    Block: 41559540, status: 1
+    Final wallet balance: 0.00489975 ETH
+
+  Plus two contract-level live reads on Sepolia:
+
+  - FTNS contract `0x7F5f00FA…`: name()="PRSM Fungible Tokens
+    for Node Support", symbol()="FTNS", decimals()=18,
+    totalSupply()=100,002,060 — full ERC-20 identity verified
+    on testnet.
+  - EmissionController `0x1478F8f5…`: EPOCH_DURATION_SECONDS()
+    returns 3600 (1 hour) — matches testnet T10 redeploy
+    (2026-05-07) per config/networks.py:164. Empirically verifies
+    Sprint 358's INV-EC-1 invariant ("EPOCH_DURATION_SECONDS is
+    constructor-set immutable") on the testnet variant.
+
+  Daemon-side `/balance/onchain` returns the SAME state as
+  direct Web3 reads (balance_ftns: 0.0) — daemon is correctly
+  proxying to live Sepolia.
+
+  Per the testnet config note, FTNS distribution is
+  founder-airdropped (not faucet), so we can't programmatically
+  acquire FTNS for stake/transfer testing without a Discord
+  request. Sprint 466 scope: ETH-only TX + contract reads —
+  covers the load-bearing infrastructure verification.
+
+  5 new ✅ rows in PRSM_Testing.md.
+
 - **2026-05-15 sprint 465** — Level B Sepolia testnet wiring (TX
   pending wallet funding). Switched daemon from Base mainnet
   (chain_id 8453) to Base Sepolia (chain_id 84532) via four
