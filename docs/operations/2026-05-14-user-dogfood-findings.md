@@ -1036,6 +1036,195 @@ defense-in-depth via a simulated-hang integration test.
 
 ---
 
+### F25 — Concurrent `/compute/submit` returns 500 (unhandled `ConcurrentModificationError` + savepoint collision)
+
+**The bug.** Multi-pronged. Surfaced when sprint 487's
+concurrency harness fired 10 simultaneous /compute/submit
+requests against a single daemon:
+
+1. The dag_ledger HAS optimistic concurrency control via
+   version checks AND a `SAVEPOINT balance_check` block.
+   But under contention `_check_balance_atomic` raises
+   `ConcurrentModificationError` which the /compute/submit
+   handler did NOT catch — propagated up as 500.
+
+2. The savepoint name `balance_check` is HARDCODED. When
+   two coroutines on the same aiosqlite connection both
+   issue `SAVEPOINT balance_check`, the second nesting
+   means a sibling's ROLLBACK TO can pop the wrong layer
+   → "no such savepoint: balance_check" → 500.
+
+3. `InsufficientBalanceError` from the same path was
+   also uncaught → 500 (should be 400 — client-actionable).
+
+**Live impact.** A burst of concurrent submits crashes 4-7
+out of 10 with 500. Real DoS surface from a single
+operator submitting multiple jobs in parallel.
+
+**Severity.** Production-blocker. Any operator dashboard
+or SDK that fires concurrent compute submits will see
+random 500s + lose the ability to track which submits
+succeeded.
+
+**Surfaced.** Sprint 487 (2026-05-16) — concurrency
+testing as priority #1 from sprint 486's coverage matrix.
+
+**Fix (partial).** Sprint 487 shipped:
+- Per-wallet `asyncio.Lock` in dag_ledger to serialize
+  balance-check operations per wallet (eliminates the
+  savepoint name collision; different wallets still
+  proceed in parallel).
+- /compute/submit handler now catches
+  `ConcurrentModificationError + BalanceLockError` with
+  bounded retry (3 attempts, exp backoff: 10/40/90ms),
+  then clean 503 with actionable detail.
+- /compute/submit handler also catches
+  `InsufficientBalanceError` → 400 (client-actionable).
+
+**Live-verified post-fix.** Concurrent-submit test now
+passes: 0 unhandled 500s; mix of 200 (success) + 400
+(insufficient balance) + 503 (retry exhausted with
+actionable detail).
+
+**Pin test.** `tests/integration/test_sprint_487_concurrency.py`
+runs 4 race scenarios against a live daemon.
+
+---
+
+### F26 — Concurrent identical-content uploads break anti-Sybil first-creator-wins
+
+**The bug.** 10 concurrent /content/upload calls with
+IDENTICAL bytes (and different creator_id payloads, though
+the handler overrides to the node's own id anyway) all
+return 200 with `duplicate_of_creator: null`. Vision §14
+anti-Sybil invariant says exactly ONE upload should be
+canonical; the rest should be flagged `duplicate_of`.
+
+Root cause: the fingerprint-registry SELECT-then-INSERT in
+the upload path is not atomic. Concurrent uploads each see
+"no existing fingerprint" → each tries to insert → SQLite's
+UNIQUE constraint on `content_provenance.cid` fires for
+all-but-one INSERTs, but the handler logs the
+`IntegrityError` and STILL RETURNS 200 with the optimistic
+canonical-creator response.
+
+Daemon log evidence:
+```
+ProvenanceQueries.upsert_provenance failed:
+(sqlite3.IntegrityError) UNIQUE constraint failed:
+content_provenance.cid
+```
+× 9 lines for 10 concurrent uploads — only 1 INSERT
+actually persisted, but all 10 responses say "you're
+canonical".
+
+**Live impact.** Anti-Sybil invariant compromised. An
+adversary running concurrent uploads of the same content
+under different identities could ALL claim to be the
+canonical creator (against the durable DB, only one wins,
+but the response-layer lies).
+
+**Severity.** Production-blocker for §14 anti-Sybil
+claim. Operator dashboards built on the response payload
+would show false canonicals.
+
+**Surfaced.** Sprint 487.
+
+**Fix.** Deferred — needs a proper fingerprint-registry
+lock + atomic "INSERT ... ON CONFLICT (cid) DO NOTHING"
++ post-insert read to discover actual canonical creator.
+The handler must then return the TRUE canonical, not the
+optimistic one.
+
+**Pin test.** Concurrency harness (sprint 487) defends
+once the fix lands.
+
+---
+
+### F28 — Concurrent `/staking/unstake` against same stake_id creates multiple pending requests
+
+**The bug.** 10 concurrent /staking/unstake calls against
+the SAME stake_id produced 5 successful pending unstake
+requests, each with a distinct `request_id` but pointing
+at the same underlying stake. The StakingManager has a
+`_lock` per its source comment but concurrent dispatchers
+on the same stake aren't actually serialized — likely
+the lock is too coarse-grained (per-manager not
+per-stake) OR the check-then-write pattern around
+existing-pending-request lookup is not atomic.
+
+Each unstake request has `amount: 1000.0` (the full
+stake). 5 requests × 1000 FTNS = 5000 FTNS of pending
+withdrawals against a 1000-FTNS stake. After the 7-day
+cooldown, the FIRST withdraw succeeds; the remaining 4
+would either:
+- (a) all succeed → 5000 FTNS withdrawn from a 1000 FTNS
+  stake — economic invariant violated, real loss to other
+  stakers in the pool, OR
+- (b) error after the first withdraws → user has 4
+  orphaned pending records that can't ever resolve
+  cleanly.
+
+Either case is a production-blocker for the Vision §11
+staking-economy claim.
+
+**Live impact.** Adversary or unlucky multi-client user
+could create duplicate unstake claims. With the 7-day
+cooldown, the actual withdraw race is delayed but
+inevitable.
+
+**Severity.** Production-blocker. Same class as F26 —
+the verification campaign is now exposing how MANY
+concurrency assumptions are wishful.
+
+**Surfaced.** Sprint 487.
+
+**Fix.** Deferred — needs proper per-stake locking in
+StakingManager.unstake (not per-manager) + atomic SELECT
+... FOR UPDATE on the stake record before inserting the
+unstake request.
+
+**Pin test.** Sprint 487 concurrency harness's
+test_staking_unstake_race_no_double_unstake. Initially
+passed (lucky timing); now reliably fails after F25's
+per-wallet lock in dag_ledger changed scheduler timing.
+
+---
+
+### F27 — Compute escrow leaked FTNS under concurrent test load
+
+**The observation.** Sprint 487's concurrent-submit test
+submitted N jobs, each locking 206 FTNS into escrow. Test
+cleanup called /compute/cancel on each successful submit.
+Post-test inspection: 1030 FTNS (5 × 206) still locked
+in escrow records; `/balance/recent_transactions` shows
+the outflows but no corresponding refund inflows.
+
+**Hypothesis.** Either:
+- (a) `/compute/cancel` race itself fails to refund
+  cleanly (related to F25 savepoint collision applied to
+  the cancel path), OR
+- (b) The cancel path requires the job's
+  history-recorded state which the failed-submit cases
+  never reached, leaving the escrow orphaned.
+
+**Severity.** Operator-visible economic-layer leak. Real
+FTNS lost from the test wallet (1030 of 1030.05). On
+mainnet this would be real-money lost.
+
+**Surfaced.** Sprint 487.
+
+**Fix.** Deferred — needs:
+1. Investigation of which case (a) or (b) applies.
+2. Either: orphan-escrow cleanup task that refunds
+   un-claimed escrows on a TTL, OR fix the cancel
+   path to be idempotent + race-safe.
+
+The wallet recovery for THIS leak needs an admin
+endpoint (also deferred).
+
+---
+
 ## What's working (positive findings)
 
 - ✅ `prsm setup --minimal` completes cleanly on existing config (re-prompt

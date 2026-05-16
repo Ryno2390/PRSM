@@ -236,7 +236,30 @@ class DAGLedger:
         # Temporary storage for signature verification data during transaction creation
         # This is used to pass verification data between pre-creation and post-creation phases
         self._pending_verification: Optional[Dict[str, str]] = None
-        
+
+        # Sprint 487 (F25) — per-wallet asyncio.Lock map.
+        # The savepoint name "balance_check" is hardcoded; concurrent
+        # submit_transaction calls on the SAME connection step on
+        # each other's savepoint → "no such savepoint: balance_check"
+        # exceptions return 500. With this lock, balance-mutation
+        # paths are serialized per-wallet (different wallets still
+        # proceed in parallel), eliminating the savepoint collision.
+        # The optimistic-version-check is still in force as defense-
+        # in-depth against external DB modifications.
+        self._wallet_locks: Dict[str, "asyncio.Lock"] = {}
+        self._wallet_locks_guard: Optional["asyncio.Lock"] = None
+
+    def _get_wallet_lock(self, wallet_id: str) -> "asyncio.Lock":
+        """Sprint 487 (F25) — return the per-wallet asyncio.Lock.
+        Lazy-creates on first use. The guard lock prevents a race
+        in the lock-creation itself."""
+        import asyncio as _asyncio
+        if self._wallet_locks_guard is None:
+            self._wallet_locks_guard = _asyncio.Lock()
+        if wallet_id not in self._wallet_locks:
+            self._wallet_locks[wallet_id] = _asyncio.Lock()
+        return self._wallet_locks[wallet_id]
+
     async def initialize(self) -> None:
         """Initialize database and load existing state."""
         self._db = await aiosqlite.connect(self.db_path)
@@ -995,14 +1018,26 @@ class DAGLedger:
         # Track atomic balance check state for cleanup
         balance_version = None
         atomic_check_in_progress = False
-        
+
+        # Sprint 487 (F25) — per-wallet serialization. The
+        # SAVEPOINT balance_check name is shared across coroutines
+        # on the same connection; without this lock, concurrent
+        # submits on the same wallet step on each other's savepoint
+        # → "no such savepoint" errors return 500. Take the lock
+        # ONLY for the duration of the savepoint+update window so
+        # different wallets still race in parallel.
+        wallet_lock = None
+        if from_wallet:
+            wallet_lock = self._get_wallet_lock(from_wallet)
+            await wallet_lock.acquire()
+
         try:
             # Create wallets if they don't exist
             if from_wallet and not await self.wallet_exists(from_wallet):
                 await self.create_wallet(from_wallet, f"wallet-{from_wallet[:8]}", public_key)
             if not await self.wallet_exists(to_wallet):
                 await self.create_wallet(to_wallet, f"wallet-{to_wallet[:8]}")
-            
+
             # ATOMIC BALANCE CHECK - TOCTOU Prevention
             # Use atomic balance check with row-level locking for debit transactions
             if from_wallet:
@@ -1175,7 +1210,12 @@ class DAGLedger:
             if atomic_check_in_progress:
                 await self._rollback_balance_check()
             raise
-    
+        finally:
+            # Sprint 487 (F25) — release the per-wallet lock
+            # taken before entering the savepoint window.
+            if wallet_lock is not None and wallet_lock.locked():
+                wallet_lock.release()
+
     async def _update_weights(self, new_tx: DAGTransaction) -> None:
         """Update cumulative weights and confirmation levels for approved transactions."""
         to_update = set()

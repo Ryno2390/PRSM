@@ -2527,20 +2527,62 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 detail=f"Invalid job type: {job.job_type}. Valid types: inference, embedding, benchmark",
             )
 
-        try:
-            submitted = await node.compute_requester.submit_job(
-                job_type=job_type,
-                payload=job.payload,
-                ftns_budget=job.ftns_budget,
-            )
-            return {
-                "job_id": submitted.job_id,
-                "status": submitted.status.value,
-                "job_type": submitted.job_type.value,
-                "ftns_budget": submitted.ftns_budget,
-            }
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        # Sprint 487 (F25) — concurrent submits race on the
+        # dag_ledger's optimistic locking. Pre-fix:
+        # ConcurrentModificationError propagated up as a raw
+        # 500 with no body. Concurrent dogfood test hit 7/10
+        # 5xx responses on a 10-caller burst. Now: bounded
+        # retry (3 attempts, exponential backoff), then a
+        # clean 503 with Retry-After-style hint so the client
+        # can back off rather than the daemon crashing.
+        import asyncio
+        from prsm.node.dag_ledger import (
+            ConcurrentModificationError, BalanceLockError,
+            InsufficientBalanceError,
+        )
+        last_exc = None
+        for attempt in range(3):
+            try:
+                submitted = await node.compute_requester.submit_job(
+                    job_type=job_type,
+                    payload=job.payload,
+                    ftns_budget=job.ftns_budget,
+                )
+                return {
+                    "job_id": submitted.job_id,
+                    "status": submitted.status.value,
+                    "job_type": submitted.job_type.value,
+                    "ftns_budget": submitted.ftns_budget,
+                }
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            except InsufficientBalanceError as e:
+                # Sprint 487 (F25) — InsufficientBalanceError
+                # from dag_ledger must surface as 400 (client-
+                # actionable) not 500 (server fault). Operator-
+                # visible signal: "your wallet doesn't have
+                # enough FTNS for this budget".
+                raise HTTPException(
+                    status_code=400,
+                    detail=str(e),
+                )
+            except (
+                ConcurrentModificationError, BalanceLockError,
+            ) as e:
+                last_exc = e
+                # Exponential backoff: 10ms, 40ms, 90ms
+                await asyncio.sleep(0.01 * (attempt + 1) ** 2)
+                continue
+        # All retries exhausted — return 503 with actionable
+        # detail so the client knows to back off.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Compute submit failed after 3 retry attempts "
+                "due to contention on the FTNS ledger. Last "
+                f"error: {last_exc}. Back off and retry."
+            ),
+        )
 
     @app.get("/compute/job/{job_id}")
     async def get_job_status(job_id: str) -> Dict[str, Any]:
