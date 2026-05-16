@@ -679,6 +679,23 @@ arc proved we need.
 
 ## Changelog
 
+- **2026-05-16 sprint 496** — FTNS-side mainnet TX test
+  plan shipped (`docs/operations/ftns-side-mainnet-tx-runbook.md`).
+  OC column (real on-chain mutations) is the last untested
+  dimension after sprints 487-495 closed concurrency / scale
+  / adversarial / fault-injection / cross-feature / long-
+  running. The runbook is operator-facing: documents pre-
+  conditions (FTNS purchase paths, env vars), staged TX
+  sequence (TX-1 self-transfer → TX-2 transfer → TX-3
+  royalty claim → TX-4 stake commission; TX-5 settler bond
+  deferred), cost estimate ($0.003 ETH + $5 FTNS float),
+  risk register (wrong-network / private-key-leak / nonce
+  conflict mitigations), and rollback honesty (FTNS-side TX
+  are irreversible). 11 pin tests defend canonical contract
+  addresses, env vars, staged sequence, cost-estimate
+  presence, and a "no leaked private key" sentinel.
+  Execution gated on user funding the wallet.
+
 - **2026-05-15 sprint 429** — Initial draft. Inventory: 202 REST
   endpoints, 124 MCP tools, 130+ CLI subcommands, 38 audit-prep
   sections. Status snapshot reflects the post-sprint-428 state of
