@@ -158,17 +158,17 @@ journey. Each step should be live-verifiable on a single node.
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Submit job | `POST /compute/submit` | 🟢 | — | Endpoint exists |
-| Job status | `GET /compute/status/{id}` | 🟢 | — | Endpoint exists |
-| Job status stream | `GET /compute/status/{id}/stream` | 🟢 | — | Endpoint exists |
-| Cancel job | `POST /compute/cancel/{id}` | 🟢 | — | Endpoint exists |
-| List jobs | `GET /compute/jobs` | 🟢 | — | Endpoint exists |
-| Stale escrow cleanup | `POST /compute/cleanup-stale` | 🟢 | — | Endpoint exists |
-| Training jobs | `POST /compute/train` | 🟢 | — | Endpoint exists |
-| Compute stats | `GET /compute/stats` | 🟢 | — | Endpoint exists |
+| Submit job | `POST /compute/submit` | ✅ | 469 | Live: returns `{job_id, status: pending, job_type, ftns_budget}`; locks escrow record. Invalid job_type → 400; payload >`PRSM_MAX_JOB_PAYLOAD_BYTES` (default 100KB) → 413 |
+| Job status | `GET /compute/status/{id}` | ✅ | 469 | Live: returns `{job_id, escrow: {escrow_id, requester_id, amount_ftns, status, tx_lock, created_at, ...}}`. Unknown job_id → 404 with actionable detail (LRU-evicted or never-ran) |
+| Job status stream | `GET /compute/status/{id}/stream` | ✅ | 469 | Live SSE: `event: status` emitted with escrow snapshot; de-duped by JSON equality (sprint B8 closure); terminal events on history/escrow terminal state or PRSM_STATUS_STREAM_TIMEOUT_SEC |
+| Cancel job | `POST /compute/cancel/{id}` | ✅ | 469 | Live: returns `{job_id, history_cancelled, escrow_refunded, refund_amount_ftns}`; pending-job cancel refunds locked FTNS budget in full |
+| List jobs | `GET /compute/jobs` | ✅ | 469 | Live: paginated envelope `{jobs, total, offset, limit}`; only surfaces history-recorded jobs (cancelled-pending jobs don't reach history) |
+| Stale escrow cleanup | `POST /compute/cleanup-stale` | ✅ | 469 | Live: returns `{cleaned: N}`; empty-state returns 0 |
+| Training jobs | `POST /compute/train` | ✅ | 469 | Live: clean 503 with actionable `set PRSM_FEDERATED_WORKER_PRIVKEY env` hint when worker privkey not configured. Full path gated by federated-worker enrollment |
+| Compute stats | `GET /compute/stats` | ✅ | 469 | Live: full canonical schema `{resources, allocation, capacity, active_jobs, completed_jobs}` — CPU count/freq, mem, GPU, allocation pcts, concurrent_slots, active_jobs counter |
 | Available models | `GET /compute/models` | ✅ | 450 | Live: returns 3 mock models (mock-llama-3-8b / mock-mistral-7b / mock-phi-3) registered by MockInferenceExecutor (sprint 438) |
 | Receipts list (persistence across daemon restart) | `GET /compute/receipts` | ✅ | 447 | Live: sprint 438's mock-inference receipts persist; epsilon_spent=0.0 (F12 fix holds); full settler_signature intact |
-| Receipt details | `GET /compute/receipt/{job_id}` | 🟢 | — | Endpoint exists |
+| Receipt details | `GET /compute/receipt/{job_id}` | ✅ | 469 | Live: 404 with `No receipt for job_id='...'` for jobs without receipts (pending/cancelled). Receipt-bearing jobs covered by sprint 447 persistence test |
 
 ### Hardware classification
 
@@ -718,6 +718,37 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 469** — §5.2 compute job-lifecycle live
+  sweep. 9 🟢 rows promoted to ✅ via end-to-end probe against
+  running daemon:
+  - `POST /compute/submit` → returns `{job_id, status: pending,
+    job_type, ftns_budget}`; happy path (embedding) ✅, invalid
+    job_type → 400 ✅, oversized payload (`PRSM_MAX_JOB_PAYLOAD_BYTES`
+    default 100KB) → 413 ✅.
+  - `GET /compute/status/{id}` → escrow snapshot with full schema
+    (escrow_id, requester_id, amount_ftns, status, tx_lock,
+    created_at); unknown job_id → 404 with actionable detail.
+  - `GET /compute/status/{id}/stream` → SSE `event: status` with
+    escrow snapshot emitted ✅. De-duped by JSON equality;
+    terminal on history/escrow terminal state OR
+    `PRSM_STATUS_STREAM_TIMEOUT_SEC`.
+  - `POST /compute/cancel/{id}` → `{history_cancelled,
+    escrow_refunded, refund_amount_ftns}`; pending-job cancel
+    refunds locked FTNS budget in full ✅.
+  - `GET /compute/jobs` → paginated envelope `{jobs, total,
+    offset, limit}`; cancelled-pending jobs don't reach history.
+  - `POST /compute/cleanup-stale` → `{cleaned: 0}` empty-state.
+  - `POST /compute/train` → clean 503 with actionable
+    `set PRSM_FEDERATED_WORKER_PRIVKEY env` hint when worker
+    privkey not configured.
+  - `GET /compute/stats` → full canonical schema (resources,
+    allocation, capacity, active_jobs, completed_jobs).
+  - `GET /compute/receipt/{id}` → 404 `No receipt for job_id='...'`
+    for jobs without receipts (pending/cancelled).
+
+  No production-blockers surfaced — the §5.2 compute lifecycle
+  is operationally sound. Cumulative ✅ rows now at 176 (was 167).
+
 - **2026-05-16 sprint 468** — Multi-host bench resume. Both
   daemons reconnected to bootstrap fleet via EU (NYC unreachable
   from local network at test time). Cross-host discovery
