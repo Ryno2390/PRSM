@@ -918,6 +918,56 @@ from `load_all_for_node` body).
 
 ---
 
+### F23 — `SandboxManager` temp-dir leak: 4416 stale dirs accumulated in /var/folders/.../T/
+
+**The bug.** `SandboxManager.__init__` at
+`prsm/core/integrations/security/sandbox_manager.py:546`
+called `tempfile.mkdtemp(prefix="prsm_sandbox_")` but never
+registered cleanup. 3+ SandboxManager instances per daemon
+startup (IntegrationManager + SecurityOrchestrator's
+EnhancedSandboxManager + module-level
+`enhanced_sandbox_manager = EnhancedSandboxManager()` singleton
+in enhanced_sandbox.py:388) × every Python process that imports
+the module = thousands of leaked dirs.
+
+Live-verified pre-fix on dev workstation: 4416 stale
+`prsm_sandbox_*` dirs in `/var/folders/.../T/`. Each holds
+`quarantine` + `tools` subdirs. Low disk impact, high inode
+pressure on macOS `/var/folders` (parent dir had 8043
+entries).
+
+**Severity.** Operator hygiene / resource leak. Not
+data-loss, but indefinite accumulation on workstations + CI
+runners + production daemons that restart frequently.
+
+**Surfaced.** Sprint 483 (2026-05-16) during continued
+startup-log audit. Sprint 482 closed the persistence-hint
+UX gap; sprint 483's daemon log showed
+`Enhanced Security Sandbox Manager initialized` firing 3x at
+startup. The 3x signal led to investigation → 4416 stale
+dirs found.
+
+**Fix.** Sprint 483 added `atexit.register(_cleanup_sandbox_dir,
+self.sandbox_dir)` to `SandboxManager.__init__`. The
+`_cleanup_sandbox_dir(path)` helper `shutil.rmtree(...,
+ignore_errors=True)` the sandbox at process exit. Defensive:
+no-op on missing/empty/None path; swallows all exceptions
+(atexit handlers must never raise).
+
+**Live-verified.** Subprocess that imports module + exits:
+4 sandbox dirs created during run → 0 persisted after exit.
+Pre-fix: 4 persisted permanently.
+
+**Stale dirs cleanup.** Existing 4416 dirs on dev/prod hosts
+need a one-time `find /var/folders/.../T/ -maxdepth 1 -type d
+-name 'prsm_sandbox_*' -mtime +1 -exec rm -rf {} +` (or
+equivalent) — not in code scope; operator hygiene.
+
+**Pin test.** `tests/unit/test_sprint_483_f23_sandbox_cleanup.py`
+defends helper semantics + atexit registration source-of-truth.
+
+---
+
 ## What's working (positive findings)
 
 - ✅ `prsm setup --minimal` completes cleanly on existing config (re-prompt

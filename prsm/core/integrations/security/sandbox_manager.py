@@ -24,6 +24,7 @@ Sandbox Types:
 """
 
 import asyncio
+import atexit
 import os
 import re
 import tempfile
@@ -514,6 +515,20 @@ class ResourceMonitor:
         return 0.1  # 0.1 MB per check
 
 
+def _cleanup_sandbox_dir(sandbox_dir: str) -> None:
+    """Sprint 483 (F23) — atexit cleanup for SandboxManager
+    sandbox dirs. Fires once per process at shutdown for each
+    instance's mkdtemp'd sandbox dir. Safe under repeated calls
+    (ignore_errors=True; missing dir is a no-op)."""
+    try:
+        if sandbox_dir and os.path.isdir(sandbox_dir):
+            shutil.rmtree(sandbox_dir, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        # atexit handlers must never raise — Python ignores
+        # them but stderr gets noisy. Defensive swallow.
+        pass
+
+
 class SandboxManager:
     """
     Enhanced Security Sandbox Manager
@@ -545,6 +560,15 @@ class SandboxManager:
         # Sandbox configuration
         self.sandbox_dir = tempfile.mkdtemp(prefix="prsm_sandbox_")
         self.tool_sandbox_dir = os.path.join(self.sandbox_dir, "tools")
+        # Sprint 483 (F23) — register atexit cleanup so the
+        # mkdtemp'd sandbox doesn't accumulate forever in
+        # /var/folders/.../T/. Pre-fix: 3 SandboxManager
+        # instances per daemon startup × N restarts =
+        # thousands of leaked dirs (live-verified: 4416 stale
+        # `prsm_sandbox_*` dirs on a dev workstation). Each
+        # holds a `quarantine` + `tools` subdir, low disk but
+        # high inode pressure on macOS /var/folders.
+        atexit.register(_cleanup_sandbox_dir, self.sandbox_dir)
         self.max_file_size = int(getattr(settings, "PRSM_MAX_FILE_SIZE_MB", 100)) * 1024 * 1024
         self.scan_timeout = int(getattr(settings, "PRSM_SCAN_TIMEOUT_SECONDS", 300))
         self.quarantine_dir = os.path.join(self.sandbox_dir, "quarantine")

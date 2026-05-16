@@ -112,13 +112,12 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_twenty_two_frictions():
-    """The findings doc enumerates F1-F22. F22 added 2026-05-16
-    during sprint 480 startup-log audit. Same class as F11
-    (SQLite drops datetime types); fixed sprint 480 via
-    `_row_created_at_to_epoch` helper. If a finding is
-    silently removed (without an explicit closure note),
-    surface that."""
+def test_findings_doc_documents_all_twenty_three_frictions():
+    """The findings doc enumerates F1-F23. F23 added 2026-05-16
+    during continued sprint 483 startup-log audit. Sandbox
+    temp-dir leak (`prsm_sandbox_*` mkdtemp without atexit
+    cleanup); fixed sprint 483. If a finding is silently
+    removed (without an explicit closure note), surface that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -143,6 +142,7 @@ def test_findings_doc_documents_all_twenty_two_frictions():
         "F20 — DO cloud firewall blocks operator P2P port",
         "F21 — `ContentFilterStore` lacks `count()`",
         "F22 — `ProvenanceQueries.load_all_for_node`",
+        "F23 — `SandboxManager` temp-dir leak",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"
