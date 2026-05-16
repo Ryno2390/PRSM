@@ -82,7 +82,8 @@ journey. Each step should be live-verifiable on a single node.
 | Upload encrypted (recipient encryption) | `POST /content/upload` w/ recipients | ✅ | 430 | Live byte-identical roundtrip |
 | Retrieve by CID (Tier A, same node) | `GET /content/retrieve/{cid}` | ✅ | 428 | Local-publish shortcut |
 | Retrieve + decrypt (recipient-encrypted, same node) | `GET /content/retrieve/{cid}` + `decrypt_for_recipient` | ✅ | 430 | E2E live-tested |
-| Bootstrap-mediated peer discovery (multi-node) | bootstrap-server peer-list | ✅ | 456 | Live: 2 daemons on same host, symmetric `known[]` entries with node_id + external IP + last_seen; `peer_join_events: 1` on both sides |
+| Bootstrap-mediated peer discovery (multi-node) | bootstrap-server peer-list | ✅ | 456, 468 | Live: 2 daemons on same host (sprint 456); sprint 468 cross-HOST verified — daemon #1 (local home NAT) + daemon #2 (DO droplet) symmetric known[] via EU bootstrap |
+| Cross-host content retrieve (direct P2P) | BT swarm + gossip | ⏸️ | 468 | F20: DO cloud firewall blocks inbound TCP 9001 on droplet; direct P2P fails. Discovery works; fetch needs operator firewall config |
 | Peer lifecycle: peer_leave propagation | bootstrap-server peer-list | ✅ | 457 | Live: killed daemon #2 → 21s later daemon #1 received peer_leave → `peer_leave_events: 1`, `known_count: 0`, `discovered_peer_count: 0`. Sprint 320-329 hardening operationally verified |
 | Direct P2P connection (single-host) | WebSocket transport | ⏸️ | 456 | F14: NAT-loopback blocks single-host direct connection (announced addrs are external IP); multi-host bench is the right test |
 | Retrieve by CID (Tier A, cross-node) | `GET /content/retrieve/{cid}` | 🔬 | — | Requires F14 fix or multi-host test bench |
@@ -717,6 +718,38 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 468** — Multi-host bench resume. Both
+  daemons reconnected to bootstrap fleet via EU (NYC unreachable
+  from local network at test time). Cross-host discovery
+  verified: daemon #1 (local, `136.47.243.122:9001`) and daemon
+  #2 (droplet, `159.203.129.218:9001`) appear in each other's
+  `known[]` lists with full capabilities metadata.
+
+  Cross-host **content retrieve** test: daemon #2 uploaded CID
+  `f0aadee79…`; daemon #1 retrieve returned `not_found,
+  providers_tried: 0`. `connected_count: 0` both sides.
+
+  **F20 surfaced**: direct `nc -zv 159.203.129.218 9001` from
+  local times out. ufw on droplet INACTIVE — security is via
+  DO cloud firewall, which has 22+8000+8765 open but NOT 9001.
+  Operator P2P port not opened on DO cloud firewall (separate
+  from droplet OS firewall ufw which sprint 458 cloud-init
+  configured but never activated).
+
+  **Three-layer NAT/firewall arc complete** (F14 single-host
+  loopback + F20 DO cloud firewall + local home NAT outbound-
+  only — typical operator pattern, not a bug).
+
+  Multi-host bench succeeds at **discovery layer** ✅ (sprint
+  320-329 P2P discovery hardening cross-host-verified).
+  **Content fetch** requires operator to open inbound P2P port
+  on at least one side — typical pattern is the droplet
+  operator does so; home operators stay outbound-only. F20
+  documented + deferred (needs DO API token or web console
+  to fix cloud firewall, out of session scope).
+
+  Roadmap row: Cross-host content retrieve ⏸️ pending F20 fix.
+
 - **2026-05-16 sprint 467** — **Level A Base mainnet TX exercise**.
   User funded wallet `0x2Fd48D2d…` with 0.0005 ETH on **Base mainnet**
   (chain_id 8453 — real production network, real funds at stake).

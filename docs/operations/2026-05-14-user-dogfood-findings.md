@@ -718,6 +718,84 @@ defend the source-level invariants (no unguarded top-level
 the dep; clear error on missing dep with pip-install hint;
 package-level import doesn't pull in ML stack).
 
+### F19 — `bleach` in `[server]` extra but required at startup
+
+**Symptom.** Sprint 462's daemon-restart on bootstrap1 droplet
+(after sprint 460 F18 fix) crashed:
+
+```
+ModuleNotFoundError: No module named 'bleach'
+File "/opt/prsm-operator/prsm/core/security/input_sanitization.py", line 12
+    import bleach
+```
+
+**Root cause.** `bleach` declared in pyproject.toml's `[server]`
+extra (line 262 pre-fix), not required deps. But
+`prsm/core/security/input_sanitization.py:12` does `import bleach`
+at module top-level. `prsm/core/security/__init__.py` re-exports
+input_sanitization, so importing the core/security package
+(which happens during node startup) triggers the bleach import.
+Fresh-venv `pip install -e .` (no extras) succeeds, but
+`prsm node start` crashes.
+
+Same class as F16 (zfec in [blockchain] extra) — package
+declared somewhere in pyproject but in the wrong location for
+what actually uses it at startup time.
+
+**Severity.** Production-blocking on fresh-venv installs.
+
+**Fix shipped sprint 462.** Moved `bleach>=6.0.0` from `[server]`
+extra to required deps. Companion comment left in [server] block
+explaining the move. Sprint 463's tightened dep-audit invariant
+catches this class permanently at CI level.
+
+Tag `fix-bleach-required-dep-f19-merge-ready-20260515`.
+
+### F20 — DO cloud firewall blocks operator P2P port 9001 (inbound)
+
+**Symptom.** Sprint 468 multi-host bench resume. Daemons cross-
+discovered via EU bootstrap server peer-list. Daemon #1 (local
+home NAT, `136.47.243.122`) and daemon #2 (DO droplet bootstrap1,
+`159.203.129.218`) appear in each other's `known[]` list. But
+`connected_count: 0` both sides; cross-host content retrieve
+returns `not_found, providers_tried: 0`.
+
+Direct `nc -zv 159.203.129.218 9001` from local → **operation
+timed out**. Droplet `ss -tlnp | grep 9001` shows
+`LISTEN 0.0.0.0:9001` (python pid=4065087). ufw on droplet
+INACTIVE. So OS firewall isn't blocking. **DO cloud firewall**
+(configured via DO dashboard) is.
+
+**Root cause.** Sprint 458's cloud-init opened ufw rules for
+22/8000/9001 inside droplet. But ufw inactive on bootstrap1 —
+security is via DO cloud firewall. The cloud firewall has
+22+8000+8765 open (bootstrap-server-v2's ports). 9001
+(operator P2P) was never added inbound.
+
+**Severity.** Blocks multi-host bench's content-retrieve half.
+Discovery works (bootstrap-server peer-list propagation via
+WSS 8765); direct P2P (gossip + BT swarm) doesn't.
+
+**Fix.** Open inbound TCP 9001 on bootstrap1 droplet's DO cloud
+firewall (DO dashboard → Networking → Firewalls). Requires DO
+API token or web console access. Out of scope for sprint 468
+(no DO API token available in this session).
+
+**Status.** Documented; deferred to operator action.
+
+Three-layer NAT/firewall arc complete:
+- F14 (sprint 456): single-host NAT-loopback
+- F20 (sprint 468): DO cloud firewall inbound 9001
+- Local home NAT: outbound-only — typical operator pattern;
+  not a PRSM bug
+
+Multi-host bench succeeds at the **discovery layer** (both
+daemons see each other via bootstrap peer-list). **Content
+fetch** requires opening a P2P port on at least one side —
+typical pattern is the droplet operator opens their inbound;
+home operators stay outbound-only. This is documented design
+behavior, not a PRSM bug.
+
 ### F5 — Quote endpoint path is `/compute/forge/quote`, not `/compute/quote`
 
 **Symptom.** Following the "MCP tools" hint in PARTICIPANT_GUIDE, a user
