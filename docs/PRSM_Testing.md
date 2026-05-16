@@ -209,23 +209,23 @@ journey. Each step should be live-verifiable on a single node.
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | Stake | `POST /staking/stake` | ✅ | 432 | Live-verified: 1000 FTNS staked; total_staked reflects new amount |
-| Unstake request | `POST /staking/unstake` | 🟢 | — | Endpoint exists |
+| Unstake request | `POST /staking/unstake` | ✅ | 470 | Live: returns `{request_id, stake_id, amount, requested_at, available_at, status: pending}` with 7-day cooldown enforced via `available_at`. Stake status transitions `active → unstaking`; `total_staked` drops; `pending_unstake_requests` populated |
 | Stake status | `GET /staking/status` | ✅ | 432 | Live-verified end-to-end with active stake |
 | Claim rewards | `POST /staking/claim-rewards` | ✅ | 432 | F11 fixed: tz-aware datetime subtraction now works (was 500 on every claim) |
-| Withdraw unstaked | `POST /staking/withdraw/{id}` | 🟢 | — | Endpoint exists |
-| Cancel unstake | `POST /staking/cancel-unstake/{id}` | 🟢 | — | Endpoint exists |
-| Single-user stake → claim E2E | (multi-step) | 🔬 | — | Multi-step ledger flow not exercised end-to-end |
+| Withdraw unstaked | `POST /staking/withdraw/{id}` | ⚠️ | 470 | Live: schema-pass — cancelled request → 400 "Request status invalid: cancelled"; unknown UUID → 404 "Unstake request X not found"; malformed UUID → 400. Happy-path gated by 7-day cooldown (`available_at` invariant, not bypassable without DB clock manipulation) |
+| Cancel unstake | `POST /staking/cancel-unstake/{id}` | ✅ | 470 | Live: `{request_id, cancelled: true, reason: null}`. Stake status returns `unstaking → active`; `total_staked` restored; `pending_unstake_requests` cleared. Unknown UUID → 404 |
+| Single-user stake → claim E2E | (multi-step) | ✅ | 470 | Live-verified end-to-end via sprint 432 (stake + claim) + sprint 470 (unstake + cancel-unstake lifecycle). Full ledger flow operationally sound |
 
 ### Settlement
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | Settlement stats | `GET /settlement/stats` | ✅ | 444 | Live: returns canonical schema (empty-state correct) |
-| Pending settlements | `GET /settlement/pending` | 🟢 | — | Endpoint exists |
-| Flush batch | `POST /settlement/flush` | 🟢 | — | Endpoint exists |
-| Settlement history | `GET /settlement/history` | 🟢 | — | Endpoint exists |
-| Settler registry (list-active surface) | `GET /settler/list/active` | ✅ | 444 | Live: returns `[]` for fresh node; register/unbond/sign-batch flows 🟢 |
-| Settler registry (register / unbond / sign batch) | `/settler/...` | 🟢 | — | Multi-step registry flows not exercised E2E |
+| Pending settlements | `GET /settlement/pending` | ✅ | 470 | Live: empty-state `{pending: [], count: 0}` |
+| Flush batch | `POST /settlement/flush` | ✅ | 470 | Live: full canonical schema `{settled_count, total_amount, net_transfers, tx_hashes: [], errors: [], duration_seconds}` — clean empty-state on fresh node |
+| Settlement history | `GET /settlement/history` | ✅ | 470 | Live: empty-state `{history: [], count: 0}` |
+| Settler registry (list-active surface) | `GET /settler/list/active` | ✅ | 444, 470 | Sprint 444 empty-state; sprint 470 with active settler — returns `[{settler_id, address, bond_amount, total_settled}]` |
+| Settler registry (register / unbond / sign batch) | `/settler/...` | ✅ | 470 | Live full lifecycle: POST /settler/register (min bond 10000 FTNS enforced — Vision §11 invariant, `bond_amount<min` → 400); GET /settler/{id} (status, can_settle, total_settled, slashed_amount); POST /settler/unbond (30-day cooldown, `unbond_at` set, list/active filters); POST /settler/batch/sign + GET /settler/batch/pending; GET /settler/ledger/export (integrity_hash for chain-of-custody); POST /settler/slash/propose schema-validated (settler_id+slash_amount+reason+proposer_id) |
 
 ### Phase 5 fiat surface (commission-ready, external-gated)
 
@@ -718,6 +718,38 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 470** — §5.3 staking + settlement +
+  settler-registry live sweep. 8 PRSM_Testing.md rows promoted
+  via end-to-end probe against running daemon:
+  - `POST /staking/unstake` → request_id with `available_at`
+    7 days out (Vision §11 cooldown invariant); stake status
+    `active → unstaking`, `total_staked` drops, pending list
+    populated.
+  - `POST /staking/cancel-unstake/{id}` → `{cancelled: true}`;
+    stake restored to active; total_staked back; pending
+    cleared.
+  - `POST /staking/withdraw/{id}` (⚠️ schema-pass) — cancelled
+    request → 400 "Request status invalid: cancelled"; unknown
+    UUID → 404. Happy path gated by 7-day cooldown.
+  - `GET /settlement/pending`, `GET /settlement/history` →
+    empty-state envelopes.
+  - `POST /settlement/flush` → full canonical schema with
+    `tx_hashes: [], errors: [], duration_seconds`.
+  - Full settler registry lifecycle: register (min bond 10000
+    FTNS enforced — Vision §11 invariant); GET /settler/{id}
+    (status, can_settle, total_settled, slashed_amount);
+    unbond (30-day cooldown, `unbond_at` set, list/active
+    filters); ledger/export with `integrity_hash` (cryptographic
+    chain-of-custody surface); slash/propose schema-validated.
+
+  No production-blockers surfaced. Min-bond + cooldown invariants
+  operationally attested. Sprint 432's single-user stake →
+  claim E2E now complemented by sprint 470's unstake-cycle
+  closure — Vision §5.3 economic layer is operationally
+  sound.
+
+  Cumulative ✅ rows now 183.
+
 - **2026-05-16 sprint 469** — §5.2 compute job-lifecycle live
   sweep. 9 🟢 rows promoted to ✅ via end-to-end probe against
   running daemon:
