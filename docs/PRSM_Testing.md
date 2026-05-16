@@ -120,9 +120,9 @@ journey. Each step should be live-verifiable on a single node.
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| SHA-256 fingerprint registry | `POST /content/upload` hook | 🟢 | 291 | Fixture-drift fixed sprint 425 |
-| Duplicate detection on re-upload | response `duplicate_of_creator` | 🟢 | 291 | Test-pinned |
-| Marketplace fingerprint lookup | `GET /marketplace/fingerprint/{hash}` | 🟢 | 291 | Endpoint exists |
+| SHA-256 fingerprint registry | `POST /content/upload` hook | ✅ | 291, 425, 441 | Live-verified via §14 chain (sprint 441): upload→ content_hash + canonical_creator recorded; sprint 425 fixed fixture-drift |
+| Duplicate detection on re-upload | response `duplicate_of_creator` | ✅ | 291, 441 | Live: re-upload identical text with creator B → response `duplicate_of_creator=A`, canonical preserved (first-creator-wins anti-Sybil invariant) |
+| Marketplace fingerprint lookup | `GET /marketplace/fingerprint/{hash}` | ✅ | 291, 441 | Live: returns `duplicate_attempt_count` and canonical-creator linkage |
 | EmbeddingDHT cross-node embedding gossip | `prsm.dht.embedding_dht_client` | 🟢 | T3.6 | Vision §11 claims live |
 | BinaryFingerprint perceptual hashes | `prsm/marketplace/binary_fingerprint.py` | 🟢 | T4.7 | Calibration deferred to testnet traffic |
 | V2 ProvenanceRegistry on-chain embedding commitment | on-chain | ✅ | — | Deployed `0xe0cedDA354...` |
@@ -305,14 +305,14 @@ journey. Each step should be live-verifiable on a single node.
 |---------|---------|--------|--------|-------|
 | Per-stage Gaussian noise (basic composition) | `ActivationDPInjector` | ✅ | 295 | Defends activation-inversion |
 | Topology rotation (uniform/beacon/anti-repeat) | `TopologyRotationPolicy` | ✅ | 296 | `stable_hash()` enables replay verification |
-| Privacy budget tracking | `/privacy/budget` + persistent store | 🟢 | 3.x.4 | Audit-prep §2.4 |
+| Privacy budget tracking | `/privacy/budget` + persistent store | ✅ | 445 | Live: returns canonical schema with per-tier budget state (sprint 445); audit-prep §2.4 unit-pinned |
 
 ### Enterprise Confidentiality Mode
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | Recipient encryption (X25519 + XChaCha20) | `POST /content/upload` w/ recipients | ✅ | 430 | Live byte-identical roundtrip; sprint 430 |
-| Recipient manifest read | `GET /content/recipient-manifest/{cid}` | 🟢 | 304 | |
+| Recipient manifest read | `GET /content/recipient-manifest/{cid}` | ✅ | 304, 472 | Live (sprint 472): 422 schema-defended `"not an encrypted recipient bundle"` on Tier A CID; full Tier B/C recipient-bundle parsing covered by sprint 430's E2E roundtrip |
 | Threshold encryption | (multi-endpoint) | 🟢 | — | Math green |
 | `prsm_enterprise_recipient` MCP | MCP | 🟢 | 304 | |
 
@@ -718,6 +718,24 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 478** — cross-table attribution
+  alignment. 5 PRSM_Testing.md rows promoted via existing
+  sprint coverage they were attributed to elsewhere in the
+  doc — bookkeeping consolidation, not new live testing:
+
+  - §4 SHA-256 fingerprint registry ✅ (sprint 291, 425,
+    441 — sprint 441's §14 E2E covers).
+  - §4 Duplicate detection on re-upload ✅ (sprint 291,
+    441 — sprint 441 attested `duplicate_of_creator`).
+  - §4 Marketplace fingerprint lookup ✅ (sprint 291,
+    441 — sprint 441 attested `duplicate_attempt_count`).
+  - §7 Privacy budget tracking ✅ (sprint 445 attested
+    /privacy/budget canonical schema).
+  - §7 Recipient manifest read ✅ (sprint 472 schema-
+    defended + sprint 430 E2E roundtrip).
+
+  Cumulative ✅ rows now 211 (was 206).
+
 - **2026-05-16 sprint 477** — §14 takedown-notice + corp-
   capability lifecycle E2E. 2 rows touched:
 
