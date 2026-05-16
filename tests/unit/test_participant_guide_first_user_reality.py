@@ -112,18 +112,18 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_thirty_five_frictions():
-    """The findings doc enumerates F1-F35. F34/F35 added
-    during sprint 494 cross-feature integration chain test
-    (coverage matrix priority #5):
-    - F34 CreatorReputationTracker + CreatorStakeClient
-      gated behind QO env var (sibling to F26)
-    - F35 content_index single-node gap broke
-      cross-feature chain — fallback to uploader's
-      uploaded_content
-    Both fixed same-sprint. If a finding is silently
-    removed (without an explicit closure note), surface
-    that."""
+def test_findings_doc_documents_all_thirty_seven_frictions():
+    """The findings doc enumerates F1-F37. F36/F37 added
+    during sprint 495 long-running stability soak (coverage
+    matrix priority #6, LR column):
+    - F36 daemon RSS leak under sustained-failure load
+      (+388 MB / 60s pre-fix; bulk-closed by F37, residual
+      ~3 KB/s deferred for heap profiler)
+    - F37 staged files leak indefinitely on BT seed
+      failure (36,337 in 60s pre-fix; cleanup-on-failure
+      shipped)
+    If a finding is silently removed (without an explicit
+    closure note), surface that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -161,6 +161,8 @@ def test_findings_doc_documents_all_thirty_five_frictions():
         "F33 — Filesystem errors during upload swallowed",
         "F34 — CreatorReputationTracker + CreatorStakeClient",
         "F35 — content_index single-node lookup gap",
+        "F36 — Daemon RSS leaks under sustained-failure",
+        "F37 — Staged files leak indefinitely on BT seed",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"

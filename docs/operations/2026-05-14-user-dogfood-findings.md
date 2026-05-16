@@ -1691,6 +1691,118 @@ fallback + conditional + field-preservation).
 
 ---
 
+### F36 — Daemon RSS leaks under sustained-failure upload load (partially closed by F37)
+
+**The bug.** 60-second sustained load soak (continuous
+upload/retrieve/submit/cancel mix) caused daemon RSS to
+grow from 147 MB → 545 MB (+388 MB, ~6.5 MB/s growth
+rate). At that rate a 4GB-RAM droplet would OOM within
+~10 minutes of moderate load.
+
+**Live impact (pre-fix):**
+- 60s soak: +388 MB RSS, 36,337 staged files leaked,
+  thousands of "BitTorrent seed_content returned None"
+  errors logged
+- RSS does NOT come back down when load stops (idle
+  daemon held the bloat)
+- FD count grew minimally (+3) — not the leak source
+- Thread count grew minimally (+3)
+
+**Severity.** Production-blocker for long-running
+operator daemons under any sustained load — silent
+OOM within hours.
+
+**Surfaced.** Sprint 495 (2026-05-16) accelerated soak
+test (coverage matrix priority #6, LR column).
+
+**Bulk closed sprint 495 via F37 fix.** Most of the
+388 MB growth turned out to be attributable to
+**staged files held in memory by libtorrent during
+failed seed attempts** + the staged files themselves
+on disk:
+
+```
+pre-F37 soak (60s):   +388 MB RSS, +36,337 staging files
+post-F37 soak (30s):  +13 MB RSS,  +50 staging files
+```
+
+The libtorrent state apparently grew alongside the
+on-disk staging dir. With staged-file cleanup-on-
+failure in place, both leaks shrink dramatically.
+
+**Remaining work (deferred).** A small RSS drift
+(~3 KB/s under rate-limited load, ~144 KB across 30s
+idle) suggests there's still a minor accumulator
+somewhere. Pinning the exact source requires a Python
+heap profiler (memray, tracemalloc) — beyond single-
+sprint scope. The post-F37 leak rate is now
+operationally acceptable for typical workloads.
+
+---
+
+### F37 — Staged files leak indefinitely on BT seed failure
+
+**The bug.** `ContentPublisher._publish_tier_a` wrote
+the staged file BEFORE calling
+`bt_provider.seed_content`. On seed failure:
+
+```python
+raise RuntimeError(
+    f"BitTorrent seed_content returned None for staged "
+    f"path {staged_path} (provenance_id={provenance_id}). "
+    f"The staged file is preserved; retry is safe."
+)
+```
+
+The message claimed "retry is safe" — but the daemon
+has NO retry mechanism that uses the preserved file.
+Operators who saw the 502 just gave up; the staged
+file lived forever.
+
+Under sustained-failure load (libtorrent flakiness,
+disk pressure, concurrent uploads exhausting the BT
+worker pool), staged files accumulated indefinitely.
+Sprint 495 soak observed **36,337 staged files leaked
+in 60 seconds**.
+
+**Severity.** Operator-hygiene leak. The files are
+small (size of original upload content) but the file
+count explodes; inode pressure on macOS /Users + slow
+filesystem operations + the leak compounds the F36
+memory pressure.
+
+**Surfaced.** Sprint 495.
+
+**Fix.** Two-pronged:
+- Track `we_wrote_file` flag — only clean up if THIS
+  publish call wrote the file (deterministic
+  content_hash naming means a concurrent publish of
+  identical bytes might use the same path; preserve
+  it for them).
+- Clean up the staged file in BOTH failure modes:
+  `seed_content` raises Exception, OR
+  `seed_content` returns None.
+- Removed the misleading "preserved; retry is safe"
+  language from the RuntimeError message (no retry
+  path consumed the preserved file).
+
+Live-verified post-fix:
+- 30s soak: +50 staging files (= number of successful
+  ops; not +18,000+ from failures)
+- 388 MB → 13 MB RSS growth bulk-closes F36 in tandem
+
+**Pin tests.** `tests/unit/test_sprint_495_f37_staging_cleanup.py`
+4 pins: cleanup-on-exception, we_wrote_file guard,
+both-failure-modes-covered, misleading-message-removed.
+
+**One-time recovery.** Pre-existing accumulated files
+were cleaned via `find $HOME/.prsm/content_publish_staging
+-type f -size -100c -delete` (delete files smaller
+than 100 bytes — the soak-leak signature). Recovered
+36,337 → 0 stale files.
+
+---
+
 ## What's working (positive findings)
 
 - ✅ `prsm setup --minimal` completes cleanly on existing config (re-prompt

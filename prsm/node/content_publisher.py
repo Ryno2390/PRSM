@@ -293,24 +293,53 @@ class ContentPublisher:
         staged_filename = hashlib.sha256(data).hexdigest()
         staged_path = self.staging_dir / staged_filename
 
+        # Sprint 495 (F37 fix) — track whether THIS publish call
+        # created the staged file. If yes + downstream BT seed
+        # fails, we own cleanup. If the file already existed
+        # (deterministic content-hash naming → re-upload of
+        # identical bytes), the existing file may be in use by
+        # another concurrent publish; leave it alone.
+        we_wrote_file = False
         if not staged_path.exists():
             # Write atomically via tmp+rename so a concurrent reader never
             # sees a partial file.
             tmp_path = staged_path.with_suffix(".tmp")
             tmp_path.write_bytes(data)
             tmp_path.replace(staged_path)
+            we_wrote_file = True
 
-        manifest = await self.bt_provider.seed_content(
-            path=staged_path,
-            name=name or staged_filename,
-            provenance_id=provenance_id,
-        )
+        try:
+            manifest = await self.bt_provider.seed_content(
+                path=staged_path,
+                name=name or staged_filename,
+                provenance_id=provenance_id,
+            )
+        except Exception:
+            # Sprint 495 (F37 fix) — clean up our staged file if
+            # BT seed raises. Pre-fix, under sustained failure
+            # load (e.g., libtorrent flakiness) staged files
+            # accumulated indefinitely. Sprint 495 soak observed
+            # 36,337 leaked files from a 60s soak; no cleanup
+            # path existed.
+            if we_wrote_file:
+                try:
+                    staged_path.unlink(missing_ok=True)
+                except Exception:  # noqa: BLE001
+                    pass
+            raise
 
         if manifest is None:
+            # Sprint 495 (F37 fix) — also clean up on the "None
+            # return" failure mode (bt_provider returned None
+            # without raising; treated as failure).
+            if we_wrote_file:
+                try:
+                    staged_path.unlink(missing_ok=True)
+                except Exception:  # noqa: BLE001
+                    pass
             raise RuntimeError(
                 f"BitTorrent seed_content returned None for staged path "
-                f"{staged_path} (provenance_id={provenance_id}). The staged "
-                f"file is preserved; retry is safe."
+                f"{staged_path} (provenance_id={provenance_id})."
             )
 
         logger.info(
