@@ -6602,6 +6602,38 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                         record, "creator_eth_address", None,
                     )
 
+            # Sprint 494 (F35 fix) — content_index is populated
+            # via GOSSIP_CONTENT_ADVERTISE which is fanned out
+            # to peers, with local-subscriber delivery only when
+            # `sent == 0`. Even with bootstrap-only connectivity
+            # the index may be empty for THIS node's own uploads
+            # because the gossip wiring is multi-node-shaped.
+            # For local content, fall back to the uploader's
+            # `uploaded_content` dict which definitely has the
+            # creator_eth_address from the upload-time payload.
+            # Without this, the §14 creator-reputation
+            # auto-record chain skipped every single-node retrieve
+            # silently (sprint 494 chain test surfaced this).
+            if creator_eth_address is None:
+                _uploader = getattr(node, "content_uploader", None)
+                if _uploader is not None:
+                    _uploaded = getattr(
+                        _uploader, "uploaded_content", {},
+                    )
+                    _local = _uploaded.get(cid)
+                    if _local is not None:
+                        if not content_hash:
+                            content_hash = getattr(
+                                _local, "content_hash", None,
+                            )
+                        if not filename:
+                            filename = getattr(
+                                _local, "filename", None,
+                            )
+                        creator_eth_address = getattr(
+                            _local, "creator_eth_address", None,
+                        )
+
             # Sprint 288 — auto-record creator access against
             # the marketplace reputation tracker. Best-effort;
             # tracker exceptions caught + logged so telemetry

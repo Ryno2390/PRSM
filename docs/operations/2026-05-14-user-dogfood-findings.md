@@ -1588,6 +1588,109 @@ defends: `_publish_content` source uses `raise` not
 
 ---
 
+### F34 — CreatorReputationTracker + CreatorStakeClient gated behind QO env var
+
+**The bug.** Same root cause as sprint-488 F26: both
+trackers were init'd inside
+`_build_query_orchestrator_or_none`, which early-returns
+when `PRSM_QUERY_ORCHESTRATOR_ENABLED` is unset (default).
+Result: every default daemon had `_creator_reputation_tracker = None`
++ `_creator_stake_client = None` → §14 reputation +
+anti-Sybil surfaces silently inert on every non-QO node.
+
+**Live-verified pre-fix**:
+`GET /marketplace/creator-reputation/{any_id}` returned
+`{"detail":"Creator reputation tracker not initialized."}`
+on every default daemon.
+
+**Severity.** §14 reputation + anti-Sybil
+infrastructure (Vision §11 / §14 invariants) silently
+inactive on every non-QO daemon. Sibling to F26 (sprint
+488 fixed that one); F34 closes the other two siblings.
+
+**Surfaced.** Sprint 494 (2026-05-16) — cross-feature
+integration chain test (coverage matrix priority #5).
+
+**Fix.** Moved CreatorReputationTracker +
+CreatorStakeClient init OUT of
+`_build_query_orchestrator_or_none` to unconditional
+Node.__init__ block (next to sprint-488's F26 fix).
+
+Live-verified post-fix:
+`/marketplace/creator-reputation/{any}` returns clean
+unknown-creator default schema on every default daemon.
+
+---
+
+### F35 — content_index single-node lookup gap broke cross-feature chain
+
+**The bug.** The `/content/retrieve/{cid}` handler
+called `node.content_index.lookup(cid)` to get the
+`creator_eth_address` for the sprint-288 auto-record-
+creator-access hook (the §14 reputation update path).
+`content_index` is populated via gossip:
+
+```python
+# gossip.py:255-261
+sent = await self.transport.gossip(msg, fanout=self.fanout)
+if sent == 0:
+    # Local subscribers fire ONLY in single-peer mode
+    ...
+```
+
+When the daemon has ANY peer (even bootstrap-only
+WebSocket session counts indirectly), `sent` could be
+non-zero and the local subscriber doesn't run. Result:
+local uploads NEVER hit the local content_index →
+`lookup(cid)` returns None → `creator_eth_address`
+stays None → auto-record-creator-access silently skips
+→ §14 reputation never updates.
+
+**Live impact (chain test results):**
+
+Pre-sprint-494 (with the F34 fix already applied):
+- Upload with creator_eth_address ✅
+- Retrieve ✅
+- `/marketplace/creator-reputation/{creator}` →
+  `{"known": false, "total_accesses": 0, ...}` — auto-
+  record silently skipped despite proper wallet wiring.
+
+**Severity.** Cross-feature §4 → §14 chain BROKEN on
+every single-node daemon. Vision §11's "every content
+access updates creator reputation" claim was actually
+inert by default.
+
+**Surfaced.** Sprint 494.
+
+**Fix.** Retrieve handler now falls back to
+`node.content_uploader.uploaded_content[cid].
+creator_eth_address` when content_index returns no
+record. The `uploaded_content` dict is populated at
+upload time (single-node) AND on hydration (sprint 480
+F22). Guarded by `if creator_eth_address is None` so
+multi-node gossip records aren't clobbered.
+
+Live-verified post-fix:
+```
+Upload with creator=0x...00c8 → cid=922833bdf75d...
+Retrieve cid → status: success
+/marketplace/creator-reputation/0x...00c8 →
+  total_accesses=1, distinct_purchasers=1, known=true
+5 more retrieves →
+  total_accesses=6, distinct_purchasers=1,
+  repeat_purchaser_count=1
+```
+
+The full §4 upload → §4 retrieve → §14 reputation
+auto-record → §14 reputation surface chain now works on
+default single-node daemons.
+
+**Pin tests.** `tests/unit/test_sprint_494_cross_feature.py`
+covers both F34 (registry placement) and F35 (retrieve
+fallback + conditional + field-preservation).
+
+---
+
 ## What's working (positive findings)
 
 - ✅ `prsm setup --minimal` completes cleanly on existing config (re-prompt

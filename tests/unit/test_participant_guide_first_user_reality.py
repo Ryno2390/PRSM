@@ -112,17 +112,18 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_thirty_three_frictions():
-    """The findings doc enumerates F1-F33. F33 added during
-    sprint 493 fault injection / chaos suite (coverage
-    matrix priority #4): filesystem errors during upload
-    (PermissionError / FileNotFoundError / OSError) were
-    swallowed by `_publish_content` and bubbled as a
-    generic 502 with no operator-visible cause. Sprint 493
-    fix: `_publish_content` re-raises; API handler's
-    existing `502 with detail=<type:msg>` surfaces the
-    real error. If a finding is silently removed (without
-    an explicit closure note), surface that."""
+def test_findings_doc_documents_all_thirty_five_frictions():
+    """The findings doc enumerates F1-F35. F34/F35 added
+    during sprint 494 cross-feature integration chain test
+    (coverage matrix priority #5):
+    - F34 CreatorReputationTracker + CreatorStakeClient
+      gated behind QO env var (sibling to F26)
+    - F35 content_index single-node gap broke
+      cross-feature chain — fallback to uploader's
+      uploaded_content
+    Both fixed same-sprint. If a finding is silently
+    removed (without an explicit closure note), surface
+    that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -158,6 +159,8 @@ def test_findings_doc_documents_all_thirty_three_frictions():
         "F31 — Content-filter tag accepts CRLF + control",
         "F32 — Settler register accepts unbacked bond",
         "F33 — Filesystem errors during upload swallowed",
+        "F34 — CreatorReputationTracker + CreatorStakeClient",
+        "F35 — content_index single-node lookup gap",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"

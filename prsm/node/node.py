@@ -3667,6 +3667,57 @@ class PRSMNode:
             )
             self._content_fingerprint_registry = None
 
+        # Sprint 494 (F34 fix) — CreatorReputationTracker
+        # and CreatorStakeClient are siblings of the F26
+        # fingerprint registry: all three were originally
+        # init'd inside `_build_query_orchestrator_or_none`
+        # and therefore None on every non-QO daemon. Sprint
+        # 488 moved only ContentFingerprintRegistry out;
+        # sprint 494 moves the other two so the
+        # cross-feature integration chain
+        # (upload → retrieve → creator-reputation update →
+        # auto-record-access → royalty dispatch) works on
+        # default daemons. Pre-fix:
+        # `/marketplace/creator-reputation/{id}` returned
+        # 503 "tracker not initialized" on every default
+        # daemon → cross-feature §14 reputation surface
+        # silently inert.
+        try:
+            from prsm.marketplace.creator_reputation import (
+                CreatorReputationTracker,
+            )
+            self._creator_reputation_tracker = (
+                CreatorReputationTracker()
+            )
+            logger.info("CreatorReputationTracker wired")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "CreatorReputationTracker construction "
+                "failed: %s — /marketplace/creator-"
+                "reputation/* will return 503.",
+                exc,
+            )
+            self._creator_reputation_tracker = None
+        try:
+            from prsm.marketplace.creator_stake_client import (
+                CreatorStakeClient,
+            )
+            self._creator_stake_client = (
+                CreatorStakeClient.from_env()
+            )
+            logger.info(
+                "CreatorStakeClient wired (commissioned=%s)",
+                self._creator_stake_client.is_commissioned(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "CreatorStakeClient construction failed: "
+                "%s — /marketplace/creator-stake/* will "
+                "return 503.",
+                exc,
+            )
+            self._creator_stake_client = None
+
         # ── Confidential Compute (Ring 7) ─────────────────────────────
         try:
             from prsm.compute.tee.confidential_executor import ConfidentialExecutor
