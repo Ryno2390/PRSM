@@ -1249,14 +1249,57 @@ mainnet this would be real-money lost.
 
 **Surfaced.** Sprint 487.
 
-**Fix.** Deferred — needs:
-1. Investigation of which case (a) or (b) applies.
-2. Either: orphan-escrow cleanup task that refunds
-   un-claimed escrows on a TTL, OR fix the cancel
-   path to be idempotent + race-safe.
+**Fix.** ~~Deferred~~ **Closed sprint 489 (2026-05-16)**.
+Investigation revealed THREE compounding root causes:
 
-The wallet recovery for THIS leak needs an admin
-endpoint (also deferred).
+1. `payment_escrow.create_escrow` registered the in-memory
+   record BEFORE the funds transfer. If transfer raised
+   anything other than ValueError (e.g.,
+   ConcurrentModificationError from dag_ledger), the
+   record stayed in `_escrows` half-registered.
+
+2. `create_escrow` only caught ValueError; other exceptions
+   propagated up.
+
+3. **The real durability bug**: `dag_ledger.submit_transaction`
+   did NOT call `await self._db.commit()` at the end of
+   transfer-style transactions. The wallet_balances UPDATE
+   and dag_transactions INSERT were buffered. The
+   `_seed_welcome_grant` startup hook DELETEs + REBUILDs
+   `wallet_balances` from `dag_transactions` on every
+   restart — so uncommitted writes were lost. Refund
+   transactions issued via /compute/cancel during a test
+   run appeared to succeed (handler returned 200) but
+   never persisted to disk → daemon restart wiped them →
+   funds appeared "leaked".
+
+Sprint 489 shipped four fixes:
+
+(a) Flipped ordering in create_escrow: register record
+    AFTER successful transfer.
+(b) Broadened exception catch in create_escrow + re-raise
+    on non-ValueError.
+(c) **Explicit `await self._db.commit()`** at end of
+    submit_transaction's transfer path.
+(d) New admin endpoint
+    `POST /admin/escrow/recover-orphans?dry_run={bool}`
+    for operator-actionable orphan recovery. Scans
+    `wallet_balances` for `escrow-%` rows with positive
+    balance, looks up the original "Escrow for job X"
+    requester via `dag_transactions`, refunds. Default
+    dry_run=true; operators must review before executing.
+
+**Live-verified**: 27 orphan escrows totaling 1081.06 FTNS
+recovered via the admin endpoint; wallet balance 3.05 →
+1084.11; survived daemon restart at 1084.11 (proving (c)
+committed durably); re-scan dry-run shows 0 orphans
+remaining. Full concurrency suite now 4/4 PASS (was 3/4
+with this test skipped).
+
+**Pin test.** `tests/unit/test_sprint_489_f27_escrow_recovery.py`
+defends all 4 invariants in source (register-after-transfer,
+broad exception catch, explicit commit marker, recovery
+endpoint shape).
 
 ---
 

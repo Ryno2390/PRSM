@@ -1181,11 +1181,25 @@ class DAGLedger:
             else:
                 # For credit transactions (no from_wallet), just commit
                 await self._db.commit()
-            
+
             # Update balance cache for receiving wallet
             if to_wallet:
                 await self._commit_balance_credit(to_wallet, amount)
-            
+
+            # Sprint 489 (F27 fix) — durability barrier. Pre-fix,
+            # `_commit_balance_deduction` released the savepoint
+            # but never called `await self._db.commit()` on the
+            # outer connection. Same for `_commit_balance_credit`
+            # + `_store_transaction`. Result: dag_transactions
+            # writes for transfer-style submits were buffered and
+            # only the LAST one flushed at close-time. This is
+            # how sprint 487's concurrent submits managed to
+            # leak escrows — some `Escrow for job X` outflows
+            # persisted (the daemon's running connection flushed)
+            # but cancel-side `Escrow refund` inflows never
+            # actually committed before daemon restart wiped them.
+            await self._db.commit()
+
             self._state.transactions[tx.tx_id] = tx
             
             logger.info(

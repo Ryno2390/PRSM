@@ -9472,6 +9472,104 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(e))
         return record.to_dict()
 
+    @app.post("/admin/escrow/recover-orphans", tags=["admin"])
+    async def recover_orphan_escrows(
+        dry_run: bool = True,
+    ) -> Dict[str, Any]:
+        """Sprint 489 (F27 recovery) — scan dag_ledger for
+        escrow-* wallets with positive balance whose
+        corresponding `_escrows` in-memory record has been
+        lost (e.g., across daemon restart). For each, look
+        up the original `Escrow for job X` transfer's
+        `from_wallet` and refund the balance back.
+
+        Without this endpoint, operators whose daemon crashed
+        mid-test or restarted before all escrows resolved
+        would have FTNS permanently locked in escrow-* wallets
+        with no recovery path short of a database edit.
+
+        Args:
+            dry_run: If True (default), report what would be
+                refunded without mutating state. Operators
+                MUST review the dry-run output before passing
+                dry_run=false.
+
+        Returns: { dry_run, scanned, recoverable, refunded,
+                   total_ftns_recovered, errors }
+        """
+        ledger = getattr(node, "ledger", None)
+        if ledger is None or not hasattr(ledger, "_db"):
+            raise HTTPException(
+                status_code=503,
+                detail="DAG ledger not initialized.",
+            )
+
+        scanned = 0
+        recoverable: List[Dict[str, Any]] = []
+        refunded = 0
+        total_ftns = 0.0
+        errors: List[str] = []
+
+        try:
+            cursor = await ledger._db.execute(
+                "SELECT wallet_id, balance FROM wallet_balances "
+                "WHERE wallet_id LIKE 'escrow-%' AND balance > 0"
+            )
+            rows = await cursor.fetchall()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=503,
+                detail=f"orphan scan failed: {exc}",
+            )
+
+        from prsm.node.dag_ledger import TransactionType
+
+        for escrow_wallet, balance in rows:
+            scanned += 1
+            try:
+                cur2 = await ledger._db.execute(
+                    "SELECT from_wallet FROM dag_transactions "
+                    "WHERE to_wallet = ? AND description LIKE "
+                    "'Escrow for%' ORDER BY timestamp ASC LIMIT 1",
+                    (escrow_wallet,),
+                )
+                rr = await cur2.fetchone()
+                if not rr or not rr[0]:
+                    errors.append(
+                        f"{escrow_wallet}: no requester found"
+                    )
+                    continue
+                requester = rr[0]
+                recoverable.append({
+                    "escrow_wallet": escrow_wallet,
+                    "balance": float(balance),
+                    "requester": requester,
+                })
+                if not dry_run:
+                    await ledger.submit_transaction(
+                        tx_type=TransactionType.TRANSFER,
+                        amount=float(balance),
+                        from_wallet=escrow_wallet,
+                        to_wallet=requester,
+                        description=(
+                            "Sprint 489 F27 admin recovery: "
+                            "orphaned escrow refund"
+                        ),
+                    )
+                    refunded += 1
+                    total_ftns += float(balance)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{escrow_wallet}: {exc}")
+
+        return {
+            "dry_run": dry_run,
+            "scanned": scanned,
+            "recoverable": recoverable if dry_run else [],
+            "refunded": refunded,
+            "total_ftns_recovered": total_ftns,
+            "errors": errors,
+        }
+
     @app.get("/admin/incident/playbook", tags=["admin"])
     async def incident_playbook() -> Dict[str, Any]:
         """Public playbook surface — Vision §14 promise that

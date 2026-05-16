@@ -158,14 +158,20 @@ class PaymentEscrow:
             )
             return None
 
-        # Create escrow record
+        # Create escrow record. Note: we register the record
+        # in `self._escrows` AFTER the funds transfer succeeds —
+        # sprint 489 (F27) flipped this ordering. Pre-fix, the
+        # record was added BEFORE the transfer; if transfer
+        # raised anything other than ValueError (e.g.,
+        # ConcurrentModificationError from dag_ledger), the
+        # record stayed in _escrows but funds didn't move →
+        # orphaned record. Now: register only on success.
         escrow = EscrowEntry(
             escrow_id=str(uuid.uuid4()),
             job_id=job_id,
             requester_id=requester,
             amount=amount,
         )
-        self._escrows[escrow.escrow_id] = escrow
 
         # Lock funds: transfer from requester to escrow wallet
         escrow_wallet = f"escrow-{escrow.escrow_id}"
@@ -177,6 +183,9 @@ class PaymentEscrow:
                 description=f"Escrow for job {job_id[:8]}",
             )
             escrow.tx_lock = tx.tx_id
+            # Sprint 489 (F27 fix) — register record AFTER
+            # successful transfer to prevent orphan-on-failure.
+            self._escrows[escrow.escrow_id] = escrow
             logger.info(
                 f"Escrow created: {escrow.escrow_id[:8]}... "
                 f"locked {amount:.6f} FTNS for job {job_id[:8]}..."
@@ -190,8 +199,20 @@ class PaymentEscrow:
             return escrow
         except ValueError as e:
             logger.warning(f"Escrow transfer failed: {e}")
-            del self._escrows[escrow.escrow_id]
             return None
+        except Exception as e:
+            # Sprint 489 (F27 fix) — broaden exception catch.
+            # Pre-fix only ValueError was handled; the
+            # ConcurrentModificationError + BalanceLockError
+            # paths from dag_ledger propagated up with the
+            # escrow record half-registered. Now: any error
+            # leaves the requester's funds intact + raises so
+            # the caller (compute_requester.submit_job) knows
+            # the submit failed.
+            logger.warning(
+                f"Escrow transfer raised {type(e).__name__}: {e}"
+            )
+            raise
 
     async def release_escrow(
         self,
