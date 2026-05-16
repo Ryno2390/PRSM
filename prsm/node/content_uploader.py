@@ -2210,8 +2210,17 @@ class ContentUploader:
             )
             return result.torrent_infohash
         except Exception as e:
+            # Sprint 493 (F33 fix) — pre-fix this `except` returned
+            # None and the API handler bubbled a generic 502
+            # "upload_text returned None" with NO clue what
+            # actually failed. Read-only filesystem, disk full,
+            # libtorrent crash — all looked identical to the
+            # operator. Log AND re-raise so the API handler's
+            # `except Exception: HTTP 502 with detail=<type:msg>`
+            # actually surfaces the underlying error class +
+            # message.
             logger.error(f"Content publish failed for {filename}: {e}")
-            return None
+            raise
 
     async def _fetch_content(self, cid: str) -> Optional[bytes]:
         """Fetch content bytes by torrent infohash via the BitTorrent layer.

@@ -1525,6 +1525,69 @@ covers all 3 fixes with 10 tests total.
 
 ---
 
+### F33 — Filesystem errors during upload swallowed → generic 502 with no operator path
+
+**The bug.** `ContentUploader._publish_content` (line
+2185) wrapped the `content_publisher.publish()` call in
+`except Exception: logger.error(...); return None`. ANY
+filesystem error (PermissionError when staging dir is
+read-only, FileNotFoundError when staging dir is renamed/
+deleted, OSError when disk is full, libtorrent crashes,
+etc.) got swallowed. The caller `upload_text` saw None
+and returned. The API handler at `/content/upload` then
+bubbled the generic 502:
+
+```
+"Upload failed — upload_text returned None.
+Common causes: content_publisher unwired, _publish_content
+raised + was swallowed (check logs for 'Content publish
+failed'), or BitTorrent layer crashed mid-upload."
+```
+
+Operators got no diagnostic detail. They had to grep the
+daemon log for `Content publish failed` to find the real
+cause — friction at the worst possible time (production
+incident).
+
+**Severity.** Operator-visibility gap. Doesn't lose data
+or corrupt state, but every filesystem error becomes a
+multi-step debugging exercise.
+
+**Surfaced.** Sprint 493 (2026-05-16) chaos suite
+(coverage matrix priority #4). Tests injected:
+- `chmod -w` on staging dir → silent 502
+- `mv` staging dir away mid-life → silent 502
+
+**Fix.** `_publish_content` now `raise`s after logging
+instead of returning None. The API handler's existing
+`except Exception: HTTP 502 with detail=<type:msg>`
+(sprint 179) then surfaces the underlying error class +
+message.
+
+Live-verified post-fix:
+- chmod -w staging dir → 502 `"Upload failed:
+  PermissionError: [Errno 13] Permission denied:
+  '/.../staging/<hash>.tmp'"`
+- rename staging dir → 502 `"Upload failed:
+  FileNotFoundError: [Errno 2] No such file or directory:
+  '/.../staging/<hash>.tmp'"`
+- daemon stays healthy across both scenarios
+
+**Pin test.** `tests/unit/test_sprint_493_fault_injection.py`
+defends: `_publish_content` source uses `raise` not
+`return None`; handler 502-detail format unchanged;
+`fetch` retains the `is_file()` guard.
+
+**Chaos scenarios verified working (no fix needed):**
+- Staged file deleted mid-retrieve → clean not_found
+  in <5s (sprint 484 timeout + sprint 485 seed + inherent
+  `is_file()` guard)
+- SQLite DB locked by external IMMEDIATE writer for 6s →
+  daemon WAITS cleanly, request succeeds when lock
+  releases. Aiosqlite's busy_timeout handles contention.
+
+---
+
 ## What's working (positive findings)
 
 - ✅ `prsm setup --minimal` completes cleanly on existing config (re-prompt
