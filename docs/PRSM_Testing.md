@@ -348,29 +348,29 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Webhooks | `/admin/webhook-history` | `prsm node webhooks` | `prsm_webhook_history` | ✅ Sprint 446 (CLI live: "set PRSM_WEBHOOK_URL to enable" actionable empty-state) |
 | Trigger heartbeat | `/admin/heartbeat/trigger` | `prsm node trigger-heartbeat` | `prsm_heartbeat_trigger` | ✅ |
 | Trigger distribution | `/admin/distribution/trigger` | `prsm node trigger-distribution` | `prsm_distribution_trigger` | ✅ |
-| Claim royalty | `/wallet/royalty/claim` | `prsm node claim-royalty` | `prsm_royalty_claim` | 🟢 |
-| Audit summary | `/audit/summary` | — | `prsm_audit_summary` | 🟢 |
-| Audit recent | `/audit/recent` | — | `prsm_audit_recent` | 🟢 |
+| Claim royalty | `/wallet/royalty/claim` | `prsm node claim-royalty` | `prsm_royalty_claim` | ⚠️ Sprint 471 (live: 503 with actionable hint — `set PRSM_ROYALTY_DISTRIBUTOR_ADDRESS explicitly OR PRSM_NETWORK=mainnet`; full flow gated on mainnet wiring) |
+| Audit summary | `/audit/summary` | — | `prsm_audit_summary` | ✅ Sprint 471 (live: 24 sprint-469+470 probe calls auto-recorded with full schema — `{total, status_buckets: {2xx,4xx,5xx}, method_buckets, top_paths}`; auto-record on every request) |
+| Audit recent | `/audit/recent` | — | `prsm_audit_recent` | ✅ Sprint 471 (live: paginated `{entries, total, offset, limit}` with full per-call envelope — timestamp, method, path, requester, status_code, request_id) |
 
 ### Content + marketplace
 
 | Feature | REST | CLI | MCP | Status |
 |---------|------|-----|-----|--------|
-| Content filter | `/admin/content-filter` | — | `prsm_content_filter` | 🟢 Sprint 269-274 |
-| Takedown notices | `/admin/takedown-notice` | — | `prsm_takedown_notices` | 🟢 Sprint 269-274 |
-| Notice → filter bridge | `/admin/content-filter/from-notice/{id}` | — | (via `prsm_takedown_notices`) | 🟢 |
-| Creator reputation | `/marketplace/creator-reputation/{id}` | — | `prsm_creator_reputation` | 🟢 Sprint 287-291 |
-| Creator stake | `/marketplace/creator-stake/{id}` | — | `prsm_creator_stake` | 🟢 |
-| Provider reputations | `/marketplace/reputation` | — | `prsm_marketplace_reputation` | 🟢 |
-| My content | `/content/mine` | `prsm content mine` | `prsm_my_content` | 🟢 |
+| Content filter | `/admin/content-filter` | — | `prsm_content_filter` | ✅ Sprint 269-274, 471 (live full lifecycle: GET → empty; POST /admin/content-filter/tags → `{added,total}`; DELETE /tags/{tag} → `{removed,total}`) |
+| Takedown notices | `/admin/takedown-notice` | — | `prsm_takedown_notices` | ✅ Sprint 439 (live chain E2E in §14 table) |
+| Notice → filter bridge | `/admin/content-filter/from-notice/{id}` | — | (via `prsm_takedown_notices`) | ✅ Sprint 439 (live E2E) |
+| Creator reputation | `/marketplace/creator-reputation/{id}` | — | `prsm_creator_reputation` | ✅ Sprint 287-291, 471 (live: unknown creator → clean default schema `{known:false, score:0.5, tier:new, total_accesses:0, distinct_purchasers:0, repeat_purchaser_count:0}`) |
+| Creator stake | `/marketplace/creator-stake/{id}` | — | `prsm_creator_stake` | ✅ Sprint 442 (live in §14 row) |
+| Provider reputations | `/marketplace/reputation` | — | `prsm_marketplace_reputation` | ✅ Sprint 471 (live: paginated `{providers, count, limit:100}` empty-state) |
+| My content | `/content/mine` | `prsm content mine` | `prsm_my_content` | ✅ Sprint 449, 471 (live: paginated `{entries, total, offset, limit:50}` envelope) |
 
 ### Phase 5 fiat operator surfaces
 
 | Feature | REST | CLI | MCP | Status |
 |---------|------|-----|-----|--------|
 | Fiat surface health | `/admin/fiat-surface/health` | `prsm node fiat-readiness` | `prsm_fiat_surface_health` | ✅ |
-| Fiat compliance summary | `/admin/fiat-compliance/summary` | — | `prsm_fiat_compliance` | 🟢 |
-| KYC status | `/wallet/kyc/status` | — | `prsm_kyc` | 🟢 |
+| Fiat compliance summary | `/admin/fiat-compliance/summary` | — | `prsm_fiat_compliance` | ✅ Sprint 451, 471 (live: `{by_kind, total_entries}`; sprint-451 attested auto-record-on-onramp-quote) |
+| KYC status | `/wallet/kyc/status` | — | `prsm_kyc` | ✅ Sprint 452, 471 (live: `{commissioned:false, vendor:null, supported_vendors:[persona,onfido,plaid], record_count}`) |
 
 ### Incident + upgrade + insurance
 
@@ -379,9 +379,9 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Incident open / advance / log event | `/admin/incident/...` | `prsm node incident list/details/playbook` (read-only) | `prsm_incident` | ✅ Sprint 434 (trifecta closure, read-only triage) |
 | Insurance fund status | `/admin/insurance-fund/status` | — | `prsm_insurance_fund` | ✅ Sprint 455 (live: treasury_address=Foundation Safe 0x91b0e6F8…, target_bps=500 reserve target, commissioned=false in dev env) |
 | Emergency pause status (mainnet contracts) | `/admin/emergency-pause/status` | — | `prsm_emergency_pause` | ✅ Sprint 455 (live: ftns_token + royalty_distributor + BSR + EscrowPool + StakeBond + Ed25519Verifier + StorageSlashing + KeyDistribution + EmissionController all reported with paused state + commissioned flag against chain_id=8453 Base mainnet) |
-| Upgrade proposal | `/admin/upgrade/...` | — | `prsm_upgrade` | 🟢 |
-| TEE policy | `/admin/tee-policy/evaluate` | — | `prsm_tee_policy` | 🟢 |
-| Vulnerability disclosure | `/admin/disclosure/...` | — | `prsm_disclosure` | 🟢 |
+| Upgrade proposal | `/admin/upgrade/...` | — | `prsm_upgrade` | ✅ Sprint 471 (live: GET /admin/upgrade → `{records:[], count:0}` empty-state; propose/update/compose-upgrade endpoints schema-pinned for follow-on E2E) |
+| TEE policy | `/admin/tee-policy/evaluate` | — | `prsm_tee_policy` | ✅ Sprint 436, 471 (live: `evaluate` → 422 with clear `policy` required-field; `/admin/tee-policy/node-status` → `{effective_tier, vendor, vendor_verified, diagnostic}`) |
+| Vulnerability disclosure | `/admin/disclosure/...` | — | `prsm_disclosure` | ✅ Sprint 471 (live: GET /admin/disclosure → `{records:[], count:0}` empty-state; submit/update/compose-payout endpoints schema-pinned for follow-on E2E) |
 
 ---
 
@@ -392,7 +392,7 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | Operator content filter (CID blocklist) | `/admin/content-filter/cids` | ✅ | 439 | Live E2E: POST cids → 451 on retrieve verified |
-| Operator content filter (tag blocklist) | `/admin/content-filter/tags` | 🟢 | 269-274 | |
+| Operator content filter (tag blocklist) | `/admin/content-filter/tags` | ✅ | 471 | Live full lifecycle: POST `{tags:[T]}` → `{added:1, total:1}`; GET /admin/content-filter shows tag in blocked_model_tags; DELETE /tags/{T} → `{removed, total:0}` |
 | Foundation takedown notice intake (info-only) | `/admin/takedown-notice` | ✅ | 439 | Live-verified: target_cid+sender+jurisdiction+basis required (§14 attribution invariant) |
 | Notice → filter bridge | `/admin/content-filter/from-notice/{id}` | ✅ | 439 | Live E2E: notice → bridge → CID auto-added; notice status flips to "acknowledged" |
 | Notice lifecycle status transitions | `/admin/takedown-notices/{id}/status` | 🟢 | 269-274 | |
@@ -718,6 +718,35 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 471** — §13 admin + §14 paired-surface
+  sweep. 13 PRSM_Testing.md rows promoted via end-to-end probe
+  against running daemon:
+  - **Audit ring** live-attested: `/audit/summary` auto-recorded
+    all 24 sprint-469+470 probe calls with full schema
+    `{total, status_buckets: {2xx, 4xx, 5xx}, method_buckets,
+    top_paths}`; `/audit/recent` paginated envelope with full
+    per-call detail (timestamp/method/path/requester/status_code).
+    Vision §13 audit-ring promise operationally verified.
+  - **Content filter lifecycle**: POST /admin/content-filter/tags
+    → `{added:1, total:1}`; GET shows tag in `blocked_model_tags`;
+    DELETE → `{removed, total:0}`. Tag-blocklist promoted ✅ in
+    both §13 + §14 tables.
+  - Marketplace surfaces: `/creator-reputation/{id}` clean
+    unknown-creator default schema; `/marketplace/reputation`
+    paginated providers; `/content/mine` paginated.
+  - Fiat compliance + KYC status canonical schemas.
+  - Operator admin lists: `/admin/upgrade` + `/admin/disclosure`
+    return `{records, count}` empty-state envelopes; sub-routes
+    (propose/update/compose-*) schema-pinned for follow-on E2E.
+  - TEE policy: `/evaluate` → 422 with clear `policy` required
+    field; `/node-status` → `{effective_tier, vendor,
+    vendor_verified, diagnostic}` clean honest-scope envelope.
+  - Royalty claim (⚠️ schema-pass): 503 with actionable
+    `set PRSM_ROYALTY_DISTRIBUTOR_ADDRESS explicitly OR
+    PRSM_NETWORK=mainnet`; full flow gated on mainnet wiring.
+
+  No production-blockers surfaced. Cumulative ✅ rows now 196.
+
 - **2026-05-16 sprint 470** — §5.3 staking + settlement +
   settler-registry live sweep. 8 PRSM_Testing.md rows promoted
   via end-to-end probe against running daemon:
