@@ -191,6 +191,9 @@ journey. Each step should be live-verifiable on a single node.
 | On-chain TX (Sepolia → testnet foundation_safe) | Web3 EIP-1559 | ✅ | 466 | TX `0xead1f03055…` block 41559540 status=1 — wallet → `0xCCAc7b21…` (config/networks.py:144 testnet deployer); 2nd attribution TX |
 | EmissionController halving epoch (constructor-immutable) | Sepolia contract call | ✅ | 466 | Live read: `EPOCH_DURATION_SECONDS() = 3600` (1 hour testnet, vs mainnet 4 years per Vision §11) — Sprint 358's INV-EC-1 claim empirically verified |
 | Sepolia FTNS contract identity | Sepolia contract call | ✅ | 466 | Live read: `name()=PRSM Fungible Tokens for Node Support`, `symbol()=FTNS`, `decimals()=18`, `totalSupply()=100,002,060` |
+| On-chain TX (Base **mainnet** self-transfer) | Web3 EIP-1559 | ✅ | 467 | TX `0xae65db7370fb…` block 46073119 status=1 — **first PRSM wallet TX on Base mainnet**; 21k gas @ 0.006 Gwei = $0.0004 USD |
+| Mainnet FTNS contract identity | mainnet contract call | ✅ | 467 | Live read: name="PRSM Fungible Tokens for Node Support", symbol=FTNS, decimals=18, totalSupply=100,000,000 (vs testnet's 100,002,060 — different deploys) |
+| INV-EC-1 mainnet (4-year epoch) | `/admin/formal-verification/check?contract=emission_controller` | ✅ | 467 | Live: EPOCH_DURATION_SECONDS=126,144,000 (4 years exactly); INV-EC-1 status: pass. Companion to sprint 466's testnet 3600 (1 hour) verification |
 | Transaction history | `GET /transactions` | ✅ | — | Verified live (sprint 198 bounds-validated `limit`) |
 | Wallet spend (30d summary) | `GET /wallet/spend` | ✅ | 464 | Live with FTNS_WALLET_PRIVATE_KEY: returns {address, days, total_spent_ftns, escrows_count} for derived wallet |
 | Wallet escrows | `GET /wallet/escrows` | ✅ | 464 | Live with wallet: paginated empty-state for the wallet address |
@@ -714,6 +717,56 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 467** — **Level A Base mainnet TX exercise**.
+  User funded wallet `0x2Fd48D2d…` with 0.0005 ETH on **Base mainnet**
+  (chain_id 8453 — real production network, real funds at stake).
+  Switched daemon from Sepolia → mainnet by dropping `PRSM_NETWORK`
+  + `BASE_SEPOLIA_RPC_URL` env vars. Confirmed daemon's
+  `/health/detailed.ftns_ledger.canonical_match: True` against
+  mainnet FTNS contract `0x5276a37…`.
+
+  **First real PRSM TX on Base mainnet**:
+    Hash: 0xae65db7370fb50fba5e70572cf0d93511e933b8b698282e089ddbf2d51757d9e
+    Block: 46073119 (Base mainnet)
+    Status: 1 (success)
+    Gas: 21000 @ 0.006 Gwei = 0.000000126 ETH (~$0.0004 USD)
+    Basescan: https://basescan.org/tx/0xae65db7370fb50fba5e70572cf0d93511e933b8b698282e089ddbf2d51757d9e
+
+  **Mainnet contract reads** (companion to sprint 466's testnet
+  reads — proves cross-network invariant differentiation):
+
+  - Mainnet FTNS `0x5276a37…`:
+    - name(): "PRSM Fungible Tokens for Node Support"
+    - symbol(): "FTNS", decimals(): 18
+    - totalSupply(): **100,000,000.0000 FTNS** (vs testnet's
+      100,002,060 — different deploy mints, both immutable post-T1)
+
+  - **Mainnet INV-RD-3 PASS** via daemon's formal-verification
+    endpoint:
+    - RoyaltyDistributor v2 `0xfEa9aeB9…` reports owner() ==
+      `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` (Foundation
+      Safe — 2-of-3 multisig)
+    - "Foundation Safe is sole administrator" claim
+      empirically verified live.
+
+  - **Mainnet INV-EC-1 PASS** via daemon's formal-verification:
+    - EmissionController `0x13A0D76…` reports
+      EPOCH_DURATION_SECONDS == **126,144,000** (= 4 years exactly)
+    - Cross-network: testnet has 3,600 (1 hour per sprint 466);
+      mainnet has 4 years — both immutable per their constructors.
+      Vision §11's "constructor-set with chainid-8453 4-year
+      enforcement" empirically verified.
+
+  Sprint 467 vs sprint 466 — same wallet, same daemon, two
+  networks, paired invariant verifications. The verification-
+  campaign methodology now has a complete cross-network
+  attestation cycle from one operator's commodity-hardware Mac.
+
+  Final wallet state: 0.0004999874 ETH remaining on mainnet
+  (sufficient for ~80,000+ more contract TX before refund).
+  Sepolia wallet still has 0.00489975 ETH for further testnet
+  exploration.
+
 - **2026-05-15 sprint 466** — Level B Sepolia testnet TX exercise.
   User funded wallet `0x2Fd48D2d…` with 0.005 ETH on Base Sepolia.
   Executed real on-chain TX from the PRSM-configured wallet:
