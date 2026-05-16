@@ -11252,6 +11252,29 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "available": False, "status": "not_wired",
             }
 
+        # Sprint 482 — actionable operator hint when filesystem
+        # persistence is opt-in but not configured. Each subsystem
+        # has a canonical PRSM_*_DIR env var; surfacing the name
+        # alongside `persisted: false` gives operators a one-step
+        # remediation path instead of grepping the codebase.
+        _PERSISTENCE_ENV_VAR = {
+            "job_history": "PRSM_JOB_HISTORY_DIR",
+            "receipt_store": "PRSM_RECEIPT_STORE_DIR",
+            "royalty_dispatch_ring": (
+                "PRSM_ROYALTY_DISPATCH_LOG_DIR"
+            ),
+            "webhook_log": "PRSM_WEBHOOK_LOG_DIR",
+            "slash_event_log": "PRSM_SLASH_EVENT_LOG_DIR",
+            "heartbeat_log": "PRSM_HEARTBEAT_LOG_DIR",
+            "distribution_log": "PRSM_DISTRIBUTION_LOG_DIR",
+        }
+
+        def _add_persistence_hint(entry: Dict[str, Any], name: str) -> None:
+            if entry.get("persisted") is False:
+                hint = _PERSISTENCE_ENV_VAR.get(name)
+                if hint:
+                    entry["persistence_env_var"] = hint
+
         # Job history (optional).
         history = getattr(node, "_job_history", None)
         if history is not None:
@@ -11262,6 +11285,9 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "max_entries": history._max_entries,
                     "persisted": history._persist_dir is not None,
                 }
+                _add_persistence_hint(
+                    subsystems["job_history"], "job_history",
+                )
             except Exception as exc:  # noqa: BLE001
                 subsystems["job_history"] = {
                     "available": False, "status": "error",
@@ -11286,6 +11312,9 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                         rstore._persist_dir is not None
                     ),
                 }
+                _add_persistence_hint(
+                    subsystems["receipt_store"], "receipt_store",
+                )
             except Exception as exc:  # noqa: BLE001
                 subsystems["receipt_store"] = {
                     "available": False, "status": "error",
@@ -11310,6 +11339,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                         royalty_ring._persist_dir is not None
                     ),
                 }
+                _add_persistence_hint(
+                    subsystems["royalty_dispatch_ring"],
+                    "royalty_dispatch_ring",
+                )
             except Exception as exc:  # noqa: BLE001
                 subsystems["royalty_dispatch_ring"] = {
                     "available": False, "status": "error",
@@ -11425,6 +11458,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 logger.debug("%s.count() raised: %s", ring_name, exc)
             persist_dir = getattr(ring, "_persist_dir", None)
             entry["persisted"] = persist_dir is not None
+            _add_persistence_hint(entry, ring_name)
             subsystems[ring_name] = entry
 
         # Phase 7-storage + Phase 8 client canonical-match probes.
