@@ -177,8 +177,19 @@ class ContentFilterStore:
             )
 
     def is_cid_blocked(self, cid: str) -> bool:
+        # Sprint 492 (F30 fix) — case-insensitive CID
+        # matching. PRSM CIDs are lowercase-hex (SHA-1 BT
+        # infohash, SHA-256 content_hash). Pre-fix, an
+        # operator who blocked `ABC123` (uppercase) didn't
+        # block requests for `abc123` (lowercase) and vice
+        # versa — trivial case-evasion attack on the §14
+        # content moderation surface. The `add_tags` path
+        # at line 240 already normalizes via `.lower()`;
+        # CID handling now matches.
+        if not isinstance(cid, str):
+            return False
         with self._lock:
-            return cid in self._cids
+            return cid.lower() in self._cids
 
     def count(self) -> int:
         """Total number of filter entries across all categories.
@@ -212,8 +223,17 @@ class ContentFilterStore:
 
     def add_cids(self, cids: Iterable[str]) -> int:
         """Add CIDs to the blocklist. Returns number newly added
-        (idempotent — adding existing CIDs is a no-op)."""
-        clean = [c for c in cids if isinstance(c, str) and c.strip()]
+        (idempotent — adding existing CIDs is a no-op).
+
+        Sprint 492 (F30 fix) — CIDs are lowercase-normalized
+        before storage so the case-insensitive lookup in
+        is_cid_blocked finds them regardless of how the
+        request URL was cased."""
+        clean = [
+            c.strip().lower()
+            for c in cids
+            if isinstance(c, str) and c.strip()
+        ]
         added = 0
         with self._lock:
             for c in clean:
@@ -226,20 +246,40 @@ class ContentFilterStore:
         return added
 
     def remove_cid(self, cid: str) -> bool:
-        """Remove a CID. Returns True if removed, False if not present."""
+        """Remove a CID. Returns True if removed, False if not present.
+
+        Sprint 492 (F30 fix) — lowercase-normalize at removal
+        time to match add/check paths."""
+        if not isinstance(cid, str):
+            return False
+        normalized = cid.strip().lower()
         with self._lock:
-            if cid in self._cids:
-                self._cids.remove(cid)
+            if normalized in self._cids:
+                self._cids.remove(normalized)
                 self._updated_at = time.time()
                 self._write_to_disk()
                 return True
             return False
 
     def add_tags(self, tags: Iterable[str]) -> int:
+        # Sprint 492 (F31 fix) — strip ALL non-printable
+        # ASCII characters before storage. Pre-fix, an
+        # operator (or compromised admin client) could store
+        # tags with embedded \r\n / NUL / control chars, which
+        # then corrupted log output ("log injection") and
+        # CLI rendering. The lowercase + .strip() pre-fix
+        # only handled leading/trailing whitespace.
+        def _sanitize(t: str) -> str:
+            # Keep only printable ASCII (0x20-0x7E), lower-case.
+            return "".join(
+                ch for ch in t.strip().lower()
+                if 0x20 <= ord(ch) <= 0x7E
+            )
         clean = [
-            t.strip().lower() for t in tags
+            _sanitize(t) for t in tags
             if isinstance(t, str) and t.strip()
         ]
+        clean = [t for t in clean if t]  # drop empties post-sanitize
         added = 0
         with self._lock:
             for t in clean:

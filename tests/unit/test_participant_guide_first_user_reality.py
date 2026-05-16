@@ -112,15 +112,19 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_twenty_nine_frictions():
-    """The findings doc enumerates F1-F29. F29 added during
-    sprint 491 scale testing (coverage matrix priority #2):
-    uploads > 10MB silently fail with cryptic 502 because
-    `ContentUploader._get_content_sharder` is referenced
-    but never defined (ContentSharder class doesn't exist).
-    Sprint 491 surfaces clean 413 with actionable path to
-    /content/upload/shard. If a finding is silently removed
-    (without an explicit closure note), surface that."""
+def test_findings_doc_documents_all_thirty_two_frictions():
+    """The findings doc enumerates F1-F32. F30/F31/F32 added
+    during sprint 492 adversarial input testing (coverage
+    matrix priority #3):
+    - F30 content-filter CID matching case-sensitive
+      (case-evasion bypass) — fixed
+    - F31 content-filter tag accepts CRLF + control chars
+      (log injection) — fixed
+    - F32 settler register accepts unbacked bond
+      (anti-Sybil broken) — fixed
+    All 3 fixed same-sprint. If a finding is silently
+    removed (without an explicit closure note), surface
+    that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -152,6 +156,9 @@ def test_findings_doc_documents_all_twenty_nine_frictions():
         "F27 — Compute escrow leaked FTNS under concurrent",
         "F28 — Concurrent `/staking/unstake` against same",
         "F29 — Uploads > 10MB silently fail",
+        "F30 — Content-filter CID matching is case-sensitive",
+        "F31 — Content-filter tag accepts CRLF + control",
+        "F32 — Settler register accepts unbacked bond",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"

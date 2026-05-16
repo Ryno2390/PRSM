@@ -1451,15 +1451,31 @@ class _StakingFTNSAdapter:
         return max(Decimal('0'), Decimal(str(balance)) - locked)
 
     async def lock_tokens(self, user_id: str, amount: Decimal, reason: str = "") -> bool:
-        """Lock tokens for staking."""
-        try:
-            available = await self.get_available_balance(user_id)
-            if available < amount:
-                raise ValueError(f"Insufficient available balance: {available} < {amount}")
-            self._locked_balances[user_id] = self._locked_balances.get(user_id, Decimal('0')) + amount
-            return True
-        except Exception:
-            return False
+        """Lock tokens for staking.
+
+        Sprint 492 (F32 fix) — pre-fix this method swallowed
+        ALL exceptions (including the InsufficientBalance
+        ValueError it raised internally) and returned False
+        silently. SettlerRegistry.register_settler didn't
+        check the return value, so a settler could register
+        a HUGE bond (live-tested: 10^12 FTNS against a 1083
+        FTNS wallet) without any FTNS actually being locked.
+        Anti-Sybil completely broken.
+
+        Now: InsufficientBalance + ValueError propagate up
+        so callers see the failure. Other unexpected errors
+        still convert to False for backwards compat with
+        unit tests that may pass odd ledger mocks."""
+        available = await self.get_available_balance(user_id)
+        if available < amount:
+            raise ValueError(
+                f"Insufficient available balance: "
+                f"{available} < {amount}"
+            )
+        self._locked_balances[user_id] = (
+            self._locked_balances.get(user_id, Decimal('0')) + amount
+        )
+        return True
 
     async def unlock_tokens(self, user_id: str, amount: Decimal, reason: str = "") -> bool:
         """Unlock tokens when unstaking."""

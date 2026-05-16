@@ -229,13 +229,25 @@ class SettlerRegistry:
             if address.lower() in self._address_to_settler:
                 raise ValueError(f"Address {address[:12]}... already registered")
             
-            # Lock the bond (via FTNS service or staking manager)
+            # Lock the bond (via FTNS service or staking manager).
+            # Sprint 492 (F32 fix) — check the return value AND
+            # let exceptions propagate. Pre-fix, lock_tokens
+            # silently returned False on insufficient balance
+            # and the registry created the settler record anyway
+            # → adversary could claim a HUGE bond without
+            # actually staking the FTNS (anti-Sybil broken).
             if self.ftns_service:
-                await self.ftns_service.lock_tokens(
+                locked = await self.ftns_service.lock_tokens(
                     settler_id,
                     Decimal(str(bond_amount)),
                     reason="settler_bond"
                 )
+                if not locked:
+                    raise ValueError(
+                        f"FTNS lock failed for settler {settler_id} "
+                        f"bond {bond_amount} — likely insufficient "
+                        f"available balance. Registration aborted."
+                    )
             elif self.staking_manager:
                 from prsm.economy.tokenomics.staking_manager import StakeType
                 await self.staking_manager.stake(

@@ -1398,6 +1398,133 @@ without wiring it — reminds them to remove the guard).
 
 ---
 
+### F30 — Content-filter CID matching is case-sensitive (case-evasion bypass)
+
+**The bug.** `ContentFilterStore.is_cid_blocked` did a
+literal `cid in self._cids` set membership check. The
+companion `add_cids` stored CIDs as-entered (no
+normalization). An operator who blocked `ABC123`
+(uppercase) didn't actually block requests for `abc123`.
+
+PRSM CIDs are conventionally lowercase hex (SHA-1
+BT infohash, SHA-256 content_hash) — so the canonical
+form is lowercase. But the §14 anti-evasion guarantee
+requires the filter to MATCH regardless of how an
+adversary cases the URL path.
+
+**Live-verified pre-fix**: blocked `BLOCKEDCASE123`,
+retrieved `/content/retrieve/blockedcase123` → HTTP 200
+not_found (bypass), retrieved `/content/retrieve/BLOCKEDCASE123`
+→ HTTP 451 blocked. Asymmetric.
+
+**Severity.** §14 anti-evasion: a hostile peer can serve
+content through any case variant the operator didn't
+enumerate. Real-world impact depends on whether real CIDs
+have any case ambiguity (lowercase hex doesn't, but the
+filter shouldn't ASSUME canonical input).
+
+**Surfaced.** Sprint 492 (2026-05-16) adversarial input
+testing (coverage matrix priority #3).
+
+**Fix.** `add_cids` + `remove_cid` + `is_cid_blocked` all
+normalize via `.strip().lower()`. The `add_tags` path at
+line 240 already had this — sprint 492 brought CID
+handling in line.
+
+Live-verified: blocked `F30TESTCASE` → both
+`f30testcase` and `F30TestCase` retrievals return 451.
+
+---
+
+### F31 — Content-filter tag accepts CRLF + control chars (log injection)
+
+**The bug.** `add_tags` normalized via `.strip().lower()`
+which stripped only leading/trailing whitespace. Embedded
+`\r\n`, NUL bytes, and other control chars (0x00–0x1F,
+0x7F) survived into storage.
+
+**Live-verified pre-fix**: tag `'benign\r\nINJECTED-CONTROL-CHARS'`
+stored as `'benign\r\ninjected-control-chars'` (hex
+contained `0d0a`).
+
+**Severity.** Low-to-moderate. Enables:
+- **Log injection** — when the daemon logs the tag, `\r\n`
+  could fake a new log line.
+- **CLI display corruption** — `prsm node` CLI rendering
+  garbled output.
+- NUL truncation — some logging frameworks truncate at NUL,
+  hiding subsequent attack content.
+
+**Surfaced.** Sprint 492.
+
+**Fix.** `add_tags` now sanitizes to printable ASCII only
+(0x20–0x7E). The example tag becomes `'benigninjectedbad'`
+(non-printable + uppercase squashed).
+
+Live-verified post-fix: tag with embedded CRLF + NUL +
+high-byte control chars all stripped before storage.
+
+---
+
+### F32 — Settler register accepts unbacked bond (anti-Sybil completely broken)
+
+**The bug.** `SettlerRegistry.register_settler` called
+`ftns_service.lock_tokens(bond_amount)` but DIDN'T CHECK
+the return value. The `_StakingFTNSAdapter.lock_tokens`
+implementation had this anti-pattern:
+
+```python
+try:
+    available = await self.get_available_balance(user_id)
+    if available < amount:
+        raise ValueError(...)
+    self._locked_balances[user_id] += amount
+    return True
+except Exception:    # SWALLOWS EVERYTHING
+    return False
+```
+
+So insufficient-balance + ANY other exception silently
+returned False, and the registry blindly created the
+settler record anyway.
+
+**Live-verified pre-fix**: registered settler `adv2` with
+**999,999,999,999 FTNS** bond against a 1083-FTNS wallet
+→ HTTP 200, status:active, can_settle:true. Wallet balance
+unchanged. **Anti-Sybil completely broken** — any node can
+claim a massive bond, defeating Vision §11's bonded-settler
+guarantee.
+
+**Severity.** Production-blocker. The settler-bond is the
+load-bearing economic mechanism preventing Sybil
+fabrication of multi-sig batch-approval votes. Pre-fix,
+an adversary could register N settlers with claimed
+massive bonds, reach the multi-sig threshold (default 3),
+and approve fraudulent batches with zero economic stake at
+risk.
+
+**Surfaced.** Sprint 492.
+
+**Fix.** Two-layer defense:
+- `_StakingFTNSAdapter.lock_tokens` no longer swallows the
+  `InsufficientBalance` ValueError — it propagates up.
+- `SettlerRegistry.register_settler` captures the
+  `lock_tokens` return value AND raises ValueError if it
+  comes back False (defense-in-depth).
+
+The API handler at `/settler/register` already had
+`except ValueError as e: raise HTTPException(400, str(e))`
+so the new error path surfaces cleanly.
+
+Live-verified: re-attack with 10^12 bond → HTTP 400
+"Insufficient available balance: 0 < 999999999999.0".
+Same for 50K bond against an empty wallet.
+
+**Pin tests.** `tests/unit/test_sprint_492_adversarial_inputs.py`
+covers all 3 fixes with 10 tests total.
+
+---
+
 ## What's working (positive findings)
 
 - ✅ `prsm setup --minimal` completes cleanly on existing config (re-prompt
