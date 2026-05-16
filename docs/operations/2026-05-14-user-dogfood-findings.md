@@ -1086,8 +1086,27 @@ passes: 0 unhandled 500s; mix of 200 (success) + 400
 (insufficient balance) + 503 (retry exhausted with
 actionable detail).
 
+**Fully closed sprint 490 (2026-05-16).** Sprint 489's
+explicit-commit barrier in `dag_ledger.submit_transaction`
+(the F27 load-bearing fix) ALSO eliminated the underlying
+contention that triggered F25's retries. Pre-sprint-489
+the buffered writes caused version-cache drift between
+concurrent coroutines → ConcurrentModificationError fired
+→ retry loop hit 503 retry-exhausted. Post-sprint-489
+each submit's writes commit cleanly, version cache stays
+consistent, retries don't fire at all.
+
+Live re-verified at sprint 490:
+- 10 concurrent submits (sufficient budget) → 10/10
+  return 200, zero 503s, zero 500s.
+- 30 concurrent submits → 30/30 return 200.
+- **50 concurrent submits with 10× wallet budget** → 5
+  return 200 + 45 return 400 (insufficient balance,
+  client-actionable), zero 500/503s. After cleanup-cancel:
+  **0.00 FTNS leaked**.
+
 **Pin test.** `tests/integration/test_sprint_487_concurrency.py`
-runs 4 race scenarios against a live daemon.
+runs 4 race scenarios against a live daemon (all pass).
 
 ---
 
