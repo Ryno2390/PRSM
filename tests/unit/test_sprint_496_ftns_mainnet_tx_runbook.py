@@ -112,6 +112,65 @@ def test_runbook_explicitly_defers_settler_bond():
     assert "Foundation Safe" in text or "10,000 FTNS" in text
 
 
+def test_runbook_sprint_497_defers_tx_4_too():
+    """Sprint 497 dry-run discovered TX-4 stake commission
+    is ALSO Foundation-ceremony-gated (PENDING_COMMISSION
+    in-memory mirror until contract deployed). Pre-sprint-497
+    runbook implied TX-4 was executable as soon as wallet
+    funded; sprint 497 corrected this."""
+    text = _read()
+    # The TX-4 section must call out the deferral
+    tx4_idx = text.find("### TX-4")
+    assert tx4_idx >= 0
+    tx4_body = text[tx4_idx:tx4_idx + 3000]
+    assert "DEFERRED" in tx4_body or "deferred" in tx4_body
+    assert "PENDING_COMMISSION" in tx4_body, (
+        "TX-4 must explain the in-memory mirror behavior "
+        "so operators don't expect chain interaction"
+    )
+
+
+def test_runbook_sprint_497_schema_correction():
+    """Sprint 496 documented TX-4 schema as
+    `creator_eth_address + amount_ftns`. Sprint 497 dry-run
+    discovered the actual schema is `creator_id + amount_wei`.
+    The corrected schema must appear in the TX-4 example."""
+    text = _read()
+    tx4_idx = text.find("### TX-4")
+    tx4_body = text[tx4_idx:tx4_idx + 3000]
+    # Correct schema must be in the example
+    assert '"creator_id"' in tx4_body
+    assert '"amount_wei"' in tx4_body
+
+
+def test_runbook_sprint_497_dry_run_mode_documented():
+    """Sprint 497 dry-run discovered /wallet/royalty/claim
+    has a built-in DRY_RUN mode (returns
+    {"status":"DRY_RUN","claimable_ftns":0.0}) when there's
+    nothing to claim. The runbook must document this so
+    operators don't read the response as an error."""
+    text = _read()
+    tx3_idx = text.find("### TX-3")
+    tx3_body = text[tx3_idx:tx3_idx + 2000]
+    assert "DRY_RUN" in tx3_body
+    assert "claimable_ftns" in tx3_body
+
+
+def test_runbook_executable_today_summary_accurate():
+    """The cost summary must distinguish 'executable today'
+    (TX-1, TX-2, TX-3) from 'deferred' (TX-4, TX-5).
+    Sprint 496 over-estimated cost by assuming all 5 TX
+    would run."""
+    text = _read()
+    # The Cost summary section must call out the
+    # executable-today vs deferred split.
+    cost_idx = text.find("## Cost summary")
+    assert cost_idx >= 0
+    cost_body = text[cost_idx:cost_idx + 2500]
+    assert "EXECUTABLE" in cost_body or "executable" in cost_body
+    assert "DEFERRED" in cost_body or "deferred" in cost_body.lower()
+
+
 def test_runbook_includes_chain_id_invariant():
     """The wrong-network risk is critical (could burn
     funds). Runbook must call out chainId 8453 as the

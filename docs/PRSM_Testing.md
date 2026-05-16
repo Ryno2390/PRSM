@@ -679,6 +679,27 @@ arc proved we need.
 
 ## Changelog
 
+- **2026-05-16 sprint 497** — FTNS mainnet TX runbook
+  dry-run walkthrough + 3 corrections applied. Walked the
+  runbook on a zero-FTNS / zero-ETH test wallet to exercise
+  the daemon's signing + RPC + endpoint paths without
+  spending. Findings:
+  (1) `/wallet/royalty/claim` has a **built-in DRY_RUN
+  mode** — returns `{"status":"DRY_RUN","claimable_ftns":0.0}`
+  when nothing to claim, not a 400.
+  (2) TX-4 stake schema is `creator_id + amount_wei`, NOT
+  `creator_eth_address + amount_ftns` as sprint 496 wrote.
+  (3) TX-4 is **Foundation-ceremony-gated like TX-5** —
+  stages stakes in the PENDING_COMMISSION in-memory mirror
+  until `PRSM_CREATOR_STAKE_CONTRACT_ADDRESS` wired.
+  
+  Sprint 497 patched runbook + added 4 pin tests. Cost
+  estimate reduced from "~$0.003 ETH + $5 FTNS" to
+  "~$0.001 ETH + 2 FTNS" since TX-4 doesn't move on-chain
+  funds today. Pre-broadcast safety also validated: chain
+  reverts (e.g., `ERC20InsufficientBalance`) catch operator
+  mistakes that slipped past daemon-side checks.
+
 - **2026-05-16 sprint 496** — FTNS-side mainnet TX test
   plan shipped (`docs/operations/ftns-side-mainnet-tx-runbook.md`).
   OC column (real on-chain mutations) is the last untested

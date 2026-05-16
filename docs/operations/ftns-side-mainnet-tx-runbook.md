@@ -4,7 +4,44 @@
 **Coverage matrix column:** OC (Real on-chain mutations) — last
 untested dimension as of sprint 495
 **Authored:** sprint 496, 2026-05-16
+**Patched:** sprint 497, 2026-05-16 (dry-run corrections)
 **Prerequisites:** Real FTNS tokens + ETH for gas
+
+---
+
+## Sprint 497 dry-run findings (applied below)
+
+A full dry-run walkthrough on a zero-FTNS / zero-ETH test
+wallet exercised the daemon's signing + RPC + endpoint
+paths without spending anything. Three corrections to
+sprint 496 surfaced:
+
+1. **TX-3 has a built-in DRY_RUN mode** — `/wallet/royalty/claim`
+   returns `{"status":"DRY_RUN", "claimable_ftns":0.0}`
+   when there's nothing to claim, NOT a 400. Operators
+   should treat this as the canonical empty-state, not
+   an error.
+2. **TX-4 stake-commission schema** uses `creator_id` +
+   `amount_wei`, NOT `creator_eth_address` + `amount_ftns`.
+   Sprint 496 had this wrong.
+3. **TX-4 + TX-5 are BOTH Foundation-ceremony-gated.**
+   Sprint 496 listed only TX-5 as deferred. Reality: TX-4
+   stages stakes in the in-memory PENDING_COMMISSION
+   mirror until `PRSM_CREATOR_STAKE_CONTRACT_ADDRESS` is
+   wired. No FTNS moves on chain until then.
+
+**Bottom line: of the 5 TX in this runbook, only TX-1,
+TX-2, TX-3 are executable today.** TX-4 + TX-5 await
+Foundation contract deployment.
+
+Pre-broadcast safety also got validated. With a zero-FTNS
+wallet, TX-1's `eth_estimateGas` call against the FTNS
+contract returns a custom revert `ERC20InsufficientBalance(sender, balance=0, needed=...)`
+BEFORE any signing. The daemon catches this and surfaces
+as a 400 with the decoded revert reason. **The chain
+itself is the last line of defense — invariants enforced
+at the contract layer catch operator mistakes that slipped
+past the daemon's local checks.**
 
 ---
 
@@ -169,10 +206,17 @@ curl -X POST http://127.0.0.1:8000/wallet/royalty/claim
 **Expected outcome:**
 - If creator has unclaimed royalties: 200 with tx_hash;
   funds move from RoyaltyDistributor contract to wallet
-- If no unclaimed royalties: 400 "nothing to claim" (clean
-  empty-state, NOT 503)
+- **If no unclaimed royalties: 200 with**
+  `{"status":"DRY_RUN","claimable_ftns":0.0,"amount_claimed_ftns":0.0,"tx_hash":null}`.
+  Sprint 496 dry-run discovered the daemon has a
+  built-in DRY_RUN mode here — the endpoint refuses to
+  broadcast a claim for zero, returns the no-op envelope
+  with explicit `status:DRY_RUN`. **Operators should
+  treat this as the canonical empty-state response, not
+  an error.** No chain interaction, no gas spent.
 - Pin: tx_hash recorded; `/admin/royalty-dispatch-history`
-  shows the entry
+  shows the entry (only when there were claimable
+  royalties; DRY_RUN entries are not persisted).
 
 **Cost:** ~50-80k gas (contract call with claim logic)
 
@@ -187,42 +231,60 @@ accessed. The cleanest E2E:
 
 ---
 
-### TX-4: Stake commissioning (Vision §14 anti-Sybil)
+### TX-4: Stake commissioning (DEFERRED — Foundation-ceremony-gated)
 
-Sprint 492 F32 fixed the LOCAL bond check. The on-chain
-side commissions a real CreatorStakeClient — which today
-returns PENDING_COMMISSION when contract address isn't
-wired.
+**Status update from sprint 497 dry-run.** Sprint 496's
+original entry assumed TX-4 was executable as soon as
+the wallet was funded. Dry-run revealed that's not true.
+
+**What happens today** (env: `PRSM_NETWORK=mainnet` +
+`PRSM_ONCHAIN_FTNS=1` + funded wallet):
 
 ```bash
 curl -X POST http://127.0.0.1:8000/marketplace/creator-stake/stake \
   -H "Content-Type: application/json" \
   -d '{
-    "creator_eth_address": "0x2Fd48D...",
-    "amount_ftns": 10
+    "creator_id": "0x4acdE458...",
+    "amount_wei": 10000000000000000000
   }'
 ```
 
-**Expected outcome:**
-- Stake tx_hash recorded on chain
-- `/marketplace/creator-stake/0x2Fd48D...` shows
-  `balance_wei: 10000000000000000000, commissioned: true,
-  high_tier_eligible: false` (10 FTNS < minimum 10000)
-- A 10000-FTNS stake would flip `high_tier_eligible: true`
-  (but costs more)
+Returns HTTP 200 with `balance_wei: 10e18, high_tier_eligible: false`
+— BUT inspect the creator-stake state and you'll see
+`commissioned: false`. The stake landed in the
+**in-memory PENDING_COMMISSION mirror**, NOT the real
+chain. No FTNS moved. No tx_hash returned.
 
-**Cost:** ~50-80k gas
+This is by design: without `PRSM_CREATOR_STAKE_CONTRACT_ADDRESS`
+pointing at a deployed contract, the daemon stages stakes
+locally awaiting the Foundation commissioning ceremony
+(per sprint 290 PENDING_COMMISSION pattern).
+
+**Schema corrections from sprint 497 dry-run** (sprint 496
+had these wrong):
+- Field names are `creator_id` + `amount_wei`, NOT
+  `creator_eth_address` + `amount_ftns`.
+- Live high-tier threshold (read from on-chain
+  `min_high_tier_stake_wei`) is **1000 FTNS** (1e21 wei),
+  NOT the 10,000 FTNS sprint 496 quoted.
+
+**Status: deferred** until either:
+- (a) The CreatorStake contract is deployed AND
+      `PRSM_CREATOR_STAKE_CONTRACT_ADDRESS` is documented,
+      OR
+- (b) Foundation ceremony commissions the in-memory mirror
+      to a real contract (Vision §11).
+
+Either way, this TX cannot move real FTNS on chain today.
 
 ---
 
-### TX-5: Settler bond on-chain (deferred follow-on)
+### TX-5: Settler bond on-chain (DEFERRED)
 
-Sprint 492 F32 fixed the local bond check at
-`_StakingFTNSAdapter.lock_tokens`. The on-chain settler
-registration is a separate flow. Out of scope for
-sprint 496's INITIAL test plan because:
-- min bond is 10,000 FTNS (~$100+ depending on price)
-- requires multi-sig coordination per Vision §11
+Same shape as TX-4: requires Foundation Safe ceremony. Min
+bond 10,000 FTNS (~$100+). Sprint 492 F32 fixed the LOCAL
+bond check at `_StakingFTNSAdapter.lock_tokens`; on-chain
+side is multi-sig-coordinated.
 
 Document for follow-on when the Foundation Safe ceremony
 date approaches.
@@ -263,15 +325,25 @@ Defenses:
 
 ## Cost summary
 
-| TX | Amount FTNS moved | Gas (Base mainnet) | USD cost (approx) |
-|----|-------------------|--------------------|--------------------|
-| TX-1 self-transfer | 0.000001 | 21k @ 0.006 Gwei | $0.0004 |
-| TX-2 transfer to 2nd wallet | 1 | 21k | $0.0004 |
-| TX-3 claim royalty | (received) | 50-80k | $0.001 |
-| TX-4 stake 10 FTNS | 10 | 50-80k | $0.001 |
-| **Total** | ~11 FTNS spent | ~170k gas total | ~$0.003 ETH |
+**Sprint 497 correction**: only TX-1, TX-2, TX-3 actually
+move FTNS on chain. TX-4 + TX-5 are
+Foundation-ceremony-gated (PENDING_COMMISSION
+in-memory mirror until the contract is deployed). The
+"executable today" total is therefore lower than sprint
+496 estimated.
 
-Plus the **funded amount** (recommend $5 in FTNS as float).
+| TX | Amount FTNS moved | Gas (Base mainnet) | USD cost (approx) | Today |
+|----|-------------------|--------------------|--------------------|-------|
+| TX-1 self-transfer | 0.000001 | 21k @ 0.006 Gwei | $0.0004 | ✅ EXECUTABLE |
+| TX-2 transfer to 2nd wallet | 1 | 21k | $0.0004 | ✅ EXECUTABLE |
+| TX-3 claim royalty | (received) | 50-80k | $0.001 | ⚠️ DRY_RUN until creator has royalties |
+| TX-4 stake | (in-memory) | 0 (not on chain) | $0 | ⏸️ DEFERRED until contract deployed |
+| TX-5 settler bond | (in-memory) | 0 (not on chain) | $0 | ⏸️ DEFERRED Foundation ceremony |
+| **Executable today** | ~1 FTNS spent | ~42k gas | ~$0.001 ETH | |
+
+Plus the **funded amount**: recommend ~2 FTNS as float
+(was $5 in sprint 496 — overshot since TX-4 doesn't
+actually spend on-chain today).
 
 ---
 
