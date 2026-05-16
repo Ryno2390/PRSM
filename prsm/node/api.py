@@ -5841,6 +5841,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 parent_cids=req.parent_cids if req.parent_cids else None,
                 creator_eth_address=req.creator_eth_address,
             )
+        except NotImplementedError as exc:
+            # Sprint 491 (F29 fix) — `upload_text` raises
+            # NotImplementedError when content exceeds the
+            # sharding threshold (the internal _upload_with_sharding
+            # path references ContentSharder which doesn't exist).
+            # Surface as 413 (Payload Too Large — matches the
+            # earlier size-cap 413) with the actionable detail
+            # already in the NotImplementedError message
+            # (directs operators to /content/upload/shard).
+            # Pre-fix: this raised a generic 502 with no path
+            # forward.
+            raise HTTPException(
+                status_code=413,
+                detail=str(exc),
+            )
         except Exception as exc:
             # Sprint 179 — surface the underlying exception in the
             # 502 detail so operators see what really broke

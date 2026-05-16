@@ -1391,24 +1391,29 @@ class ContentUploader:
         should_shard = force_shard or size_bytes > self.sharding_threshold
 
         if should_shard:
-            # Use sharding for large files
-            logger.info(
-                f"File {filename} ({size_bytes} bytes) exceeds threshold "
-                f"({self.sharding_threshold} bytes), using sharding"
-            )
-            return await self._upload_with_sharding(
-                content=content,
-                filename=filename,
-                metadata=metadata,
-                replicas=replicas,
-                royalty_rate=rate,
-                parent_cids=parents,
-                content_hash=content_hash,
-                embedding=embedding,
-                near_dup_cid=near_dup_cid,
-                near_dup_sim=near_dup_sim,
-                provenance_hash_hex=provenance_hash_hex,
-                binary_fingerprint_record=binary_fingerprint_record,
+            # Sprint 491 (F29 fix) — `_upload_with_sharding` calls
+            # `self._get_content_sharder()` which is referenced
+            # but NEVER DEFINED on ContentUploader (the ContentSharder
+            # class itself doesn't exist). Pre-fix this path
+            # crashed with `AttributeError: 'ContentUploader'
+            # object has no attribute '_get_content_sharder'`,
+            # got swallowed by the outer try/except, and returned
+            # None → the API handler bubbled a generic 502
+            # "upload_text returned None" with no actionable detail.
+            #
+            # The /content/upload/shard endpoint IS a separate
+            # working surface (sprint 102). Until ContentSharder
+            # ships, refuse internal auto-sharding with a
+            # NotImplementedError that the handler converts to
+            # a clean 413 directing operators to the canonical
+            # sharding path.
+            raise NotImplementedError(
+                f"Internal sharding path is not implemented "
+                f"({size_bytes} bytes > {self.sharding_threshold} "
+                f"threshold). Use POST /content/upload/shard for "
+                f"sharded uploads, or keep content under "
+                f"{self.sharding_threshold} bytes for the "
+                f"monolithic path."
             )
 
         # Standard monolithic upload for small files. The cid is now the

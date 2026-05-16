@@ -1322,6 +1322,82 @@ endpoint shape).
 
 ---
 
+### F29 — Uploads > 10MB silently fail with cryptic 502 (sharding path broken)
+
+**The bug.** Sprint 491 scale testing (coverage matrix
+priority #2) walked content sizes 1KB → 100KB → 1MB → 10MB
+→ 50MB. The first 4 round-tripped cleanly with byte-
+identity preserved + linear throughput up to 22.67 MB/s
+at 10MB. **50MB returned 502** with the cryptic detail
+"Upload failed — upload_text returned None".
+
+Daemon log:
+```
+Unexpected error during sharding of document.txt:
+'ContentUploader' object has no attribute
+'_get_content_sharder'
+```
+
+Root cause: `ContentUploader._upload_with_sharding` (the
+internal sharding code path triggered when content >
+`sharding_threshold`, default 10MB) calls
+`await self._get_content_sharder()` at line 1587 and again
+at line 2555. The method is **never defined**. The
+`ContentSharder` class it would return doesn't exist
+anywhere in the codebase. The outer try/except swallows
+the AttributeError, `upload_text` returns None, and the
+API handler bubbles a generic 502.
+
+**Live impact.** Vision §11 claims multi-GB Tier B/C
+content support. Reality: `/content/upload` is hard-broken
+at 10MB. Any operator who lifts `PRSM_MAX_UPLOAD_BYTES`
+above the default (intending to support Vision-claimed
+sizes) hits this silent failure. The 502 message gives
+zero path forward — operators don't know
+`/content/upload/shard` exists as a separate working
+surface (sprint 102).
+
+**Severity.** Production-blocker. Default
+`PRSM_MAX_UPLOAD_BYTES` matches the sharding threshold
+(10MB) so casual users get a clean 413 directing them to
+the shard endpoint — but the underlying bug is masked.
+Any operator with a higher cap is silently broken.
+
+**Surfaced.** Sprint 491 (2026-05-16) during scale stress.
+
+**Fix.** Sprint 491:
+- `ContentUploader.upload_text` raises `NotImplementedError`
+  with an actionable message (`"Internal sharding path is
+  not implemented... Use POST /content/upload/shard..."`)
+  when content > `sharding_threshold`.
+- The `/content/upload` handler catches
+  `NotImplementedError` specifically and returns 413 with
+  that message (was generic 502).
+
+Live-verified: 50MB upload now returns:
+```
+HTTP 413
+{"detail":"Internal sharding path is not implemented
+(52428800 bytes > 10485760 threshold). Use POST
+/content/upload/shard for sharded uploads, or keep
+content under 10485760 bytes for the monolithic path."}
+```
+
+**Deferred work.** Implement `ContentSharder` class +
+`_get_content_sharder` so the internal sharding path
+actually works. Until then, `/content/upload/shard`
+remains the canonical large-file path.
+
+**Pin tests.** `tests/unit/test_sprint_491_f29_sharding_path.py`
+defends: NotImplementedError marker in source, handler-
+side 413 conversion, ContentSharder-class-still-absent
+sentinel (fails if a future contributor adds the class
+without wiring it — reminds them to remove the guard).
+`tests/integration/test_sprint_491_scale.py` runs the
+1KB-50MB scale walk against a live daemon.
+
+---
+
 ## What's working (positive findings)
 
 - ✅ `prsm setup --minimal` completes cleanly on existing config (re-prompt

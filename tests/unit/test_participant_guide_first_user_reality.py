@@ -112,21 +112,15 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_twenty_eight_frictions():
-    """The findings doc enumerates F1-F28. F25-F28 all
-    added 2026-05-16 during sprint 487 concurrency stress
-    test:
-    - F25 concurrent /compute/submit 500s — partially fixed
-    - F26 concurrent identical uploads break anti-Sybil
-      first-creator-wins — open
-    - F27 compute escrow leaked FTNS under concurrent test
-      load — open
-    - F28 concurrent /staking/unstake against same stake_id
-      creates multiple pending requests — open
-    Single sprint, 4 production-blockers surfaced — the
-    coverage matrix's "zero concurrency coverage" warning
-    was correct. If a finding is silently removed (without
-    an explicit closure note), surface that."""
+def test_findings_doc_documents_all_twenty_nine_frictions():
+    """The findings doc enumerates F1-F29. F29 added during
+    sprint 491 scale testing (coverage matrix priority #2):
+    uploads > 10MB silently fail with cryptic 502 because
+    `ContentUploader._get_content_sharder` is referenced
+    but never defined (ContentSharder class doesn't exist).
+    Sprint 491 surfaces clean 413 with actionable path to
+    /content/upload/shard. If a finding is silently removed
+    (without an explicit closure note), surface that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -157,6 +151,7 @@ def test_findings_doc_documents_all_twenty_eight_frictions():
         "F26 — Concurrent identical-content uploads break",
         "F27 — Compute escrow leaked FTNS under concurrent",
         "F28 — Concurrent `/staking/unstake` against same",
+        "F29 — Uploads > 10MB silently fail",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"
