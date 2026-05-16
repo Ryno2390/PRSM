@@ -443,6 +443,159 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 
 ---
 
+## Test coverage matrix — depth dimensions
+
+The section-by-section tables above answer **"is this surface
+verified end-to-end?"**. They do NOT answer **"verified under
+what conditions?"**. Sprints 469-485 surfaced this gap: most ✅
+rows mean "happy path returns the right shape", not "survives
+concurrent callers" or "delivers correct bytes at scale" or
+"degrades gracefully when the disk fills up".
+
+This matrix rates each subject area across the canonical
+depth dimensions. A green cell means the dimension was
+exercised live (cite the sprint). Red means we know it's
+untested. Yellow means partial — some scenarios but not all.
+
+### Depth dimensions
+
+| Symbol | Dimension | Definition |
+|--------|-----------|------------|
+| **HP** | Happy path | Basic call with valid input returns expected shape + correct value |
+| **EP** | Error path | Bad / malformed / out-of-bounds input returns clean error + actionable detail |
+| **CC** | Concurrency | N simultaneous callers don't race / deadlock / corrupt shared state |
+| **SC** | Scale | Realistic data sizes (Vision-claimed MB/GB for content, M+ records for indices) |
+| **AD** | Adversarial | Resists deliberate attack: signature forgery, content-filter evasion, header overflow, replay |
+| **FM** | Failure modes | Graceful degradation on disk full / peer crash / partial write / DB unreachable |
+| **LR** | Long-running | Stable over 24h+: no memory leak, no FD leak, no slow degradation |
+| **DR** | Disaster recovery | Can restore from data loss: DB drop, staging dir deleted, identity file lost |
+| **OC** | Real on-chain | Actually executed against mainnet (Base 8453) — not just schema-pin or testnet |
+| **XF** | Cross-feature | Interacts correctly with adjacent features (forge + staking, upload + on-chain royalty) |
+
+### Coverage matrix
+
+| Subject | HP | EP | CC | SC | AD | FM | LR | DR | OC | XF |
+|---------|----|----|----|----|----|----|----|----|----|----|
+| **§4 user workflow (Tier A)** | ✅ 484 | ✅ 484 | ❌ | ❌ | ❌ | ⚠️ 484 | ❌ | ✅ 485 | ❌ | ⚠️ 472 |
+| **§4 user workflow (Tier B/C)** | ✅ 430 | ⚠️ 472 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§5.1 BitTorrent layer** | ✅ 472 | ✅ 472 | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ 485 | N/A | ❌ |
+| **§5.1 Content index (fingerprint dedup)** | ✅ 441 | ✅ 471 | ❌ | ❌ | ⚠️ 441 | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§5.2 Inference (mock executor)** | ✅ 438 | ✅ 469 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§5.2 Inference (streaming SSE)** | ✅ 469 | ⚠️ 469 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§5.2 Forge query** | ⚠️ 431 | ✅ 469 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§5.2 Compute jobs lifecycle** | ✅ 469 | ✅ 469 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§5.2 Training (compute/train)** | ⚠️ 469 | ✅ 469 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§5.3 Staking lifecycle** | ✅ 432, 470 | ✅ 470 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§5.3 Unstake → withdraw (cooldown)** | ⚠️ 470 | ✅ 470 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§5.3 Settlement (flush + history)** | ✅ 470 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§5.3 Settler registry lifecycle** | ✅ 470 | ✅ 470 | ❌ | ❌ | ⚠️ 470 | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§5.3 Royalty distribution** | ❌ | ⚠️ 471 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§5.4 Provenance V2 (on-chain)** | ✅ 443 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ 467 | ❌ |
+| **§5.4 Formal verification (INV-*)** | ✅ 443, 466, 467 | N/A | N/A | N/A | N/A | N/A | N/A | N/A | ✅ 443, 467 | N/A |
+| **§7 Receipt sign + verify** | ✅ 433 | ✅ 433 | ❌ | ❌ | ✅ 433 | ❌ | ❌ | ⚠️ 447 | N/A | ❌ |
+| **§7 Attestation backends (SGX/SEV)** | ✅ 448 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§7 Privacy primitives (DP + topology)** | ✅ 415, 419 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§7 Enterprise recipient encryption** | ✅ 430 | ✅ 472 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§8 Wallet (FTNS local ledger)** | ✅ 432 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§8 Wallet (on-chain balance)** | ✅ 464, 466, 467 | ❌ | ❌ | N/A | ❌ | ❌ | ❌ | ❌ | ✅ 467 | ❌ |
+| **§8 Phase 5 fiat onramp/offramp** | ✅ 451 | ⚠️ 451 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🔗 | ❌ |
+| **§8 KYC handshake** | ✅ 452 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🔗 | ❌ |
+| **§11/12 Governance (proposals/voting)** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§13 Operator CLI trifecta** | ✅ 434-437, 446 | ⚠️ 446 | N/A | N/A | N/A | ❌ | ❌ | ❌ | N/A | N/A |
+| **§13 Audit ring (auto-record)** | ✅ 471 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§13 Incident response lifecycle** | ✅ 476 | ❌ | ❌ | N/A | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§13 Upgrade proposal flow** | ✅ 475 | ✅ 475 | ❌ | N/A | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§13 Disclosure intake + payout** | ✅ 475 | ✅ 475 | ❌ | N/A | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§13 Emergency pause (9-contract)** | ✅ 455 | N/A | N/A | N/A | N/A | N/A | N/A | N/A | ✅ 455 | N/A |
+| **§14 Content moderation chain** | ✅ 439 | ✅ 471 | ❌ | ❌ | ⚠️ 439 | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§14 Takedown lifecycle** | ✅ 439, 477 | ✅ 477 | ❌ | N/A | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§14 Anti-Sybil (creator stake)** | ✅ 442 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **§14 Corp capability (Ed25519)** | ✅ 477 | ✅ 477 | ❌ | ❌ | ⚠️ 477 | ❌ | ❌ | ❌ | N/A | ❌ |
+| **§5.3 / §13 Daemon health surface** | ✅ 447, 482 | ✅ 473 | ❌ | ❌ | ❌ | ✅ 473 | ❌ | ❌ | N/A | ❌ |
+| **§5.4 P2P discovery (peer join/leave)** | ✅ 456, 457 | N/A | ❌ | ❌ | ❌ | ✅ 457 | ❌ | ❌ | N/A | ❌ |
+| **§5.4 P2P retrieve cross-host** | ❌ | N/A | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | N/A | ❌ |
+| **Bootstrap reconnect (sentinel recovery)** | ✅ 474 | N/A | ❌ | N/A | ❌ | ✅ 474 | ❌ | ❌ | N/A | ❌ |
+| **Dep audit (sprint 461-463 invariants)** | ✅ 461-463 | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |
+| **Cross-restart persistence** | ✅ 485 | N/A | ❌ | ❌ | N/A | ⚠️ 480 | ❌ | ✅ 485 | N/A | ❌ |
+
+Legend: ✅ live-tested (sprint cited), ⚠️ partial, ❌ untested,
+N/A not applicable to this surface, 🔗 external-gated.
+
+### Highest-priority untested cells
+
+Ranked by **risk × likelihood × blast-radius**. These are the
+gaps worth a dedicated sprint each rather than one more
+endpoint sweep:
+
+1. **CC — Concurrency across the board.** Zero surfaces have
+   been tested under simultaneous callers. Locks in
+   StakingManager, ContentUploader.uploaded_content,
+   SettlerRegistry, payment_escrow are all suspect. Risk:
+   a 2-user race condition double-spends FTNS or corrupts
+   a stake record. Test plan: 10-100 concurrent
+   `httpx.AsyncClient` callers against each lifecycle
+   endpoint with conflicting writes; assert post-state
+   matches a serial-execution baseline.
+
+2. **SC — Scale.** Largest file uploaded was probably 500B.
+   Vision §11 claims multi-GB Tier B/C content. Risk: the
+   in-memory hashing path (`hashlib.sha256(data)` in upload
+   handler) OOMs on a 1GB upload. Test plan: 1MB / 10MB /
+   100MB / 1GB upload + retrieve; measure memory, CPU,
+   time; pin acceptable bounds.
+
+3. **AD — Adversarial inputs.** We schema-pin canonical
+   fields but never tried to bypass them. Signature
+   forgery, replay attacks, content-filter evasion via
+   Unicode normalization, JSON-bomb. Risk: a malicious
+   client wedges a public node. Test plan: targeted
+   negative-cases per §7 receipt verify, §14 content filter,
+   §13 audit endpoints; document each defense.
+
+4. **FM — Failure modes / fault injection.** What happens
+   when staged file is deleted mid-retrieve? When the DB
+   becomes unreachable? When a peer crashes mid-fetch? We
+   have *some* coverage (sprint 473 F21, sprint 480 F22,
+   sprint 484 F24 all surfaced via accidental fault
+   injection) but no systematic suite. Test plan: chaos
+   harness that randomly perturbs DB / FS / network during
+   the canonical user journey.
+
+5. **LR — Long-running stability.** Daemon has only run
+   ~hours in any verification, never 24h+. Risk: memory
+   leak (we found F23 sandbox-dir leak almost by accident),
+   FD exhaustion, slow-growing dict that never evicts.
+   Test plan: 24h soak test with continuous low-rate
+   upload/retrieve/stake/claim; pin RSS and FD counts.
+
+6. **OC — Real on-chain mutations (FTNS-side).** Sprint 466
+   did 2 testnet ETH-side TX. Sprint 467 did 1 mainnet
+   ETH-side TX. We've never actually moved FTNS on chain,
+   staked on chain, claimed a royalty on chain. Risk: the
+   real on-chain integration has a bug that schema-pin
+   testing won't catch. Test plan: $5 of FTNS funding +
+   exercise transfer, stake, claim cycle on Sepolia.
+
+7. **XF — Cross-feature interactions.** Each feature
+   tested in isolation. What happens when an inference
+   receipt's auto-recorded creator access THEN triggers a
+   royalty dispatch THEN updates the stake? Test plan:
+   end-to-end chain test across §5.2 → §14 reputation →
+   §5.3 royalty → §8 wallet for a single content access.
+
+8. **§11/§12 Governance — entirely untested.** Proposals,
+   voting, execution, treasury distribution — we have
+   admin surfaces probed (sprint 471) but no real proposal
+   lifecycle. Risk: governance system can't actually be
+   used when a real proposal comes in. Test plan: simulate
+   a proposal-lifecycle E2E with multi-signer voting.
+
+The matrix is **NOT** a punch list to clear top-to-bottom —
+it's a risk map. The verification campaign should pick
+cells by production-risk per unit-effort, not by completeness.
+
+---
+
 ## Operator-trifecta gaps (REST-only or MCP-only, missing CLI)
 
 Some operator endpoints exist via REST but lack CLI / MCP wrappers
@@ -718,6 +871,38 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 486** — Test coverage matrix added.
+  Surfaces the DEPTH dimension that the section-by-section
+  tables lack. Each subject area rated across 10 dimensions
+  (HP/EP/CC/SC/AD/FM/LR/DR/OC/XF). **What's untested becomes
+  visible at a glance**: zero concurrency coverage anywhere,
+  no scale testing, no adversarial input testing, no
+  long-running stability, no FTNS-side on-chain mutations,
+  no cross-feature integration tests. Closes the loop on
+  the user's challenge ("Have we really thoroughly tested
+  ALL of PRSM's functionality? I doubt it") — answer: no,
+  and here's the map of what's missing. 8 priority cells
+  identified for follow-on dedicated sprints. The matrix is
+  a risk map, not a punch list: future sprints should pick
+  cells by production-risk per unit-effort, not by
+  completeness.
+
+- **2026-05-16 sprint 485** — F24 follow-on closed. F22 +
+  F24 + sprint 485 chain end-to-end working: hydrated CIDs
+  deliver original bytes across daemon restart. Vision §4
+  step 5 cross-restart fully closed for Tier A content.
+  17/17 historical hydrated CIDs return success live. Tier
+  B/C deferred. Tag
+  `sprint-485-f24-followon-hydration-seed-paths-merge-ready-20260516`
+  commit `33e200af`.
+
+- **2026-05-16 sprint 484** — Semi-fresh dogfood pass +
+  F24 fix shipped. User-authorized re-walk of §4 surfaced
+  F24 (retrieve hangs on hydrated CIDs). Fix: propagate
+  timeout through request_content → _fetch_local →
+  _fetch_local_via_bt → retriever.fetch + asyncio.wait_for
+  defense-in-depth. 30s+ hang → 2s clean response.
+
 - **2026-05-16 sprint 478** — cross-table attribution
   alignment. 5 PRSM_Testing.md rows promoted via existing
   sprint coverage they were attributed to elsewhere in the
