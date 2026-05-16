@@ -88,11 +88,11 @@ journey. Each step should be live-verifiable on a single node.
 | Direct P2P connection (single-host) | WebSocket transport | ⏸️ | 456 | F14: NAT-loopback blocks single-host direct connection (announced addrs are external IP); multi-host bench is the right test |
 | Retrieve by CID (Tier A, cross-node) | `GET /content/retrieve/{cid}` | 🔬 | — | Requires F14 fix or multi-host test bench |
 | Retrieve by CID (Tier B/C Shamir, same node) | `ContentRetriever.fetch` | 🟢 | 430 | Routing pinned; infrastructure-only — `/content/upload` doesn't reach this lane today |
-| Upload shard | `POST /content/upload/shard` | 🟢 | 102 | Size cap test pinned; E2E untested |
-| Recipient manifest | `GET /content/recipient-manifest/{cid}` | 🟢 | 304 | Test-pinned |
-| Content metadata | `GET /content/{cid}` | 🟢 | — | Endpoint exists; usage path untested |
-| Content search | `GET /content/search` | 🟢 | 287 | Tier filtering test-pinned |
-| My uploaded content | `GET /content/mine` | 🟢 | — | Endpoint exists |
+| Upload shard | `POST /content/upload/shard` | ⚠️ | 102, 472 | Live schema-pass: missing `dataset_id` → 400 with clean message; full E2E untested (needs sharded-dataset fixture) |
+| Recipient manifest | `GET /content/recipient-manifest/{cid}` | ✅ | 304, 472 | Live: schema-defended 422 with `"not an encrypted recipient bundle"` when CID is plaintext Tier A (honest-scope: this is only valid for encrypted Tier B/C bundles) |
+| Content metadata | `GET /content/{cid}` | ✅ | 472 | Live: returns 404 `"Content not found in index"` for un-indexed CIDs (Tier A uploads don't auto-index); index-populating uploads addressed by sprint 449's /content/index/stats |
+| Content search | `GET /content/search` | ✅ | 287, 472 | Live: returns `{query, results: [], count: 0}` clean envelope; tier filter validates `min_tier` enum (`low/medium/high`) — invalid → 400 with the canonical list |
+| My uploaded content | `GET /content/mine` | ✅ | 449, 472 | Live: post-upload entry returns full canonical schema `{content_id, filename, size_bytes, content_hash, creator_id, royalty_rate, access_count, total_royalties, provenance_tx_hash, created_at, is_sharded}` |
 
 ### Storage subsystem
 
@@ -143,8 +143,8 @@ journey. Each step should be live-verifiable on a single node.
 | Streaming inference (full E2E) | `POST /compute/inference/stream` | 🟢 | 3.x.8 | Audit-prep §7.4-§7.8 unit-pinned; full E2E needs ParallaxScheduledExecutor wiring |
 | Privacy budget | `GET /privacy/budget` | ✅ | 445 | Live: returns {max_epsilon, total_spent, remaining, num_operations, spends} |
 | Arbitration queue | `GET /content/arbitration/queue` | ✅ | 445 | Live: returns {pending, total} empty-state |
-| Tensor parallel sharding | `POST /compute/inference/tensor_parallel/shard` | 🟢 | — | Endpoint exists |
-| Pipeline stage setup | `POST /compute/inference/pipeline/stage` | 🟢 | — | Endpoint exists |
+| Tensor parallel sharding | `POST /compute/inference/tensor_parallel/shard` | ✅ | 472 | Live: schema-defended 422 with required-field list `{shard_id, input_activations_b64}` — defense-in-depth against malformed shard dispatch |
+| Pipeline stage setup | `POST /compute/inference/pipeline/stage` | ✅ | 472 | Live: schema-defended 422 with full required-field list `{job_id, round_id, stage_id, layer_indices, input_activations_b64}` |
 
 ### Forge (query orchestrator)
 
@@ -718,6 +718,32 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 472** — §4 content + §5.2 inference
+  paired-surface sweep. 6 PRSM_Testing.md rows promoted:
+  - `GET /content/{cid}` → 404 "Content not found in index"
+    for un-indexed CIDs (Tier A uploads don't auto-index;
+    honest-scope distinction documented).
+  - `GET /content/recipient-manifest/{cid}` → 422 schema-
+    defended "not an encrypted recipient bundle" on Tier A
+    CID (this endpoint is Tier B/C-only by design).
+  - `GET /content/search` → clean `{query, results, count}`
+    envelope; tier filter validates `min_tier` enum
+    (`low/medium/high`) — invalid → 400 with canonical list.
+  - `GET /content/mine` post-upload returns full canonical
+    schema (content_id, filename, size_bytes, content_hash,
+    creator_id, royalty_rate, access_count, total_royalties,
+    provenance_tx_hash, created_at, is_sharded).
+  - `POST /content/upload/shard` ⚠️ schema-pass: missing
+    `dataset_id` → 400 with clean message; full E2E untested
+    (needs sharded-dataset fixture).
+  - `POST /compute/inference/tensor_parallel/shard` +
+    `POST /compute/inference/pipeline/stage` → schema-defended
+    422 with full required-field lists. Defense-in-depth
+    against malformed shard/stage dispatch on the live
+    inference fabric.
+
+  Cumulative ✅ rows now 202 (was 196).
+
 - **2026-05-16 sprint 471** — §13 admin + §14 paired-surface
   sweep. 13 PRSM_Testing.md rows promoted via end-to-end probe
   against running daemon:
