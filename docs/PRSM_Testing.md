@@ -395,7 +395,7 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Operator content filter (tag blocklist) | `/admin/content-filter/tags` | ✅ | 471 | Live full lifecycle: POST `{tags:[T]}` → `{added:1, total:1}`; GET /admin/content-filter shows tag in blocked_model_tags; DELETE /tags/{T} → `{removed, total:0}` |
 | Foundation takedown notice intake (info-only) | `/admin/takedown-notice` | ✅ | 439 | Live-verified: target_cid+sender+jurisdiction+basis required (§14 attribution invariant) |
 | Notice → filter bridge | `/admin/content-filter/from-notice/{id}` | ✅ | 439 | Live E2E: notice → bridge → CID auto-added; notice status flips to "acknowledged" |
-| Notice lifecycle status transitions | `/admin/takedown-notices/{id}/status` | 🟢 | 269-274 | |
+| Notice lifecycle status transitions | `/admin/takedown-notices/{id}/status` | ✅ | 269-274, 477 | Live full lifecycle: POST /takedown-notice → status=received; POST /{id}/status → transitions received → acknowledged → disputed; GET /{id} round-trips updated state; invalid status value → 422 with canonical list `['acknowledged','disputed','expired','received']` |
 
 ### Data quality + Sybil resistance
 
@@ -718,6 +718,32 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 477** — §14 takedown-notice + corp-
+  capability lifecycle E2E. 2 rows touched:
+
+  **Takedown lifecycle** (`/admin/takedown-notices/{id}/status`):
+  - POST /admin/takedown-notice → status=received with full
+    envelope (notice_id, timestamp, target_cid, sender,
+    jurisdiction, basis, notice_text, status).
+  - POST /{id}/status → transitions received → acknowledged
+    → disputed. State changes round-trip via GET /{id}.
+  - Invalid status → 422 with canonical list
+    `['acknowledged', 'disputed', 'expired', 'received']`.
+
+  **Corp capability** (`/admin/corp/issuer`,
+  `/admin/corp/capability/{id}/...`):
+  - POST /issuer with 32-byte Ed25519 pubkey → 200 +
+    issuer envelope. Non-32-byte pubkey → 422 with clear
+    `Ed25519 pubkey must be 32 bytes, got N` message
+    (cryptographic-soundness invariant: 44-byte X.509-DER-
+    wrapped pubkeys explicitly rejected).
+  - GET /issuer → paginated list.
+  - GET /capability/{id}/ledger → empty entries envelope.
+  - GET /capability/{id}/consumed → `{capability_id,
+    consumed: 0}`.
+
+  Cumulative ✅ rows now 206.
+
 - **2026-05-16 sprint 476** — incident-response full lifecycle
   E2E live-verified. Completes the Foundation-Safe-adjacent
   flow trio (upgrade-proposal sprint 475, disclosure-payout
