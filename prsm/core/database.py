@@ -1412,6 +1412,50 @@ class FTNSQueries:
             return transactions
 
 
+def _row_created_at_to_epoch(value) -> float:
+    """Normalize a DATETIME column value to a Unix-epoch float.
+
+    SQLite stores DATETIME columns as ISO-format strings (sprint
+    480 / F22 — same class as F11). Postgres returns native
+    `datetime` objects. Callers want a float epoch (the dict
+    schema produced by ProvenanceQueries.load_all_for_node passes
+    `created_at: float` to UploadedContent).
+
+    Returns 0.0 if `value` is None or unparseable, matching the
+    pre-F22 behavior for missing values.
+    """
+    if value is None:
+        return 0.0
+    # Native datetime (Postgres path)
+    ts = getattr(value, "timestamp", None)
+    if callable(ts):
+        return ts()
+    # ISO-string (SQLite path) — accept both space + 'T' separators
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return 0.0
+        # Tolerate 'YYYY-MM-DD HH:MM:SS[.ffffff]' and ISO 8601.
+        from datetime import datetime as _dt
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S",
+        ):
+            try:
+                return _dt.strptime(s, fmt).timestamp()
+            except ValueError:
+                continue
+        # Last resort: fromisoformat (handles fractional seconds
+        # in a more permissive way on newer Pythons)
+        try:
+            return _dt.fromisoformat(s).timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
 class ProvenanceQueries:
     """Query helpers for content provenance operations.
 
@@ -1584,7 +1628,22 @@ class ProvenanceQueries:
                             else None
                         ),
                         "provenance_hash": row.provenance_hash,
-                        "created_at": row.created_at.timestamp() if row.created_at else 0.0,
+                        # Sprint 480 (F22) — SQLite returns DATETIME
+                        # columns as ISO-format strings (`'2026-05-15
+                        # 12:52:27.363797'`) instead of native
+                        # `datetime` objects. Same class as F11
+                        # (sprint 432, StakingManager tz subtract).
+                        # Pre-fix: `.timestamp()` raised
+                        # AttributeError on every str row →
+                        # except-Exception caught + the WHOLE
+                        # hydration returned [] → uploaded_content
+                        # silently empty after every daemon restart
+                        # → operator can't see previously-uploaded
+                        # content via /content/mine until they
+                        # re-upload.
+                        "created_at": _row_created_at_to_epoch(
+                            row.created_at,
+                        ),
                     }
                     for row in rows
                 ]

@@ -872,6 +872,52 @@ defends method presence + sum semantics + agreement with `to_dict()`.
 
 ---
 
+### F22 — `ProvenanceQueries.load_all_for_node` crashes on SQLite str datetime → `/content/mine` empty after every restart
+
+**The bug.** `prsm/core/database.py:1587` called
+`row.created_at.timestamp()` inside the hydration list-comp.
+SQLite stores DATETIME columns as ISO-format strings
+(`'2026-05-15 12:52:27.363797'`) instead of native Python
+`datetime` objects (Postgres path). The first row triggered
+AttributeError; the defensive try/except at line 1591 caught
+it and returned [] silently.
+
+Live impact: `uploaded_content` dict empty after every daemon
+restart → operator can't see previously-uploaded content via
+`/content/mine` until they re-upload. Live-verified pre-fix:
+`/content/mine` returned 0 entries despite 14 records in the
+DB.
+
+**Same class as F11** (sprint 432, StakingManager tz-aware
+datetime subtract — also SQLite-typing-related).
+
+**Severity.** Production-blocker (silent — no user-visible
+error, but operator content listings appear empty for
+days/weeks at a time).
+
+**Surfaced.** Sprint 480 (2026-05-16) during startup-log
+audit chartered after sprint 479's libp2p-warning cleanup.
+Each successive sprint exposes more startup noise; each piece
+of noise is worth investigating for a real bug.
+
+**Fix.** Sprint 480 added `_row_created_at_to_epoch()` helper
+in `prsm/core/database.py` that normalizes both native
+`datetime` (Postgres) and ISO strings (SQLite — both
+microsecond + non-microsecond + 'T'-separator variants) to a
+Unix-epoch float. Unparseable input → 0.0 (matches pre-F22
+None-handling).
+
+**Live-verified.** Daemon restart with fix → `/content/mine`
+returned 0 → 14 entries (full content history from sprints
+441/449/472 restored).
+
+**Pin test.** `tests/unit/test_sprint_480_f22_provenance_hydration.py`
+defends helper edge cases + integration source-of-truth (the
+buggy `row.created_at.timestamp()` pattern explicitly banned
+from `load_all_for_node` body).
+
+---
+
 ## What's working (positive findings)
 
 - ✅ `prsm setup --minimal` completes cleanly on existing config (re-prompt

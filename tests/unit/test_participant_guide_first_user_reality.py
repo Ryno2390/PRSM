@@ -112,14 +112,13 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_twenty_one_frictions():
-    """The findings doc enumerates F1-F21. F19 + F20 + F21
-    added 2026-05-15/16. F19 bleach was in [server] extra;
-    fixed 462. F20 DO cloud firewall blocks operator P2P
-    port 9001 inbound; deferred to operator action. F21
-    ContentFilterStore.count() missing — fixed sprint 473.
-    If a finding is silently removed (without an explicit
-    closure note), surface that."""
+def test_findings_doc_documents_all_twenty_two_frictions():
+    """The findings doc enumerates F1-F22. F22 added 2026-05-16
+    during sprint 480 startup-log audit. Same class as F11
+    (SQLite drops datetime types); fixed sprint 480 via
+    `_row_created_at_to_epoch` helper. If a finding is
+    silently removed (without an explicit closure note),
+    surface that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -143,6 +142,7 @@ def test_findings_doc_documents_all_twenty_one_frictions():
         "F19 — `bleach` in `[server]` extra but required",
         "F20 — DO cloud firewall blocks operator P2P port",
         "F21 — `ContentFilterStore` lacks `count()`",
+        "F22 — `ProvenanceQueries.load_all_for_node`",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"
