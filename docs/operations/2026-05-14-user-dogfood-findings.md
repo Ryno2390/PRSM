@@ -1130,14 +1130,38 @@ would show false canonicals.
 
 **Surfaced.** Sprint 487.
 
-**Fix.** Deferred — needs a proper fingerprint-registry
-lock + atomic "INSERT ... ON CONFLICT (cid) DO NOTHING"
-+ post-insert read to discover actual canonical creator.
-The handler must then return the TRUE canonical, not the
-optimistic one.
+**Fix.** ~~Deferred~~ **Closed sprint 488 (2026-05-16)**.
+Root cause was actually two bugs compounding:
 
-**Pin test.** Concurrency harness (sprint 487) defends
-once the fix lands.
+1. **The fingerprint registry was never wired** on
+   non-QO daemons. Pre-fix: ContentFingerprintRegistry
+   init was inside `_build_query_orchestrator_or_none`,
+   which early-returns when `PRSM_QUERY_ORCHESTRATOR_ENABLED`
+   is unset (the default). Result: every daemon without QO
+   had `_content_fingerprint_registry = None` → the §14
+   anti-Sybil first-creator-wins NEVER fired → every
+   duplicate upload returned `duplicate_of_creator: null`
+   regardless of race conditions. Live-verified via
+   `/marketplace/fingerprint/{hash}` returning 503 "not
+   initialized".
+2. Even with the registry wired, the `register()` method's
+   check-then-insert window was not atomic. Concurrent
+   callers all saw `existing is None` and all inserted.
+
+Sprint 488 fix: (a) moved registry construction OUT of
+`_build_query_orchestrator_or_none` to unconditional
+node init; (b) added `threading.Lock` around the get →
+insert → disk-write critical section in `register()`.
+
+Live-verified post-fix: 10 concurrent uploads with
+distinct `creator_eth_address` payloads → 1 returns
+`canonical_creator=<first_addr>, duplicate_of_creator=null`;
+9 return `canonical_creator=<first_addr>,
+duplicate_of_creator=<first_addr>`. §14 anti-Sybil
+operational.
+
+**Pin test.** `tests/integration/test_sprint_487_concurrency.py::test_fingerprint_dedup_race_first_creator_wins`
+now passes; runs the same 10-caller stress.
 
 ---
 
@@ -1179,15 +1203,26 @@ concurrency assumptions are wishful.
 
 **Surfaced.** Sprint 487.
 
-**Fix.** Deferred — needs proper per-stake locking in
-StakingManager.unstake (not per-manager) + atomic SELECT
-... FOR UPDATE on the stake record before inserting the
-unstake request.
+**Fix.** ~~Deferred~~ **Closed sprint 488 (2026-05-16)**
+incidentally. F25's per-wallet `asyncio.Lock` in
+`dag_ledger.submit_transaction` serializes ALL FTNS
+balance-mutation operations on a given wallet. Staking
+unstake routes its FTNS transition through the dag_ledger,
+so the per-wallet lock now enforces strict serialization
+of unstake-the-same-stake calls — only the first sees
+the active stake; the rest see the unstaking state and
+get rejected cleanly. Live-verified: sprint 487's race
+test now passes 5/5 consecutive runs (previously: 5 of 10
+unstake requests succeeded simultaneously).
 
-**Pin test.** Sprint 487 concurrency harness's
-test_staking_unstake_race_no_double_unstake. Initially
-passed (lucky timing); now reliably fails after F25's
-per-wallet lock in dag_ledger changed scheduler timing.
+**Pin test.** `test_staking_unstake_race_no_double_unstake`
+in sprint 487's harness. Reliably passes post-F25 lock.
+
+**Note.** This is a side-effect of F25's fix, not a
+direct fix in StakingManager. A defense-in-depth follow-on
+would be to add a per-stake_id lock at the StakingManager
+layer too, so the invariant holds even if the dag_ledger
+lock is bypassed by a future refactor.
 
 ---
 

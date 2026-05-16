@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -81,6 +82,17 @@ class ContentFingerprintRegistry:
         persist_dir: Optional[Path] = None,
     ) -> None:
         self._entries: Dict[str, ContentFingerprintEntry] = {}
+        # Sprint 488 (F26 fix) — serialize the check-then-insert
+        # window in register(). Pre-fix: concurrent identical
+        # uploads all saw `existing is None` and all inserted +
+        # returned `is_new=True` → the API handler reported all
+        # of them as canonical (Vision §14 first-creator-wins
+        # anti-Sybil invariant compromised at the response
+        # layer). A single process-wide threading.Lock is
+        # sufficient because the operations are tiny dict
+        # updates + a synchronous disk write; contention is low
+        # and content-hash conflicts are rare in practice.
+        self._lock = threading.Lock()
         self._persist_dir: Optional[Path] = (
             Path(persist_dir) if persist_dir is not None else None
         )
@@ -112,23 +124,31 @@ class ContentFingerprintRegistry:
         now_int = int(
             timestamp if timestamp is not None else time.time()
         )
-        existing = self._entries.get(content_hash)
-        if existing is None:
-            entry = ContentFingerprintEntry(
-                content_hash=content_hash,
-                canonical_creator=creator_eth_address,
-                first_seen_unix=now_int,
-                duplicate_attempt_count=0,
-            )
-            self._entries[content_hash] = entry
-            self._write_to_disk(entry)
-            return (creator_eth_address, True)
-        # Existing: re-claim by same creator is a no-op; by
-        # different creator counts as a duplicate attempt.
-        if existing.canonical_creator != creator_eth_address:
-            existing.duplicate_attempt_count += 1
-            self._write_to_disk(existing)
-        return (existing.canonical_creator, False)
+        # Sprint 488 (F26 fix) — the check-then-insert window
+        # must be atomic. Pre-fix, under N=10 concurrent
+        # uploads of identical content, all callers saw
+        # `existing is None` and all inserted + all returned
+        # `is_new=True`. The lock makes the get → insert →
+        # disk-write transition a single critical section per
+        # content_hash. Different content_hashes still parallel.
+        with self._lock:
+            existing = self._entries.get(content_hash)
+            if existing is None:
+                entry = ContentFingerprintEntry(
+                    content_hash=content_hash,
+                    canonical_creator=creator_eth_address,
+                    first_seen_unix=now_int,
+                    duplicate_attempt_count=0,
+                )
+                self._entries[content_hash] = entry
+                self._write_to_disk(entry)
+                return (creator_eth_address, True)
+            # Existing: re-claim by same creator is a no-op; by
+            # different creator counts as a duplicate attempt.
+            if existing.canonical_creator != creator_eth_address:
+                existing.duplicate_attempt_count += 1
+                self._write_to_disk(existing)
+            return (existing.canonical_creator, False)
 
     # ── Queries ──────────────────────────────────────────
 

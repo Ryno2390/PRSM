@@ -3612,6 +3612,45 @@ class PRSMNode:
         #   docs/2026-05-07-aggregator-selector-threat-model.md
         self.agent_forge = self._build_query_orchestrator_or_none()
 
+        # Sprint 488 (F26 fix) — ContentFingerprintRegistry must
+        # be wired UNCONDITIONALLY, not gated behind
+        # QueryOrchestrator. Pre-fix: the registry was constructed
+        # inside `_build_query_orchestrator_or_none` which
+        # early-returns when `PRSM_QUERY_ORCHESTRATOR_ENABLED` is
+        # unset (the default). Result: every daemon without QO had
+        # `_content_fingerprint_registry = None` → §14 anti-Sybil
+        # first-creator-wins NEVER fired → every duplicate upload
+        # returned `duplicate_of_creator: null` regardless of race
+        # conditions. Move it out so the registry is wired on
+        # every daemon. (The duplicate init in
+        # `_build_query_orchestrator_or_none` is left in place for
+        # QO-enabled deployments; the second from_env() call
+        # constructs a fresh instance, harmlessly overwriting the
+        # earlier reference — a follow-on can consolidate.)
+        try:
+            from prsm.marketplace.content_fingerprint_registry import (  # noqa: E501
+                ContentFingerprintRegistry,
+            )
+            self._content_fingerprint_registry = (
+                ContentFingerprintRegistry.from_env()
+            )
+            logger.info(
+                "ContentFingerprintRegistry wired "
+                "(persist_dir=%s)",
+                getattr(
+                    self._content_fingerprint_registry,
+                    "_persist_dir", None,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ContentFingerprintRegistry "
+                "construction failed: %s — fingerprint "
+                "dedup will not be enforced.",
+                exc,
+            )
+            self._content_fingerprint_registry = None
+
         # ── Confidential Compute (Ring 7) ─────────────────────────────
         try:
             from prsm.compute.tee.confidential_executor import ConfidentialExecutor

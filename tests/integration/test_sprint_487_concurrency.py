@@ -335,23 +335,35 @@ def test_compute_cancel_refund_race_no_double_refund():
 
 def test_fingerprint_dedup_race_first_creator_wins():
     """N concurrent /content/upload with IDENTICAL content
-    but DIFFERENT creator_ids. Vision §14 anti-Sybil
-    invariant: only the FIRST upload's creator becomes
-    canonical; the rest get duplicate_of_creator set.
-    Without proper locking, two concurrent uploaders could
-    both think they're canonical."""
+    but DIFFERENT `creator_eth_address` values. Vision §14
+    anti-Sybil invariant: only the FIRST upload's creator
+    becomes canonical; the rest get duplicate_of_creator
+    set. Without proper locking in the
+    ContentFingerprintRegistry, multiple concurrent uploaders
+    could all see `existing is None` and all insert + return
+    is_new=True → all appear canonical → adversary defeats
+    first-creator-wins by racing identity claims.
+
+    NOTE on field name: the upload schema uses
+    `creator_eth_address` (0x-prefixed 40-hex), NOT
+    `creator_id`. Sprint 487's first version of this test
+    used `creator_id` which the handler ignored → registry
+    was never reached → false-positive failure that masked
+    the real F26. Sprint 488 corrected the field name AND
+    fixed the actual race in the registry."""
     import time
-    # Use a unique payload so we don't collide with other
-    # historical uploads.
     payload_text = (
-        f"sprint-487-dedup-race-{int(time.time())}"
+        f"sprint-488-dedup-race-{int(time.time())}"
     )
     n = 10
+    # Generate N distinct valid 0x addresses (40 hex chars).
+    def _fake_addr(i: int) -> str:
+        return "0x" + (f"{i:040x}")
     results = asyncio.run(_parallel_calls(
         n, "POST", "/content/upload",
         lambda i: {
             "text": payload_text,
-            "creator_id": f"sprint-487-creator-{i}",
+            "creator_eth_address": _fake_addr(i + 1),
         },
     ))
     successes = [r for r in results if r["status"] == 200]
@@ -380,13 +392,21 @@ def test_fingerprint_dedup_race_first_creator_wins():
         f"exactly 1. anti-Sybil invariant broken"
     )
     if duplicates:
-        canonical_creator = canonicals[0]["body"]["creator_id"]
+        # The canonical's `canonical_creator` field is the
+        # 0x address that won. Duplicates' `duplicate_of_creator`
+        # must point at the SAME 0x address. Note: this is the
+        # `creator_eth_address` (from the request), NOT
+        # `creator_id` (which is the node's identity and is
+        # the same for all 10 calls).
+        canonical_eth_address = (
+            canonicals[0]["body"]["canonical_creator"]
+        )
         for d in duplicates:
             assert (
                 d["body"]["duplicate_of_creator"]
-                == canonical_creator
+                == canonical_eth_address
             ), (
                 f"duplicate points to wrong canonical: "
                 f"{d['body']['duplicate_of_creator']} != "
-                f"{canonical_creator}"
+                f"{canonical_eth_address}"
             )
