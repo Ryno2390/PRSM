@@ -379,9 +379,9 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Incident open / advance / log event | `/admin/incident/...` | `prsm node incident list/details/playbook` (read-only) | `prsm_incident` | ✅ Sprint 434 (trifecta closure, read-only triage) |
 | Insurance fund status | `/admin/insurance-fund/status` | — | `prsm_insurance_fund` | ✅ Sprint 455 (live: treasury_address=Foundation Safe 0x91b0e6F8…, target_bps=500 reserve target, commissioned=false in dev env) |
 | Emergency pause status (mainnet contracts) | `/admin/emergency-pause/status` | — | `prsm_emergency_pause` | ✅ Sprint 455 (live: ftns_token + royalty_distributor + BSR + EscrowPool + StakeBond + Ed25519Verifier + StorageSlashing + KeyDistribution + EmissionController all reported with paused state + commissioned flag against chain_id=8453 Base mainnet) |
-| Upgrade proposal | `/admin/upgrade/...` | — | `prsm_upgrade` | ✅ Sprint 471 (live: GET /admin/upgrade → `{records:[], count:0}` empty-state; propose/update/compose-upgrade endpoints schema-pinned for follow-on E2E) |
+| Upgrade proposal | `/admin/upgrade/...` | — | `prsm_upgrade` | ✅ Sprint 471, 475 (full lifecycle live: POST /propose → proposed; GET /{id} round-trips; /update advances proposed→reviewed→safe_uploaded with safe_tx_hash; /compose-upgrade returns Safe-uploadable tx with `upgradeToAndCall` calldata, chain_id=8453, explicit storage-layout warning + 4-step instructions; /compose-rollback enforces `status==executed` invariant — Vision §14 "composer produces tx, doesn't execute" verified) |
 | TEE policy | `/admin/tee-policy/evaluate` | — | `prsm_tee_policy` | ✅ Sprint 436, 471 (live: `evaluate` → 422 with clear `policy` required-field; `/admin/tee-policy/node-status` → `{effective_tier, vendor, vendor_verified, diagnostic}`) |
-| Vulnerability disclosure | `/admin/disclosure/...` | — | `prsm_disclosure` | ✅ Sprint 471 (live: GET /admin/disclosure → `{records:[], count:0}` empty-state; submit/update/compose-payout endpoints schema-pinned for follow-on E2E) |
+| Vulnerability disclosure | `/admin/disclosure/...` | — | `prsm_disclosure` | ✅ Sprint 471, 475 (full lifecycle live: POST /submit → received; GET /{id} round-trips with details_b64 (privacy-preserving); /update advances received→triaged→awarded with triage_notes + payout_ftns; /compose-payout enforces `status==AWARDED` state-machine invariant; on awarded → returns Safe-uploadable bug-bounty payout tx (FTNS ERC-20 `transfer(recipient, 1000e18)` calldata, chain_id=8453, warning + 4-step Safe UI instructions); /record-payout-tx closes audit trail with on-chain tx hash) |
 
 ---
 
@@ -718,6 +718,43 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 475** — Foundation-Safe composer flows
+  E2E. Two full multi-step lifecycles operationally attested:
+
+  **Upgrade-proposal** (`/admin/upgrade/...`):
+  - POST /propose → status=proposed; full proposal envelope
+    (proposal_id, target_proxy, new_implementation, severity,
+    rationale, init_calldata_hex, reviewer_assignments).
+  - GET /{id} round-trips; GET /admin/upgrade list reflects.
+  - /update advances proposed → reviewed → safe_uploaded
+    with safe_tx_hash recorded.
+  - /compose-upgrade returns Safe-uploadable tx with
+    `upgradeToAndCall` calldata, chain_id=8453, explicit
+    storage-layout warning + 4-step Safe UI instructions.
+  - /compose-rollback enforces `status==executed` (correctly
+    rejects pre-execution rollback attempts).
+
+  **Disclosure-payout** (`/admin/disclosure/...`):
+  - POST /submit → status=received; details stored as
+    base64 (privacy-preserving).
+  - /update advances received → triaged → awarded with
+    triage_notes + payout_ftns.
+  - /compose-payout enforces `status==AWARDED` invariant
+    (correctly rejects pre-award attempts).
+  - On awarded → returns FTNS ERC-20 `transfer(recipient,
+    1000e18)` calldata against the mainnet FTNS contract
+    (`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`), with
+    Safe UI instructions.
+  - /record-payout-tx closes audit trail with on-chain
+    tx hash.
+
+  **Vision §14 invariant operationally verified for both
+  flows: composer PRODUCES the transaction; does NOT
+  execute it.** Foundation Safe 2-of-3 hardware multisig
+  retains exclusive privilege per the canonical claim.
+
+  Cumulative ✅ rows now 204 (was 202).
+
 - **2026-05-16 sprint 472** — §4 content + §5.2 inference
   paired-surface sweep. 6 PRSM_Testing.md rows promoted:
   - `GET /content/{cid}` → 404 "Content not found in index"
