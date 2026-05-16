@@ -212,15 +212,42 @@ class Libp2pTransport:
 
         maddr = self._to_multiaddr(address)
         if "/p2p/" not in maddr:
-            logger.warning(
-                "Libp2pTransport: bootstrap multiaddr %r is missing "
-                "/p2p/<peerID> suffix — libp2p connect requires it. "
-                "Use the bootstrap registry (signed bootstrap.json) "
-                "to resolve full multiaddrs, or append /p2p/<id> "
-                "manually if the peer ID is known.",
-                maddr,
+            # Sprint 479: demote to debug for ws:// / wss:// inputs.
+            # The canonical PRSM bootstrap fleet uses
+            # BootstrapClient's register/heartbeat WS protocol —
+            # NOT full libp2p. Libp2pDiscovery.bootstrap() calls
+            # this method first as a libp2p-native probe and falls
+            # back to _try_bootstrap_client on ws:// URLs (which
+            # don't need /p2p/<peerID>). Emitting a WARNING for
+            # ws:// inputs misled operators into thinking the
+            # bootstrap config was broken when it was actually
+            # working via the documented fallback.
+            #
+            # Real libp2p multiaddrs (/dns4/.../tcp/.../ws or
+            # /ip4/...) STILL warn — those genuinely need /p2p
+            # for the C-bridge connect to succeed.
+            is_ws_fallback_path = (
+                address.startswith("ws://")
+                or address.startswith("wss://")
             )
-            self._telemetry["error_count"] += 1
+            if is_ws_fallback_path:
+                logger.debug(
+                    "Libp2pTransport: skipping libp2p-native "
+                    "connect for ws:// bootstrap %r — "
+                    "BootstrapClient WS fallback will handle.",
+                    address,
+                )
+            else:
+                logger.warning(
+                    "Libp2pTransport: bootstrap multiaddr %r is "
+                    "missing /p2p/<peerID> suffix — libp2p connect "
+                    "requires it. Use the bootstrap registry "
+                    "(signed bootstrap.json) to resolve full "
+                    "multiaddrs, or append /p2p/<id> manually if "
+                    "the peer ID is known.",
+                    maddr,
+                )
+                self._telemetry["error_count"] += 1
             return None
 
         ptr = self._lib.PrsmConnect(self._handle, maddr.encode("utf-8"))
