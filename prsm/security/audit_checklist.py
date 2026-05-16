@@ -71,11 +71,27 @@ class SecurityCheck:
     references: List[str] = field(default_factory=list)
     
     def __post_init__(self):
-        """Validate check configuration"""
+        """Validate check configuration.
+
+        Sprint 481: SecurityCheck instances with
+        `auto_check=True, check_function=None` are intentional
+        scaffolding for the default checklist (see
+        SecurityAuditor.DEFAULT_CHECKS) — each represents a
+        manual-review item awaiting a concrete check_function
+        implementation. This is a known state of the codebase,
+        not an operator-visible fault.
+
+        Pre-fix: this constructor emitted WARNING for every
+        such instance — 36 lines per daemon startup, polluting
+        operator log dashboards keyed on WARNING count. Demoted
+        to debug; operators can still surface the pending-impl
+        roster via SecurityAuditor's audit-trail API.
+        """
         if self.auto_check and self.check_function is None:
-            logger.warning(
-                "Check marked as auto but no function provided",
-                check_id=self.check_id
+            logger.debug(
+                "SecurityCheck pending check_function impl "
+                "(intentional scaffold)",
+                check_id=self.check_id,
             )
 
 
