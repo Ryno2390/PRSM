@@ -376,7 +376,7 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 
 | Feature | REST | CLI | MCP | Status |
 |---------|------|-----|-----|--------|
-| Incident open / advance / log event | `/admin/incident/...` | `prsm node incident list/details/playbook` (read-only) | `prsm_incident` | ✅ Sprint 434 (trifecta closure, read-only triage) |
+| Incident open / advance / log event | `/admin/incident/...` | `prsm node incident list/details/playbook` (read-only) | `prsm_incident` | ✅ Sprint 434, 476 (sprint 434: CLI trifecta read-only; sprint 476: **full lifecycle live E2E** — POST /open returns full envelope with timeline; /event appends to timeline preserving phase; /advance transitions detected→triaged (s2 example, timeline grows); /recommendations returns context-specific action items; /comms-template returns ready-to-paste internal-update text; /playbook surfaces full s0-s3 × phase decision tree with Vision §14 PAUSE NOW / Foundation Safe 15min-target / forensics-partner-engage guidance) |
 | Insurance fund status | `/admin/insurance-fund/status` | — | `prsm_insurance_fund` | ✅ Sprint 455 (live: treasury_address=Foundation Safe 0x91b0e6F8…, target_bps=500 reserve target, commissioned=false in dev env) |
 | Emergency pause status (mainnet contracts) | `/admin/emergency-pause/status` | — | `prsm_emergency_pause` | ✅ Sprint 455 (live: ftns_token + royalty_distributor + BSR + EscrowPool + StakeBond + Ed25519Verifier + StorageSlashing + KeyDistribution + EmissionController all reported with paused state + commissioned flag against chain_id=8453 Base mainnet) |
 | Upgrade proposal | `/admin/upgrade/...` | — | `prsm_upgrade` | ✅ Sprint 471, 475 (full lifecycle live: POST /propose → proposed; GET /{id} round-trips; /update advances proposed→reviewed→safe_uploaded with safe_tx_hash; /compose-upgrade returns Safe-uploadable tx with `upgradeToAndCall` calldata, chain_id=8453, explicit storage-layout warning + 4-step instructions; /compose-rollback enforces `status==executed` invariant — Vision §14 "composer produces tx, doesn't execute" verified) |
@@ -718,6 +718,32 @@ arc proved we need.
   persistence is the production reliability guarantee** — operators
   expect signed receipts to survive restarts; this sprint
   verified that operationally. 3 §13 rows attributed to sprint 447.
+- **2026-05-16 sprint 476** — incident-response full lifecycle
+  E2E live-verified. Completes the Foundation-Safe-adjacent
+  flow trio (upgrade-proposal sprint 475, disclosure-payout
+  sprint 475, incident-response sprint 476):
+  - POST /admin/incident/open → s2 incident, current_phase
+    detected, full envelope with timeline + affected_contracts
+    + related_disclosure_id slot.
+  - POST /event appends to timeline preserving phase.
+  - POST /advance transitions detected → triaged + timeline
+    grows.
+  - GET /recommendations returns context-specific actions
+    keyed on (severity, current_phase).
+  - GET /comms-template returns ready-to-paste internal-
+    update markdown.
+  - GET /playbook surfaces full s0-s3 × phase decision tree
+    with explicit **Vision §14 guidance**: "PAUSE NOW:
+    invoke prsm_emergency_pause compose_pause" / "Foundation
+    Safe signs IMMEDIATELY (target: <15min)" / "Engage
+    on-chain forensics partner (Chainalysis / TRM Labs)".
+
+  Sprint 476 closes the operator-side incident-response audit
+  surface. The TX-side response (emergency-pause compose) is
+  already ✅ via sprint 455's 9-contract mainnet readback.
+
+  Cumulative ✅ rows now 205.
+
 - **2026-05-16 sprint 475** — Foundation-Safe composer flows
   E2E. Two full multi-step lifecycles operationally attested:
 
