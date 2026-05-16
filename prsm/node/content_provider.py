@@ -664,8 +664,11 @@ class ContentProvider:
         timeout = timeout or self.default_timeout
         
         # Check if we have it locally first
+        # Sprint 484 (F24): propagate timeout into _fetch_local so
+        # the BT-fallback path can't block indefinitely on hydrated
+        # CIDs whose BT seed metadata was lost across restart.
         if cid in self._local_content:
-            local_bytes = await self._fetch_local(cid)
+            local_bytes = await self._fetch_local(cid, timeout=timeout)
             if local_bytes is not None:
                 logger.debug(f"Retrieved {cid[:12]}... locally")
                 return local_bytes
@@ -849,7 +852,10 @@ class ContentProvider:
             self._http_session = aiohttp.ClientSession()
         return self._http_session
 
-    async def _fetch_local(self, content_id: str) -> Optional[bytes]:
+    async def _fetch_local(
+        self, content_id: str,
+        timeout: Optional[float] = None,
+    ) -> Optional[bytes]:
         """Retrieve content from the local ContentStore by content hash.
 
         Returns None (never raises) for any of: ContentStore unavailable,
@@ -861,6 +867,11 @@ class ContentProvider:
         ``_local_content``. Closes the BT-infohash vs ContentHash storage
         split documented in
         ``docs/operations/2026-05-14-user-dogfood-findings.md`` F7.
+
+        Sprint 484 (F24): propagates ``timeout`` to the BT-fallback
+        path. Pre-fix, BT-fallback was unbounded; for hydrated CIDs
+        (post-sprint-480 F22 fix) where BT publisher state was lost
+        across restart, retrieve hung forever.
         """
         try:
             from prsm.storage import ContentHash, get_content_store
@@ -871,7 +882,7 @@ class ContentProvider:
                 logger.debug(
                     f"ContentStore not available, cannot retrieve {content_id[:12]}..."
                 )
-                return await self._fetch_local_via_bt(content_id)
+                return await self._fetch_local_via_bt(content_id, timeout=timeout)
             try:
                 bytes_ = await store.retrieve_local(
                     ContentHash.from_hex(content_id),
@@ -888,16 +899,28 @@ class ContentProvider:
             logger.debug(f"Content not found in ContentStore for {content_id[:12]}...")
         except (StorageError, OSError) as e:
             logger.error(f"ContentStore retrieve failed for {content_id[:12]}...: {e}")
-        return await self._fetch_local_via_bt(content_id)
+        return await self._fetch_local_via_bt(content_id, timeout=timeout)
 
     async def _fetch_local_via_bt(
         self, content_id: str,
+        timeout: Optional[float] = None,
     ) -> Optional[bytes]:
         """Sprint 427 (F7): fetch via the wired ``ContentRetriever``.
 
         Fires only for cids that are in ``_local_content`` — guards
         against accidentally swarming the BT layer for unknown cids
         when the local-lookup path is meant to be a fast no-op.
+
+        Sprint 484 (F24): propagates ``timeout`` to retriever.fetch().
+        Pre-fix: timeout=None → BT swarm wait was unbounded. This
+        regressed F8 single-node retrieve for content hydrated by
+        sprint 480's F22 fix — `_local_content` re-populated post-
+        restart, but BT-publisher's `_published_paths` is per-session
+        so `local_publish_path()` returned None → fell through to
+        `bt_requester.request_content(timeout=None)` → hung forever
+        even though the user's curl had its own timeout. Operator-
+        visible symptom: `/content/retrieve/{cid}` would never
+        return for any hydrated CID.
 
         Returns None (never raises) for: no retriever wired, cid not
         in ``_local_content``, or retriever errors.
@@ -908,7 +931,24 @@ class ContentProvider:
         if content_id not in self._local_content:
             return None
         try:
+            # Sprint 484 (F24): propagate timeout. asyncio.wait_for
+            # is the defense-in-depth — even if retriever.fetch
+            # has its own (None) default, wait_for forces a return.
+            if timeout is not None:
+                return await asyncio.wait_for(
+                    retriever.fetch(
+                        content_id, timeout=timeout,
+                    ),
+                    timeout=timeout,
+                )
             return await retriever.fetch(content_id)
+        except asyncio.TimeoutError:
+            logger.debug(
+                "BT fallback retrieve timed out for "
+                "%s... (timeout=%ss)",
+                content_id[:12], timeout,
+            )
+            return None
         except Exception as e:  # noqa: BLE001
             logger.error(
                 f"BT fallback retrieve failed for {content_id[:12]}...: {e}"

@@ -112,12 +112,13 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_twenty_three_frictions():
-    """The findings doc enumerates F1-F23. F23 added 2026-05-16
-    during continued sprint 483 startup-log audit. Sandbox
-    temp-dir leak (`prsm_sandbox_*` mkdtemp without atexit
-    cleanup); fixed sprint 483. If a finding is silently
-    removed (without an explicit closure note), surface that."""
+def test_findings_doc_documents_all_twenty_four_frictions():
+    """The findings doc enumerates F1-F24. F24 added 2026-05-16
+    during sprint 484 semi-fresh dogfood pass — F22 fix exposed
+    a latent BT-fallback retrieve hang. Fixed sprint 484 via
+    timeout propagation + asyncio.wait_for defense. If a finding
+    is silently removed (without an explicit closure note),
+    surface that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -143,6 +144,7 @@ def test_findings_doc_documents_all_twenty_three_frictions():
         "F21 — `ContentFilterStore` lacks `count()`",
         "F22 — `ProvenanceQueries.load_all_for_node`",
         "F23 — `SandboxManager` temp-dir leak",
+        "F24 — `/content/retrieve/{cid}` hangs forever",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"

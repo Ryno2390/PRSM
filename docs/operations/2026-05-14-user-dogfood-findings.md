@@ -968,6 +968,72 @@ defends helper semantics + atexit registration source-of-truth.
 
 ---
 
+### F24 — `/content/retrieve/{cid}` hangs forever for hydrated CIDs after restart
+
+**The bug.** Sprint 480's F22 fix made
+`ProvenanceQueries.load_all_for_node` hydrate `_local_content`
+correctly from the DB after daemon restart. That **exposed a
+latent bug** in the BT-fallback retrieve path:
+
+1. `_local_content` is populated for hydrated CIDs (the F22
+   fix path).
+2. But BT-publisher's `_published_paths` is per-session.
+   `local_publish_path(cid)` returns None for hydrated CIDs
+   because the BT seed metadata was lost across restart.
+3. The retriever fell through to
+   `bt_requester.request_content(timeout=None)`. With 0 peers
+   on a single-node dev daemon, the BT swarm wait was
+   unbounded.
+4. `_fetch_local_via_bt` didn't propagate the caller's
+   `timeout` argument — so even when the operator passed
+   `?timeout=2`, the BT layer ignored it.
+
+Operator-visible symptom (live-verified during sprint 484
+semi-fresh dogfood pass): `curl /content/retrieve/{cid}`
+returned no response — not even the daemon's 30s HTTP
+timeout fired. Curl's own 35s wait expired with 0 bytes
+received.
+
+**Severity.** Production-blocker. After F22 fix landed,
+EVERY hydrated CID becomes a footgun: operators who try to
+retrieve their own previously-uploaded content get a
+permanent hang. Worse, because the hang doesn't release the
+worker, sustained dogfood retrieves could pile up.
+
+**Surfaced.** Sprint 484 (2026-05-16) during the semi-fresh
+dogfood pass that the user asked for after the sprint 469-483
+work. Walking Vision §4 step 5 (retrieve uploaded content),
+the user-perspective probe hung immediately.
+
+**Fix.** Sprint 484 propagated `timeout` through
+`request_content` → `_fetch_local` → `_fetch_local_via_bt` →
+`retriever.fetch(timeout=...)`. Plus defense-in-depth via
+`asyncio.wait_for(..., timeout=timeout)` so even a future
+retriever that silently ignores its `timeout` kwarg can't
+hang beyond the caller's bound.
+
+Live-verified pre-fix: 30s+ hang (curl gave up at 35s).
+Post-fix: 2s response with clean `not_found` envelope
+(timeout=2 honored).
+
+**Remaining work (deferred).** The fix makes retrieve fail
+FAST instead of HANG, but it doesn't actually deliver the
+bytes. Tier A staged files exist on disk
+(`content_publish_staging/<content_hash>`) but the
+CID→content_hash→staged_path lookup isn't wired into the
+retrieve path. A follow-on sprint should: at F22 hydration
+time, ALSO re-register the BT seed if the staged file is
+present, so `local_publish_path(cid)` returns the staged
+path and `ContentRetriever.fetch` short-circuits before the
+BT swarm. This would close Vision §4 step 5 end-to-end for
+hydrated content.
+
+**Pin test.** `tests/unit/test_sprint_484_f24_retrieve_timeout.py`
+defends the timeout-propagation contract + asyncio.wait_for
+defense-in-depth via a simulated-hang integration test.
+
+---
+
 ## What's working (positive findings)
 
 - ✅ `prsm setup --minimal` completes cleanly on existing config (re-prompt
