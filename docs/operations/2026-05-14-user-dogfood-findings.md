@@ -1016,17 +1016,19 @@ Live-verified pre-fix: 30s+ hang (curl gave up at 35s).
 Post-fix: 2s response with clean `not_found` envelope
 (timeout=2 honored).
 
-**Remaining work (deferred).** The fix makes retrieve fail
+**Remaining work (deferred).** ~~The fix makes retrieve fail
 FAST instead of HANG, but it doesn't actually deliver the
-bytes. Tier A staged files exist on disk
-(`content_publish_staging/<content_hash>`) but the
-CID→content_hash→staged_path lookup isn't wired into the
-retrieve path. A follow-on sprint should: at F22 hydration
-time, ALSO re-register the BT seed if the staged file is
-present, so `local_publish_path(cid)` returns the staged
-path and `ContentRetriever.fetch` short-circuits before the
-BT swarm. This would close Vision §4 step 5 end-to-end for
-hydrated content.
+bytes.~~ **Closed sprint 485 (2026-05-16):** at F22 hydration
+time, the uploader now calls
+`ContentPublisher.register_local_publish_tier_a` for each
+non-sharded hydrated record. The BT publisher's
+`_published_paths` is restored from the persisted
+`content_hash` → `local_publish_path(cid)` returns the staged
+file → `ContentRetriever.fetch` short-circuits the BT swarm
+path. Live-verified: **17/17** hydrated CIDs deliver bytes
+across a clean daemon restart. Vision §4 step 5 cross-restart
+fully closed for Tier A. Tier B/C remains deferred (staged
+dir naming requires per-publish info not persisted to DB).
 
 **Pin test.** `tests/unit/test_sprint_484_f24_retrieve_timeout.py`
 defends the timeout-propagation contract + asyncio.wait_for

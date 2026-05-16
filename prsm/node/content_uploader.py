@@ -2476,6 +2476,25 @@ class ContentUploader:
                 # so on-chain routing survives restarts for rows uploaded with
                 # a configured creator 0x address.
                 self._register_with_provider(uploaded)
+                # Sprint 485 (F24 follow-on) — restore the BT
+                # publisher's per-session `_published_paths` so
+                # `ContentRetriever.fetch` can short-circuit the
+                # BT swarm path for hydrated CIDs. Without this,
+                # sprint 480's F22 hydration made `_local_content`
+                # carry the CID but `local_publish_path()` still
+                # returned None → retrieve fell through to the BT
+                # swarm → sprint 484 (F24) bounded the hang but
+                # still returned `not_found` for every hydrated
+                # CID. Tier A only; Tier B/C is a deferred follow-
+                # on (staged dir naming requires per-publish info).
+                if (
+                    self.content_publisher is not None
+                    and not uploaded.is_sharded
+                ):
+                    self.content_publisher.register_local_publish_tier_a(
+                        infohash=uploaded.content_id,
+                        content_hash=uploaded.content_hash,
+                    )
                 loaded += 1
             if loaded > 0:
                 logger.info(

@@ -181,6 +181,37 @@ class ContentPublisher:
         """
         return self._published_paths.get(infohash)
 
+    def register_local_publish_tier_a(
+        self, infohash: str, content_hash: str,
+    ) -> bool:
+        """Sprint 485 (F24 follow-on) — re-register a Tier A
+        staged file with this publisher.
+
+        Called at F22 hydration time (content_uploader._hydrate_*)
+        so the BT seed metadata lost across daemon restart gets
+        restored from the persisted ``content_hash`` field.
+        After this, ``local_publish_path(infohash)`` returns the
+        staged file and ``ContentRetriever.fetch`` can short-
+        circuit the BT swarm path that sprint 484 (F24)
+        established was unbounded for orphaned BT lookups.
+
+        Returns True if the staged file exists and was
+        registered, False if the file is missing (in which case
+        the caller should fall through to the F24 fail-fast
+        path — better an honest not_found than a stale serve).
+
+        Tier B/C is NOT covered by this helper: those staged
+        roots use a per-publish directory naming convention
+        (``staging_dir/<basename>-<tier>``) that can't be
+        reconstructed from the hydrated record alone. Tier B/C
+        retrieval after restart remains a deferred follow-on.
+        """
+        staged_path = self.staging_dir / content_hash
+        if not staged_path.is_file():
+            return False
+        self._published_paths[infohash] = staged_path
+        return True
+
     def _resolve_content_store(self) -> "ContentStore":
         """Return the configured ContentStore or raise if unavailable."""
         if self.content_store is not None:
