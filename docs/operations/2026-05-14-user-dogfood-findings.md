@@ -832,6 +832,46 @@ route.
 
 ---
 
+### F21 — `ContentFilterStore` lacks `count()` → /health/detailed flips daemon to `degraded`
+
+**The bug.** Sprint 343 added a record-count probe to `/health/detailed`
+that calls `x.count()` on `ContentFilterStore` (among other optional
+subsystems). The method was never implemented. Live probe in sprint 473:
+
+```
+{
+  "available": false,
+  "status": "error",
+  "error": "'ContentFilterStore' object has no attribute 'count'"
+}
+```
+
+Because `content_filter_store` is in `_orchestrator_subsystem`'s `optional`
+list (not the `_OPT_OUT_STATUSES` set), having it `available: false`
+without `not_wired`/`disabled` status flips the top-level health to
+`degraded`.
+
+**Live impact.** Operator dashboards + alerting keyed on `status ==
+"degraded"` fire continuously even on a perfectly healthy daemon. Real
+alerts get drowned out.
+
+**Severity.** Production-blocker (silent — no user-visible error, but
+operator alerting is poisoned).
+
+**Surfaced.** Sprint 473 (2026-05-16) during the daemon reconnect-
+stability investigation that was originally chartered to track down
+`client_state: dead`. Found a different bug along the way.
+
+**Fix.** Sprint 473 added `ContentFilterStore.count()` returning the
+sum of CIDs + tags + patterns (matching the `to_dict()` snapshot
+fields). Live-verified: daemon status `degraded → healthy`,
+`content_filter_store` reports `record_count: 0` clean.
+
+**Pin test.** `tests/unit/test_sprint_473_content_filter_store_count.py`
+defends method presence + sum semantics + agreement with `to_dict()`.
+
+---
+
 ## What's working (positive findings)
 
 - ✅ `prsm setup --minimal` completes cleanly on existing config (re-prompt

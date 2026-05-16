@@ -112,13 +112,14 @@ def test_findings_doc_exists_and_linked():
 # ── Findings doc structure pins ──────────────────────────
 
 
-def test_findings_doc_documents_all_twenty_frictions():
-    """The findings doc enumerates F1-F20. F19 + F20 added
-    2026-05-15/16 during sprints 462 + 468. F19 bleach was
-    in [server] extra; fixed 462. F20 DO cloud firewall
-    blocks operator P2P port 9001 inbound; deferred to
-    operator action. If a finding is silently removed
-    (without an explicit closure note), surface that."""
+def test_findings_doc_documents_all_twenty_one_frictions():
+    """The findings doc enumerates F1-F21. F19 + F20 + F21
+    added 2026-05-15/16. F19 bleach was in [server] extra;
+    fixed 462. F20 DO cloud firewall blocks operator P2P
+    port 9001 inbound; deferred to operator action. F21
+    ContentFilterStore.count() missing — fixed sprint 473.
+    If a finding is silently removed (without an explicit
+    closure note), surface that."""
     text = FINDINGS.read_text()
     for marker in (
         "F1 — `prsm daemon`",
@@ -141,6 +142,7 @@ def test_findings_doc_documents_all_twenty_frictions():
         "F18 — Query orchestrator package imports `sentence_transformers` eagerly",
         "F19 — `bleach` in `[server]` extra but required",
         "F20 — DO cloud firewall blocks operator P2P port",
+        "F21 — `ContentFilterStore` lacks `count()`",
     ):
         assert marker in text, (
             f"dogfood finding marker missing: {marker!r}"

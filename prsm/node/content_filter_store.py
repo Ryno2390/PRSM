@@ -180,6 +180,21 @@ class ContentFilterStore:
         with self._lock:
             return cid in self._cids
 
+    def count(self) -> int:
+        """Total number of filter entries across all categories.
+        Used by /health/detailed's subsystem-record-count probe
+        (sprint 343). Without this, the probe raises
+        AttributeError and the health endpoint flips
+        `content_filter_store.status` to `error` + the whole
+        daemon to `degraded` — false-positive alert noise.
+        Fixed in sprint 473 (F21)."""
+        with self._lock:
+            return (
+                len(self._cids)
+                + len(self._tags)
+                + len(self._patterns)
+            )
+
     def to_dict(self) -> dict:
         with self._lock:
             return {
