@@ -414,6 +414,17 @@ class OnChainFTNSLedger:
                 created_at    REAL NOT NULL
             )
         """)
+        # Sprint 510 F39 fix: ensure chain_id column exists.
+        # ALTER TABLE adds it with NULL default for pre-sprint-510
+        # rows. Wrapped in try/except since the column may already
+        # exist on databases initialized after this sprint.
+        try:
+            await self._db.execute(
+                "ALTER TABLE onchain_transactions "
+                "ADD COLUMN chain_id INTEGER"
+            )
+        except Exception:
+            pass  # column already exists
         await self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_octx_created "
             "ON onchain_transactions(created_at)"
@@ -422,12 +433,24 @@ class OnChainFTNSLedger:
             "CREATE INDEX IF NOT EXISTS idx_octx_tx_hash "
             "ON onchain_transactions(tx_hash)"
         )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_octx_chain_id "
+            "ON onchain_transactions(chain_id)"
+        )
         await self._db.commit()
-        # Replay rows into in-memory list, ordered chronologically.
+        # Replay rows — sprint 510 F39 fix: filter by this
+        # ledger's chain_id so a daemon on Sepolia doesn't
+        # see mainnet TX (and vice versa). NULL-chain_id
+        # rows (legacy pre-sprint-510) are excluded — they
+        # have ambiguous provenance and shouldn't be
+        # trusted as belonging to any specific network.
         cur = await self._db.execute(
             "SELECT job_id, tx_hash, from_addr, to_addr, "
             "amount_ftns, status, block_number, created_at "
-            "FROM onchain_transactions ORDER BY created_at ASC"
+            "FROM onchain_transactions "
+            "WHERE chain_id = ? "
+            "ORDER BY created_at ASC",
+            (self.chain_id,),
         )
         rows = await cur.fetchall()
         for r in rows:
@@ -489,12 +512,12 @@ class OnChainFTNSLedger:
         await self._db.execute(
             "INSERT OR REPLACE INTO onchain_transactions "
             "(job_id, tx_hash, from_addr, to_addr, amount_ftns, "
-            "status, block_number, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "status, block_number, created_at, chain_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 tx.job_id, tx.tx_hash, tx.from_addr, tx.to_addr,
                 tx.amount_ftns, tx.status, tx.block_number,
-                tx.created_at,
+                tx.created_at, self.chain_id,
             ),
         )
         await self._db.commit()
