@@ -2978,6 +2978,75 @@ def transfer(to: str, amount: float, description: str, api_url: str) -> None:
         raise SystemExit(1)
 
 
+@ftns.command("transfer-onchain")
+@click.option("--to",      required=True,             help="Recipient Ethereum address (0x…)")
+@click.option("--amount",  required=True, type=float, help="Amount in FTNS")
+@click.option("--api-url", default=None,              help="PRSM API URL (default: from stored credentials)")
+def transfer_onchain(to: str, amount: float, api_url: str) -> None:
+    """Transfer FTNS tokens on-chain to an Ethereum address.
+
+    Unlike `prsm ftns transfer` (which moves FTNS between user IDs
+    on the off-chain DAG ledger), this command broadcasts a real
+    ERC-20 Transfer on Base mainnet using the daemon's loaded
+    FTNS_WALLET_PRIVATE_KEY. Requires daemon to be started with
+    PRSM_ONCHAIN_FTNS=1 + FTNS_WALLET_PRIVATE_KEY set.
+    """
+    import httpx
+
+    if amount <= 0:
+        console.print("❌ Amount must be positive (> 0)", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+    console.print(
+        f"🔗 Broadcasting on-chain transfer: {amount:.6f} FTNS → {to}...",
+        style="bold blue",
+    )
+
+    try:
+        response = httpx.post(
+            f"{url}/wallet/transfer/onchain",
+            json={"to_address": to, "amount_ftns": amount},
+            timeout=90.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        console.print("✅ Transfer confirmed on-chain!", style="bold green")
+        console.print(f"   tx_hash      : 0x{data.get('tx_hash', '').lstrip('0x')}")
+        console.print(f"   block_number : {data.get('block_number')}")
+        console.print(f"   status       : {data.get('status')}")
+        console.print(f"   from         : {data.get('from_address')}")
+        console.print(f"   to           : {data.get('to_address')}")
+        console.print(f"   amount_ftns  : {data.get('amount_ftns')}")
+    elif response.status_code == 503:
+        detail = ""
+        try:
+            detail = response.json().get("detail", "")
+        except Exception:
+            detail = response.text[:300]
+        console.print("❌ On-chain ledger not available:", style="red")
+        console.print(f"   {detail}")
+        raise SystemExit(1)
+    elif response.status_code == 422:
+        detail = ""
+        try:
+            detail = response.json().get("detail", "")
+        except Exception:
+            detail = response.text[:300]
+        console.print(f"❌ Invalid input: {detail}", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(
+            f"❌ Transfer failed: HTTP {response.status_code}", style="red",
+        )
+        console.print(f"   {response.text[:300]}")
+        raise SystemExit(1)
+
+
 @ftns.command()
 @click.option("--amount",      required=True, type=float, help="FTNS to stake")
 @click.option("--lock-days",   default=30,    type=int,   help="Lock duration in days (default: 30)")
