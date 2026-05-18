@@ -801,24 +801,42 @@ def query(query: str, context: int, user_id: str, api_url: str):
 
             console.print("\n")
             console.print(Panel(answer, title="[bold green]PRSM Response[/bold green]", border_style="green"))
-            
+
             trace = data.get("reasoning_trace", [])
             if trace:
                 console.print("\n[bold cyan]Reasoning Trace:[/bold cyan]")
                 for i, step in enumerate(trace, 1):
                     action = step.get("input_data", {}).get("action", str(step.get("agent_type", "Process")))
                     console.print(f"  [dim]{i}.[/dim] {action}")
-                    
+
             conf = data.get('confidence_score', 0)
             ctx = data.get('context_used', 0)
             console.print(f"\n[dim]Confidence Score: {conf:.2f} | Context Used: {ctx} tokens[/dim]")
+        elif response.status_code == 404:
+            # Sprint 533 F47 fix: /query was retired in favor of
+            # /compute/forge. Surface actionable hint instead of
+            # opaque "Not Found".
+            console.print(
+                "\n[bold yellow]⚠️  Legacy `/query` endpoint not found.[/bold yellow]"
+            )
+            console.print(
+                "The `/query` route was retired. Use one of:\n"
+                "  • [cyan]prsm compute run --query \"...\"[/cyan]  — full forge pipeline (Rings 1-10)\n"
+                "  • [cyan]prsm compute submit --prompt \"...\"[/cyan]  — single-shot inference\n"
+                "  • [cyan]prsm mcp-server[/cyan] + configure your LLM (Claude/Gemini)\n"
+                "  • Direct: [cyan]curl -X POST {api}/compute/forge[/cyan]"
+                .format(api=api_url)
+            )
+            raise SystemExit(1)
         else:
             console.print(f"\n[bold red]Error ({response.status_code}):[/bold red] {response.text}")
-            
+            raise SystemExit(1)
+
     except httpx.RequestError as e:
         console.print(f"\n[bold red]Connection Error:[/bold red] Could not connect to {api_url}.")
         console.print("Make sure the PRSM API server is running (`prsm serve`).")
         console.print(f"[dim]Details: {e}[/dim]")
+        raise SystemExit(1)
 
 
 @main.command()
@@ -2830,9 +2848,23 @@ def compute_quote(query, shards, tier):
 
 @main.command("demo")
 def demo():
-    """Run the PRSM Ring 1-10 demo (no network required)."""
-    # v1.6.0 scope alignment: prsm.demo deleted in PR 3
-    click.echo("Demo module removed in v1.6.0 scope alignment. Use 'prsm node start' instead.", err=True)
+    """DEPRECATED: Ring 1-10 demo removed in v1.6.0.
+
+    Use `prsm node start` to launch a real daemon, or `prsm demo-multinode`
+    for a multi-node P2P walkthrough.
+    """
+    # Sprint 533 F46 fix: previously the help-text promised a Ring 1-10
+    # demo that the command no longer runs. First-impression UX
+    # blocker for new users. Updated docstring + actionable error +
+    # nonzero exit so misuse is signaled clearly.
+    console.print(
+        "[yellow]⚠️  `prsm demo` was removed in v1.6.0 scope alignment.[/yellow]\n"
+        "[bold]Try instead:[/bold]\n"
+        "  • [cyan]prsm node start[/cyan]        — launch a real daemon\n"
+        "  • [cyan]prsm demo-multinode[/cyan]    — multi-node P2P walkthrough\n"
+        "  • [cyan]prsm setup[/cyan]             — first-run config wizard\n"
+    )
+    raise SystemExit(1)
 
 
 @main.command("mcp-server")
