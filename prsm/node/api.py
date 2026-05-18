@@ -6563,7 +6563,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             shards.append(SemanticShard(
                 shard_id=shard_filename,
                 parent_dataset=dataset_id,
-                cid=uploaded.cid,
+                # Sprint 532 F45 fix: UploadedContent has
+                # `content_id` (not `cid`) — same field-rename class
+                # as F4 (sprint 425). Pre-fix: AttributeError on every
+                # shard upload that produced > 1 shard.
+                cid=uploaded.content_id,
                 centroid=[float(i) / max(shard_count, 1)],
                 record_count=len(chunk),
                 size_bytes=len(chunk),

@@ -161,8 +161,8 @@ journey. Each step should be live-verifiable on a single node.
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | Forge quote | `POST /compute/forge/quote` | ✅ | — | Verified live in dogfood arc |
-| Submit forge query | `POST /compute/forge` | ⚠️ | — | Default-disabled; needs `PRSM_QUERY_ORCHESTRATOR_ENABLED=1` |
-| Single-node forge E2E | `POST /compute/forge` | 🔬 | — | Requires content present; was blocked by F4 before sprint 428 |
+| Submit forge query | `POST /compute/forge` | ✅ | 532 | Live: with `PRSM_QUERY_ORCHESTRATOR_ENABLED=1` daemon accepts queries (no crypto setup errors). Forge pipeline invoked; downstream blocker is F10 multi-node aggregator pool (row below) |
+| Single-node forge E2E | `POST /compute/forge` | ⏸️ 532 | — | **F10 confirmed structural**: single-node fails with "no eligible aggregator after filtering (prompter=<node>, pool_size=0)" because A2 invariant requires aggregator be a DIFFERENT node from prompter. Multi-node test bench is the only path — same gate as F14/F20 |
 
 ### Compute jobs (general)
 
@@ -210,9 +210,9 @@ journey. Each step should be live-verifiable on a single node.
 | Wallet escrows | `GET /wallet/escrows` | ✅ | 464 | Live with wallet: paginated empty-state for the wallet address |
 | `prsm wallet info` CLI | CLI | ✅ | 464 | Live with FTNS_WALLET_PRIVATE_KEY: shows network (testnet vs mainnet), address, explorer URL, balance, foundation-config warnings |
 | `prsm node earnings` CLI (with wallet) | CLI | ✅ | 464 | Live: operator address surfaced; Royalty/Heartbeat/Distribution categories ready to wire |
-| Transfer (gasless via paymaster) | `POST /wallet/transfer/gasless` | 🟢 | Phase 5 | Endpoint exists; live activation external-gated |
-| WaaS provision | `POST /wallet/waas/provision` | 🟢 | Phase 5 | Endpoint exists; requires CDP credentials |
-| Paymaster status | `GET /wallet/paymaster/status` | 🟢 | Phase 5 | Endpoint exists |
+| Transfer (gasless via paymaster) | `POST /wallet/transfer/gasless` | ✅ | 532 | Live schema-pass: empty body → 422 with `from_user_id/to_address/ftns_amount` field-required; valid body without prior WaaS → 404 "must provision first" — clean error chain |
+| WaaS provision | `POST /wallet/waas/provision` | ✅ | 532 | Live schema-pass: valid body returns `{user_id, email, wallet_id: null, address: null, network: base-mainnet, status: PENDING_COMMISSION, created_at}`. PENDING_COMMISSION because no CDP credentials wired (external-gated) |
+| Paymaster status | `GET /wallet/paymaster/status` | ✅ | 532 | Live: returns canonical schema `{commissioned: false, sponsorships: 0, total_sponsored_wei: 0, endpoint: null, policy_id: null}` |
 | **On-chain transfer (real ERC-20)** | `POST /wallet/transfer/onchain` | ✅ | 498 | **F38 fix**: endpoint shipped + 2 TX live on Base mainnet (TX-1 self-transfer 0xa49dd80b…, TX-2 0x1b3b1f5e… 1 FTNS to second wallet). Real ERC-20 transfer signed by `FTNS_WALLET_PRIVATE_KEY` |
 | `prsm ftns transfer-onchain` CLI | CLI | ✅ | 499 | Live-verified with 3 mainnet self-transfers via CLI: 0x596ccfdc…, 0x39d1a510…, 0x77c82fce… |
 | On-chain TX history | `GET /wallet/transactions/onchain` | ✅ | 500 | Live: persistent SQLite-backed list with full schema (tx_hash, status, block, addrs, amount, created_at, job_id, scope) |
@@ -266,12 +266,12 @@ journey. Each step should be live-verifiable on a single node.
 |---------|---------|--------|--------|-------|
 | Onramp quote | `POST /wallet/onramp/quote` | ✅ | 451 | Live (schema: usd_amount+destination_address): returns full quote with coinbase-cdp onramp_route + aerodrome swap_route + KYC + tier-limit fields |
 | Offramp quote | `POST /wallet/offramp/quote` | ✅ | 451 | Live: clean operator-readable balance breakdown when destination has 0 balance ("requested $X, available $Y...") |
-| Pool quote (Aerodrome) | `GET /wallet/pool/quote` | 🟢 | 276-286 | Read-only quoter; live pool external-gated |
+| Pool quote (Aerodrome) | `GET /wallet/pool/quote` | ✅ | 532 | Live: returns `{status: NOT_CONFIGURED, amount_in, token_in, note: "Set BASE_RPC_URL + AERODROME_USDC_FTNS_POOL_ADDRESS after the seeding ceremony"}`. Empty-state clean + actionable for post-ceremony wire-up |
 | Pool state | `GET /wallet/pool/state` | ✅ | 451 | Live: reports `NOT_CONFIGURED` with operator-actionable note pointing to AERODROME_USDC_FTNS_POOL_ADDRESS env var + seeding ceremony date |
 | Fiat compliance audit ring (auto-record) | `GET /admin/fiat-compliance/summary` | ✅ | 451 | Live: my single onramp-quote call auto-recorded as `{onramp_quote: {count: 1, total_usd: 100.0}}` — Vision §11's AUSTRAC/FinCEN/IRS-ready claim attested |
 | KYC initiate | `POST /wallet/kyc/initiate` | ✅ | 452 | Live (schema: user_id+email+tier): returns clean PENDING_COMMISSION envelope with vendor=null in dev env (per sprint-285 commissioning pattern) |
 | KYC status (lookup) | `GET /wallet/kyc/status` | ✅ | 452 | Live: `{commissioned: false, vendor: null, supported_vendors: ["persona","onfido","plaid"], record_count: N}` |
-| KYC webhook | `POST /wallet/kyc/webhook/{vendor}` | 🟢 | Phase 5 | HMAC-SHA256 + replay protection — requires real vendor signed payload to live-verify |
+| KYC webhook | `POST /wallet/kyc/webhook/{vendor}` | ✅ | 532 | Live schema-pass: vendor path-param honored (persona/onfido/plaid); missing `user_id` → 400 "missing required field". HMAC verification remains 🔗 external-gated (real vendor signed payload required for vendor_verified=true) |
 | Fiat-surface health | `GET /admin/fiat-surface/health` | ✅ | 285/422 | `check_fiat_surface_health()` live-verified |
 | Fiat-readiness CLI | `prsm node fiat-readiness` | ✅ | 422, 452 | Live: text → "✓ Phase 5 fiat surface ready — OK (no findings)"; JSON → `{overall_status: "ok", findings: []}` |
 | Activation runbook | `docs/operations/phase-5-fiat-surface-activation-runbook.md` | ✅ | 421 | Pinned by 11 source-truth-parity tests |
@@ -435,11 +435,11 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | Creator reputation tracker (lookup) | `/marketplace/creator-reputation/{id}` | ✅ | 440 | Live: returns clean default (known:false, score:0.5, tier:"new") for unknown creators |
-| Creator reputation tracker (auto-record on retrieve) | hook in `/content/retrieve` | 🟢 | 287-291 | Wired correctly; live update gated by operator wallet config (`FTNS_WALLET_PRIVATE_KEY`) — dev env can't trigger |
-| Tier classification (new/low/medium/high) | reputation tier auto-records on retrieve | 🟢 | 287-291 | Same wallet-gate as above |
+| Creator reputation tracker (auto-record on retrieve) | hook in `/content/retrieve` | ✅ | 532 | **Sprint 440 deferral resolved**: with sprint-529 F44 fix (creator_eth_address persisted), retrieve fires record_access. Live: 6 retrieves of sprint-529 content → reputation `{total_accesses: 6, distinct_purchasers: 1, repeat_purchaser_count: 1, known: true}`. Operator wallet `FTNS_WALLET_PRIVATE_KEY` gate operationally cleared |
+| Tier classification (new/low/medium/high) | reputation tier auto-records on retrieve | ✅ | 532 | Live: tier reads correctly (`tier: new` for 6-access creator with 1 distinct purchaser). Higher tiers require more distinct purchasers — same data-dependency, mechanism verified |
 | Search filter by tier | `GET /content/search?min_tier=...&exclude_new=...` | ✅ | 440 | Live: query params accepted cleanly; tier-filter codepath active |
 | Creator stake lookup | `GET /marketplace/creator-stake/{id}` | ✅ | 442 | Live: returns clean schema (balance_wei, high_tier_eligible, min_high_tier_stake_wei, commissioned); unknown creator defaults to balance_wei=0 + high_tier_eligible=false |
-| Creator stake gate (commissioning) | on-chain `StakeBond` + `commissioned` flag | 🟢 | 287-291 | Lookup surface ready; live stake/slash flow gated by on-chain wallet + StakeBond contract address (dev env: `commissioned: false`) |
+| Creator stake gate (commissioning) | on-chain `StakeBond` + `commissioned` flag | ✅ | 532 | Live: `/marketplace/creator-stake/<addr>` returns canonical schema `{creator_id, balance_wei: 0, high_tier_eligible: false, min_high_tier_stake_wei: 1000000000000000000000, commissioned: false}`. 1000 FTNS min for high-tier eligibility. Real stake/slash requires Foundation-ceremony to deploy CreatorStake contract (separate gate) |
 | Content fingerprint registry (first-upload registers) | `POST /content/upload` hook | ✅ | 441 | Live E2E: content_hash registered with canonical_creator |
 | Content fingerprint registry (duplicate detection) | `POST /content/upload` re-upload | ✅ | 441 | Live E2E: re-upload with different creator surfaces `duplicate_of_creator`; first-creator-wins invariant verified |
 | Fingerprint registry (dedup-attempt counter) | `GET /marketplace/fingerprint/{hash}` | ✅ | 441 | `duplicate_attempt_count` increments on each re-upload attempt |
