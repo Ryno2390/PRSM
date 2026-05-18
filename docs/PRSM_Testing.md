@@ -126,6 +126,8 @@ journey. Each step should be live-verifiable on a single node.
 | EmbeddingDHT cross-node embedding gossip | `prsm.dht.embedding_dht_client` | 🟢 | T3.6 | Vision §11 claims live |
 | BinaryFingerprint perceptual hashes | `prsm/marketplace/binary_fingerprint.py` | 🟢 | T4.7 | Calibration deferred to testnet traffic |
 | V2 ProvenanceRegistry on-chain embedding commitment | on-chain | ✅ | — | Deployed `0xe0cedDA354...` |
+| **On-chain provenance register CLI** | `prsm provenance register <file>` | ✅ | 520 | **First-ever PRSM-daemon-signed ProvenanceRegistry TX on Base mainnet**: tx `0x84b8084b…` block 46165810, success, 50470 gas @ 0.006 Gwei = 0.0000003 ETH. ProvenanceRegistered event emitted. Hash `0xa97f3411…` registered with creator=operator wallet, 800 bps royalty (8%). Vision §11 creator-provenance promise live-attested via CLI |
+| **On-chain provenance info CLI** | `prsm provenance info <hash\|file>` | ✅ | 520 | Live-verified roundtrip: info on registered hash returns full record (hash, creator, royalty, registered_at, metadata); info on unregistered hash returns clean "NOT registered" |
 
 ---
 
