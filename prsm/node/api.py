@@ -13759,14 +13759,35 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 500: If bridge operation fails
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
+            # Sprint 539: investigation found that FTNSBridge is
+            # pre-Base-mainnet scaffold code (defaults to network=
+            # polygon_mumbai, ContractManager only knows Polygon/
+            # Sepolia, no deployed bridge contract exists on any
+            # network). The bridge concept is fulfilled in current
+            # PRSM by two paths:
+            #   1. /wallet/transfer/onchain (operator-initiated
+            #      same-chain FTNS moves)
+            #   2. RoyaltyDispatcher (automatic off-chain → on-chain
+            #      payouts to content creators)
+            # See /admin/royalty-dispatch-summary for current
+            # dispatcher state. The /bridge/* endpoints are kept as
+            # API stubs for future bridge contract deployment; they
+            # are intentionally not wired in this build.
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "FTNS bridge not wired in this daemon build — "
-                    "FTNSBridge requires cross-chain RPC + contract "
-                    "addresses not yet configurable via env var. "
-                    "Track sprint-X bridge integration; for now use "
-                    "/wallet/transfer/onchain for same-chain FTNS moves."
+                    "FTNS bridge endpoints are SCAFFOLD-ONLY in "
+                    "current PRSM builds. The FTNSBridge module "
+                    "(prsm/economy/blockchain/ftns_bridge.py) targets "
+                    "polygon_mumbai-era contracts; no bridge contract "
+                    "is deployed on Base mainnet. The functionally "
+                    "equivalent flows on current PRSM are: "
+                    "(a) `/wallet/transfer/onchain` for operator-"
+                    "initiated FTNS moves; "
+                    "(b) `/admin/royalty-dispatch-summary` for "
+                    "automatic off-chain → on-chain creator payouts. "
+                    "Track sprint-X bridge re-implementation against "
+                    "Base mainnet."
                 ),
             )
         
@@ -13823,14 +13844,35 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 500: If bridge operation fails
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
+            # Sprint 539: investigation found that FTNSBridge is
+            # pre-Base-mainnet scaffold code (defaults to network=
+            # polygon_mumbai, ContractManager only knows Polygon/
+            # Sepolia, no deployed bridge contract exists on any
+            # network). The bridge concept is fulfilled in current
+            # PRSM by two paths:
+            #   1. /wallet/transfer/onchain (operator-initiated
+            #      same-chain FTNS moves)
+            #   2. RoyaltyDispatcher (automatic off-chain → on-chain
+            #      payouts to content creators)
+            # See /admin/royalty-dispatch-summary for current
+            # dispatcher state. The /bridge/* endpoints are kept as
+            # API stubs for future bridge contract deployment; they
+            # are intentionally not wired in this build.
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "FTNS bridge not wired in this daemon build — "
-                    "FTNSBridge requires cross-chain RPC + contract "
-                    "addresses not yet configurable via env var. "
-                    "Track sprint-X bridge integration; for now use "
-                    "/wallet/transfer/onchain for same-chain FTNS moves."
+                    "FTNS bridge endpoints are SCAFFOLD-ONLY in "
+                    "current PRSM builds. The FTNSBridge module "
+                    "(prsm/economy/blockchain/ftns_bridge.py) targets "
+                    "polygon_mumbai-era contracts; no bridge contract "
+                    "is deployed on Base mainnet. The functionally "
+                    "equivalent flows on current PRSM are: "
+                    "(a) `/wallet/transfer/onchain` for operator-"
+                    "initiated FTNS moves; "
+                    "(b) `/admin/royalty-dispatch-summary` for "
+                    "automatic off-chain → on-chain creator payouts. "
+                    "Track sprint-X bridge re-implementation against "
+                    "Base mainnet."
                 ),
             )
         
@@ -13887,14 +13929,35 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 503: If bridge not initialized
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
+            # Sprint 539: investigation found that FTNSBridge is
+            # pre-Base-mainnet scaffold code (defaults to network=
+            # polygon_mumbai, ContractManager only knows Polygon/
+            # Sepolia, no deployed bridge contract exists on any
+            # network). The bridge concept is fulfilled in current
+            # PRSM by two paths:
+            #   1. /wallet/transfer/onchain (operator-initiated
+            #      same-chain FTNS moves)
+            #   2. RoyaltyDispatcher (automatic off-chain → on-chain
+            #      payouts to content creators)
+            # See /admin/royalty-dispatch-summary for current
+            # dispatcher state. The /bridge/* endpoints are kept as
+            # API stubs for future bridge contract deployment; they
+            # are intentionally not wired in this build.
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "FTNS bridge not wired in this daemon build — "
-                    "FTNSBridge requires cross-chain RPC + contract "
-                    "addresses not yet configurable via env var. "
-                    "Track sprint-X bridge integration; for now use "
-                    "/wallet/transfer/onchain for same-chain FTNS moves."
+                    "FTNS bridge endpoints are SCAFFOLD-ONLY in "
+                    "current PRSM builds. The FTNSBridge module "
+                    "(prsm/economy/blockchain/ftns_bridge.py) targets "
+                    "polygon_mumbai-era contracts; no bridge contract "
+                    "is deployed on Base mainnet. The functionally "
+                    "equivalent flows on current PRSM are: "
+                    "(a) `/wallet/transfer/onchain` for operator-"
+                    "initiated FTNS moves; "
+                    "(b) `/admin/royalty-dispatch-summary` for "
+                    "automatic off-chain → on-chain creator payouts. "
+                    "Track sprint-X bridge re-implementation against "
+                    "Base mainnet."
                 ),
             )
         
@@ -13934,14 +13997,35 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 404: If transaction not found
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
+            # Sprint 539: investigation found that FTNSBridge is
+            # pre-Base-mainnet scaffold code (defaults to network=
+            # polygon_mumbai, ContractManager only knows Polygon/
+            # Sepolia, no deployed bridge contract exists on any
+            # network). The bridge concept is fulfilled in current
+            # PRSM by two paths:
+            #   1. /wallet/transfer/onchain (operator-initiated
+            #      same-chain FTNS moves)
+            #   2. RoyaltyDispatcher (automatic off-chain → on-chain
+            #      payouts to content creators)
+            # See /admin/royalty-dispatch-summary for current
+            # dispatcher state. The /bridge/* endpoints are kept as
+            # API stubs for future bridge contract deployment; they
+            # are intentionally not wired in this build.
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "FTNS bridge not wired in this daemon build — "
-                    "FTNSBridge requires cross-chain RPC + contract "
-                    "addresses not yet configurable via env var. "
-                    "Track sprint-X bridge integration; for now use "
-                    "/wallet/transfer/onchain for same-chain FTNS moves."
+                    "FTNS bridge endpoints are SCAFFOLD-ONLY in "
+                    "current PRSM builds. The FTNSBridge module "
+                    "(prsm/economy/blockchain/ftns_bridge.py) targets "
+                    "polygon_mumbai-era contracts; no bridge contract "
+                    "is deployed on Base mainnet. The functionally "
+                    "equivalent flows on current PRSM are: "
+                    "(a) `/wallet/transfer/onchain` for operator-"
+                    "initiated FTNS moves; "
+                    "(b) `/admin/royalty-dispatch-summary` for "
+                    "automatic off-chain → on-chain creator payouts. "
+                    "Track sprint-X bridge re-implementation against "
+                    "Base mainnet."
                 ),
             )
         
@@ -13970,14 +14054,35 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 503: If bridge not initialized
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
+            # Sprint 539: investigation found that FTNSBridge is
+            # pre-Base-mainnet scaffold code (defaults to network=
+            # polygon_mumbai, ContractManager only knows Polygon/
+            # Sepolia, no deployed bridge contract exists on any
+            # network). The bridge concept is fulfilled in current
+            # PRSM by two paths:
+            #   1. /wallet/transfer/onchain (operator-initiated
+            #      same-chain FTNS moves)
+            #   2. RoyaltyDispatcher (automatic off-chain → on-chain
+            #      payouts to content creators)
+            # See /admin/royalty-dispatch-summary for current
+            # dispatcher state. The /bridge/* endpoints are kept as
+            # API stubs for future bridge contract deployment; they
+            # are intentionally not wired in this build.
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "FTNS bridge not wired in this daemon build — "
-                    "FTNSBridge requires cross-chain RPC + contract "
-                    "addresses not yet configurable via env var. "
-                    "Track sprint-X bridge integration; for now use "
-                    "/wallet/transfer/onchain for same-chain FTNS moves."
+                    "FTNS bridge endpoints are SCAFFOLD-ONLY in "
+                    "current PRSM builds. The FTNSBridge module "
+                    "(prsm/economy/blockchain/ftns_bridge.py) targets "
+                    "polygon_mumbai-era contracts; no bridge contract "
+                    "is deployed on Base mainnet. The functionally "
+                    "equivalent flows on current PRSM are: "
+                    "(a) `/wallet/transfer/onchain` for operator-"
+                    "initiated FTNS moves; "
+                    "(b) `/admin/royalty-dispatch-summary` for "
+                    "automatic off-chain → on-chain creator payouts. "
+                    "Track sprint-X bridge re-implementation against "
+                    "Base mainnet."
                 ),
             )
         
