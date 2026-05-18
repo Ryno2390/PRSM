@@ -5673,9 +5673,19 @@ def mcp_start(host: str, port: int):
     from prsm.cli_modules.mcp_server import is_fastmcp_available, start_mcp_server
 
     if not is_fastmcp_available():
+        # Sprint 538 F70 fix: point operators to the PRSM-canonical
+        # install path (`.[mcp]` extra) instead of generic
+        # `pip install fastmcp`. The `[mcp]` extra also pulls the
+        # official `mcp>=1.27.0` SDK that fastmcp wraps + ensures
+        # version compat. Generic install can mismatch.
+        # F70b: escape `[mcp]` for Rich (square brackets = markup).
         console.print(
             "✗ fastmcp is required to run the MCP server.\n"
-            "  Install it with:  pip install fastmcp",
+            "  Install via PRSM extra (recommended — pins compatible\n"
+            "  versions of mcp + fastmcp):\n"
+            "    pip install -e '.\\[mcp]'\n"
+            "  Or standalone (may not match PRSM's pinned versions):\n"
+            "    pip install 'fastmcp>=2.0.0' 'mcp>=1.27.0'",
             style="red",
         )
         raise SystemExit(1)
