@@ -3103,10 +3103,78 @@ def stake(amount: float, lock_days: int, api_url: str) -> None:
 @ftns.command()
 @click.option("--limit",   default=20, type=int, help="Transactions to show (max 100)")
 @click.option("--search",  default=None,          help="Filter by description or transaction ID")
+@click.option("--onchain", is_flag=True, default=False, help="Show on-chain TX (broadcast by daemon) instead of off-chain DAG ledger")
 @click.option("--api-url", default=None,           help="PRSM API URL (default: from stored credentials)")
-def history(limit: int, search: Optional[str], api_url: str) -> None:
-    """Show your FTNS transaction history."""
+def history(limit: int, search: Optional[str], onchain: bool, api_url: str) -> None:
+    """Show your FTNS transaction history.
+
+    Default: off-chain DAG ledger (user-to-user FTNS moves).
+    With --onchain: real Base mainnet TX broadcast by this daemon's
+    loaded FTNS_WALLET_PRIVATE_KEY (sprint-498 endpoint).
+    """
     import httpx
+
+    if onchain:
+        url = _api_url_from_creds(api_url)
+        try:
+            response = httpx.get(
+                f"{url}/wallet/transactions/onchain",
+                timeout=10.0,
+            )
+        except httpx.ConnectError:
+            console.print(f"❌ Cannot connect to {url}", style="red")
+            raise SystemExit(1)
+
+        if response.status_code == 503:
+            detail = ""
+            try:
+                detail = response.json().get("detail", "")
+            except Exception:
+                detail = response.text[:300]
+            console.print("❌ On-chain ledger not available:", style="red")
+            console.print(f"   {detail}")
+            raise SystemExit(1)
+        if response.status_code != 200:
+            console.print(f"❌ Failed: HTTP {response.status_code}", style="red")
+            raise SystemExit(1)
+
+        data = response.json()
+        txs = data.get("transactions", [])
+        count = data.get("count", 0)
+        addr = data.get("connected_address", "?")
+        scope = data.get("scope", "")
+
+        console.print(
+            f"🔗 On-chain TX for [bold]{addr}[/bold]  "
+            f"[dim]({count} total — {scope})[/dim]",
+        )
+        if not txs:
+            console.print(
+                "No on-chain transactions in this session.",
+                style="dim",
+            )
+            return
+
+        table = Table(title=f"On-chain FTNS TX  (count={count})")
+        table.add_column("tx_hash",   style="dim",     max_width=18)
+        table.add_column("block",     style="cyan",    justify="right")
+        table.add_column("from",      style="white",   max_width=14)
+        table.add_column("to",        style="white",   max_width=14)
+        table.add_column("amount",    style="green",   justify="right")
+        table.add_column("status",    style="magenta")
+
+        for tx in txs[: min(limit, 100)]:
+            tx_hash = (tx.get("tx_hash") or "")
+            table.add_row(
+                (tx_hash[:16] + "…") if tx_hash else "—",
+                str(tx.get("block_number") or "—"),
+                (tx.get("from_address") or "—")[:14],
+                (tx.get("to_address") or "—")[:14],
+                f"{tx.get('amount_ftns', 0):.6f}",
+                tx.get("status", "?"),
+            )
+        console.print(table)
+        return
 
     headers = _auth_headers()
     if not headers:

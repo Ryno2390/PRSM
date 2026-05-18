@@ -1594,6 +1594,45 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "job_id": job_id,
         }
 
+    @app.get("/wallet/transactions/onchain", tags=["wallet"])
+    async def get_onchain_transactions() -> Dict[str, Any]:
+        ledger = getattr(node, "ftns_ledger", None)
+        if ledger is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "On-chain FTNS ledger not initialized — "
+                    "daemon must be started with "
+                    "FTNS_WALLET_PRIVATE_KEY set."
+                ),
+            )
+        txs = getattr(ledger, "_transactions", []) or []
+        out = []
+        for tx in txs:
+            out.append({
+                "tx_hash": getattr(tx, "tx_hash", ""),
+                "status": getattr(tx, "status", None),
+                "block_number": getattr(
+                    tx, "block_number", None,
+                ),
+                "from_address": getattr(tx, "from_addr", None),
+                "to_address": getattr(tx, "to_addr", None),
+                "amount_ftns": getattr(tx, "amount_ftns", None),
+                "created_at": getattr(tx, "created_at", None),
+                "job_id": getattr(tx, "job_id", None),
+            })
+        return {
+            "count": len(out),
+            "connected_address": getattr(
+                ledger, "_connected_address", None,
+            ),
+            "scope": (
+                "in-memory (resets on daemon restart) — "
+                "persistence is a follow-on sprint"
+            ),
+            "transactions": out,
+        }
+
     @app.get("/wallet/paymaster/status", tags=["wallet"])
     async def get_paymaster_status() -> Dict[str, Any]:
         paymaster = getattr(node, "_paymaster_client", None)
