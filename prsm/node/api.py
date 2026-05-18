@@ -6799,7 +6799,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "filename": r.filename,
                 "size_bytes": r.size_bytes,
                 "content_hash": r.content_hash,
+                # Sprint 534 F59 fix: surface BOTH the raw
+                # sha3_256 content_hash AND the on-chain
+                # provenance_hash (keccak256(creator||sha3(bytes)))
+                # so operators looking up their registration via
+                # `prsm provenance info <hash>` get the right
+                # value. Previously they tried content_hash and
+                # got "NOT registered" because the registry keys
+                # on provenance_hash.
+                "provenance_hash": getattr(
+                    r, "provenance_hash", None,
+                ),
                 "creator_id": r.creator_id,
+                "creator_eth_address": getattr(
+                    r, "creator_eth_address", None,
+                ),
                 "royalty_rate": r.royalty_rate,
                 "access_count": r.access_count,
                 "total_royalties": r.total_royalties,
