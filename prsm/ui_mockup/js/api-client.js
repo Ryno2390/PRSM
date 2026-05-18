@@ -987,8 +987,26 @@ class PRSMAPIClient {
 
         try {
             const response = await fetch(url, requestOptions);
-            
+
             if (!response.ok) {
+                // Sprint 537 F68 fix: dashboard JS calls some endpoints
+                // (/ui/information-space, /integrations/*/health) that
+                // exist on prsm.interface.api.main but NOT on the new
+                // prsm.node.api the daemon now serves. Surface a clear
+                // console warning + degrade to mock data instead of
+                // throwing — dashboard sections remain partially
+                // functional rather than fully error-out.
+                if (response.status === 404) {
+                    console.warn(
+                        `Dashboard endpoint ${endpoint} not wired on ` +
+                        `this daemon (404). Falling back to mock data. ` +
+                        `If you need this feature, run the legacy ` +
+                        `prsm.interface.api.main server.`
+                    );
+                    return this.getMockResponse(
+                        endpoint, options.method || 'GET',
+                    );
+                }
                 const errorData = await response.text();
                 throw new Error(`HTTP ${response.status}: ${errorData}`);
             }
@@ -996,12 +1014,12 @@ class PRSMAPIClient {
             return await response.json();
         } catch (error) {
             console.error(`API request failed: ${endpoint}`, error);
-            
+
             // Return mock data for offline mode
             if (!this.connected) {
                 return this.getMockResponse(endpoint, options.method || 'GET');
             }
-            
+
             throw error;
         }
     }

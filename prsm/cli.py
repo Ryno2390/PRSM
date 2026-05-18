@@ -723,21 +723,51 @@ def dashboard(port: int, api_port: int):
     """Launch the high-fidelity PRSM Dashboard and API"""
     import subprocess
     import time
+    import socket
 
     _init_config()
-    
+
     console.print("🚀 Starting PRSM Command Center...", style="bold green")
-    
-    # 1. Start the API Server in the background
-    console.print(f"📡 Launching API Server on port {api_port}...", style="dim")
-    api_process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "prsm.interface.api.main:app", "--port", str(api_port)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
-    
-    # Give the API a moment to spin up
-    time.sleep(2)
+
+    # Sprint 537 F67 fix: detect if a daemon is already listening on
+    # api_port. If yes, reuse it (the dashboard talks to /rings/status
+    # etc. which the daemon's prsm.node.api serves). If no, spawn the
+    # interface API as a fallback. Pre-fix unconditionally spawned a
+    # second uvicorn that conflicted with the daemon on :8000 and died
+    # silently, leaving the dashboard talking to the wrong API surface.
+    api_process = None
+    api_already_running = False
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            api_already_running = (
+                s.connect_ex(("127.0.0.1", api_port)) == 0
+            )
+    except Exception:
+        api_already_running = False
+
+    if api_already_running:
+        console.print(
+            f"  ✓ API already running on port {api_port} — reusing existing daemon",
+            style="dim",
+        )
+    else:
+        console.print(
+            f"📡 No daemon detected — launching fallback API on port {api_port}...",
+            style="dim",
+        )
+        api_process = subprocess.Popen(
+            [
+                sys.executable, "-m", "uvicorn",
+                "prsm.interface.api.main:app",
+                "--port", str(api_port),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Give the API a moment to spin up
+        time.sleep(2)
     
     # 2. Launch Streamlit
     console.print(f"🎨 Launching Dashboard UI on port {port}...", style="dim")
@@ -766,7 +796,13 @@ def dashboard(port: int, api_port: int):
     except KeyboardInterrupt:
         console.print("\n👋 Closing Command Center...", style="bold yellow")
     finally:
-        api_process.terminate()
+        # Sprint 537 F67 fix: only kill the API process if WE spawned
+        # it. Pre-fix: api_process.terminate() always ran — when a
+        # daemon was already running and we reused it, this line
+        # would AttributeError on None (post-fix) or wrongly kill the
+        # operator's daemon (pre-fix never had this branch).
+        if api_process is not None:
+            api_process.terminate()
 
 
 @main.command()
