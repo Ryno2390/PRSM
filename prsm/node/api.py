@@ -3162,7 +3162,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         query = body.get("query", "") or ""
         if not query.strip():
-            raise HTTPException(status_code=400, detail="Missing 'query' field")
+            # Sprint 536 F66 fix: include schema hint in error
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Missing 'query' field. Expected body: "
+                    "{\"query\": \"<text>\", \"shard_cids\": [...], "
+                    "\"budget_ftns\": <float>}"
+                ),
+            )
 
         shard_cids = body.get("shard_cids") or []
         # If caller passed shard_cids, use that count; otherwise honor explicit shard_count.
@@ -3637,9 +3645,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # regardless of whether the forge subsystem is wired.
         query = body.get("query", "")
         if not query or not query.strip():
+            # Sprint 536 F66 fix: schema hint
             raise HTTPException(
                 status_code=400,
-                detail="Missing 'query' field (or whitespace-only)",
+                detail=(
+                    "Missing 'query' field (or whitespace-only). "
+                    "Expected body: {\"query\": \"<text>\", "
+                    "\"budget_ftns\": <float>, \"privacy_tier\": "
+                    "\"none|standard|high|maximum\"}"
+                ),
             )
         # Cap query length to prevent prompt-injection DoS via
         # multi-MB queries that amplify through the LLM token
@@ -4883,8 +4897,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         minus billing — caller doesn't need budget_ftns."""
         prompt = body.get("prompt", "")
         if not prompt:
+            # Sprint 536 F66 fix: schema hint
             raise HTTPException(
-                status_code=400, detail="Missing 'prompt' field",
+                status_code=400,
+                detail=(
+                    "Missing 'prompt' field. Expected body: "
+                    "{\"prompt\": \"<text>\", \"model_id\": "
+                    "\"mock-llama-3-8b\", \"max_tokens\": <int>}"
+                ),
             )
         # Sprint 198 cap inherited.
         _ip_raw = os.environ.get(
@@ -5092,7 +5112,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         prompt = body.get("prompt", "")
         if not prompt:
-            raise HTTPException(status_code=400, detail="Missing 'prompt' field")
+            # Sprint 536 F66 fix: schema hint
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Missing 'prompt' field. Expected body: "
+                    "{\"prompt\": \"<text>\", \"model_id\": "
+                    "\"mock-llama-3-8b\", \"budget_ftns\": "
+                    "<float>, \"max_tokens\": <int>}"
+                ),
+            )
 
         # Sprint 198 — cap prompt size (DoS surface; sibling
         # /compute/query has the same cap via PRSM_MAX_QUERY_BYTES).
@@ -5567,7 +5596,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         prompt = body.get("prompt", "")
         if not prompt:
-            raise HTTPException(status_code=400, detail="Missing 'prompt' field")
+            # Sprint 536 F66 fix: schema hint
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Missing 'prompt' field. Expected body: "
+                    "{\"prompt\": \"<text>\", \"model_id\": "
+                    "\"mock-llama-3-8b\", \"budget_ftns\": "
+                    "<float>, \"max_tokens\": <int>}"
+                ),
+            )
         # Sprint 198 — cap prompt size; shares
         # PRSM_MAX_INFERENCE_PROMPT_BYTES with the unary sibling.
         _ip_raw = os.environ.get(
@@ -6417,7 +6455,17 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
 
         if not dataset_id:
-            raise HTTPException(status_code=400, detail="Missing dataset_id")
+            # Sprint 536 F66 fix: schema hint
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Missing 'dataset_id'. Expected body: "
+                    "{\"dataset_id\": \"<unique-id>\", "
+                    "\"content_b64\": \"<base64>\", "
+                    "\"title\": \"<optional>\", \"shard_count\": "
+                    "<int default 4>, \"royalty_rate\": <0.001-0.1>}"
+                ),
+            )
         if shard_count < 1:
             raise HTTPException(
                 status_code=400, detail="shard_count must be >= 1",
@@ -7592,9 +7640,33 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         try:
             tx_hash, status = client.pull_and_distribute()
         except Exception as exc:  # noqa: BLE001
+            # Sprint 536 F65 fix: detect "insufficient funds for gas"
+            # specifically + return 402 (Payment Required) with
+            # actionable top-up guidance. Other exceptions stay 502
+            # but with cleaner message — strip Web3 internal dict
+            # serialization that leaks RPC error codes to operators.
+            exc_str = str(exc)
+            if (
+                "insufficient funds" in exc_str.lower()
+                or "-32003" in exc_str
+            ):
+                raise HTTPException(
+                    status_code=402,
+                    detail=(
+                        "CompensationDistributor TX would fail — "
+                        "operator wallet has insufficient ETH for "
+                        "gas. Top up the wallet (see `prsm wallet "
+                        "gas-status` for current balance + "
+                        "threshold). Underlying RPC error: "
+                        f"{exc_str[:200]}"
+                    ),
+                )
             raise HTTPException(
                 status_code=502,
-                detail=f"pull_and_distribute raised: {exc}",
+                detail=(
+                    f"pull_and_distribute raised "
+                    f"{type(exc).__name__}: {exc_str[:300]}"
+                ),
             )
         return {
             "tx_hash": tx_hash,
