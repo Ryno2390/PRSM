@@ -5747,11 +5747,30 @@ def config_show(output_format: str):
     table.add_column("Value", style="green")
     table.add_row("p2p_port", str(cfg.p2p_port))
     table.add_row("api_port", str(cfg.api_port))
+    # Sprint 533 F52 fix: detect known-stale bootstrap_nodes
+    # placeholder patterns and surface a migration hint. The
+    # `/dns4/.../p2p/QmPRSM1` pattern was a pre-sprint-148 default
+    # using fake PeerIDs; canonical is now `wss://bootstrap-eu.
+    # prsm-network.com:8765` (sprint-385 DNS fleet).
+    _stale = bool(
+        cfg.bootstrap_nodes
+        and any(
+            "QmPRSM" in b or "bootstrap1.prsm.network" in b
+            for b in cfg.bootstrap_nodes
+        )
+    )
     if cfg.bootstrap_nodes:
         table.add_row("bootstrap_nodes", ", ".join(cfg.bootstrap_nodes))
     else:
         table.add_row("bootstrap_nodes", "[dim]none configured[/dim]")
     console.print(table)
+    if _stale:
+        console.print(
+            "[yellow]⚠️  bootstrap_nodes contains pre-sprint-148 "
+            "placeholder values (QmPRSM1 / bootstrap1.prsm.network).[/yellow]\n"
+            "[dim]Run `prsm setup --reset` or `prsm config reset` to "
+            "refresh from canonical fleet (wss://bootstrap-eu/apac.prsm-network.com:8765).[/dim]"
+        )
 
     # API Keys
     table = Table(title="API Keys", show_header=False, box=None)
