@@ -6123,6 +6123,13 @@ def _wallet_read_balance_wei(rpc_url: str, ftns_token: str, address: str) -> int
         Web3.to_checksum_address(address)).call())
 
 
+def _wallet_read_eth_balance_wei(rpc_url: str, address: str) -> int:
+    """Sprint 508: native ETH balance for gas-runway visibility."""
+    from web3 import Web3
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    return int(w3.eth.get_balance(Web3.to_checksum_address(address)))
+
+
 @main.group()
 def content():
     """Content publishing — view uploads, royalties accrued."""
@@ -6268,6 +6275,36 @@ def wallet_info(network_name: str, address):
                       f"({cfg.ftns_token[:10]}…)")
     except Exception as exc:
         console.print(f"FTNS balance:   ⚠️  read failed: {exc}", style="yellow")
+
+    # Sprint 508 — native ETH balance (gas runway).
+    try:
+        eth_wei = _wallet_read_eth_balance_wei(ctx['rpc_url'], addr)
+        eth = eth_wei / 1e18
+        if eth < 0.0001:
+            status_color = "bold red"
+            status_label = "CRITICAL"
+        elif eth < 0.0005:
+            status_color = "yellow"
+            status_label = "LOW"
+        else:
+            status_color = "bold green"
+            status_label = "ok"
+        console.print(
+            f"ETH balance:    [bold]{eth:.10f}[/bold] ETH  "
+            f"[[{status_color}]{status_label}[/{status_color}]]"
+        )
+        if status_label == "CRITICAL":
+            console.print(
+                "  ⚠️  Top up ETH now — on-chain TX will start failing.",
+                style="bold red",
+            )
+        elif status_label == "LOW":
+            console.print(
+                "  ⚠️  Gas is low — plan to top up soon.",
+                style="yellow",
+            )
+    except Exception as exc:
+        console.print(f"ETH balance:    ⚠️  read failed: {exc}", style="yellow")
 
     # Claimable royalties
     if cfg.royalty_distributor:
