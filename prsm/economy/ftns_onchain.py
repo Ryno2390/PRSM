@@ -271,6 +271,42 @@ class OnChainFTNSLedger:
                 created_at=r[7],
             ))
 
+    def _emit_startup_gas_log(self) -> None:
+        """Push-signal counterpart to /wallet/gas-status.
+
+        Called at end of initialize(). Logs WARNING for low gas
+        and ERROR for critical so operators see it in startup
+        output even without polling /health/detailed.
+        """
+        if self.w3 is None or self._connected_address is None:
+            return
+        try:
+            wei = self.w3.eth.get_balance(self._connected_address)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "startup gas check failed (non-fatal): %s", exc,
+            )
+            return
+        eth = wei / 1e18
+        addr_short = self._connected_address[:10] + "…"
+        if eth < 0.0001:
+            logger.error(
+                "Operator gas CRITICAL: %.10f ETH on %s — "
+                "broadcasts will start failing soon. Top up now.",
+                eth, addr_short,
+            )
+        elif eth < 0.0005:
+            logger.warning(
+                "Operator gas low: %.10f ETH on %s — plan to "
+                "top up to avoid mid-job failures.",
+                eth, addr_short,
+            )
+        else:
+            logger.info(
+                "Operator gas ok: %.10f ETH on %s",
+                eth, addr_short,
+            )
+
     async def _close_persistence(self) -> None:
         if self._db is not None:
             await self._db.close()
@@ -347,6 +383,7 @@ class OnChainFTNSLedger:
             await self._init_persistence()
 
             self._is_initialized = True
+            self._emit_startup_gas_log()
             return True
 
         except Exception as e:
