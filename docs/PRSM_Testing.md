@@ -127,6 +127,7 @@ journey. Each step should be live-verifiable on a single node.
 | BinaryFingerprint perceptual hashes | `prsm/marketplace/binary_fingerprint.py` | 🟢 | T4.7 | Calibration deferred to testnet traffic |
 | V2 ProvenanceRegistry on-chain embedding commitment | on-chain | ✅ | — | Deployed `0xe0cedDA354...` |
 | **On-chain provenance register CLI** | `prsm provenance register <file>` | ✅ | 520 | **First-ever PRSM-daemon-signed ProvenanceRegistry TX on Base mainnet**: tx `0x84b8084b…` block 46165810, success, 50470 gas @ 0.006 Gwei = 0.0000003 ETH. ProvenanceRegistered event emitted. Hash `0xa97f3411…` registered with creator=operator wallet, 800 bps royalty (8%). Vision §11 creator-provenance promise live-attested via CLI |
+| **Auto-register provenance on upload** | `POST /content/upload` → `_register_on_chain` | ✅ | 523 | **Vision §11 "creator provenance happens automatically on upload" live-attested**: with `PRSM_PROVENANCE_REGISTRY_ADDRESS + PRSM_ONCHAIN_PROVENANCE=1` set, upload of new content triggers ProvenanceRegistry write transparently. TX `0x82d1776d…` block 46166531 success, 116157 gas. Operator queries `/content/mine` to see `provenance_tx_hash`. UX gap surfaced: upload response JSON doesn't surface tx_hash (sprint-524 candidate to thread it through) |
 | **On-chain provenance info CLI** | `prsm provenance info <hash\|file>` | ✅ | 520 | Live-verified roundtrip: info on registered hash returns full record (hash, creator, royalty, registered_at, metadata); info on unregistered hash returns clean "NOT registered" |
 
 ---
