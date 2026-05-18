@@ -3119,6 +3119,37 @@ def history(limit: int, search: Optional[str], onchain: bool, stats: bool, inbou
     """
     import httpx
 
+    if onchain and inbound and stats:
+        url = _api_url_from_creds(api_url)
+        try:
+            r = httpx.get(
+                f"{url}/wallet/transactions/onchain/inbound/stats",
+                params={"lookback_blocks": lookback_blocks},
+                timeout=30.0,
+            )
+        except httpx.ConnectError:
+            console.print(f"❌ Cannot connect to {url}", style="red")
+            raise SystemExit(1)
+        if r.status_code == 503:
+            try:
+                detail = r.json().get("detail", "")
+            except Exception:
+                detail = r.text[:300]
+            console.print("❌ Inbound stats unavailable:", style="red")
+            console.print(f"   {detail}")
+            raise SystemExit(1)
+        if r.status_code != 200:
+            console.print(f"❌ HTTP {r.status_code}", style="red")
+            raise SystemExit(1)
+        d = r.json()
+        console.print(f"\n[bold]Inbound FTNS stats[/bold] for {d.get('recipient')}")
+        console.print(f"  count             : {d.get('count')}")
+        console.print(f"  total received    : [green]{d.get('total_inbound_ftns', 0):.6f}[/green] FTNS")
+        console.print(f"  first inbound blk : {d.get('first_inbound_block', '—')}")
+        console.print(f"  last inbound blk  : {d.get('last_inbound_block', '—')}")
+        console.print(f"  scan window       : blocks {d.get('from_block')}-{d.get('to_block')}\n")
+        return
+
     if onchain and inbound:
         url = _api_url_from_creds(api_url)
         try:
