@@ -1640,6 +1640,76 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "transactions": out,
         }
 
+    @app.get("/wallet/transactions/onchain/inbound", tags=["wallet"])
+    async def get_inbound_transactions(
+        from_block: int = 0,
+        to_block: str = "latest",
+        lookback_blocks: int = 100000,
+    ) -> Dict[str, Any]:
+        """Sprint 512: scan inbound ERC-20 Transfer events.
+
+        Query params:
+          from_block (int): explicit start block
+          to_block (str/int): "latest" or block number
+          lookback_blocks (int): if from_block=0, scan
+            current_block - lookback_blocks → current_block
+            (Base mainnet at 2s/block → 100k blocks ≈ 56 hrs)
+        """
+        ledger = getattr(node, "ftns_ledger", None)
+        if ledger is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "On-chain FTNS ledger not initialized — "
+                    "daemon must be started with "
+                    "FTNS_WALLET_PRIVATE_KEY set."
+                ),
+            )
+        w3 = getattr(ledger, "w3", None)
+        addr = getattr(ledger, "_connected_address", None)
+        token = getattr(ledger, "_token", None)
+        if w3 is None or addr is None or token is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Ledger not fully initialized — w3/token/"
+                    "address missing."
+                ),
+            )
+        try:
+            from prsm.economy.ftns_onchain import (
+                scan_inbound_transfers,
+            )
+            if from_block == 0:
+                latest = w3.eth.block_number
+                start = max(0, latest - lookback_blocks)
+                end = latest
+            else:
+                start = from_block
+                end = (
+                    w3.eth.block_number
+                    if to_block == "latest"
+                    else int(to_block)
+                )
+            transfers = scan_inbound_transfers(
+                token,
+                recipient=addr,
+                from_block=start,
+                to_block=end,
+            )
+            return {
+                "recipient": addr,
+                "from_block": start,
+                "to_block": end,
+                "count": len(transfers),
+                "transfers": transfers,
+            }
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=f"inbound scan failed: {exc!s}"[:300],
+            )
+
     @app.get("/wallet/transactions/onchain/stats", tags=["wallet"])
     async def get_onchain_transaction_stats() -> Dict[str, Any]:
         ledger = getattr(node, "ftns_ledger", None)

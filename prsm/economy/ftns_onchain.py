@@ -116,6 +116,17 @@ _ERC20_ABI = [
         "outputs": [{"name": "", "type": "bool"}],
         "type": "function",
     },
+    # Sprint 512 — Transfer event for inbound-scan endpoint.
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "name": "from", "type": "address"},
+            {"indexed": True, "name": "to", "type": "address"},
+            {"indexed": False, "name": "value", "type": "uint256"},
+        ],
+        "name": "Transfer",
+        "type": "event",
+    },
 ]
 
 # ── Network config (resolved at module load via PRSM_NETWORK) ─────────────
@@ -131,6 +142,69 @@ _resolved = resolve_endpoints()
 FTNS_CONTRACT_ADDRESS = _resolved.ftns_token or "0x5276a3756C85f2E9e46f6D34386167a209aa16e5"
 BASE_RPC_URL = _resolved.rpc_url
 BASE_CHAIN_ID = _resolved.chain_id
+
+
+def scan_inbound_transfers(
+    contract,
+    recipient: str,
+    from_block: int,
+    to_block,
+) -> list:
+    """Sprint 512: scan ERC-20 Transfer events where to=recipient.
+
+    Uses Web3 events get_logs (stateless) rather than
+    create_filter (stateful) because public RPC providers
+    like base.org reject stateful filters with
+    "filter not found".
+
+    Returns list of dicts:
+      {block_number, tx_hash, from_address, to_address,
+       amount_ftns}
+    """
+    from eth_utils import to_checksum_address
+    recipient_checksum = to_checksum_address(recipient)
+    events_obj = contract.events.Transfer
+    # Prefer get_logs (stateless) — falls back to
+    # create_filter for code paths that mock the older API.
+    if hasattr(events_obj, "get_logs"):
+        logs = events_obj.get_logs(
+            from_block=from_block,
+            to_block=to_block,
+            argument_filters={"to": recipient_checksum},
+        )
+    else:
+        filt = events_obj.create_filter(
+            from_block=from_block,
+            to_block=to_block,
+            argument_filters={"to": recipient_checksum},
+        )
+        logs = filt.get_all_entries()
+    out = []
+    for log in logs:
+        tx_hash_bytes = getattr(log, "transactionHash", b"")
+        if hasattr(tx_hash_bytes, "hex"):
+            tx_hash = tx_hash_bytes.hex()
+        else:
+            tx_hash = str(tx_hash_bytes)
+        if not tx_hash.startswith("0x"):
+            tx_hash = "0x" + tx_hash
+        args = log.args
+        try:
+            from_addr = args["from"]
+            to_addr = args["to"]
+            amount_wei = args["value"]
+        except (KeyError, TypeError):
+            from_addr = getattr(args, "from", None) or ""
+            to_addr = getattr(args, "to", None) or ""
+            amount_wei = getattr(args, "value", 0) or 0
+        out.append({
+            "block_number": getattr(log, "blockNumber", 0),
+            "tx_hash": tx_hash,
+            "from_address": from_addr,
+            "to_address": to_addr,
+            "amount_ftns": amount_wei / 1e18,
+        })
+    return out
 
 
 def _gas_status_for_eth(eth: float) -> str:
