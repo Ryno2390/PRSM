@@ -10687,9 +10687,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         tracker = getattr(node, "reputation_tracker", None)
         if tracker is None:
+            # Sprint 535 F62 fix: actionable hint. Tracker is
+            # currently wired only inside the QO-init block (node.py
+            # line ~4304) — set PRSM_QUERY_ORCHESTRATOR_ENABLED=1
+            # to unlock. Long-term fix: move out of QO-gated block
+            # (same class as F34/F44).
             raise HTTPException(
                 status_code=503,
-                detail="Reputation tracker not initialized.",
+                detail=(
+                    "Reputation tracker not initialized — set "
+                    "PRSM_QUERY_ORCHESTRATOR_ENABLED=1 to enable "
+                    "marketplace surfaces."
+                ),
             )
         provider_ids = tracker.known_providers()
         rows = [_reputation_row(tracker, pid) for pid in provider_ids]
@@ -10713,9 +10722,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """Single-provider detail incl slash event history."""
         tracker = getattr(node, "reputation_tracker", None)
         if tracker is None:
+            # Sprint 535 F62 fix: actionable hint. Tracker is
+            # currently wired only inside the QO-init block (node.py
+            # line ~4304) — set PRSM_QUERY_ORCHESTRATOR_ENABLED=1
+            # to unlock. Long-term fix: move out of QO-gated block
+            # (same class as F34/F44).
             raise HTTPException(
                 status_code=503,
-                detail="Reputation tracker not initialized.",
+                detail=(
+                    "Reputation tracker not initialized — set "
+                    "PRSM_QUERY_ORCHESTRATOR_ENABLED=1 to enable "
+                    "marketplace surfaces."
+                ),
             )
         row = _reputation_row(tracker, provider_id)
         # Add the slash event list (not surfaced in /list rows
@@ -13406,11 +13424,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """List inference model_ids the executor accepts."""
         executor = getattr(node, "inference_executor", None)
         if executor is None:
+            # Sprint 535 F63 fix: actionable hint pointing to the
+            # mock executor for local dogfood. Real executor wiring
+            # is daemon-side compute provider config (sprint 235+).
             raise HTTPException(
                 status_code=503,
                 detail=(
                     "Inference executor not initialized on this "
-                    "node — no models available."
+                    "node — set PRSM_INFERENCE_EXECUTOR=mock for "
+                    "local testing, or wire a real executor via "
+                    "compute_provider config."
                 ),
             )
         try:
@@ -13664,7 +13687,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 500: If bridge operation fails
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
-            raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "FTNS bridge not wired in this daemon build — "
+                    "FTNSBridge requires cross-chain RPC + contract "
+                    "addresses not yet configurable via env var. "
+                    "Track sprint-X bridge integration; for now use "
+                    "/wallet/transfer/onchain for same-chain FTNS moves."
+                ),
+            )
         
         if not node.identity:
             raise HTTPException(status_code=503, detail="Node identity not initialized")
@@ -13719,7 +13751,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 500: If bridge operation fails
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
-            raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "FTNS bridge not wired in this daemon build — "
+                    "FTNSBridge requires cross-chain RPC + contract "
+                    "addresses not yet configurable via env var. "
+                    "Track sprint-X bridge integration; for now use "
+                    "/wallet/transfer/onchain for same-chain FTNS moves."
+                ),
+            )
         
         if not node.identity:
             raise HTTPException(status_code=503, detail="Node identity not initialized")
@@ -13774,7 +13815,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 503: If bridge not initialized
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
-            raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "FTNS bridge not wired in this daemon build — "
+                    "FTNSBridge requires cross-chain RPC + contract "
+                    "addresses not yet configurable via env var. "
+                    "Track sprint-X bridge integration; for now use "
+                    "/wallet/transfer/onchain for same-chain FTNS moves."
+                ),
+            )
         
         try:
             stats = await node.ftns_bridge.get_bridge_stats()
@@ -13812,7 +13862,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 404: If transaction not found
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
-            raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "FTNS bridge not wired in this daemon build — "
+                    "FTNSBridge requires cross-chain RPC + contract "
+                    "addresses not yet configurable via env var. "
+                    "Track sprint-X bridge integration; for now use "
+                    "/wallet/transfer/onchain for same-chain FTNS moves."
+                ),
+            )
         
         tx = await node.ftns_bridge.get_bridge_status(tx_id)
         
@@ -13839,7 +13898,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 503: If bridge not initialized
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
-            raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "FTNS bridge not wired in this daemon build — "
+                    "FTNSBridge requires cross-chain RPC + contract "
+                    "addresses not yet configurable via env var. "
+                    "Track sprint-X bridge integration; for now use "
+                    "/wallet/transfer/onchain for same-chain FTNS moves."
+                ),
+            )
         
         # Sprint 194 — bounds validation. Pre-fix `min(limit, 200)`
         # capped upper but accepted negative — limit=-1 returned
