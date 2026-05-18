@@ -3105,16 +3105,67 @@ def stake(amount: float, lock_days: int, api_url: str) -> None:
 @click.option("--search",  default=None,          help="Filter by description or transaction ID")
 @click.option("--onchain", is_flag=True, default=False, help="Show on-chain TX (broadcast by daemon) instead of off-chain DAG ledger")
 @click.option("--stats", is_flag=True, default=False, help="With --onchain: print aggregate stats instead of full TX list")
+@click.option("--inbound", is_flag=True, default=False, help="With --onchain: show INBOUND Transfer events (FTNS sent TO this wallet) — sprint 512")
+@click.option("--lookback-blocks", default=100000, type=int, help="With --onchain --inbound: how many blocks back to scan (default 100000 ~= 56hrs on Base)")
 @click.option("--api-url", default=None,           help="PRSM API URL (default: from stored credentials)")
-def history(limit: int, search: Optional[str], onchain: bool, stats: bool, api_url: str) -> None:
+def history(limit: int, search: Optional[str], onchain: bool, stats: bool, inbound: bool, lookback_blocks: int, api_url: str) -> None:
     """Show your FTNS transaction history.
 
     Default: off-chain DAG ledger (user-to-user FTNS moves).
     With --onchain: real Base mainnet TX broadcast by this daemon's
     loaded FTNS_WALLET_PRIVATE_KEY (sprint-498 endpoint).
     With --onchain --stats: compact aggregate summary.
+    With --onchain --inbound: FTNS received from external parties.
     """
     import httpx
+
+    if onchain and inbound:
+        url = _api_url_from_creds(api_url)
+        try:
+            r = httpx.get(
+                f"{url}/wallet/transactions/onchain/inbound",
+                params={"lookback_blocks": lookback_blocks},
+                timeout=30.0,
+            )
+        except httpx.ConnectError:
+            console.print(f"❌ Cannot connect to {url}", style="red")
+            raise SystemExit(1)
+        if r.status_code == 503:
+            try:
+                detail = r.json().get("detail", "")
+            except Exception:
+                detail = r.text[:300]
+            console.print("❌ Inbound scan unavailable:", style="red")
+            console.print(f"   {detail}")
+            raise SystemExit(1)
+        if r.status_code != 200:
+            console.print(f"❌ HTTP {r.status_code}: {r.text[:200]}", style="red")
+            raise SystemExit(1)
+        d = r.json()
+        transfers = d.get("transfers", [])
+        count = d.get("count", 0)
+        console.print(
+            f"\n🔗 Inbound FTNS for [bold]{d.get('recipient')}[/bold]  "
+            f"[dim]({count} in blocks {d.get('from_block')}-{d.get('to_block')})[/dim]",
+        )
+        if not transfers:
+            console.print("No inbound transfers in this window.", style="dim")
+            return
+        table = Table(title=f"Inbound FTNS  (count={count})")
+        table.add_column("tx_hash",  style="dim",    max_width=18)
+        table.add_column("block",    style="cyan",   justify="right")
+        table.add_column("from",     style="white",  max_width=14)
+        table.add_column("amount",   style="green",  justify="right")
+        for t in transfers[: min(limit, 100)]:
+            tx_hash = t.get("tx_hash") or ""
+            table.add_row(
+                (tx_hash[:16] + "…") if tx_hash else "—",
+                str(t.get("block_number") or "—"),
+                (t.get("from_address") or "—")[:14],
+                f"{t.get('amount_ftns', 0):.6f}",
+            )
+        console.print(table)
+        return
 
     if onchain and stats:
         url = _api_url_from_creds(api_url)
