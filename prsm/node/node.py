@@ -189,9 +189,16 @@ def _build_provenance_client_or_none():
     pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip()
     if not addr and os.getenv("PRSM_NETWORK", "").strip():
         # Sprint 146 — canonical fallback when PRSM_NETWORK declared.
+        # Sprint 525 (PARTIAL): attempted to prefer V2 but discovered F42
+        # — the auto-register code path uses V1 ProvenanceRegistryClient
+        # which has a 3-arg `registerContent` signature. V2 contract has
+        # a 5-arg signature → method-signature mismatch → EVM fallback
+        # gas explosion. Sprint 526 candidate: proper V2 client routing
+        # in _register_on_chain. Until then, V1 fallback is the stable path.
         try:
+            ep = _resolve_endpoints()
             addr = (
-                _resolve_endpoints().provenance_registry or ""
+                ep.provenance_registry or ""
             ).strip()
         except Exception:  # noqa: BLE001
             addr = ""

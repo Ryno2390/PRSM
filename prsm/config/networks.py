@@ -238,6 +238,7 @@ class ResolvedEndpoints:
     explorer_url: str
     ftns_token: Optional[str]
     provenance_registry: Optional[str]
+    provenance_registry_v2: Optional[str]
     royalty_distributor: Optional[str]
     foundation_safe: Optional[str]
     publisher_key_anchor: Optional[str]
@@ -313,6 +314,12 @@ def resolve_endpoints(network: Optional[str] = None) -> ResolvedEndpoints:
         ),
         provenance_registry=_override(
             "PRSM_PROVENANCE_REGISTRY_ADDRESS", cfg.provenance_registry
+        ),
+        # Sprint 525 — V2 canonical (post-A-08 ceremony). Operators
+        # should pin to V2 going forward; V1 retained as legacy fallback.
+        provenance_registry_v2=_override(
+            "PRSM_PROVENANCE_REGISTRY_V2_ADDRESS",
+            cfg.provenance_registry_v2,
         ),
         royalty_distributor=_override(
             "PRSM_ROYALTY_DISTRIBUTOR_ADDRESS", cfg.royalty_distributor
