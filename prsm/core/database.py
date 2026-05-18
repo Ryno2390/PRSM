@@ -468,6 +468,13 @@ class ContentProvenanceModel(Base):
     # 0x address stay null and fall back to local royalties.
     provenance_hash = Column(String(length=66), nullable=True)
 
+    # Sprint 528 F43 fix: on-chain ProvenanceRegistry TX hash for the
+    # auto-register call. Persisted so daemon restarts don't lose the
+    # operator's audit trail. Nullable — rows where auto-register
+    # didn't fire (no client, no creator_address, broadcast failure)
+    # keep this null and operators check BaseScan via content_hash.
+    provenance_tx_hash = Column(String(length=66), nullable=True)
+
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -963,7 +970,20 @@ class DatabaseManager:
             engine = await get_async_engine()
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
-            
+                # Sprint 528 F43 migration: add provenance_tx_hash
+                # column to content_provenance for existing DBs that
+                # predate it. ALTER TABLE wrapped in try/except so
+                # post-migration init stays idempotent.
+                try:
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE content_provenance "
+                            "ADD COLUMN provenance_tx_hash VARCHAR(66)"
+                        )
+                    )
+                except Exception:
+                    pass  # column already exists
+
             logger.info("Database tables created successfully")
             
         except Exception as e:
@@ -1505,6 +1525,11 @@ class ProvenanceQueries:
                     # persisted value.
                     if record.get("provenance_hash") is not None:
                         existing.provenance_hash = record.get("provenance_hash")
+                    # Sprint 528 F43 fix: same guard for tx_hash
+                    if record.get("provenance_tx_hash") is not None:
+                        existing.provenance_tx_hash = record.get(
+                            "provenance_tx_hash",
+                        )
                 else:
                     row = ContentProvenanceModel(
                         cid=content_id,
@@ -1524,6 +1549,7 @@ class ProvenanceQueries:
                         near_duplicate_of=record.get("near_duplicate_of"),
                         near_duplicate_similarity=record.get("near_duplicate_similarity"),
                         provenance_hash=record.get("provenance_hash"),
+                        provenance_tx_hash=record.get("provenance_tx_hash"),
                         created_at=created_at,
                     )
                     session.add(row)
@@ -1595,7 +1621,8 @@ class ProvenanceQueries:
                             provenance_signature, royalty_rate, parent_cids,
                             access_count, total_royalties, is_sharded, manifest_cid,
                             total_shards, embedding_id, near_duplicate_of,
-                            near_duplicate_similarity, provenance_hash, created_at
+                            near_duplicate_similarity, provenance_hash,
+                            provenance_tx_hash, created_at
                         FROM content_provenance
                         WHERE creator_id = :creator_id
                         ORDER BY created_at ASC
@@ -1628,6 +1655,11 @@ class ProvenanceQueries:
                             else None
                         ),
                         "provenance_hash": row.provenance_hash,
+                        # Sprint 528 F43 fix: on-chain tx_hash now
+                        # persisted + restored across daemon restart
+                        "provenance_tx_hash": getattr(
+                            row, "provenance_tx_hash", None,
+                        ),
                         # Sprint 480 (F22) — SQLite returns DATETIME
                         # columns as ISO-format strings (`'2026-05-15
                         # 12:52:27.363797'`) instead of native

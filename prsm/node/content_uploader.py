@@ -2339,6 +2339,11 @@ class ContentUploader:
                 # must survive node restarts so royalty routing stays
                 # on-chain across process lifetimes.
                 "provenance_hash": uploaded.provenance_hash,
+                # Sprint 528 F43 fix: on-chain ProvenanceRegistry tx_hash
+                # — must survive restarts so /content/mine surfaces the
+                # auto-register audit trail without an extra BaseScan
+                # round-trip.
+                "provenance_tx_hash": uploaded.provenance_tx_hash,
                 "created_at": uploaded.created_at,
             }
             success = await ProvenanceQueries.upsert_provenance(record)
@@ -2482,6 +2487,11 @@ class ContentUploader:
                     # fall back to local royalties, matching the pre-1.3
                     # behaviour operators already expect.
                     provenance_hash=rec.get("provenance_hash"),
+                    # Sprint 528 F43 fix: restore on-chain tx_hash
+                    # so /content/mine surfaces auto-register audit
+                    # trail after restart. Operators no longer have
+                    # to query BaseScan to find the registration tx.
+                    provenance_tx_hash=rec.get("provenance_tx_hash"),
                 )
                 self.uploaded_content[rec["content_id"]] = uploaded
                 # Phase 1.3: restart must also re-populate provider._local_content
