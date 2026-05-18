@@ -6279,6 +6279,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "duplicate_of_creator": duplicate_of_creator,
             "canonical_creator": canonical_creator,
             "encrypted": encrypted,
+            # Sprint 524: surface provenance_tx_hash in the
+            # immediate upload response (instead of forcing a
+            # /content/mine round-trip). None when no on-chain
+            # provenance write happened (no creator_address,
+            # provenance_client unwired, etc).
+            "provenance_tx_hash": getattr(
+                result, "provenance_tx_hash", None,
+            ),
         }
 
     # ── Sprint 304 — recipient-manifest endpoint ─────────
