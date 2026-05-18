@@ -1710,6 +1710,77 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 detail=f"inbound scan failed: {exc!s}"[:300],
             )
 
+    @app.get("/wallet/transactions/onchain/inbound/stats", tags=["wallet"])
+    async def get_inbound_transaction_stats(
+        from_block: int = 0,
+        to_block: str = "latest",
+        lookback_blocks: int = 100000,
+    ) -> Dict[str, Any]:
+        """Sprint 515 — aggregate inbound stats."""
+        ledger = getattr(node, "ftns_ledger", None)
+        if ledger is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "On-chain FTNS ledger not initialized — "
+                    "daemon must be started with "
+                    "FTNS_WALLET_PRIVATE_KEY set."
+                ),
+            )
+        w3 = getattr(ledger, "w3", None)
+        addr = getattr(ledger, "_connected_address", None)
+        token = getattr(ledger, "_token", None)
+        if w3 is None or addr is None or token is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Ledger not fully initialized.",
+            )
+        try:
+            from prsm.economy.ftns_onchain import (
+                scan_inbound_transfers,
+            )
+            if from_block == 0:
+                latest = w3.eth.block_number
+                start = max(0, latest - lookback_blocks)
+                end = latest
+            else:
+                start = from_block
+                end = (
+                    w3.eth.block_number
+                    if to_block == "latest"
+                    else int(to_block)
+                )
+            transfers = scan_inbound_transfers(
+                token, recipient=addr,
+                from_block=start, to_block=end,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=f"inbound scan failed: {exc!s}"[:300],
+            )
+        total_ftns = sum(
+            t.get("amount_ftns", 0.0) for t in transfers
+        )
+        blocks = [
+            t.get("block_number")
+            for t in transfers
+            if t.get("block_number") is not None
+        ]
+        return {
+            "recipient": addr,
+            "from_block": start,
+            "to_block": end,
+            "count": len(transfers),
+            "total_inbound_ftns": total_ftns,
+            "first_inbound_block": (
+                min(blocks) if blocks else None
+            ),
+            "last_inbound_block": (
+                max(blocks) if blocks else None
+            ),
+        }
+
     @app.get("/wallet/transactions/onchain/stats", tags=["wallet"])
     async def get_onchain_transaction_stats() -> Dict[str, Any]:
         ledger = getattr(node, "ftns_ledger", None)
@@ -11718,6 +11789,35 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 }
         else:
             subsystems["operator_gas"] = {
+                "available": False, "status": "not_wired",
+            }
+
+        # Sprint 515 — inbound_monitor subsystem. Exposes
+        # sprint 514's poller state so monitoring tools see
+        # whether the inbound scan is healthy + which block
+        # was last scanned (no event-loss).
+        inbound_mon = getattr(node, "_inbound_monitor", None)
+        if inbound_mon is not None:
+            try:
+                subsystems["inbound_monitor"] = {
+                    "available": True,
+                    "status": "ok",
+                    "last_scanned_block": getattr(
+                        inbound_mon, "_last_scanned_block",
+                        None,
+                    ),
+                    "interval_seconds": getattr(
+                        inbound_mon, "interval_seconds",
+                        None,
+                    ),
+                }
+            except Exception as exc:  # noqa: BLE001
+                subsystems["inbound_monitor"] = {
+                    "available": False, "status": "error",
+                    "error": str(exc)[:200],
+                }
+        else:
+            subsystems["inbound_monitor"] = {
                 "available": False, "status": "not_wired",
             }
 
