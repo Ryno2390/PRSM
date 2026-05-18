@@ -36,15 +36,51 @@ def _content_hash_for(path: Path, creator_address: str) -> bytes:
 
 
 def _make_client():
-    from prsm.economy.web3.provenance_registry import ProvenanceRegistryClient
+    """Sprint 527: detect V2 contract address + dispatch to V2 client.
 
-    addr = os.getenv("PRSM_PROVENANCE_REGISTRY_ADDRESS")
+    V2 client exposes V1-compatible `register_content`/`is_registered`/
+    `get_content` shims (sprint 526) — caller is contract-agnostic.
+
+    Routing logic:
+      1. Explicit PRSM_PROVENANCE_REGISTRY_ADDRESS wins. Detect V1 vs V2
+         by comparing against the network's canonical V2 address.
+      2. If unset + PRSM_NETWORK declared, pull canonical V2 (preferred)
+         else V1 from networks.py.
+    """
+    rpc = os.getenv("PRSM_BASE_RPC_URL") or os.getenv(
+        "BASE_RPC_URL", "https://mainnet.base.org",
+    )
+    pk = os.getenv("FTNS_WALLET_PRIVATE_KEY")
+    explicit_addr = os.getenv("PRSM_PROVENANCE_REGISTRY_ADDRESS")
+    v2_addr = ""
+    try:
+        from prsm.config.networks import resolve_endpoints
+        ep = resolve_endpoints()
+        v2_addr = (getattr(ep, "provenance_registry_v2", None) or "")
+        if not explicit_addr:
+            # Canonical fallback prefers V2 (post sprint-526 ceremony).
+            explicit_addr = (
+                v2_addr or ep.provenance_registry or ""
+            )
+    except Exception:
+        pass
+    addr = (explicit_addr or "").strip()
     if not addr:
         click.echo("error: PRSM_PROVENANCE_REGISTRY_ADDRESS not set", err=True)
         sys.exit(1)
-    rpc = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
-    pk = os.getenv("FTNS_WALLET_PRIVATE_KEY")
-    return ProvenanceRegistryClient(rpc_url=rpc, contract_address=addr, private_key=pk)
+    if v2_addr and addr.lower() == v2_addr.lower():
+        from prsm.economy.web3.provenance_registry_v2 import (
+            ProvenanceRegistryV2Client,
+        )
+        return ProvenanceRegistryV2Client(
+            rpc_url=rpc, contract_address=addr, private_key=pk,
+        )
+    from prsm.economy.web3.provenance_registry import (
+        ProvenanceRegistryClient,
+    )
+    return ProvenanceRegistryClient(
+        rpc_url=rpc, contract_address=addr, private_key=pk,
+    )
 
 
 @click.group("provenance")
