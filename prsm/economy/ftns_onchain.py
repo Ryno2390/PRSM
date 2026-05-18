@@ -522,6 +522,66 @@ class OnChainFTNSLedger:
         )
         await self._db.commit()
 
+    async def _reconcile_pending_transactions(self) -> None:
+        """Sprint 511: rebuild pending status from chain receipts.
+
+        If the daemon was killed during wait_for_transaction_receipt
+        (e.g. SIGKILL, container restart, OOM), TX broadcast
+        successfully on-chain but the local audit trail stayed
+        'pending'. At init time, check the chain for any
+        outstanding pending rows and update status if a receipt
+        now exists.
+        """
+        if self.w3 is None:
+            return
+        import asyncio as _aio
+        loop = _aio.get_running_loop()
+        for tx in self._transactions:
+            if tx.status != "pending":
+                continue
+            if not tx.tx_hash:
+                continue
+            try:
+                tx_hash_bytes = tx.tx_hash
+                if not tx_hash_bytes.startswith("0x"):
+                    tx_hash_bytes = "0x" + tx_hash_bytes
+                receipt = await loop.run_in_executor(
+                    None,
+                    lambda: self.w3.eth.get_transaction_receipt(
+                        tx_hash_bytes,
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "reconcile: receipt lookup for %s failed "
+                    "(leaving pending): %s",
+                    tx.tx_hash[:18], exc,
+                )
+                continue
+            if receipt is None:
+                continue
+            if receipt.get("status") == 1:
+                tx.status = "confirmed"
+                tx.block_number = receipt.get("blockNumber")
+                logger.info(
+                    "reconcile: promoted %s pending → "
+                    "confirmed (block %s)",
+                    tx.tx_hash[:18], tx.block_number,
+                )
+            else:
+                tx.status = "rejected"
+                logger.warning(
+                    "reconcile: marked %s pending → rejected",
+                    tx.tx_hash[:18],
+                )
+            try:
+                await self._update_tx_status(tx)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "reconcile: persistence update failed "
+                    "for %s: %s", tx.tx_hash[:18], exc,
+                )
+
     async def _update_tx_status(self, tx: FTNSTransaction) -> None:
         if self._db is None:
             return
@@ -578,6 +638,15 @@ class OnChainFTNSLedger:
 
             self._is_initialized = True
             self._emit_startup_gas_log()
+            # Sprint 511: reconcile any pending TX whose receipt
+            # may have been missed due to daemon interruption.
+            try:
+                await self._reconcile_pending_transactions()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "pending-TX reconciliation raised "
+                    "(non-fatal): %s", exc,
+                )
             return True
 
         except Exception as e:
