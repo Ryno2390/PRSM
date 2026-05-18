@@ -166,6 +166,7 @@ class OnChainFTNSLedger:
         contract_address: str = FTNS_CONTRACT_ADDRESS,
         rpc_url: str = BASE_RPC_URL,
         chain_id: int = BASE_CHAIN_ID,
+        db_path: Optional[str] = None,
     ):
         self.node_id = node_id
         self.wallet_private_key = wallet_private_key or os.getenv(
@@ -174,6 +175,7 @@ class OnChainFTNSLedger:
         self.contract_address = contract_address
         self.rpc_url = rpc_url
         self.chain_id = chain_id
+        self.db_path = db_path
 
         self.w3: Optional[Web3] = None
         self._account = None
@@ -183,6 +185,7 @@ class OnChainFTNSLedger:
         self._transactions: List[FTNSTransaction] = []
         self._is_initialized = False
         self._lock = asyncio.Lock()
+        self._db = None  # aiosqlite.Connection if persistent
 
         # Phase 1.3 Task 3a: populate _connected_address synchronously
         # from the wallet private key. Account.from_key(key).address is
@@ -217,6 +220,88 @@ class OnChainFTNSLedger:
                     f"will require PRSM_CREATOR_ADDRESS env var or fall "
                     f"back to local royalties."
                 )
+
+    @property
+    def is_persistent(self) -> bool:
+        return self.db_path is not None
+
+    async def _init_persistence(self) -> None:
+        if not self.is_persistent:
+            return
+        import aiosqlite
+        self._db = await aiosqlite.connect(self.db_path)
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS onchain_transactions (
+                job_id        TEXT PRIMARY KEY,
+                tx_hash       TEXT,
+                from_addr     TEXT,
+                to_addr       TEXT,
+                amount_ftns   REAL NOT NULL,
+                status        TEXT NOT NULL,
+                block_number  INTEGER,
+                created_at    REAL NOT NULL
+            )
+        """)
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_octx_created "
+            "ON onchain_transactions(created_at)"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_octx_tx_hash "
+            "ON onchain_transactions(tx_hash)"
+        )
+        await self._db.commit()
+        # Replay rows into in-memory list, ordered chronologically.
+        cur = await self._db.execute(
+            "SELECT job_id, tx_hash, from_addr, to_addr, "
+            "amount_ftns, status, block_number, created_at "
+            "FROM onchain_transactions ORDER BY created_at ASC"
+        )
+        rows = await cur.fetchall()
+        for r in rows:
+            self._transactions.append(FTNSTransaction(
+                job_id=r[0],
+                from_addr=r[2] or "",
+                to_addr=r[3] or "",
+                amount_ftns=r[4],
+                tx_hash=r[1] or "",
+                status=r[5],
+                block_number=r[6],
+                created_at=r[7],
+            ))
+
+    async def _close_persistence(self) -> None:
+        if self._db is not None:
+            await self._db.close()
+            self._db = None
+
+    async def _record_tx(self, tx: FTNSTransaction) -> None:
+        if self._db is None:
+            return
+        await self._db.execute(
+            "INSERT OR REPLACE INTO onchain_transactions "
+            "(job_id, tx_hash, from_addr, to_addr, amount_ftns, "
+            "status, block_number, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                tx.job_id, tx.tx_hash, tx.from_addr, tx.to_addr,
+                tx.amount_ftns, tx.status, tx.block_number,
+                tx.created_at,
+            ),
+        )
+        await self._db.commit()
+
+    async def _update_tx_status(self, tx: FTNSTransaction) -> None:
+        if self._db is None:
+            return
+        await self._db.execute(
+            "UPDATE onchain_transactions "
+            "SET status = ?, block_number = ?, tx_hash = ? "
+            "WHERE job_id = ?",
+            (tx.status, tx.block_number, tx.tx_hash, tx.job_id),
+        )
+        await self._db.commit()
 
     async def initialize(self) -> bool:
         """Connect to Base mainnet and load the FTNS contract."""
@@ -258,6 +343,8 @@ class OnChainFTNSLedger:
                     logger.info(f"FTNS token loaded: {name} ({symbol})")
                 except Exception as e:
                     logger.warning(f"Could not read token metadata: {e}")
+
+            await self._init_persistence()
 
             self._is_initialized = True
             return True
@@ -350,6 +437,7 @@ class OnChainFTNSLedger:
                 tx_record.tx_hash = tx_hash.hex()
                 tx_record.status = "pending"
                 self._transactions.append(tx_record)
+                await self._record_tx(tx_record)
 
                 logger.info(
                     f"FTNS transfer sent: {amount_ftns:.6f} -> {to_address[:12]}… "
@@ -370,6 +458,7 @@ class OnChainFTNSLedger:
                 else:
                     tx_record.status = "rejected"
                     logger.warning(f"FTNS transfer reverted: {tx_hash.hex()}")
+                await self._update_tx_status(tx_record)
 
                 return tx_record
 
@@ -377,6 +466,7 @@ class OnChainFTNSLedger:
                 tx_record.status = "rejected"
                 logger.error(f"FTNS transfer failed: {e}")
                 self._transactions.append(tx_record)
+                await self._record_tx(tx_record)
                 return None
 
     def token_info_sync(self) -> Dict[str, Any]:

@@ -43,6 +43,10 @@ def app_with_ledger():
     ledger._connected_address = (
         "0x4acdE458766C704B2511583572303e77109cFFE8"
     )
+    # Sprint 501 added these attributes — explicit defaults
+    # for the legacy sprint-500 honest-scope check.
+    ledger.is_persistent = False
+    ledger.db_path = None
     # _transactions is the in-memory list maintained by
     # OnChainFTNSLedger.transfer()
     tx1 = MagicMock()

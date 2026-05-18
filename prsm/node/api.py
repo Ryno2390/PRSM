@@ -1621,15 +1621,22 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "created_at": getattr(tx, "created_at", None),
                 "job_id": getattr(tx, "job_id", None),
             })
+        if getattr(ledger, "is_persistent", False):
+            scope = (
+                f"persistent (sqlite: "
+                f"{getattr(ledger, 'db_path', '?')})"
+            )
+        else:
+            scope = (
+                "in-memory (resets on daemon restart) — "
+                "set OnChainFTNSLedger(db_path=…) to persist"
+            )
         return {
             "count": len(out),
             "connected_address": getattr(
                 ledger, "_connected_address", None,
             ),
-            "scope": (
-                "in-memory (resets on daemon restart) — "
-                "persistence is a follow-on sprint"
-            ),
+            "scope": scope,
             "transactions": out,
         }
 

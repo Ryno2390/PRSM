@@ -2086,8 +2086,25 @@ class PRSMNode:
         # later, which left creator_address=None at upload-time and
         # silently bypassed provenance_hash computation / on-chain
         # royalty routing for every production upload.
+        # Sprint 501: persist on-chain TX audit trail to SQLite so
+        # operators don't lose history on daemon restart. Defaults to
+        # ~/.prsm/onchain_tx.db; PRSM_ONCHAIN_TX_DB=":memory:" disables.
+        _onchain_db = os.environ.get("PRSM_ONCHAIN_TX_DB")
+        if _onchain_db == ":memory:" or _onchain_db == "":
+            _onchain_db = None
+        elif _onchain_db is None:
+            _onchain_db = str(
+                Path.home() / ".prsm" / "onchain_tx.db"
+            )
+            try:
+                Path(_onchain_db).parent.mkdir(
+                    parents=True, exist_ok=True,
+                )
+            except OSError:
+                _onchain_db = None
         self.ftns_ledger = OnChainFTNSLedger(
             node_id=self.identity.node_id,
+            db_path=_onchain_db,
         )
 
         # T6 (2026-05-05): on-chain ProvenanceRegistry client. Lazy-init at
