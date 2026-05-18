@@ -6212,6 +6212,39 @@ def _wallet_read_eth_balance_wei(rpc_url: str, address: str) -> int:
     return int(w3.eth.get_balance(Web3.to_checksum_address(address)))
 
 
+def _wallet_read_inbound_count(
+    rpc_url: str,
+    ftns_token: str,
+    address: str,
+    lookback_blocks: int = 10000,
+) -> tuple:
+    """Sprint 518: aggregate inbound count + total in a
+    window using the sprint-512 scan helper. RPC-direct
+    so it works without a running daemon.
+
+    Returns (count, total_ftns).
+    """
+    from web3 import Web3
+    from prsm.economy.ftns_onchain import (
+        _ERC20_ABI, scan_inbound_transfers,
+    )
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address(ftns_token),
+        abi=_ERC20_ABI,
+    )
+    latest = w3.eth.block_number
+    from_block = max(0, latest - lookback_blocks)
+    transfers = scan_inbound_transfers(
+        contract,
+        recipient=address,
+        from_block=from_block,
+        to_block=latest,
+    )
+    total = sum(t.get("amount_ftns", 0.0) for t in transfers)
+    return (len(transfers), total)
+
+
 @main.group()
 def content():
     """Content publishing — view uploads, royalties accrued."""
@@ -6387,6 +6420,25 @@ def wallet_info(network_name: str, address):
             )
     except Exception as exc:
         console.print(f"ETH balance:    ⚠️  read failed: {exc}", style="yellow")
+
+    # Sprint 518 — recent inbound FTNS count (scan Transfer
+    # events for `to == address`). Uses sprint-512 helper.
+    try:
+        inb_count, inb_total = _wallet_read_inbound_count(
+            ctx['rpc_url'], cfg.ftns_token, addr,
+        )
+        if inb_count > 0:
+            console.print(
+                f"Inbound:        [bold]{inb_count}[/bold] receipts  "
+                f"([green]{inb_total:.6f}[/green] FTNS total, last ~10k blocks)"
+            )
+        else:
+            console.print(
+                f"Inbound:        0 receipts in last ~10k blocks",
+                style="dim",
+            )
+    except Exception as exc:
+        console.print(f"Inbound:        ⚠️  read failed: {exc}", style="yellow")
 
     # Claimable royalties
     if cfg.royalty_distributor:
