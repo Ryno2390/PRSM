@@ -371,7 +371,7 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Webhooks | `/admin/webhook-history` | `prsm node webhooks` | `prsm_webhook_history` | ✅ Sprint 446 (CLI live: "set PRSM_WEBHOOK_URL to enable" actionable empty-state) |
 | Trigger heartbeat | `/admin/heartbeat/trigger` | `prsm node trigger-heartbeat` | `prsm_heartbeat_trigger` | ✅ |
 | Trigger distribution | `/admin/distribution/trigger` | `prsm node trigger-distribution` | `prsm_distribution_trigger` | ✅ |
-| Claim royalty | `/wallet/royalty/claim` | `prsm node claim-royalty` | `prsm_royalty_claim` | ⚠️ Sprint 471 (live: 503 with actionable hint — `set PRSM_ROYALTY_DISTRIBUTOR_ADDRESS explicitly OR PRSM_NETWORK=mainnet`; full flow gated on mainnet wiring) |
+| Claim royalty | `/wallet/royalty/claim` | `prsm node claim-royalty` | `prsm_royalty_claim` | ✅ Sprint 519 (live-verified Base mainnet: DRY-RUN returns "Claimable: 0.000000 FTNS (0 wei)" + hint; `--execute` correctly short-circuits with "Nothing to claim — claimable balance is 0" — no wasted gas. Real-claim happy-path with claimable>0 requires multi-wallet consumer bench to accumulate royalties) |
 | Audit summary | `/audit/summary` | — | `prsm_audit_summary` | ✅ Sprint 471 (live: 24 sprint-469+470 probe calls auto-recorded with full schema — `{total, status_buckets: {2xx,4xx,5xx}, method_buckets, top_paths}`; auto-record on every request) |
 | Audit recent | `/audit/recent` | — | `prsm_audit_recent` | ✅ Sprint 471 (live: paginated `{entries, total, offset, limit}` with full per-call envelope — timestamp, method, path, requester, status_code, request_id) |
 
