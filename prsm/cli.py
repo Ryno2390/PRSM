@@ -2577,7 +2577,16 @@ def benchmark():
     profiler = HardwareProfiler()
     profile = profiler.detect()
     click.echo(f"Hardware Profile:")
-    click.echo(f"  CPU: {profile.cpu_cores} cores @ {profile.cpu_freq_mhz:.0f} MHz")
+    # Sprint 533 F51 fix: omit MHz if reading was junk (0).
+    # Apple Silicon and some platforms don't expose real freq;
+    # showing "0 MHz" or "4 MHz" is worse than just core count.
+    if profile.cpu_freq_mhz and profile.cpu_freq_mhz >= 100:
+        click.echo(
+            f"  CPU: {profile.cpu_cores} cores @ "
+            f"{profile.cpu_freq_mhz:.0f} MHz"
+        )
+    else:
+        click.echo(f"  CPU: {profile.cpu_cores} cores")
     click.echo(f"  GPU: {profile.gpu_name or 'None detected'}")
     if profile.gpu_vram_gb > 0:
         click.echo(f"  VRAM: {profile.gpu_vram_gb:.1f} GB")
@@ -4227,6 +4236,19 @@ def proposals(limit: int, status: str, api_url: str):
             console.print(table)
         elif response.status_code == 401:
             console.print("❌ Session expired. Run: prsm login", style="red")
+        elif response.status_code == 404:
+            # Sprint 533 F49 fix: surface that the governance route
+            # isn't wired on this daemon. Operators wanting governance
+            # today use /admin/upgrade/* (sprint-394-era surface).
+            console.print(
+                "[yellow]⚠️  Governance endpoint not wired on this daemon.[/yellow]\n"
+                "Current governance surface lives at `/admin/upgrade/*`. Use:\n"
+                "  • [cyan]curl /admin/upgrade/{proposal_id}[/cyan]  — get proposal\n"
+                "  • [cyan]curl /admin/upgrade/{id}/compose-upgrade[/cyan]\n"
+                "  • [cyan]curl /admin/upgrade/{id}/compose-rollback[/cyan]\n"
+                "The `prsm governance ...` CLI commands wrap a future "
+                "proposal-list endpoint that isn't deployed in this build."
+            )
         else:
             console.print(f"❌ Failed to list proposals: {response.status_code}", style="red")
     except httpx.ConnectError:

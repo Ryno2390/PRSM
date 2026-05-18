@@ -67,12 +67,53 @@ class HardwareProfiler:
         )
 
     def _detect_cpu(self) -> Tuple[int, float]:
-        """Detect CPU cores and frequency via psutil."""
+        """Detect CPU cores and frequency via psutil.
+
+        Sprint 533 F51 fix: psutil.cpu_freq() on Apple Silicon
+        returns nonsense (~4 MHz from the tbfrequency timer, not
+        the real CPU clock). Sanity-check + fall back to nominal
+        clocks from a known-chip lookup table on macOS.
+        """
         try:
             import psutil
             cores = psutil.cpu_count(logical=True) or 1
             freq = psutil.cpu_freq()
-            freq_mhz = freq.current if freq else 0.0
+            freq_mhz = freq.current if freq and freq.current else 0.0
+            if freq_mhz < 100.0:
+                # Junk reading — try platform-specific fallback
+                import platform
+                if platform.system() == "Darwin":
+                    try:
+                        import subprocess
+                        brand = subprocess.check_output(
+                            ["sysctl", "-n",
+                             "machdep.cpu.brand_string"],
+                            text=True, timeout=2,
+                        ).strip()
+                        _APPLE_M_NOMINAL_MHZ = {
+                            "Apple M1": 3200,
+                            "Apple M1 Pro": 3200,
+                            "Apple M1 Max": 3200,
+                            "Apple M1 Ultra": 3200,
+                            "Apple M2": 3500,
+                            "Apple M2 Pro": 3500,
+                            "Apple M2 Max": 3700,
+                            "Apple M2 Ultra": 3700,
+                            "Apple M3": 4000,
+                            "Apple M3 Pro": 4000,
+                            "Apple M3 Max": 4000,
+                            "Apple M4": 4400,
+                            "Apple M4 Pro": 4400,
+                            "Apple M4 Max": 4400,
+                        }
+                        if brand in _APPLE_M_NOMINAL_MHZ:
+                            freq_mhz = float(
+                                _APPLE_M_NOMINAL_MHZ[brand],
+                            )
+                    except Exception:
+                        pass
+                if freq_mhz < 100.0:
+                    freq_mhz = 0.0  # signal "unknown"
             return cores, freq_mhz
         except ImportError:
             logger.warning("psutil not available, using os.cpu_count()")

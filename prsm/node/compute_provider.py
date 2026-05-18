@@ -94,10 +94,43 @@ def detect_resources() -> SystemResources:
     resources = SystemResources()
     try:
         import psutil
+        import platform
         resources.cpu_count = psutil.cpu_count(logical=True) or 1
         freq = psutil.cpu_freq()
-        if freq:
+        if freq and freq.current and freq.current >= 100:
+            # Sprint 533 F51 fix: psutil.cpu_freq() returns
+            # nonsense (4 MHz) on Apple Silicon — the M-series
+            # power-management exposes a "tbfrequency" that's
+            # not the CPU clock. Sanity-check the reading;
+            # anything below 100 MHz is broken (no modern CPU
+            # runs that slow). Fall back to platform-specific
+            # nominal clocks for known Apple chips, else leave
+            # cpu_freq_mhz=0 + don't display.
             resources.cpu_freq_mhz = freq.current
+        elif platform.system() == "Darwin":
+            try:
+                import subprocess
+                brand = subprocess.check_output(
+                    ["sysctl", "-n", "machdep.cpu.brand_string"],
+                    text=True, timeout=2,
+                ).strip()
+                # Nominal base clock for Apple M-series (Wikipedia)
+                _APPLE_M_NOMINAL_MHZ = {
+                    "Apple M1": 3200, "Apple M1 Pro": 3200,
+                    "Apple M1 Max": 3200, "Apple M1 Ultra": 3200,
+                    "Apple M2": 3500, "Apple M2 Pro": 3500,
+                    "Apple M2 Max": 3700, "Apple M2 Ultra": 3700,
+                    "Apple M3": 4000, "Apple M3 Pro": 4000,
+                    "Apple M3 Max": 4000,
+                    "Apple M4": 4400, "Apple M4 Pro": 4400,
+                    "Apple M4 Max": 4400,
+                }
+                if brand in _APPLE_M_NOMINAL_MHZ:
+                    resources.cpu_freq_mhz = float(
+                        _APPLE_M_NOMINAL_MHZ[brand],
+                    )
+            except Exception:
+                pass  # leave cpu_freq_mhz=0
         mem = psutil.virtual_memory()
         resources.memory_total_gb = round(mem.total / (1024**3), 2)
         resources.memory_available_gb = round(mem.available / (1024**3), 2)
