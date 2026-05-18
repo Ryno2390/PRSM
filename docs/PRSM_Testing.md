@@ -203,6 +203,29 @@ journey. Each step should be live-verifiable on a single node.
 | Transfer (gasless via paymaster) | `POST /wallet/transfer/gasless` | 🟢 | Phase 5 | Endpoint exists; live activation external-gated |
 | WaaS provision | `POST /wallet/waas/provision` | 🟢 | Phase 5 | Endpoint exists; requires CDP credentials |
 | Paymaster status | `GET /wallet/paymaster/status` | 🟢 | Phase 5 | Endpoint exists |
+| **On-chain transfer (real ERC-20)** | `POST /wallet/transfer/onchain` | ✅ | 498 | **F38 fix**: endpoint shipped + 2 TX live on Base mainnet (TX-1 self-transfer 0xa49dd80b…, TX-2 0x1b3b1f5e… 1 FTNS to second wallet). Real ERC-20 transfer signed by `FTNS_WALLET_PRIVATE_KEY` |
+| `prsm ftns transfer-onchain` CLI | CLI | ✅ | 499 | Live-verified with 3 mainnet self-transfers via CLI: 0x596ccfdc…, 0x39d1a510…, 0x77c82fce… |
+| On-chain TX history | `GET /wallet/transactions/onchain` | ✅ | 500 | Live: persistent SQLite-backed list with full schema (tx_hash, status, block, addrs, amount, created_at, job_id, scope) |
+| On-chain TX history CLI | `prsm ftns history --onchain` | ✅ | 500 | Live: Rich table render of persisted TX |
+| On-chain TX persistence | SQLite `onchain_transactions` table | ✅ | 501 | **Live-verified roundtrip**: broadcast 2 TX → kill daemon → restart → both TX present with full fidelity |
+| On-chain TX stats | `GET /wallet/transactions/onchain/stats` | ✅ | 505 | Live: aggregates {count, confirmed/pending/rejected, total_ftns_sent, first/last_tx_at} |
+| On-chain TX stats CLI | `prsm ftns history --onchain --stats` | ✅ | 505 | Live: compact summary with color-coded counts |
+| Operator gas status | `GET /wallet/gas-status` | ✅ | 502 | Live: thresholds low<0.0005 / critical<0.0001 ETH, status=ok/low/critical/unavailable. Operator wallet 0.000497 ETH → status=low |
+| Operator gas status CLI | `prsm wallet gas-status` | ✅ | 502 | Live: color-coded status + actionable warning by severity |
+| Operator gas in /health/detailed | `subsystems.operator_gas` | ✅ | 503 | Live: monitoring tools polling /health/detailed get gas signal for free |
+| Daemon-startup gas log | log push signal | ✅ | 504 | Live-verified: "Operator gas low: 0.0004974813 ETH on 0x4acdE458…" in startup log |
+| Continuous gas monitor | `GasStatusMonitor` background task | ✅ | 506 | Live: periodic sampler logs ONLY on transitions (ok↔low↔critical) |
+| Gas transition webhook | `POST PRSM_WEBHOOK_URL` event=gas.transition | ✅ | 507 | Infrastructure live-verified; transition firing pin-tested |
+| `prsm wallet info` shows ETH balance | CLI | ✅ | 508 | Live-verified Base mainnet: shows ETH + gas status [LOW] + warning alongside FTNS + claimable |
+| Sepolia parity (FTNS-side surfaces) | all sprint 498-508 endpoints | ✅ | 509 | Live-verified: ftns_ledger canonical_match=True against Sepolia FTNS `0x7F5f00FA…`; operator_gas, /wallet/gas-status, CLI all work identically on testnet |
+| Cross-network TX history isolation | `chain_id` column on onchain_transactions | ✅ | 510 | **F39 fix**: Sepolia daemon now correctly hides mainnet TX. Live-verified: mainnet TX 0xaf1b8b35… tagged chain_id=8453, Sepolia view returns count=0 |
+| Pending-TX reconciliation | `_reconcile_pending_transactions()` at init | ✅ | 511 | **F40 fix**: pending TX from interrupted broadcasts now get final status from chain receipt on next daemon start |
+| Inbound FTNS detection | `GET /wallet/transactions/onchain/inbound` | ✅ | 512 | Live-verified Base mainnet: detected Foundation Safe → 2 FTNS funding at block 46159960 (tx 0xe80410f9…) + 4 self-transfers |
+| Inbound CLI | `prsm ftns history --onchain --inbound` | ✅ | 513 | Live: Rich table render of inbound transfers |
+| Background inbound poller + webhook | `InboundMonitor` task + event=ftns.inbound | ✅ | 514 | **Live-verified end-to-end**: webhook listener received POST with full payload (event/recipient/from_address/tx_hash/block_number/amount_ftns/timestamp) within 10s of broadcast |
+| Inbound stats | `GET /wallet/transactions/onchain/inbound/stats` | ✅ | 515 | Live: 9 inbound, 2.000008 FTNS total, first/last block 46159960/46165077 |
+| Inbound monitor in /health/detailed | `subsystems.inbound_monitor` | ✅ | 515 | Live: status=ok, last_scanned_block tracking |
+| Inbound stats CLI | `prsm ftns history --onchain --inbound --stats` | ✅ | 516 | Live: symmetric with outbound --stats |
 
 ### Staking
 
