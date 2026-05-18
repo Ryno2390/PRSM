@@ -1640,6 +1640,62 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "transactions": out,
         }
 
+    @app.get("/wallet/gas-status", tags=["wallet"])
+    async def get_gas_status() -> Dict[str, Any]:
+        ledger = getattr(node, "ftns_ledger", None)
+        if ledger is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "On-chain FTNS ledger not initialized — "
+                    "daemon must be started with "
+                    "FTNS_WALLET_PRIVATE_KEY set."
+                ),
+            )
+        # Base mainnet at ~0.0072 Gwei × 60k gas/TX ≈ 4.3e-7 ETH/TX
+        # low      < 0.0005 ETH (~1150 TX runway)
+        # critical < 0.0001 ETH (~230 TX runway)
+        LOW = 0.0005
+        CRITICAL = 0.0001
+        addr = getattr(ledger, "_connected_address", None)
+        w3 = getattr(ledger, "w3", None)
+        if w3 is None or addr is None:
+            return {
+                "address": addr,
+                "eth_balance_wei": None,
+                "eth_balance": None,
+                "low_threshold_eth": LOW,
+                "critical_threshold_eth": CRITICAL,
+                "status": "unavailable",
+            }
+        try:
+            wei = w3.eth.get_balance(addr)
+        except Exception as exc:
+            return {
+                "address": addr,
+                "eth_balance_wei": None,
+                "eth_balance": None,
+                "low_threshold_eth": LOW,
+                "critical_threshold_eth": CRITICAL,
+                "status": "unavailable",
+                "error": str(exc)[:200],
+            }
+        eth = wei / 1e18
+        if eth < CRITICAL:
+            status = "critical"
+        elif eth < LOW:
+            status = "low"
+        else:
+            status = "ok"
+        return {
+            "address": addr,
+            "eth_balance_wei": wei,
+            "eth_balance": eth,
+            "low_threshold_eth": LOW,
+            "critical_threshold_eth": CRITICAL,
+            "status": status,
+        }
+
     @app.get("/wallet/paymaster/status", tags=["wallet"])
     async def get_paymaster_status() -> Dict[str, Any]:
         paymaster = getattr(node, "_paymaster_client", None)

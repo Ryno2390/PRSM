@@ -6261,6 +6261,63 @@ def wallet_info(network_name: str, address):
     console.print()
 
 
+@wallet.command("gas-status")
+@click.option("--api-url", default=None, help="PRSM daemon API URL")
+def wallet_gas_status(api_url: str) -> None:
+    """Show ETH gas balance for the daemon's loaded wallet.
+
+    Queries /wallet/gas-status on the running daemon. Surfaces
+    status=ok|low|critical so operators can top up before
+    on-chain TX start failing with cryptic "insufficient funds
+    for gas" errors.
+    """
+    import httpx
+    url = _api_url_from_creds(api_url)
+    try:
+        r = httpx.get(f"{url}/wallet/gas-status", timeout=10.0)
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+    if r.status_code == 503:
+        try:
+            detail = r.json().get("detail", "")
+        except Exception:
+            detail = r.text[:300]
+        console.print("❌ Gas status unavailable:", style="red")
+        console.print(f"   {detail}")
+        raise SystemExit(1)
+    if r.status_code != 200:
+        console.print(f"❌ HTTP {r.status_code}: {r.text[:200]}", style="red")
+        raise SystemExit(1)
+    d = r.json()
+    status_color = {
+        "ok": "bold green",
+        "low": "yellow",
+        "critical": "bold red",
+        "unavailable": "dim",
+    }.get(d.get("status"), "white")
+    console.print(f"\n[bold]Operator gas balance[/bold]")
+    console.print(f"  address       : {d.get('address')}")
+    if d.get("eth_balance") is not None:
+        console.print(f"  ETH balance   : {d['eth_balance']:.10f} ETH")
+    else:
+        console.print(f"  ETH balance   : unavailable")
+    console.print(f"  status        : [{status_color}]{d.get('status', '?').upper()}[/{status_color}]")
+    console.print(f"  low threshold : {d.get('low_threshold_eth')} ETH")
+    console.print(f"  critical thr. : {d.get('critical_threshold_eth')} ETH")
+    if d.get("status") == "critical":
+        console.print(
+            "\n⚠️  Top up ETH now — broadcasts will start failing soon.",
+            style="bold red",
+        )
+    elif d.get("status") == "low":
+        console.print(
+            "\n⚠️  Plan to top up ETH soon to avoid mid-job failures.",
+            style="yellow",
+        )
+    console.print()
+
+
 @wallet.command("claim")
 @click.option(
     "--network", "network_name",
