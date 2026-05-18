@@ -13051,25 +13051,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e))
 
-    @app.get("/settler/{settler_id}", tags=["settler"])
-    async def get_settler(settler_id: str) -> Dict[str, Any]:
-        """Get details of a specific settler."""
-        if not hasattr(node, "_settler_registry") or not node._settler_registry:
-            raise HTTPException(503, "Settler registry not initialized")
-        
-        settler = node._settler_registry.get_settler(settler_id)
-        if not settler:
-            raise HTTPException(404, f"Settler {settler_id} not found")
-        
-        return {
-            "settler_id": settler.settler_id,
-            "address": settler.address,
-            "bond_amount": settler.bond_amount,
-            "status": settler.status.value,
-            "can_settle": settler.can_settle,
-            "total_settled": settler.total_settled,
-            "slashed_amount": settler.slashed_amount,
-        }
+    # Sprint 534 F61 fix: route order matters in FastAPI — the
+    # parameterized `/settler/{settler_id}` was declared BEFORE
+    # the literal `/settler/stats`, causing every GET on /stats
+    # to be matched as settler_id="stats" → 404 "Settler stats
+    # not found". Moving the parameterized route to come AFTER
+    # all literal 2-segment routes fixes the routing precedence.
+    # FastAPI matches first-declared-wins so literals must come
+    # before catch-all parameterized paths sharing the prefix.
 
     @app.get("/settler/list/active", tags=["settler"])
     async def list_active_settlers() -> List[Dict[str, Any]]:
@@ -13225,8 +13214,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """Get settler registry statistics."""
         if not hasattr(node, "_settler_registry") or not node._settler_registry:
             raise HTTPException(503, "Settler registry not initialized")
-        
+
         return node._settler_registry.get_stats()
+
+    # Sprint 534 F61 fix: parameterized route DECLARED LAST so all
+    # literal 2-segment /settler/<word> routes win route-matching.
+    @app.get("/settler/{settler_id}", tags=["settler"])
+    async def get_settler(settler_id: str) -> Dict[str, Any]:
+        """Get details of a specific settler."""
+        if not hasattr(node, "_settler_registry") or not node._settler_registry:
+            raise HTTPException(503, "Settler registry not initialized")
+
+        settler = node._settler_registry.get_settler(settler_id)
+        if not settler:
+            raise HTTPException(404, f"Settler {settler_id} not found")
+
+        return {
+            "settler_id": settler.settler_id,
+            "address": settler.address,
+            "bond_amount": settler.bond_amount,
+            "status": settler.status.value,
+            "can_settle": settler.can_settle,
+            "total_settled": settler.total_settled,
+            "slashed_amount": settler.slashed_amount,
+        }
 
 
     # ── Storage endpoints ────────────────────────────────────────
