@@ -378,6 +378,132 @@ class GasStatusMonitor:
                 raise
 
 
+class InboundMonitor:
+    """Sprint 514: periodic background poller for inbound FTNS.
+
+    Pull complement (sprint 512 endpoint + sprint 513 CLI) gives
+    operators on-demand visibility. This adds the push signal:
+    on each tick scan for new Transfer events in
+    (last_scanned_block, current_block], log each + fire webhook
+    (event: "ftns.inbound").
+
+    First tick records the current block as baseline without
+    scanning — sprint-512's pull surface covers historical scan.
+    """
+
+    def __init__(self, ledger, interval_seconds: float = 60.0,
+                 webhook_deliverer=None,
+                 webhook_url=None, webhook_secret=None):
+        self.ledger = ledger
+        self.interval_seconds = interval_seconds
+        self._webhook_deliverer = webhook_deliverer
+        self._webhook_url = webhook_url
+        self._webhook_secret = webhook_secret
+        self._last_scanned_block: Optional[int] = None
+
+    async def _fire_webhook(self, transfer: dict) -> None:
+        if (
+            self._webhook_deliverer is None
+            or not self._webhook_url
+        ):
+            return
+        import time as _time
+        payload = {
+            "event": "ftns.inbound",
+            "node_id": getattr(
+                self.ledger, "node_id", "unknown",
+            ),
+            "recipient": self.ledger._connected_address,
+            "from_address": transfer.get("from_address"),
+            "tx_hash": transfer.get("tx_hash"),
+            "block_number": transfer.get("block_number"),
+            "amount_ftns": transfer.get("amount_ftns"),
+            "timestamp": _time.time(),
+        }
+        try:
+            await self._webhook_deliverer.deliver(
+                url=self._webhook_url,
+                event="ftns.inbound",
+                payload=payload,
+                secret=self._webhook_secret,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "inbound-monitor webhook raised "
+                "(non-fatal): %s", exc,
+            )
+
+    async def _tick_async(self) -> None:
+        w3 = getattr(self.ledger, "w3", None)
+        token = getattr(self.ledger, "_token", None)
+        addr = getattr(
+            self.ledger, "_connected_address", None,
+        )
+        if w3 is None or token is None or addr is None:
+            return
+        try:
+            current_block = w3.eth.block_number
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "inbound-monitor block_number failed "
+                "(non-fatal): %s", exc,
+            )
+            return
+        if self._last_scanned_block is None:
+            self._last_scanned_block = current_block
+            return
+        if current_block <= self._last_scanned_block:
+            return
+        scan_from = self._last_scanned_block + 1
+        scan_to = current_block
+        try:
+            transfers = scan_inbound_transfers(
+                token,
+                recipient=addr,
+                from_block=scan_from,
+                to_block=scan_to,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "inbound-monitor scan failed "
+                "(non-fatal): %s", exc,
+            )
+            self._last_scanned_block = current_block
+            return
+        for t in transfers:
+            logger.info(
+                "Inbound FTNS detected: %.6f from %s "
+                "(block %s, tx %s)",
+                t.get("amount_ftns", 0),
+                (t.get("from_address") or "?")[:10] + "…",
+                t.get("block_number"),
+                (t.get("tx_hash") or "?")[:18] + "…",
+            )
+            try:
+                await self._fire_webhook(t)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "inbound-monitor webhook prep "
+                    "raised (non-fatal): %s", exc,
+                )
+        self._last_scanned_block = current_block
+
+    async def run_forever(self) -> None:
+        import asyncio as _aio
+        while True:
+            try:
+                await self._tick_async()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "inbound-monitor outer exception "
+                    "(non-fatal): %s", exc,
+                )
+            try:
+                await _aio.sleep(self.interval_seconds)
+            except _aio.CancelledError:
+                raise
+
+
 @dataclass
 class FTNSTransaction:
     """Record of an on-chain FTNS transfer."""

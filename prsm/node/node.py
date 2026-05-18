@@ -4054,6 +4054,39 @@ class PRSMNode:
                 "GasStatusMonitor launched (interval=%.0fs)",
                 _gas_interval,
             )
+            # Sprint 514: inbound monitor — periodic Transfer
+            # event scan for the operator wallet. Push signal
+            # complementing sprint 512/513 pull surfaces.
+            from prsm.economy.ftns_onchain import InboundMonitor
+            try:
+                _inbound_interval = float(
+                    os.environ.get(
+                        "PRSM_INBOUND_MONITOR_INTERVAL_SECONDS",
+                        "60",
+                    )
+                )
+            except ValueError:
+                _inbound_interval = 60.0
+            self._inbound_monitor = InboundMonitor(
+                self.ftns_ledger,
+                interval_seconds=_inbound_interval,
+                webhook_deliverer=getattr(
+                    self, "_webhook_deliverer", None,
+                ),
+                webhook_url=os.environ.get(
+                    "PRSM_WEBHOOK_URL", "",
+                ).strip() or None,
+                webhook_secret=os.environ.get(
+                    "PRSM_WEBHOOK_SECRET", "",
+                ).strip() or None,
+            )
+            self._inbound_monitor_task = asyncio.create_task(
+                self._inbound_monitor.run_forever(),
+            )
+            logger.info(
+                "InboundMonitor launched (interval=%.0fs)",
+                _inbound_interval,
+            )
         if hasattr(self, '_batch_settlement') and self._batch_settlement:
             # Update connected_address now that ftns_ledger may have initialized
             if self.ftns_ledger and hasattr(self.ftns_ledger, '_connected_address'):
