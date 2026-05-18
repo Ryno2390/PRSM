@@ -50,26 +50,25 @@ def test_resolved_endpoints_exposes_provenance_registry_v2():
     )
 
 
-def test_canonical_fallback_uses_v1_until_v2_client_wired():
-    """Sprint-525 partial fix: the canonical fallback path in
-    _build_provenance_client_or_none currently uses V1 ONLY,
-    because the V1 client can't talk to V2 (F42).
+def test_f42_fix_landed_in_sprint_526():
+    """Sprint 526 closed F42: V2 client routing now lands.
+    The canonical fallback prefers V2 (provenance_registry_v2)
+    over V1, and the build path dispatches to
+    ProvenanceRegistryV2Client when V2 address is wired.
 
-    This pin pegs the current state. Sprint 526 will replace
-    with a proper V2-aware routing test.
+    This pin replaces the original sprint-525 "V1-only locked"
+    pin (which was correct at sprint 525 but obsoleted by
+    sprint 526's fix).
     """
     from pathlib import Path
     src = (
         Path(__file__).resolve().parents[2]
         / "prsm/node/node.py"
     ).read_text()
-    assert "F42" in src
-    assert "Sprint 526 candidate" in src
-    # V1-only fallback locked in until F42 fixed
-    assert (
-        "ep.provenance_registry or" in src
-        or "ep.provenance_registry\n" in src
-    )
+    assert "F42 fix" in src or "F42" in src
+    # V2 routing present
+    assert "ProvenanceRegistryV2Client" in src
+    assert "provenance_registry_v2" in src
 
 
 def test_f42_documented():
