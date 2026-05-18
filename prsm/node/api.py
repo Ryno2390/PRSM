@@ -1640,6 +1640,58 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "transactions": out,
         }
 
+    @app.get("/wallet/transactions/onchain/stats", tags=["wallet"])
+    async def get_onchain_transaction_stats() -> Dict[str, Any]:
+        ledger = getattr(node, "ftns_ledger", None)
+        if ledger is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "On-chain FTNS ledger not initialized — "
+                    "daemon must be started with "
+                    "FTNS_WALLET_PRIVATE_KEY set."
+                ),
+            )
+        txs = getattr(ledger, "_transactions", []) or []
+        confirmed_count = 0
+        pending_count = 0
+        rejected_count = 0
+        total_sent = 0.0
+        timestamps = []
+        for t in txs:
+            status = getattr(t, "status", None)
+            amt = getattr(t, "amount_ftns", 0) or 0
+            ts = getattr(t, "created_at", None)
+            if ts is not None:
+                timestamps.append(ts)
+            if status == "confirmed":
+                confirmed_count += 1
+                total_sent += amt
+            elif status == "pending":
+                pending_count += 1
+            elif status == "rejected":
+                rejected_count += 1
+        if getattr(ledger, "is_persistent", False):
+            scope = (
+                f"persistent (sqlite: "
+                f"{getattr(ledger, 'db_path', '?')})"
+            )
+        else:
+            scope = "in-memory (resets on daemon restart)"
+        return {
+            "address": getattr(
+                ledger, "_connected_address", None,
+            ),
+            "total_count": len(txs),
+            "confirmed_count": confirmed_count,
+            "pending_count": pending_count,
+            "rejected_count": rejected_count,
+            "total_ftns_sent": total_sent,
+            "first_tx_at": min(timestamps) if timestamps else None,
+            "last_tx_at": max(timestamps) if timestamps else None,
+            "scope": scope,
+        }
+
     @app.get("/wallet/gas-status", tags=["wallet"])
     async def get_gas_status() -> Dict[str, Any]:
         ledger = getattr(node, "ftns_ledger", None)

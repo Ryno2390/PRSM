@@ -3104,15 +3104,58 @@ def stake(amount: float, lock_days: int, api_url: str) -> None:
 @click.option("--limit",   default=20, type=int, help="Transactions to show (max 100)")
 @click.option("--search",  default=None,          help="Filter by description or transaction ID")
 @click.option("--onchain", is_flag=True, default=False, help="Show on-chain TX (broadcast by daemon) instead of off-chain DAG ledger")
+@click.option("--stats", is_flag=True, default=False, help="With --onchain: print aggregate stats instead of full TX list")
 @click.option("--api-url", default=None,           help="PRSM API URL (default: from stored credentials)")
-def history(limit: int, search: Optional[str], onchain: bool, api_url: str) -> None:
+def history(limit: int, search: Optional[str], onchain: bool, stats: bool, api_url: str) -> None:
     """Show your FTNS transaction history.
 
     Default: off-chain DAG ledger (user-to-user FTNS moves).
     With --onchain: real Base mainnet TX broadcast by this daemon's
     loaded FTNS_WALLET_PRIVATE_KEY (sprint-498 endpoint).
+    With --onchain --stats: compact aggregate summary.
     """
     import httpx
+
+    if onchain and stats:
+        url = _api_url_from_creds(api_url)
+        try:
+            r = httpx.get(
+                f"{url}/wallet/transactions/onchain/stats",
+                timeout=10.0,
+            )
+        except httpx.ConnectError:
+            console.print(f"❌ Cannot connect to {url}", style="red")
+            raise SystemExit(1)
+        if r.status_code == 503:
+            try:
+                detail = r.json().get("detail", "")
+            except Exception:
+                detail = r.text[:300]
+            console.print("❌ On-chain ledger not available:", style="red")
+            console.print(f"   {detail}")
+            raise SystemExit(1)
+        if r.status_code != 200:
+            console.print(f"❌ HTTP {r.status_code}", style="red")
+            raise SystemExit(1)
+        d = r.json()
+        import datetime as _dt
+
+        def _fmt_ts(ts):
+            if ts is None:
+                return "—"
+            return _dt.datetime.fromtimestamp(ts).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        console.print(f"\n[bold]On-chain TX stats[/bold] for {d.get('address')}")
+        console.print(f"  total       : {d.get('total_count')}")
+        console.print(f"  confirmed   : [green]{d.get('confirmed_count')}[/green]")
+        console.print(f"  pending     : [yellow]{d.get('pending_count')}[/yellow]")
+        console.print(f"  rejected    : [red]{d.get('rejected_count')}[/red]")
+        console.print(f"  total sent  : {d.get('total_ftns_sent', 0):.6f} FTNS  (confirmed only)")
+        console.print(f"  first tx    : {_fmt_ts(d.get('first_tx_at'))}")
+        console.print(f"  last tx     : {_fmt_ts(d.get('last_tx_at'))}")
+        console.print(f"  [dim]scope:[/dim] {d.get('scope', '')}\n")
+        return
 
     if onchain:
         url = _api_url_from_creds(api_url)
