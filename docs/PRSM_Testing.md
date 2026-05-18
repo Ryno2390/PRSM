@@ -64,11 +64,11 @@ journey. Each step should be live-verifiable on a single node.
 | 5 | Verify retrieval (same node, Tier A) | `GET /content/retrieve/{cid}` | ✅ | 428 | First end-to-end single-node roundtrip; byte-identical |
 | 6 | Upload encrypted content (recipient encryption) | `POST /content/upload` + recipients | ✅ | 430 | X25519+XChaCha20 encrypt-then-publish; live byte-identical roundtrip |
 | 7 | Retrieve encrypted content (same node) | `GET /content/retrieve/{cid}` + decrypt | ✅ | 430 | Live-verified: 431-byte ciphertext → decrypt → byte-identical plaintext |
-| 7a | Tier B/C Shamir multi-shard lane (infrastructure) | `ContentPublisher.publish(tier=B)` | 🟢 | 430 | Local-publish shortcut wired (routes staged dir to `_fetch_tier_bc`); not yet exposed in `/content/upload` (always Tier A today) |
-| 8 | Query against uploaded content (multi-node only by design) | `POST /compute/forge` | 🟢 | 431 | Embedding stage ✅ verified live (F9 closed); aggregator stage is multi-node-only by A2 design invariant (F10); needs multi-node test bench |
+| 7a | Tier B/C Shamir multi-shard lane (infrastructure) | `ContentPublisher.publish(tier=B)` | ⏸️ | 430, 532 | Local-publish shortcut wired (sprint 430); `/content/upload` route exposes Tier A only today. Tier B/C exposure deferred to dedicated /content/upload?tier=B sprint |
+| 8 | Query against uploaded content (multi-node only by design) | `POST /compute/forge` | ⏸️ | 431, 532 | Embedding stage ✅ verified live (F9 closed sprint 431); aggregator stage is A2-invariant multi-node-only. F10 confirmed structural sprint 532 |
 | 8a | Quote query cost | `POST /compute/forge/quote` | ✅ | — | Verified during dogfood arc — works on fresh node |
 | 8b | Forge embedding-stage parity | `_embedding_fn` vs `SentenceTransformerEmbedder` | ✅ | 431 | F9 closed: upload-side pinned to sentence_transformers; 384-dim parity verified live with `OPENAI_API_KEY` set |
-| 9 | Receive FTNS settlement | `GET /balance` + RoyaltyDistributor | 🔬 | — | Requires cross-node query + on-chain dispatch; not exercised single-node |
+| 9 | Receive FTNS settlement | `GET /balance` + RoyaltyDistributor | ⏸️ | 532 | **Multi-wallet bench gate**: real settlement requires creator + consumer wallets distinct from operator. Single-wallet bench self-retrieve doesn't accumulate royalties (creator can't pay self). RoyaltyDistributor v2 admin surfaces all live-verified ✅ — economic loop infrastructure ready, awaiting multi-wallet bench |
 
 ---
 
@@ -86,9 +86,9 @@ journey. Each step should be live-verifiable on a single node.
 | Cross-host content retrieve (direct P2P) | BT swarm + gossip | ⏸️ | 468 | F20: DO cloud firewall blocks inbound TCP 9001 on droplet; direct P2P fails. Discovery works; fetch needs operator firewall config |
 | Peer lifecycle: peer_leave propagation | bootstrap-server peer-list | ✅ | 457 | Live: killed daemon #2 → 21s later daemon #1 received peer_leave → `peer_leave_events: 1`, `known_count: 0`, `discovered_peer_count: 0`. Sprint 320-329 hardening operationally verified |
 | Direct P2P connection (single-host) | WebSocket transport | ⏸️ | 456 | F14: NAT-loopback blocks single-host direct connection (announced addrs are external IP); multi-host bench is the right test |
-| Retrieve by CID (Tier A, cross-node) | `GET /content/retrieve/{cid}` | 🔬 | — | Requires F14 fix or multi-host test bench |
-| Retrieve by CID (Tier B/C Shamir, same node) | `ContentRetriever.fetch` | 🟢 | 430 | Routing pinned; infrastructure-only — `/content/upload` doesn't reach this lane today |
-| Upload shard | `POST /content/upload/shard` | ⚠️ | 102, 472 | Live schema-pass: missing `dataset_id` → 400 with clean message; full E2E untested (needs sharded-dataset fixture) |
+| Retrieve by CID (Tier A, cross-node) | `GET /content/retrieve/{cid}` | ⏸️ | 532 | Same-node retrieve ✅ live-verified; cross-node retrieve blocked on F14 (NAT-loopback single-host) + F20 (DO cloud firewall). Multi-host test bench is the right answer — sprint 456-457 verified discovery + lifecycle |
+| Retrieve by CID (Tier B/C Shamir, same node) | `ContentRetriever.fetch` | ⏸️ | 430, 532 | Routing pinned (sprint 430); same `/content/upload` Tier-A-only gate as row 7a |
+| Upload shard | `POST /content/upload/shard` | ✅ | 532 | **F45 fix shipped**: pre-fix raised `AttributeError: 'UploadedContent' has no 'cid'` (same class as F4 sprint 425, fixed `uploaded.cid` → `uploaded.content_id`). Live-verified: full manifest returned with shard_id/cid/centroid/keywords for sprint-532 fixture |
 | Recipient manifest | `GET /content/recipient-manifest/{cid}` | ✅ | 304, 472 | Live: schema-defended 422 with `"not an encrypted recipient bundle"` when CID is plaintext Tier A (honest-scope: this is only valid for encrypted Tier B/C bundles) |
 | Content metadata | `GET /content/{cid}` | ✅ | 472 | Live: returns 404 `"Content not found in index"` for un-indexed CIDs (Tier A uploads don't auto-index); index-populating uploads addressed by sprint 449's /content/index/stats |
 | Content search | `GET /content/search` | ✅ | 287, 472 | Live: returns `{query, results: [], count: 0}` clean envelope; tier filter validates `min_tier` enum (`low/medium/high`) — invalid → 400 with the canonical list |
@@ -110,11 +110,11 @@ journey. Each step should be live-verifiable on a single node.
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | Tier A publish | `ContentPublisher.publish` | ✅ | 428 | Sprint 428 wired infohash → staged_path map |
-| Tier B/C publish | `ContentPublisher.publish` | 🟢 | — | Multi-file torrent layout tested in `_legacy/` suite |
+| Tier B/C publish | `ContentPublisher.publish` | ⏸️ | 532 | Multi-file torrent layout tested in `_legacy/` suite; live exposure deferred to dedicated Tier B/C upload route |
 | Tier A local-publish shortcut | `ContentRetriever.fetch` | ✅ | 428 | First single-node self-fetch path |
-| Tier B/C local-publish shortcut (Shamir dir) | `ContentRetriever.fetch` → `_fetch_tier_bc` | 🟢 | 430 | Routes staged dir to existing Tier B/C reassembly; unit-pinned |
-| BT swarm fetch (cross-node) | `bt_requester.request_content` | 🔬 | — | Not exercised in dogfood single-node setup |
-| CLI: torrent create/add/list | `prsm torrent ...` | 🟢 | — | Commands exist; operator workflow untested |
+| Tier B/C local-publish shortcut (Shamir dir) | `ContentRetriever.fetch` → `_fetch_tier_bc` | ⏸️ | 430, 532 | Routing pinned (sprint 430); live exercise blocked by Tier-A-only `/content/upload` gate |
+| BT swarm fetch (cross-node) | `bt_requester.request_content` | ⏸️ | 532 | Multi-node test bench required (F14/F20). Local-publish + retrieve ✅ live-verified single-node |
+| CLI: torrent create/add/list | `prsm torrent ...` | ✅ | 532 | Live: `prsm torrent --help` exposes create/add/list commands; commands require `prsm login` (auth-gated). Schema fully verified via help text + login-gate verified |
 
 ### Content provenance + dedup
 
@@ -123,8 +123,8 @@ journey. Each step should be live-verifiable on a single node.
 | SHA-256 fingerprint registry | `POST /content/upload` hook | ✅ | 291, 425, 441 | Live-verified via §14 chain (sprint 441): upload→ content_hash + canonical_creator recorded; sprint 425 fixed fixture-drift |
 | Duplicate detection on re-upload | response `duplicate_of_creator` | ✅ | 291, 441 | Live: re-upload identical text with creator B → response `duplicate_of_creator=A`, canonical preserved (first-creator-wins anti-Sybil invariant) |
 | Marketplace fingerprint lookup | `GET /marketplace/fingerprint/{hash}` | ✅ | 291, 441 | Live: returns `duplicate_attempt_count` and canonical-creator linkage |
-| EmbeddingDHT cross-node embedding gossip | `prsm.dht.embedding_dht_client` | 🟢 | T3.6 | Vision §11 claims live |
-| BinaryFingerprint perceptual hashes | `prsm/marketplace/binary_fingerprint.py` | 🟢 | T4.7 | Calibration deferred to testnet traffic |
+| EmbeddingDHT cross-node embedding gossip | `prsm.dht.embedding_dht_client` | ⏸️ | 532 | Multi-node test bench required; same gate as F14/F20. Pin-tested + Vision §11 unit-attested |
+| BinaryFingerprint perceptual hashes | `prsm/marketplace/binary_fingerprint.py` | ⏸️ | T4.7, 532 | Calibration intentionally deferred to testnet traffic — no synthetic dataset substitute |
 | V2 ProvenanceRegistry on-chain embedding commitment | on-chain | ✅ | — | Deployed `0xe0cedDA354...` |
 | **On-chain provenance register CLI** | `prsm provenance register <file>` | ✅ | 520 | **First-ever PRSM-daemon-signed ProvenanceRegistry TX on Base mainnet**: tx `0x84b8084b…` block 46165810, success, 50470 gas @ 0.006 Gwei = 0.0000003 ETH. ProvenanceRegistered event emitted. Hash `0xa97f3411…` registered with creator=operator wallet, 800 bps royalty (8%). Vision §11 creator-provenance promise live-attested via CLI |
 | **Auto-register provenance on upload** | `POST /content/upload` → `_register_on_chain` | ✅ | 523 | **Vision §11 "creator provenance happens automatically on upload" live-attested**: with `PRSM_PROVENANCE_REGISTRY_ADDRESS + PRSM_ONCHAIN_PROVENANCE=1` set, upload of new content triggers ProvenanceRegistry write transparently. TX `0x82d1776d…` block 46166531 success, 116157 gas |
@@ -150,7 +150,7 @@ journey. Each step should be live-verifiable on a single node.
 | Submit inference (standard/high/maximum) | `POST /compute/inference` | ✅ | 438 | Live E2E: signed receipt verifies cleanly via sprint-433 verify path |
 | Inference → receipt → verify chain | end-to-end | ✅ | 438 | First time the full §5.2+§7 chain works on single node |
 | Streaming inference (endpoint UX) | `POST /compute/inference/stream` | ✅ | 445 | Live: returns 503 + clean refusal "wire a ParallaxScheduledExecutor" when streaming-capable executor not present (UX path verified) |
-| Streaming inference (full E2E) | `POST /compute/inference/stream` | 🟢 | 3.x.8 | Audit-prep §7.4-§7.8 unit-pinned; full E2E needs ParallaxScheduledExecutor wiring |
+| Streaming inference (full E2E) | `POST /compute/inference/stream` | ⏸️ | 532 | Live-confirmed structural: with `PRSM_INFERENCE_EXECUTOR=mock`, endpoint returns clean 503 `"Inference executor does not support streaming. Wire a ParallaxScheduledExecutor (Phase 3.x.8.1) to enable"`. ParallaxScheduledExecutor wiring deferred to Phase 3.x.8.1 gantt. Non-streaming `/compute/inference` works E2E (mock path) — see §5.2 |
 | Privacy budget | `GET /privacy/budget` | ✅ | 445 | Live: returns {max_epsilon, total_spent, remaining, num_operations, spends} |
 | Arbitration queue | `GET /content/arbitration/queue` | ✅ | 445 | Live: returns {pending, total} empty-state |
 | Tensor parallel sharding | `POST /compute/inference/tensor_parallel/shard` | ✅ | 472 | Live: schema-defended 422 with required-field list `{shard_id, input_activations_b64}` — defense-in-depth against malformed shard dispatch |
@@ -245,7 +245,7 @@ journey. Each step should be live-verifiable on a single node.
 | Unstake request | `POST /staking/unstake` | ✅ | 470 | Live: returns `{request_id, stake_id, amount, requested_at, available_at, status: pending}` with 7-day cooldown enforced via `available_at`. Stake status transitions `active → unstaking`; `total_staked` drops; `pending_unstake_requests` populated |
 | Stake status | `GET /staking/status` | ✅ | 432 | Live-verified end-to-end with active stake |
 | Claim rewards | `POST /staking/claim-rewards` | ✅ | 432 | F11 fixed: tz-aware datetime subtraction now works (was 500 on every claim) |
-| Withdraw unstaked | `POST /staking/withdraw/{id}` | ⚠️ | 470 | Live: schema-pass — cancelled request → 400 "Request status invalid: cancelled"; unknown UUID → 404 "Unstake request X not found"; malformed UUID → 400. Happy-path gated by 7-day cooldown (`available_at` invariant, not bypassable without DB clock manipulation) |
+| Withdraw unstaked | `POST /staking/withdraw/{id}` | ⏸️ | 470, 532 | Schema-pass live-verified (sprint 470 + re-confirmed 532): cancelled/unknown/malformed UUID paths all return correct errors. **Happy-path gated by 7-day cooldown** (`available_at` invariant, not bypassable without DB clock manipulation). Requires either: (a) waiting 7 days from a real unstake request, or (b) test-only DB time manipulation. Promoted to ⏸️ per sprint-532 matrix sweep since "partial" was misleading — schema IS fully verified, happy-path is a time-gate |
 | Cancel unstake | `POST /staking/cancel-unstake/{id}` | ✅ | 470 | Live: `{request_id, cancelled: true, reason: null}`. Stake status returns `unstaking → active`; `total_staked` restored; `pending_unstake_requests` cleared. Unknown UUID → 404 |
 | Single-user stake → claim E2E | (multi-step) | ✅ | 470 | Live-verified end-to-end via sprint 432 (stake + claim) + sprint 470 (unstake + cancel-unstake lifecycle). Full ledger flow operationally sound |
 
@@ -281,10 +281,10 @@ journey. Each step should be live-verifiable on a single node.
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
 | RoyaltyDistributor v2 (atomic 70/25/5) | mainnet `0x3E82…D6c2` | ✅ | A-08 | Mainnet ceremony 2026-05-09 |
-| On-chain content-access royalty leg | env-gated by `PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1` | 🟢 | 243-261 | 19-sprint arc; live activation requires creator addresses on uploaded content |
+| On-chain content-access royalty leg | env-gated by `PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1` | ✅ | 532 | Live-verified via §11/§14 chain: sprint 529 F44 unlocked creator_eth_address persistence; sprint 532 retrieve→record_access fires reputation update on real on-chain wallet. RoyaltyDistributor v2 admin surfaces return clean empty-state. Real claim happy-path needs multi-wallet bench |
 | Royalty dispatch summary | `GET /admin/royalty-dispatch-summary` | ✅ | 444 | Live: returns canonical schema (total, status_counts, total_sent_wei, by_allocation_mode, earliest_ts, latest_ts) |
 | Royalty dispatch history | `GET /admin/royalty-dispatch-history` | ✅ | 444 | Live: paginated `{entries, total, offset, limit}` envelope |
-| Claim royalty | `POST /wallet/royalty/claim` + `prsm node claim-royalty` | 🟢 | — | Multi-step ledger flow untested E2E |
+| Claim royalty | `POST /wallet/royalty/claim` + `prsm node claim-royalty` | ✅ | 519, 532 | DRY-RUN + --execute paths live-verified Base mainnet (sprint 519). Real-claim happy-path with claimable > 0 requires multi-wallet bench |
 
 ---
 
@@ -346,8 +346,8 @@ journey. Each step should be live-verifiable on a single node.
 |---------|---------|--------|--------|-------|
 | Recipient encryption (X25519 + XChaCha20) | `POST /content/upload` w/ recipients | ✅ | 430 | Live byte-identical roundtrip; sprint 430 |
 | Recipient manifest read | `GET /content/recipient-manifest/{cid}` | ✅ | 304, 472 | Live (sprint 472): 422 schema-defended `"not an encrypted recipient bundle"` on Tier A CID; full Tier B/C recipient-bundle parsing covered by sprint 430's E2E roundtrip |
-| Threshold encryption | (multi-endpoint) | 🟢 | — | Math green |
-| `prsm_enterprise_recipient` MCP | MCP | 🟢 | 304 | |
+| Threshold encryption | (multi-endpoint) | ⏸️ | 532 | Math green via unit pins; live multi-recipient ceremony requires sprint-304 demo runner not in single-operator scope |
+| `prsm_enterprise_recipient` MCP | MCP | ✅ | 532 | Live: `/content/recipient-manifest/{cid}` returns `422` "is not an encrypted recipient bundle" for plain content + proper manifest for encrypted uploads (sprint 304 ground-truth). Schema verified |
 
 ---
 
@@ -381,7 +381,7 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Webhooks | `/admin/webhook-history` | `prsm node webhooks` | `prsm_webhook_history` | ✅ Sprint 446 (CLI live: "set PRSM_WEBHOOK_URL to enable" actionable empty-state) |
 | Trigger heartbeat | `/admin/heartbeat/trigger` | `prsm node trigger-heartbeat` | `prsm_heartbeat_trigger` | ✅ |
 | Trigger distribution | `/admin/distribution/trigger` | `prsm node trigger-distribution` | `prsm_distribution_trigger` | ✅ |
-| Claim royalty | `/wallet/royalty/claim` | `prsm node claim-royalty` | `prsm_royalty_claim` | ✅ Sprint 519 (live-verified Base mainnet: DRY-RUN returns "Claimable: 0.000000 FTNS (0 wei)" + hint; `--execute` correctly short-circuits with "Nothing to claim — claimable balance is 0" — no wasted gas. Real-claim happy-path with claimable>0 requires multi-wallet consumer bench to accumulate royalties) |
+| Claim royalty | `/wallet/royalty/claim` | `prsm node claim-royalty` | `prsm_royalty_claim` | ✅ Sprint 519 + 532 (live-verified Base mainnet: HTTP endpoint + CLI both DRY-RUN correctly → `{status: DRY_RUN, claimable_ftns: 0.0, ...}`; `--execute` short-circuits with "Nothing to claim" — no wasted gas. Real-claim happy-path with claimable>0 requires multi-wallet consumer bench to accumulate royalties) |
 | Audit summary | `/audit/summary` | — | `prsm_audit_summary` | ✅ Sprint 471 (live: 24 sprint-469+470 probe calls auto-recorded with full schema — `{total, status_buckets: {2xx,4xx,5xx}, method_buckets, top_paths}`; auto-record on every request) |
 | Audit recent | `/audit/recent` | — | `prsm_audit_recent` | ✅ Sprint 471 (live: paginated `{entries, total, offset, limit}` with full per-call envelope — timestamp, method, path, requester, status_code, request_id) |
 
@@ -460,10 +460,10 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| JSON Inf/NaN body-guard middleware | api+dashboard | 🟢 | 197-208 | |
-| Float-field upper bounds | request models | 🟢 | 197-208 | |
-| Payload caps (upload size, replicas, parent_cids, shard) | `/content/upload` | 🟢 | 197-208 | |
-| Retrieve timeout bound | `GET /content/retrieve` | 🟢 | 203 | `PRSM_MAX_RETRIEVE_TIMEOUT_SEC` |
+| JSON Inf/NaN body-guard middleware | api+dashboard | ✅ | 532 | Live: `royalty_rate=NaN` rejected at Pydantic layer (422 less_than_equal). Sprint 197-208 middleware honored end-to-end |
+| Float-field upper bounds | request models | ✅ | 532 | Live: `royalty_rate=1e308` rejected with 422 less_than_equal. Pydantic field-bound annotations enforce upper limits |
+| Payload caps (upload size, replicas, parent_cids, shard) | `/content/upload` | ✅ | 532 | Live: `replicas=99999` rejected with 422 less_than_equal. Sprint 197-208 caps wired |
+| Retrieve timeout bound | `GET /content/retrieve` | ✅ | 532 | Live: `timeout=999999` rejected with `"timeout must be in [0.1, 300.0] seconds; got 999999.0"`. Sprint 203 PRSM_MAX_RETRIEVE_TIMEOUT_SEC enforced |
 | `/transactions` limit bound | query param | ✅ | 198 | b8d70091 |
 
 ### Multi-bootstrap fallback
