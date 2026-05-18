@@ -1535,6 +1535,65 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         out["sender_address"] = sender.address
         return out
 
+    class _OnChainTransferRequest(BaseModel):
+        to_address: str
+        amount_ftns: float
+
+    @app.post("/wallet/transfer/onchain", tags=["wallet"])
+    async def post_onchain_transfer(
+        body: _OnChainTransferRequest,
+    ) -> Dict[str, Any]:
+        ledger = getattr(node, "ftns_ledger", None)
+        if ledger is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "On-chain FTNS ledger not initialized — "
+                    "daemon must be started with "
+                    "FTNS_WALLET_PRIVATE_KEY set."
+                ),
+            )
+        if not body.to_address:
+            raise HTTPException(
+                status_code=422,
+                detail="to_address must be non-empty",
+            )
+        if body.amount_ftns <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="amount_ftns must be > 0",
+            )
+        import uuid
+        job_id = f"manual-{uuid.uuid4().hex[:12]}"
+        tx_record = await ledger.transfer(
+            job_id=job_id,
+            to_address=body.to_address,
+            amount_ftns=body.amount_ftns,
+        )
+        if tx_record is None:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Ledger transfer returned None — wallet "
+                    "may not be configured or amount invalid."
+                ),
+            )
+        return {
+            "tx_hash": getattr(tx_record, "tx_hash", None),
+            "status": getattr(tx_record, "status", None),
+            "block_number": getattr(
+                tx_record, "block_number", None,
+            ),
+            "from_address": getattr(
+                tx_record, "from_addr", None,
+            ),
+            "to_address": getattr(tx_record, "to_addr", None),
+            "amount_ftns": getattr(
+                tx_record, "amount_ftns", None,
+            ),
+            "job_id": job_id,
+        }
+
     @app.get("/wallet/paymaster/status", tags=["wallet"])
     async def get_paymaster_status() -> Dict[str, Any]:
         paymaster = getattr(node, "_paymaster_client", None)

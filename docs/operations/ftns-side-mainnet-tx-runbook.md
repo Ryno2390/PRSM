@@ -71,18 +71,30 @@ FTNS layer.**
 
 ---
 
-## Test wallet from sprint 467
+## Test wallet — sprint 498 pivot
+
+**Sprint 464 wallet `0x2Fd48D2d026bEf7563C85c647674cb945C4d4f57` is STRANDED.**
+The private key was generated inside a Python subprocess
+during sprint 464 and set as an env var when launching the
+daemon, but never persisted to a file the operator
+controlled. When that daemon was killed + restarted with a
+fresh key later, the original key was lost. The 0.0005 ETH
++ 2 FTNS in that address are written off (negligible cost,
+documented as a sprint-464/498 lesson — keys MUST be
+written to disk before they're used to launch a daemon).
 
 | Field | Value |
 |-------|-------|
-| Address | `0x2Fd48D2d026bEf7563C85c647674cb945C4d4f57` |
-| Current ETH balance (Base mainnet, last checked sprint 467) | `0.0004999874 ETH` |
-| Current FTNS balance | `0` (never been funded) |
+| Active test wallet (sprint 498) | `0x4acdE458766C704B2511583572303e77109cFFE8` |
+| Stranded sprint-464 wallet | `0x2Fd48D2d026bEf7563C85c647674cb945C4d4f57` (key lost) |
+| Persistent key file | `~/.prsm/test-wallet.env` (chmod 600) |
 | Private key env var | `FTNS_WALLET_PRIVATE_KEY` |
 
-This wallet has enough ETH for ~80-100 small TX at current
-Base gas prices (~0.006 Gwei observed sprint 467). FTNS-side
-TX still requires the wallet to HOLD FTNS first.
+To load the persisted key into a daemon shell:
+```bash
+set -a; source ~/.prsm/test-wallet.env; set +a
+```
+or pass through nohup: `env $(cat ~/.prsm/test-wallet.env) nohup prsm node start …`
 
 ---
 
@@ -98,7 +110,7 @@ TX still requires the wallet to HOLD FTNS first.
    At a notional $0.01/FTNS that's 500 FTNS. At higher
    prices the test budget scales.
 
-2. **Wallet funded.** Send FTNS to `0x2Fd48D2d026bEf7563C85c647674cb945C4d4f57`.
+2. **Wallet funded.** Send FTNS to `0x4acdE458766C704B2511583572303e77109cFFE8`.
    Verify via `prsm wallet info` or `/balance/onchain`:
    ```
    {
@@ -142,7 +154,7 @@ without any balance change.
 **Command:**
 ```bash
 prsm wallet transfer-ftns \
-  --to 0x2Fd48D2d026bEf7563C85c647674cb945C4d4f57 \
+  --to 0x4acdE458766C704B2511583572303e77109cFFE8 \
   --amount 0.000001
 ```
 or HTTP:

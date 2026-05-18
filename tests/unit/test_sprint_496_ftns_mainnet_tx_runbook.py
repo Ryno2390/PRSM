@@ -59,11 +59,31 @@ def test_runbook_pins_canonical_royalty_distributor():
 
 
 def test_runbook_pins_test_wallet_from_sprint_467():
-    """The test wallet must match sprint 467's funded
-    wallet. Using a different wallet would lose the
-    sprint-467 ETH balance + the audit-trail continuity."""
+    """Sprint 498 pivot: sprint-464 wallet
+    `0x2Fd48D…` is stranded (key lost). Active test
+    wallet is now `0x4acdE458…`. Runbook must reference
+    BOTH — the stranded one as the documented lesson,
+    the active one as the operational target."""
     text = _read()
-    assert "0x2Fd48D2d026bEf7563C85c647674cb945C4d4f57" in text
+    assert "0x2Fd48D2d026bEf7563C85c647674cb945C4d4f57" in text, (
+        "stranded sprint-464 wallet must remain referenced "
+        "as the documented lost-key lesson"
+    )
+    assert "0x4acdE458766C704B2511583572303e77109cFFE8" in text, (
+        "active sprint-498 wallet must be the operational "
+        "target for TX-1/2/3"
+    )
+
+
+def test_runbook_documents_persistent_key_file():
+    """Sprint 498 lesson: the key MUST be persisted to a
+    file the operator controls BEFORE the daemon is
+    launched with it, so a daemon restart doesn't lose
+    the key forever (as happened to the sprint-464
+    wallet). Runbook must document the persistence path."""
+    text = _read()
+    assert "~/.prsm/test-wallet.env" in text
+    assert "chmod 600" in text or "0600" in text
 
 
 def test_runbook_documents_all_required_env_vars():
