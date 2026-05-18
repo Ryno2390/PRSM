@@ -2319,6 +2319,13 @@ def info(output_format: str):
         console.print("No node identity found. Run 'prsm setup' first.", style="yellow")
         return
 
+    # Sprint 534 F58 fix: surface BOTH primary + fallback
+    # bootstrap lists so operators see the full failover chain
+    # (not just the single dead bootstrap1 that pre-sprint-534
+    # configs persisted).
+    fallback_nodes = list(
+        getattr(config, "bootstrap_fallback_nodes", []) or []
+    )
     data = {
         "ok": True,
         "node_id": identity.node_id,
@@ -2329,6 +2336,7 @@ def info(output_format: str):
         "api_port": config.api_port,
         "data_dir": config.data_dir,
         "bootstrap_nodes": config.bootstrap_nodes or [],
+        "bootstrap_fallback_nodes": fallback_nodes,
     }
 
     if output_format == "json":
@@ -2345,7 +2353,15 @@ def info(output_format: str):
     table.add_row("P2P Port", str(data["p2p_port"]))
     table.add_row("API Port", str(data["api_port"]))
     table.add_row("Data Dir", data["data_dir"])
-    table.add_row("Bootstrap Nodes", ", ".join(data["bootstrap_nodes"]) or "none")
+    table.add_row(
+        "Bootstrap Primary",
+        ", ".join(data["bootstrap_nodes"]) or "none",
+    )
+    if fallback_nodes:
+        table.add_row(
+            "Bootstrap Fallback",
+            ", ".join(fallback_nodes),
+        )
     console.print(table)
 
 
