@@ -187,21 +187,21 @@ def _build_provenance_client_or_none():
         return None
     addr = os.getenv("PRSM_PROVENANCE_REGISTRY_ADDRESS", "").strip()
     pk = os.getenv("FTNS_WALLET_PRIVATE_KEY", "").strip()
-    if not addr and os.getenv("PRSM_NETWORK", "").strip():
-        # Sprint 146 — canonical fallback when PRSM_NETWORK declared.
-        # Sprint 525 (PARTIAL): attempted to prefer V2 but discovered F42
-        # — the auto-register code path uses V1 ProvenanceRegistryClient
-        # which has a 3-arg `registerContent` signature. V2 contract has
-        # a 5-arg signature → method-signature mismatch → EVM fallback
-        # gas explosion. Sprint 526 candidate: proper V2 client routing
-        # in _register_on_chain. Until then, V1 fallback is the stable path.
+    # Sprint 526 — F42 fix: V2 ProvenanceRegistry routing. Detect whether
+    # the configured address matches V2 (canonical going forward) and
+    # dispatch to ProvenanceRegistryV2Client. The V2 client exposes a
+    # V1-compatible `register_content` shim (sprint 526) so the auto-register
+    # caller is contract-agnostic.
+    v2_addr = ""
+    if os.getenv("PRSM_NETWORK", "").strip():
         try:
             ep = _resolve_endpoints()
-            addr = (
-                ep.provenance_registry or ""
-            ).strip()
+            v2_addr = (getattr(ep, "provenance_registry_v2", None) or "").strip()
+            if not addr:
+                # Canonical fallback: prefer V2 when wired; else V1.
+                addr = (v2_addr or ep.provenance_registry or "").strip()
         except Exception:  # noqa: BLE001
-            addr = ""
+            addr = addr or ""
     if not addr or not pk:
         if not addr:
             logger.info(
@@ -215,16 +215,34 @@ def _build_provenance_client_or_none():
             )
         return None
     try:
-        from prsm.economy.web3.provenance_registry import ProvenanceRegistryClient
         rpc_url = _resolve_endpoints().rpc_url
-        client = ProvenanceRegistryClient(
-            rpc_url=rpc_url,
-            contract_address=addr,
-            private_key=pk,
-        )
-        logger.info(
-            f"on-chain ProvenanceRegistry wired: {addr} via {_redact_rpc_url(rpc_url)}"
-        )
+        # Pick V2 client if the wired address is the V2 contract.
+        if v2_addr and addr.lower() == v2_addr.lower():
+            from prsm.economy.web3.provenance_registry_v2 import (
+                ProvenanceRegistryV2Client,
+            )
+            client = ProvenanceRegistryV2Client(
+                rpc_url=rpc_url,
+                contract_address=addr,
+                private_key=pk,
+            )
+            logger.info(
+                f"on-chain ProvenanceRegistry V2 wired: {addr} via "
+                f"{_redact_rpc_url(rpc_url)}"
+            )
+        else:
+            from prsm.economy.web3.provenance_registry import (
+                ProvenanceRegistryClient,
+            )
+            client = ProvenanceRegistryClient(
+                rpc_url=rpc_url,
+                contract_address=addr,
+                private_key=pk,
+            )
+            logger.info(
+                f"on-chain ProvenanceRegistry V1 wired: {addr} via "
+                f"{_redact_rpc_url(rpc_url)}"
+            )
         return client
     except Exception as exc:
         logger.warning(

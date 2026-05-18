@@ -257,6 +257,29 @@ class ProvenanceRegistryV2Client:
 
     # ---- Writes ----
 
+    def register_content(
+        self,
+        content_hash: bytes,
+        royalty_rate_bps: int,
+        metadata_uri: str,
+    ) -> Tuple[str, TransferStatus]:
+        """Sprint 526: V1-compatible shim. Auto-register code (content_
+        uploader._register_on_chain) uses the V1 method signature; this
+        shim lets the same caller talk to V2 by filling embedding_
+        commitment + fingerprint_kind with ZERO_BYTES32 (which V2 falls
+        back to raw-hash matching for).
+
+        Operators wanting to register with real embedding/fingerprint
+        data should call register_content_v2 directly.
+        """
+        return self.register_content_v2(
+            content_hash=content_hash,
+            royalty_rate_bps=royalty_rate_bps,
+            metadata_uri=metadata_uri,
+            embedding_commitment=ZERO_BYTES32,
+            fingerprint_kind=ZERO_BYTES32,
+        )
+
     def register_content_v2(
         self,
         content_hash: bytes,
