@@ -11556,6 +11556,49 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "available": False, "status": "not_wired",
             }
 
+        # Sprint 503 — operator gas balance. Wired to ftns_ledger
+        # but surfaced as its own subsystem so monitoring tools
+        # picking up /health/detailed get the gas signal without
+        # extra config. Mirrors /wallet/gas-status thresholds.
+        if ftns_ledger is not None:
+            try:
+                gas_addr = getattr(
+                    ftns_ledger, "_connected_address", None,
+                )
+                w3 = getattr(ftns_ledger, "w3", None)
+                if w3 is not None and gas_addr is not None:
+                    wei = w3.eth.get_balance(gas_addr)
+                    eth = wei / 1e18
+                    if eth < 0.0001:
+                        gas_status = "critical"
+                    elif eth < 0.0005:
+                        gas_status = "low"
+                    else:
+                        gas_status = "ok"
+                    subsystems["operator_gas"] = {
+                        "available": True,
+                        "status": gas_status,
+                        "address": gas_addr,
+                        "eth_balance": eth,
+                        "low_threshold_eth": 0.0005,
+                        "critical_threshold_eth": 0.0001,
+                    }
+                else:
+                    subsystems["operator_gas"] = {
+                        "available": False,
+                        "status": "unavailable",
+                    }
+            except Exception as exc:  # noqa: BLE001
+                subsystems["operator_gas"] = {
+                    "available": False,
+                    "status": "error",
+                    "error": str(exc)[:200],
+                }
+        else:
+            subsystems["operator_gas"] = {
+                "available": False, "status": "not_wired",
+            }
+
         # Payment escrow (core).
         escrow_svc = getattr(node, "_payment_escrow", None)
         if escrow_svc is not None:
