@@ -133,6 +133,107 @@ BASE_RPC_URL = _resolved.rpc_url
 BASE_CHAIN_ID = _resolved.chain_id
 
 
+def _gas_status_for_eth(eth: float) -> str:
+    """Pure helper — shared between startup log, endpoint,
+    /health/detailed, and the periodic monitor. One source
+    of truth for threshold boundaries."""
+    if eth < 0.0001:
+        return "critical"
+    if eth < 0.0005:
+        return "low"
+    return "ok"
+
+
+class GasStatusMonitor:
+    """Periodic background sampler that logs ONLY on
+    status transitions (ok ↔ low ↔ critical) so operators
+    get continuous signal without log spam.
+    """
+
+    SEVERITY = {"ok": 0, "low": 1, "critical": 2}
+
+    def __init__(self, ledger: "OnChainFTNSLedger",
+                 interval_seconds: float = 60.0):
+        self.ledger = ledger
+        self.interval_seconds = interval_seconds
+        self._last_status: Optional[str] = None
+
+    def _tick_sync(self) -> None:
+        """Single tick. Synchronous helper for unit tests
+        + reused inside the async run_forever loop."""
+        w3 = getattr(self.ledger, "w3", None)
+        addr = getattr(self.ledger, "_connected_address", None)
+        if w3 is None or addr is None:
+            return
+        try:
+            wei = w3.eth.get_balance(addr)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "gas-monitor tick failed (non-fatal): %s",
+                exc,
+            )
+            return
+        eth = wei / 1e18
+        new_status = _gas_status_for_eth(eth)
+        if self._last_status is None:
+            # First tick is the baseline; don't log it
+            # since sprint-504's startup log already did.
+            self._last_status = new_status
+            return
+        if new_status == self._last_status:
+            return
+        prev = self._last_status
+        addr_short = addr[:10] + "…"
+        if new_status == "critical":
+            logger.error(
+                "Operator gas transition %s → critical: "
+                "%.10f ETH on %s. Top up NOW — broadcasts "
+                "will start failing.",
+                prev, eth, addr_short,
+            )
+        elif new_status == "low" and (
+            self.SEVERITY[new_status]
+            > self.SEVERITY[prev]
+        ):
+            logger.warning(
+                "Operator gas transition %s → low: %.10f "
+                "ETH on %s. Plan to top up soon.",
+                prev, eth, addr_short,
+            )
+        elif (
+            self.SEVERITY[new_status]
+            < self.SEVERITY[prev]
+        ):
+            logger.info(
+                "Operator gas recovered %s → %s: %.10f "
+                "ETH on %s.",
+                prev, new_status, eth, addr_short,
+            )
+        else:
+            logger.info(
+                "Operator gas transition %s → %s: %.10f "
+                "ETH on %s.",
+                prev, new_status, eth, addr_short,
+            )
+        self._last_status = new_status
+
+    async def run_forever(self) -> None:
+        """Async loop suitable for asyncio.create_task()."""
+        import asyncio as _aio
+        while True:
+            try:
+                self._tick_sync()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "gas-monitor outer exception "
+                    "(non-fatal): %s", exc,
+                )
+            try:
+                await _aio.sleep(self.interval_seconds)
+            except _aio.CancelledError:
+                raise
+
+
 @dataclass
 class FTNSTransaction:
     """Record of an on-chain FTNS transfer."""

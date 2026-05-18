@@ -4012,6 +4012,36 @@ class PRSMNode:
             self.ledger_sync.start()
         if self._payment_escrow:
             self._escrow_cleanup_task = asyncio.create_task(self._payment_escrow.periodic_cleanup())
+        # Sprint 506: periodic gas-status monitor. Logs on transitions
+        # ok↔low↔critical so operators get continuous signal between
+        # the startup log (sprint 504) and active polling. Interval
+        # configurable via PRSM_GAS_MONITOR_INTERVAL_SECONDS.
+        if (
+            self.ftns_ledger is not None
+            and getattr(self.ftns_ledger, "w3", None) is not None
+            and self.ftns_ledger._connected_address is not None
+        ):
+            from prsm.economy.ftns_onchain import GasStatusMonitor
+            try:
+                _gas_interval = float(
+                    os.environ.get(
+                        "PRSM_GAS_MONITOR_INTERVAL_SECONDS",
+                        "300",  # default: 5 min
+                    )
+                )
+            except ValueError:
+                _gas_interval = 300.0
+            self._gas_status_monitor = GasStatusMonitor(
+                self.ftns_ledger,
+                interval_seconds=_gas_interval,
+            )
+            self._gas_status_monitor_task = asyncio.create_task(
+                self._gas_status_monitor.run_forever(),
+            )
+            logger.info(
+                "GasStatusMonitor launched (interval=%.0fs)",
+                _gas_interval,
+            )
         if hasattr(self, '_batch_settlement') and self._batch_settlement:
             # Update connected_address now that ftns_ledger may have initialized
             if self.ftns_ledger and hasattr(self.ftns_ledger, '_connected_address'):
