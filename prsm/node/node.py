@@ -4031,9 +4031,21 @@ class PRSMNode:
                 )
             except ValueError:
                 _gas_interval = 300.0
+            # Sprint 507: also fire webhook on transitions if
+            # operator has set PRSM_WEBHOOK_URL (reuses the
+            # deliverer the early-init created at __init__).
             self._gas_status_monitor = GasStatusMonitor(
                 self.ftns_ledger,
                 interval_seconds=_gas_interval,
+                webhook_deliverer=getattr(
+                    self, "_webhook_deliverer", None,
+                ),
+                webhook_url=os.environ.get(
+                    "PRSM_WEBHOOK_URL", "",
+                ).strip() or None,
+                webhook_secret=os.environ.get(
+                    "PRSM_WEBHOOK_SECRET", "",
+                ).strip() or None,
             )
             self._gas_status_monitor_task = asyncio.create_task(
                 self._gas_status_monitor.run_forever(),

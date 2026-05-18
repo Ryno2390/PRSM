@@ -153,10 +153,80 @@ class GasStatusMonitor:
     SEVERITY = {"ok": 0, "low": 1, "critical": 2}
 
     def __init__(self, ledger: "OnChainFTNSLedger",
-                 interval_seconds: float = 60.0):
+                 interval_seconds: float = 60.0,
+                 webhook_deliverer: Optional[Any] = None,
+                 webhook_url: Optional[str] = None,
+                 webhook_secret: Optional[str] = None):
         self.ledger = ledger
         self.interval_seconds = interval_seconds
         self._last_status: Optional[str] = None
+        self._webhook_deliverer = webhook_deliverer
+        self._webhook_url = webhook_url
+        self._webhook_secret = webhook_secret
+
+    async def _fire_webhook(
+        self, prev: str, new: str, eth: float,
+    ) -> None:
+        if (
+            self._webhook_deliverer is None
+            or not self._webhook_url
+        ):
+            return
+        import time as _time
+        payload = {
+            "event": "gas.transition",
+            "node_id": getattr(
+                self.ledger, "node_id", "unknown",
+            ),
+            "address": self.ledger._connected_address,
+            "previous_status": prev,
+            "new_status": new,
+            "eth_balance": eth,
+            "timestamp": _time.time(),
+        }
+        try:
+            await self._webhook_deliverer.deliver(
+                url=self._webhook_url,
+                event="gas.transition",
+                payload=payload,
+                secret=self._webhook_secret,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "gas-monitor webhook delivery raised "
+                "(non-fatal): %s", exc,
+            )
+
+    async def _tick_async(self) -> None:
+        """Async tick variant that supports webhook firing.
+
+        Used by run_forever() (which already runs in an event
+        loop). The sync _tick_sync() remains for unit tests
+        that need synchronous semantics.
+        """
+        prev_status = self._last_status
+        self._tick_sync()
+        new_status = self._last_status
+        if (
+            prev_status is not None
+            and new_status is not None
+            and prev_status != new_status
+        ):
+            w3 = getattr(self.ledger, "w3", None)
+            addr = getattr(
+                self.ledger, "_connected_address", None,
+            )
+            if w3 is not None and addr is not None:
+                try:
+                    wei = w3.eth.get_balance(addr)
+                    await self._fire_webhook(
+                        prev_status, new_status, wei / 1e18,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "gas-monitor webhook prep failed "
+                        "(non-fatal): %s", exc,
+                    )
 
     def _tick_sync(self) -> None:
         """Single tick. Synchronous helper for unit tests
@@ -222,7 +292,7 @@ class GasStatusMonitor:
         import asyncio as _aio
         while True:
             try:
-                self._tick_sync()
+                await self._tick_async()
             except Exception as exc:  # noqa: BLE001
                 logger.debug(
                     "gas-monitor outer exception "
