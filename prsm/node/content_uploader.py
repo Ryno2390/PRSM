@@ -1214,6 +1214,15 @@ class ContentUploader:
         rate = royalty_rate if royalty_rate is not None else DEFAULT_ROYALTY_RATE
         rate = max(MIN_ROYALTY_RATE, min(MAX_ROYALTY_RATE, rate))
 
+        # Sprint 529 F44 fix: when caller doesn't pass creator_eth_address
+        # explicitly, fall back to this uploader's wired creator_address
+        # (populated from ftns_ledger._connected_address at __init__).
+        # This makes the operator wallet the default creator for self-
+        # uploads, which is required for the retrieve→record_access
+        # royalty flow to find the creator on RoyaltyDistributor.
+        if creator_eth_address is None:
+            creator_eth_address = self.creator_address
+
         content_hash = hashlib.sha256(content).hexdigest()
         size_bytes = len(content)
         parents = parent_cids or []
@@ -2344,6 +2353,10 @@ class ContentUploader:
                 # auto-register audit trail without an extra BaseScan
                 # round-trip.
                 "provenance_tx_hash": uploaded.provenance_tx_hash,
+                # Sprint 529 F44 fix: creator's on-chain wallet address
+                # — must survive restarts so the retrieve→record_access
+                # royalty flow can find the creator on RoyaltyDistributor.
+                "creator_eth_address": uploaded.creator_eth_address,
                 "created_at": uploaded.created_at,
             }
             success = await ProvenanceQueries.upsert_provenance(record)
@@ -2492,6 +2505,10 @@ class ContentUploader:
                     # trail after restart. Operators no longer have
                     # to query BaseScan to find the registration tx.
                     provenance_tx_hash=rec.get("provenance_tx_hash"),
+                    # Sprint 529 F44 fix: restore creator_eth_address
+                    # so retrieve→record_access can fire on royalty
+                    # flow after restart (same gap class as F43).
+                    creator_eth_address=rec.get("creator_eth_address"),
                 )
                 self.uploaded_content[rec["content_id"]] = uploaded
                 # Phase 1.3: restart must also re-populate provider._local_content

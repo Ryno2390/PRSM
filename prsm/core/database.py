@@ -475,6 +475,13 @@ class ContentProvenanceModel(Base):
     # keep this null and operators check BaseScan via content_hash.
     provenance_tx_hash = Column(String(length=66), nullable=True)
 
+    # Sprint 529 F44 fix: creator's on-chain wallet address. Required
+    # for the retrieve→record_access royalty flow to link content
+    # back to its creator on RoyaltyDistributor. Without this, the
+    # retrieve handler's `record_access` short-circuits (only fires
+    # when creator_eth_address is set on the record).
+    creator_eth_address = Column(String(length=42), nullable=True)
+
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -979,6 +986,17 @@ class DatabaseManager:
                         text(
                             "ALTER TABLE content_provenance "
                             "ADD COLUMN provenance_tx_hash VARCHAR(66)"
+                        )
+                    )
+                except Exception:
+                    pass  # column already exists
+                # Sprint 529 F44 migration: same pattern for
+                # creator_eth_address.
+                try:
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE content_provenance "
+                            "ADD COLUMN creator_eth_address VARCHAR(42)"
                         )
                     )
                 except Exception:
@@ -1530,6 +1548,11 @@ class ProvenanceQueries:
                         existing.provenance_tx_hash = record.get(
                             "provenance_tx_hash",
                         )
+                    # Sprint 529 F44 fix: same guard for creator_eth_address
+                    if record.get("creator_eth_address") is not None:
+                        existing.creator_eth_address = record.get(
+                            "creator_eth_address",
+                        )
                 else:
                     row = ContentProvenanceModel(
                         cid=content_id,
@@ -1550,6 +1573,7 @@ class ProvenanceQueries:
                         near_duplicate_similarity=record.get("near_duplicate_similarity"),
                         provenance_hash=record.get("provenance_hash"),
                         provenance_tx_hash=record.get("provenance_tx_hash"),
+                        creator_eth_address=record.get("creator_eth_address"),
                         created_at=created_at,
                     )
                     session.add(row)
@@ -1622,7 +1646,7 @@ class ProvenanceQueries:
                             access_count, total_royalties, is_sharded, manifest_cid,
                             total_shards, embedding_id, near_duplicate_of,
                             near_duplicate_similarity, provenance_hash,
-                            provenance_tx_hash, created_at
+                            provenance_tx_hash, creator_eth_address, created_at
                         FROM content_provenance
                         WHERE creator_id = :creator_id
                         ORDER BY created_at ASC
@@ -1659,6 +1683,11 @@ class ProvenanceQueries:
                         # persisted + restored across daemon restart
                         "provenance_tx_hash": getattr(
                             row, "provenance_tx_hash", None,
+                        ),
+                        # Sprint 529 F44 fix: creator's on-chain
+                        # wallet address — same gap as F43, same fix
+                        "creator_eth_address": getattr(
+                            row, "creator_eth_address", None,
                         ),
                         # Sprint 480 (F22) — SQLite returns DATETIME
                         # columns as ISO-format strings (`'2026-05-15
