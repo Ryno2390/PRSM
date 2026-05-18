@@ -5673,8 +5673,8 @@ def mcp_config_snippet(host: str, port: int):
 def mcp_status_cmd(output_format: str):
     """Show MCP server status.
 
-    Reports whether the MCP server is running based on config and
-    daemon process state.
+    Reports whether the MCP server is running based on config AND
+    actual port-bind state.
     """
     from prsm.cli_modules.config_schema import PRSMConfig
 
@@ -5682,9 +5682,24 @@ def mcp_status_cmd(output_format: str):
     enabled = cfg.mcp_server_enabled
     port = cfg.mcp_server_port
 
+    # Sprint 534 F60 fix: probe the actual port instead of trusting
+    # config-says-enabled. Pre-fix: `prsm mcp status` reported
+    # "enabled (:9100)" while the port was closed — misleading
+    # for operators trying to integrate Claude Desktop / Gemini CLI.
+    running = False
+    if enabled:
+        import socket
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1.0)
+                running = s.connect_ex(("127.0.0.1", port)) == 0
+        except Exception:
+            running = False
+
     data = {
         "ok": True,
         "mcp_enabled": enabled,
+        "mcp_running": running,
         "mcp_port": port,
         "config_path": str(PRSMConfig.config_path()),
     }
@@ -5693,12 +5708,32 @@ def mcp_status_cmd(output_format: str):
         _agent_output(data)
         return
 
-    if enabled:
-        console.print(f"\n  {ICONS['success']} MCP Server: enabled (:{port})")
-        console.print(f"  Config:  {PRSMConfig.config_path()}", style=THEME.dim)
+    if enabled and running:
+        console.print(
+            f"\n  {ICONS['success']} MCP Server: running (:{port})",
+        )
+        console.print(
+            f"  Config:  {PRSMConfig.config_path()}",
+            style=THEME.dim,
+        )
+    elif enabled and not running:
+        console.print(
+            f"\n  ⚠️  MCP Server: enabled in config but NOT listening on :{port}",
+            style="yellow",
+        )
+        console.print(
+            f"  Start:   prsm mcp start", style=THEME.dim,
+        )
+        console.print(
+            f"  Config:  {PRSMConfig.config_path()}",
+            style=THEME.dim,
+        )
     else:
         console.print(f"\n  {ICONS['info']} MCP Server: disabled")
-        console.print(f"  Enable:  prsm config set mcp_server_enabled true", style=THEME.dim)
+        console.print(
+            f"  Enable:  prsm config set mcp_server_enabled true",
+            style=THEME.dim,
+        )
 
 
 # ---------------------------------------------------------------------------
