@@ -653,12 +653,20 @@ def status(output_format: str):
     from prsm.core.config import get_settings
     settings = get_settings()
 
+    # Sprint 533 F53 fix: when ~/.prsm/config.yaml doesn't exist,
+    # the global "PRSM is not configured" nudge fires above, but
+    # then the table below showed "Configuration: ✅ Loaded" using
+    # defaults. Contradictory signals confuse new users. Detect
+    # the unconfigured state + reflect it in the table.
+    config_path = Path.home() / ".prsm" / "config.yaml"
+    config_status = "loaded" if config_path.exists() else "not_configured"
+
     if settings:
         data = {
             "ok": True,
             "components": {
                 "configuration": {
-                    "status": "loaded",
+                    "status": config_status,
                     "environment": getattr(settings, "environment", "unknown"),
                 },
                 "database": {
@@ -701,6 +709,7 @@ def status(output_format: str):
         enabled = info.get("enabled", True)
         status_text = "✅ Loaded" if info.get("status") == "loaded" else \
                       "⚠️ Defaults" if info.get("status") == "defaults" else \
+                      "⚠️ Not configured" if info.get("status") == "not_configured" else \
                       "✅ Enabled" if enabled else "❌ Disabled"
         detail = info.get("url", info.get("model", info.get("note", "")))
         table.add_row(name.capitalize(), status_text, str(detail))

@@ -15,14 +15,29 @@ import json
 import os
 
 
-# Multi-region bootstrap server configuration
-# Primary server (US region by default)
+# Multi-region bootstrap server configuration.
+# Sprint 533 F57 fix: write ALL canonical regional bootstraps to the
+# default list so fresh installs get full failover wired into
+# `~/.prsm/config.yaml`, not just the (currently DNS-failing)
+# primary. Previously DEFAULT contained only `bootstrap1.prsm-
+# network.com` — when its DNS A record drifted, every fresh user
+# got an unreachable primary. The daemon's runtime FALLBACK list
+# already tries EU/APAC, but `prsm config show` and the setup
+# wizard only persisted the primary, making the failure invisible
+# at config-inspection time. Listing all 3 here means:
+#   - `prsm config show` displays the full fleet (no surprises)
+#   - daemon's connect loop tries them in order
+#   - operators can edit/remove regions without env-var hacking
 DEFAULT_BOOTSTRAP_NODES = [
     os.getenv("BOOTSTRAP_PRIMARY", "wss://bootstrap1.prsm-network.com:8765"),
+    os.getenv("BOOTSTRAP_FALLBACK_EU", "wss://bootstrap-eu.prsm-network.com:8765"),
+    os.getenv("BOOTSTRAP_FALLBACK_APAC", "wss://bootstrap-apac.prsm-network.com:8765"),
 ]
 
-# Multi-region fallback bootstrap servers for high availability
-# Nodes try servers in order: Primary (US) → EU → APAC
+# FALLBACK_BOOTSTRAP_NODES retained for backwards compat with
+# callers that explicitly distinguish primary vs fallbacks (e.g.
+# health-probe display). DEFAULT_BOOTSTRAP_NODES is the canonical
+# operator-config source.
 FALLBACK_BOOTSTRAP_NODES = [
     os.getenv("BOOTSTRAP_FALLBACK_EU", "wss://bootstrap-eu.prsm-network.com:8765"),
     os.getenv("BOOTSTRAP_FALLBACK_APAC", "wss://bootstrap-apac.prsm-network.com:8765"),
