@@ -2303,9 +2303,16 @@ def peers():
     console.print()
 
     # Try connecting to the running node's API to get live peer data
+    # Sprint 574: honor PRSM_API_PORT env override (operators on
+    # non-default ports e.g. droplet at 8002)
     try:
-        import httpx
-        resp = httpx.get(f"http://127.0.0.1:{config.api_port}/peers", timeout=3)
+        import httpx, os as _os
+        _env_port = (_os.environ.get("PRSM_API_PORT", "") or "").strip()
+        try:
+            _api_port = int(_env_port) if _env_port else config.api_port
+        except ValueError:
+            _api_port = config.api_port
+        resp = httpx.get(f"http://127.0.0.1:{_api_port}/peers", timeout=3)
         if resp.status_code == 200:
             data = resp.json()
             connected = data.get("connected", [])
@@ -2364,7 +2371,23 @@ def peers():
 
 
 def _api_base() -> str:
-    """Read NodeConfig + return http://127.0.0.1:api_port."""
+    """Resolve the local daemon's API base URL.
+
+    Sprint 574 — honor PRSM_API_PORT env var FIRST so operators
+    running daemons on non-default ports (e.g., bootstrap-us
+    droplet at 8002 alongside bootstrap-server-v2) get the right
+    target without editing NodeConfig. Falls back to NodeConfig
+    loaded value (default 8000) when env unset.
+    """
+    import os
+    env_port = (os.environ.get("PRSM_API_PORT", "") or "").strip()
+    if env_port:
+        try:
+            port = int(env_port)
+        except ValueError:
+            port = 0
+        if port > 0:
+            return f"http://127.0.0.1:{port}"
     from prsm.node.config import NodeConfig
     cfg = NodeConfig.load()
     return f"http://127.0.0.1:{cfg.api_port}"

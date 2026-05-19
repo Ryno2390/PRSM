@@ -209,6 +209,33 @@ def test_share_posts_file_content_and_prints_cid(tmp_path):
     assert "deadbeef" in result.output
 
 
+# ── PRSM_API_PORT env override ───────────────────────────────────
+
+
+def test_dial_honors_prsm_api_port_env_var():
+    """When PRSM_API_PORT=8002 is set, dial targets 127.0.0.1:8002
+    instead of the NodeConfig default. Required for operators
+    running daemons on non-default ports (e.g., bootstrap-us
+    droplet co-located with bootstrap-server-v2).
+    """
+    import os
+    from prsm.cli import node
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.json.return_value = {
+        "connected": True, "peer_id": "x", "address": "y",
+    }
+    with patch.dict(os.environ, {"PRSM_API_PORT": "8002"}, clear=False):
+        with patch("httpx.post", return_value=fake_resp) as mock_post:
+            result = _runner().invoke(node, ["dial", "1.2.3.4:9001"])
+    assert result.exit_code == 0, result.output
+    url = mock_post.call_args.args[0] if mock_post.call_args.args else mock_post.call_args.kwargs.get("url", "")
+    assert "127.0.0.1:8002" in url, (
+        f"PRSM_API_PORT=8002 must override; got {url!r}"
+    )
+
+
 # ── daemon-down behavior ─────────────────────────────────────────
 
 
