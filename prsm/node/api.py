@@ -980,6 +980,12 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         amount_ftns: float
         wallet_id: Optional[str] = None
         to_eth_address: Optional[str] = None
+        # Sprint 556 — optional EIP-712 user-sig fields. Required
+        # when the wallet's requires_user_signature flag is on
+        # (sprint 554); ignored otherwise.
+        signature: Optional[str] = None
+        nonce: Optional[int] = None
+        expiry_unix: Optional[int] = None
 
     @app.post("/wallet/withdraw", tags=["wallet"])
     async def post_withdraw(
@@ -1037,6 +1043,120 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     f"to wallet_id={wallet_id!r} via "
                     f"POST /wallet/deposit/link first."
                 ),
+            )
+        # ─── Sprint 556 — user-sig enforcement ────────────────────
+        # When the wallet's requires_user_signature flag is True,
+        # the request body must carry a valid EIP-712 signature
+        # over {wallet_id, amount_ftns_wei, to_eth_address, nonce,
+        # expiry_unix}. Each check below returns 401 with a
+        # specific detail so callers can self-diagnose:
+        #   - missing signature/nonce/expiry → "signature required"
+        #   - unlinked wallet → "link eth address first"
+        #   - expired payload → "payload expired"
+        #   - wrong nonce → "nonce mismatch"
+        #   - wrong signer → "signer address mismatch"
+        # On success the nonce is consumed BEFORE the broadcast —
+        # even if broadcast fails (502 + refund), the nonce stays
+        # bumped so the captured signature can't be replayed.
+        nonce_consumed: Optional[int] = None
+        try:
+            requires_sig = await local_ledger.get_requires_user_signature(
+                wallet_id,
+            )
+        except Exception:  # noqa: BLE001
+            requires_sig = False
+        if requires_sig:
+            if (
+                body.signature is None
+                or body.nonce is None
+                or body.expiry_unix is None
+            ):
+                raise HTTPException(
+                    status_code=401,
+                    detail=(
+                        "Wallet requires user signature: pass "
+                        "`signature` (EIP-712 over WithdrawRequest), "
+                        "`nonce` (current next_withdraw_nonce), and "
+                        "`expiry_unix` (Unix epoch in the future) "
+                        "in the body. See sprint-555's "
+                        "`prsm.economy.withdraw_signature` module for "
+                        "the canonical payload shape."
+                    ),
+                )
+            linked = await local_ledger.eth_address_for_wallet(
+                wallet_id,
+            )
+            if not linked:
+                raise HTTPException(
+                    status_code=401,
+                    detail=(
+                        "Wallet has requires_user_signature=True but "
+                        "no linked eth_address — there is nothing to "
+                        "verify the signer against. Link an address "
+                        "via POST /wallet/deposit/link first."
+                    ),
+                )
+            from prsm.economy.withdraw_signature import (
+                verify_withdraw_signature,
+                is_expired,
+                InvalidSignatureFormat,
+            )
+            payload = {
+                "wallet_id": wallet_id,
+                "amount_ftns_wei": int(body.amount_ftns * 1e18),
+                "to_eth_address": to_addr,
+                "nonce": int(body.nonce),
+                "expiry_unix": int(body.expiry_unix),
+            }
+            if is_expired(payload):
+                raise HTTPException(
+                    status_code=401,
+                    detail=(
+                        "Signed payload expired "
+                        f"(expiry_unix={body.expiry_unix}). "
+                        "Re-sign with a future expiry."
+                    ),
+                )
+            expected_nonce = await local_ledger.get_next_withdraw_nonce(
+                wallet_id,
+            )
+            if int(body.nonce) != int(expected_nonce):
+                raise HTTPException(
+                    status_code=401,
+                    detail=(
+                        f"Nonce mismatch: got {body.nonce}, expected "
+                        f"{expected_nonce}. Read current nonce via "
+                        "GET /wallet/deposit/info (sprint-556 field)."
+                    ),
+                )
+            try:
+                recovered = verify_withdraw_signature(
+                    payload, body.signature,
+                )
+            except InvalidSignatureFormat as exc:
+                raise HTTPException(
+                    status_code=401,
+                    detail=f"Signature format invalid: {exc!s}",
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=401,
+                    detail=f"Signature verification failed: {exc!s}"[:200],
+                )
+            if recovered.lower() != linked.lower():
+                raise HTTPException(
+                    status_code=401,
+                    detail=(
+                        f"Signer address mismatch: signature recovered "
+                        f"to {recovered.lower()}, but wallet is linked "
+                        f"to {linked.lower()}. Sign with the same key "
+                        f"used to link via /wallet/deposit/link."
+                    ),
+                )
+            # All checks passed — consume the nonce BEFORE broadcast
+            # so replay isn't possible even if broadcast fails.
+            nonce_consumed = await local_ledger.bump_withdraw_nonce(
+                wallet_id,
             )
         # Pre-flight balance check
         balance = await local_ledger.get_balance(wallet_id)
@@ -1136,6 +1256,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             ),
             "debit_tx_id": debit_tx.tx_id,
             "job_id": job_id,
+            # Sprint 556 — only present when requires_user_signature
+            # is on for this wallet. Echoes back which nonce was
+            # consumed so callers can verify their bookkeeping.
+            "nonce_consumed": nonce_consumed,
         }
 
     @app.get("/balance")
