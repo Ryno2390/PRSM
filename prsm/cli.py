@@ -2367,6 +2367,109 @@ def peers():
     console.print("Node is not running. Start it with 'prsm node start'.", style="yellow")
 
 
+# ── Sprint 579 — trust-stack observability ──────────────────────
+
+
+_TRUST_STACK_ENV_VARS = [
+    ("PRSM_PARALLAX_TRUST_STACK_KIND",
+     ("mock", "production"), "mock",
+     "Top-level trust-stack kind. mock=permissive (dev); "
+     "production=4-component verification (sprints 558-562)."),
+    ("PRSM_PARALLAX_PROFILE_SOURCE_KIND",
+     ("in_memory", "dht"), "in_memory",
+     "Inner ProfileSource (sprint 576). dht hooks Phase 2 "
+     "ProfileDHT integration; Phase 1 falls back to in_memory."),
+    ("PRSM_PARALLAX_CONSENSUS_SUBMITTER_KIND",
+     ("logging", "onchain"), "logging",
+     "Consensus mismatch submitter (sprint 577). onchain hooks "
+     "Phase 2 ChallengeRecord → Phase 7.1x ABI dispatch; Phase 1 "
+     "falls back to logging."),
+    ("PRSM_PARALLAX_CHAIN_EXECUTOR_KIND",
+     ("stub", "rpc"), "stub",
+     "Inference chain executor (sprint 578). rpc hooks Phase 2 "
+     "make_rpc_chain_executor wiring; Phase 1 falls back to stub."),
+]
+
+
+def _resolve_trust_stack_entry(name, valid, default):
+    """Return (kind, env_value, status) for one trust-stack env var."""
+    import os as _os
+    raw = (_os.environ.get(name, "") or "").strip()
+    env_value = raw if raw else None
+    val = (raw or default).lower()
+    if val in valid:
+        # Phase 1: only the FIRST valid kind is fully active; the
+        # second one is the Phase 2 hook that currently falls back.
+        if val == default:
+            status = "active (default)" if env_value is None else "active"
+        else:
+            # Phase 2 hook kinds — surface as "phase 2 pending"
+            # so operators don't assume they got the real thing.
+            status = "phase 2 pending (falls back to default)"
+        return val, env_value, status
+    return default, env_value, f"unknown_falls_back_to_{default}"
+
+
+@node.command("trust-stack")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format: 'text' (Rich table) or 'json' (agent-parseable)",
+)
+def trust_stack_cli(output_format: str):
+    """Inspect §7 trust-stack Phase-1 env config.
+
+    Reports the 4 ParallaxScheduledExecutor component env vars
+    + their effective kinds. Useful for verifying which Phase 2
+    hooks an operator has opted into.
+
+    Sprint 579 closes the observability gap left by sprints
+    558-562/576/577/578 — operators no longer need to spelunk
+    daemon startup logs to see effective trust-stack config.
+    """
+    import json
+    entries = {}
+    for (name, valid, default, descr) in _TRUST_STACK_ENV_VARS:
+        kind, env_value, status = _resolve_trust_stack_entry(
+            name, valid, default,
+        )
+        entries[name] = {
+            "kind": kind,
+            "env_value": env_value,
+            "status": status,
+            "valid": list(valid),
+            "default": default,
+            "description": descr,
+        }
+
+    if output_format == "json":
+        click.echo(json.dumps(entries, indent=2))
+        return
+
+    # no_wrap on all columns + console.width override prevents Rich
+    # auto-truncation in narrow terminals or test harness output.
+    from rich.console import Console as _RichConsole
+    _wide = _RichConsole(width=140)
+    table = Table(title="Trust-stack Phase-1 env config (sprint 579)")
+    table.add_column("Env var", style="cyan", no_wrap=True)
+    table.add_column("Effective kind", style="green", no_wrap=True)
+    table.add_column("Env value", style="magenta", no_wrap=True)
+    table.add_column("Status", style="blue", no_wrap=True)
+    for name, e in entries.items():
+        table.add_row(
+            name,
+            e["kind"],
+            (e["env_value"] or "<unset>"),
+            e["status"],
+        )
+    _wide.print(table)
+    _wide.print(
+        "\n[dim]Sprints 558-562/576/577/578 plumb four Phase-1 "
+        "hooks for §7 trust-stack. Phase 2 lands real impl per "
+        "component additively.[/dim]"
+    )
+
+
 # ── Sprint 574 — fleet-ops CLI quartet ───────────────────────────
 
 
