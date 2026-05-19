@@ -98,7 +98,7 @@ journey. Each step should be live-verifiable on a single node.
 | Retrieve by CID (Tier A, same node) | `GET /content/retrieve/{cid}` | ✅ | 428 | Local-publish shortcut |
 | Retrieve + decrypt (recipient-encrypted, same node) | `GET /content/retrieve/{cid}` + `decrypt_for_recipient` | ✅ | 430 | E2E live-tested |
 | Bootstrap-mediated peer discovery (multi-node) | bootstrap-server peer-list | ✅ | 456, 468, 565 | Live: 2 daemons on same host (sprint 456); sprint 468 cross-HOST verified via EU bootstrap; **sprint 565 — first live cross-host discovery on the canonical bootstrap-us fleet member**: droplet operator (`484f003c...`) + Mac (`cdefb8e5...`) symmetric `known[]` via bootstrap-us, both registered live in `/peers` with `active_connections: 2`. Closes the fleet-coordination gap (pre-565 the droplet operator was bootstrapped against bootstrap-eu while all others defaulted to bootstrap-us → different registries → no cross-discovery) |
-| Cross-host content retrieve (direct P2P) | BT swarm + gossip | ⏸️ | 468, 567 | **Sprint 567 reframed**: F20 ("DO firewall blocks 9001") is stale — `nc -zv 159.203.129.218 9001` succeeds from Mac; ufw inactive; iptables INPUT default ACCEPT. Droplet listens on `0.0.0.0:9001` TCP. **Actual remaining gaps for direct P2P**: (1) auto-dial gap — `_hydrate_peers_from_bootstrap` populates `known[]` only, never calls `transport.connect_to_peer(addr)` on discovered peers; `connected[]` stays empty. (2) Address format mismatch — bootstrap shares `host:port`; transport's `_to_multiaddr` translates to `/ip4/host/udp/port/quic-v1` (QUIC/UDP) but daemon listens on TCP. (3) Peer ID requirement — libp2p multiaddr needs `/p2p/<peerID>` suffix; bootstrap-shared addresses lack it. Each is its own sprint candidate |
+| Cross-host content retrieve (direct P2P) | BT swarm + gossip | ⏸️ | 468, 567, 568 | **Sprint 568 reframed**: F20 REINSTATED as stealth firewall — TCP handshake completes (`nc -zv` reports "succeeded") but external WS to `:9001` payload is dropped; loopback WS to droplet's own `:9001` works (`1002 protocol error "Missing public key"` returned). This is DO-cloud-firewall level, NOT OS-level (ufw inactive, iptables ACCEPT). Bootstrap :8765 works end-to-end → port-specific. **Needs operator action in DO dashboard** (out of autonomous scope). Sprint-567 gaps 2+3 (multiaddr/peer-ID) are libp2p-only concerns — both daemons run `PRSM_TRANSPORT_BACKEND=websocket`, so `connect_to_peer(host:port)` is sufficient at the code layer. Remaining gap (1) auto-dial is autonomous-fixable but useless until F20 cleared at DO level |
 | Peer lifecycle: peer_leave propagation | bootstrap-server peer-list | ✅ | 457 | Live: killed daemon #2 → 21s later daemon #1 received peer_leave → `peer_leave_events: 1`, `known_count: 0`, `discovered_peer_count: 0`. Sprint 320-329 hardening operationally verified |
 | Direct P2P connection (single-host) | WebSocket transport | ⏸️ | 456 | F14: NAT-loopback blocks single-host direct connection (announced addrs are external IP); multi-host bench is the right test |
 | Retrieve by CID (Tier A, cross-node) | `GET /content/retrieve/{cid}` | ⏸️ | 532 | Same-node retrieve ✅ live-verified; cross-node retrieve blocked on F14 (NAT-loopback single-host) + F20 (DO cloud firewall). Multi-host test bench is the right answer — sprint 456-457 verified discovery + lifecycle |
@@ -767,6 +767,34 @@ arc proved we need.
 ---
 
 ## Changelog
+
+- **2026-05-19 sprint 568 — F20 REINSTATED (stealth firewall) + WebSocket
+  transport reality check**. Started as "multiaddr-in-registration to close
+  sprint-567 gaps 2+3"; pivoted heavily after discovering:
+  1. **Droplet runs WebSocketTransport, not libp2p**. Systemd env sets
+     `PRSM_TRANSPORT_BACKEND=websocket`; the libp2p .so was missing on
+     droplet (F26 — surfaced from May 15 journal). WebSocket's
+     `connect_to_peer(host:port)` takes plain host:port; no multiaddr,
+     no /p2p/<peerID> suffix needed. Sprint-567 gaps 2+3 were
+     libp2p-only concerns that don't apply to current production.
+  2. **F20 reinstated as stealth firewall**. Loopback WS to droplet's
+     own :9001 SUCCEEDS — daemon responds `1002 protocol error
+     "Missing public key"` (handshake protocol works). External WS to
+     `159.203.129.218:9001` from Mac TIMES OUT after TCP handshake.
+     `nc -zv 159.203.129.218 9001` returns "succeeded" because the
+     TCP SYN/ACK completes; subsequent payload data is silently
+     dropped. Port-specific (bootstrap :8765 works end-to-end). This
+     is DO-cloud-firewall level, NOT OS-level (ufw inactive, iptables
+     INPUT default ACCEPT). **Needs operator action in the DO
+     dashboard** — outside autonomous fix scope.
+
+  No code changes shipped. Sprint scoped down from multiaddr arc
+  (moot) to verification + finding-documentation. Real direct-P2P
+  remaining blockers are now:
+  - DO cloud firewall payload-blocking on :9001 (F20, operator-gated)
+  - Auto-dial gap (sprint-567 gap 1, autonomous-fixable but useless
+    until F20 cleared)
+  - Handshake protocol details (public_key field requirement)
 
 - **2026-05-19 sprint 567 — F20 verification: stale; direct-P2P gaps
   documented**. Sprint-468's F20 ("DO cloud firewall blocks inbound
