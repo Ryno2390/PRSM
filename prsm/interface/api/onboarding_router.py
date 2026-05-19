@@ -269,7 +269,7 @@ async def network_config_form(request: Request):
             "current_config": {
                 "p2p_port": _pending_config.get("p2p_port", 8765),
                 "api_port": _pending_config.get("api_port", 8080),
-                "bootstrap_nodes": _pending_config.get("bootstrap_nodes", ["wss://bootstrap1.prsm-network.com:8765"])
+                "bootstrap_nodes": _pending_config.get("bootstrap_nodes", ["wss://bootstrap-us.prsm-network.com:8765"])
             }
         })
 
@@ -278,7 +278,7 @@ async def network_config_form(request: Request):
             "step": 4,
             "p2p_port": _pending_config.get("p2p_port", 8765),
             "api_port": _pending_config.get("api_port", 8080),
-            "bootstrap_nodes": ",".join(_pending_config.get("bootstrap_nodes", ["wss://bootstrap1.prsm-network.com:8765"]))
+            "bootstrap_nodes": ",".join(_pending_config.get("bootstrap_nodes", ["wss://bootstrap-us.prsm-network.com:8765"]))
         })
 
 
@@ -287,7 +287,7 @@ async def submit_network_config(
     request: Request,
     p2p_port: int = Form(default=8765),
     api_port: int = Form(default=8080),
-    bootstrap_nodes: str = Form(default="wss://bootstrap1.prsm-network.com:8765"),
+    bootstrap_nodes: str = Form(default="wss://bootstrap-us.prsm-network.com:8765"),
 ):
     """Save network configuration."""
     global _pending_config
@@ -509,7 +509,7 @@ def _get_default_config() -> Dict[str, Any]:
         "timeout_seconds": 120,
         "max_retries": 3,
         "p2p_port": 8765,
-        "bootstrap_nodes": ["wss://bootstrap1.prsm-network.com:8765"],
+        "bootstrap_nodes": ["wss://bootstrap-us.prsm-network.com:8765"],
         "node_identity_path": "config/node_identity.json",
         "api_port": 8080,
         "log_level": "INFO"

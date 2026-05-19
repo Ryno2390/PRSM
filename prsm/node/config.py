@@ -29,7 +29,10 @@ import os
 #   - daemon's connect loop tries them in order
 #   - operators can edit/remove regions without env-var hacking
 DEFAULT_BOOTSTRAP_NODES = [
-    os.getenv("BOOTSTRAP_PRIMARY", "wss://bootstrap1.prsm-network.com:8765"),
+    # Sprint 575 F29 — bootstrap1 → bootstrap-us DNS rename
+    # (2026-05-19). Old hostname no longer resolves; defaulting
+    # to it would make every new operator fail initial bootstrap.
+    os.getenv("BOOTSTRAP_PRIMARY", "wss://bootstrap-us.prsm-network.com:8765"),
     os.getenv("BOOTSTRAP_FALLBACK_EU", "wss://bootstrap-eu.prsm-network.com:8765"),
     os.getenv("BOOTSTRAP_FALLBACK_APAC", "wss://bootstrap-apac.prsm-network.com:8765"),
 ]
@@ -302,6 +305,19 @@ class NodeConfig:
     def _load_from_json_path(cls, path: Path) -> "NodeConfig":
         data = json.loads(path.read_text())
         roles = [NodeRole(r) for r in data.pop("roles", ["full"])]
+        # Sprint 575 F29 — bootstrap1 → bootstrap-us DNS rename.
+        # Migrate stored JSON configs the same way _load_from_yaml_path
+        # does, so legacy JSON-on-disk operators get redirected to the
+        # live hostname instead of stranded on dead DNS.
+        bs = data.get("bootstrap_nodes")
+        if isinstance(bs, list):
+            data["bootstrap_nodes"] = [
+                (entry.replace(
+                    "bootstrap1.prsm-network.com",
+                    "bootstrap-us.prsm-network.com",
+                ) if isinstance(entry, str) else entry)
+                for entry in bs
+            ]
         return cls(roles=roles, **data)
 
     @classmethod
@@ -356,6 +372,22 @@ class NodeConfig:
         ]
         if ncfg.get("bootstrap_nodes") == _LEGACY_BROKEN_BOOTSTRAP:
             ncfg["bootstrap_nodes"] = list(DEFAULT_BOOTSTRAP_NODES)
+
+        # Sprint 575 F29 — bootstrap1 → bootstrap-us DNS rename
+        # (2026-05-19). Auto-migrate stored configs whose primary
+        # bootstrap still references the dead hostname so existing
+        # operators don't get stranded on a non-resolving URL after
+        # `prsm upgrade`. Per-entry replacement preserves any
+        # operator-customized fallbacks.
+        bs = ncfg.get("bootstrap_nodes")
+        if isinstance(bs, list):
+            ncfg["bootstrap_nodes"] = [
+                (entry.replace(
+                    "bootstrap1.prsm-network.com",
+                    "bootstrap-us.prsm-network.com",
+                ) if isinstance(entry, str) else entry)
+                for entry in bs
+            ]
 
         if "node_role" in raw:
             try:

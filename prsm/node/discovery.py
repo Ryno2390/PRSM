@@ -132,8 +132,10 @@ class PeerDiscovery:
         local_backends: Optional[List[str]] = None,
         local_gpu_available: bool = False,
     ):
-        # Default bootstrap node — the live PRSM bootstrap server
-        _DEFAULT_BOOTSTRAP = ["wss://bootstrap1.prsm-network.com:8765"]
+        # Default bootstrap node — the live PRSM bootstrap server.
+        # Sprint 575 F29 — bootstrap1 → bootstrap-us DNS rename
+        # (2026-05-19); old hostname no longer resolves.
+        _DEFAULT_BOOTSTRAP = ["wss://bootstrap-us.prsm-network.com:8765"]
 
         self.transport = transport
         self.bootstrap_nodes = bootstrap_nodes if bootstrap_nodes is not None else _DEFAULT_BOOTSTRAP
