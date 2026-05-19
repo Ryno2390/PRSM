@@ -2449,6 +2449,84 @@ def anchor_probe_cli(output_format: str):
     raise SystemExit(1)
 
 
+# ── Sprint 583 — stake-bond probe ────────────────────────────────
+
+
+@node.command("stake-bond-probe")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def stake_bond_probe_cli(output_format: str):
+    """Probe whether PRSM_STAKE_BOND_ADDRESS wires a working
+    StakeManagerClient.
+
+    Sprint 583 — mirror of sprint-581 anchor-probe for the
+    sibling §7 production env var (sprint 561). Operator
+    preflight before flipping PRSM_PARALLAX_TRUST_STACK_KIND
+    =production with stake-weighted trust.
+    """
+    import json
+    import os as _os
+    stake_addr = (
+        _os.environ.get("PRSM_STAKE_BOND_ADDRESS", "") or ""
+    ).strip()
+    rpc_url = _os.environ.get(
+        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+    )
+    outcome = "ok"
+    error = None
+    if not stake_addr:
+        outcome = "unset"
+    else:
+        try:
+            from prsm.economy.web3.stake_manager import (
+                StakeManagerClient,
+            )
+            StakeManagerClient(
+                contract_address=stake_addr,
+                rpc_url=rpc_url,
+            )
+        except Exception as exc:  # noqa: BLE001
+            outcome = "construction_failed"
+            error = f"{type(exc).__name__}: {exc}"
+
+    payload = {
+        "PRSM_STAKE_BOND_ADDRESS": stake_addr or None,
+        "PRSM_BASE_RPC_URL": rpc_url,
+        "outcome": outcome,
+        "error": error,
+    }
+    if output_format == "json":
+        click.echo(json.dumps(payload, indent=2))
+        raise SystemExit(0 if outcome == "ok" else 1)
+
+    if outcome == "ok":
+        console.print(
+            f"[green]✓ ok[/green] — StakeManagerClient constructed "
+            f"against [cyan]{stake_addr}[/cyan] on "
+            f"[magenta]{rpc_url}[/magenta]"
+        )
+        return
+    if outcome == "unset":
+        console.print(
+            "[yellow]PRSM_STAKE_BOND_ADDRESS is unset[/yellow] "
+            "— required for sprint-561 real stake-weighted trust. "
+            "Without it, production trust-stack falls back to "
+            "ZeroStakeLookup placeholder (every node treated as "
+            "zero stake)."
+        )
+        raise SystemExit(1)
+    console.print(
+        f"[red]✗ construction_failed[/red]: {error}\n"
+        f"[dim]stake_addr={stake_addr!r}, rpc_url={rpc_url!r}[/dim]\n"
+        f"[dim]Check the address resolves to a deployed StakeBond "
+        f"contract and the RPC endpoint is reachable.[/dim]"
+    )
+    raise SystemExit(1)
+
+
 # ── Sprint 579 — trust-stack observability ──────────────────────
 
 
