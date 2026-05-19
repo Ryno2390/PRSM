@@ -768,6 +768,46 @@ arc proved we need.
 
 ## Changelog
 
+- **2026-05-19 sprint 566 — PRSM_ADVERTISE_ADDRESS env var (sprint-456
+  candidate A) + F25 subprocess scoping fix**. Sprint 565 closed
+  bootstrap-mediated discovery but surfaced the next layer: droplet
+  operator (bootstrapping via loopback per sprint-460) advertised
+  `127.0.0.1` to remote peers — unreachable. Two-side fix:
+  - **Client**: `BootstrapClient` gains `advertise_address` kwarg.
+    When set, register message JSON carries `address` field.
+    `Libp2pDiscovery` + `Discovery` read `PRSM_ADVERTISE_ADDRESS`
+    env via new `_resolve_advertise_address()` helper.
+  - **Server**: `_handle_register` honors client-supplied `address`
+    if present, non-empty, and a string. Falls back to client_ip
+    otherwise (legacy clients unaffected). Defensive against bad
+    values (None, int, empty, dict, list — all reject + use
+    client_ip).
+  - **F25 surfaced + fixed during droplet redeploy**: Linux
+    operator crashed at startup with `UnboundLocalError: cannot
+    access local variable 'subprocess'`. Root cause: `import
+    subprocess` inside a Darwin-only `elif` branch made `subprocess`
+    function-local for the entire `detect_resources`; on Linux the
+    elif was skipped, the local stayed unbound, and the subsequent
+    `subprocess.TimeoutExpired` raise blew up. Mac dev always hit
+    the Darwin path so the bug was hidden. Hourly Linux startup
+    crash since sprint-533 F51 added the inner import. Fix: remove
+    the redundant inner import. 4 pin tests defend.
+
+  14 pin tests across sprint 566 (10 advertise_address + 4 F25
+  scoping). 117 cross-suite green incl. libp2p + bootstrap suites.
+
+  **Live-verified end-to-end on Base mainnet bootstrap-us fleet**:
+  systemd unit gained `Environment=PRSM_ADVERTISE_ADDRESS=
+  159.203.129.218`; daemon restarted; bootstrap-us `/peers` now
+  shows BOTH operators at their **external IPs**:
+  - droplet `484f003c...` @ `159.203.129.218:9001`
+  - Mac `cdefb8e5...` @ `146.70.202.116:9001`
+
+  Both with `capabilities: [compute, storage]`. The fleet-side
+  cross-host bench has reachable advertised addresses. Direct
+  P2P connection still gated on DO firewall (F20) + Mac NAT-
+  traversal (separate sprints).
+
 - **2026-05-19 sprint 565 — fleet-coordination fix: first live cross-host
   peer discovery on the canonical bootstrap-us fleet member**. The
   droplet operator daemon was bootstrapped against bootstrap-eu (while

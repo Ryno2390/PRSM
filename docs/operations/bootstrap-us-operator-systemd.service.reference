@@ -33,6 +33,12 @@ Group=root
 WorkingDirectory=/opt/prsm-operator
 Environment=HOME=/root
 Environment=PRSM_TRANSPORT_BACKEND=websocket
+# Sprint 566 — advertise external IP so remote peers can connect.
+# Without this, the bootstrap-server records the WS client_ip
+# (= 127.0.0.1 when bootstrapping via loopback per sprint-460),
+# which is unreachable to other peers. IP-only (no port — port
+# is a separate field in the registration).
+Environment=PRSM_ADVERTISE_ADDRESS=159.203.129.218
 ExecStart=/opt/prsm-operator/.venv/bin/python -m prsm.cli node start \
     --no-dashboard \
     --api-port 8002 \
