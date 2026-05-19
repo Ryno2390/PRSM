@@ -2087,6 +2087,17 @@ def node_bootstrap_test(urls, timeout, output_format):
                 if h.cert_subject else ""
             )
         )
+        # Sprint 591 — surface SAN-mismatch warning in text output
+        # (sprint 590 already populates h.san_mismatch + JSON; text
+        # output had only the subject CN before this sprint).
+        if getattr(h, "san_mismatch", False):
+            san_list = ", ".join(h.cert_san_dns) if h.cert_san_dns else "<empty>"
+            console.print(
+                f"    [yellow]⚠ SAN mismatch[/yellow] — "
+                f"cert covers [{san_list}], "
+                f"not [cyan]{h.host}[/cyan]. "
+                f"Strict-TLS clients will fail."
+            )
         if h.error:
             console.print(f"    [red]error:[/red] {h.error}")
 
