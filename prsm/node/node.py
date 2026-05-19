@@ -1141,7 +1141,7 @@ def _build_key_distribution_watcher_or_none(
 def _build_storage_slashing_watcher_or_none(
     *, client, state_store=None, slash_event_log=None,
     heartbeat_log=None, webhook_deliverer=None,
-    webhook_url=None, webhook_secret=None,
+    webhook_url=None, webhook_secret=None, dedup_store=None,
 ):
     """Construct a StorageSlashingWatcher if operator opted in AND
     underlying client is non-None.
@@ -1287,10 +1287,12 @@ def _build_storage_slashing_watcher_or_none(
             on_heartbeat_missing_slashed=_on_missing,
             poll_interval_sec=interval,
             state_store=state_store,
+            dedup_store=dedup_store,
         )
         logger.info(
             f"StorageSlashingWatcher wired (interval={interval}s, "
-            f"persistence={'on' if state_store is not None else 'off'})"
+            f"persistence={'on' if state_store is not None else 'off'}, "
+            f"dedup={'on' if dedup_store is not None else 'off'})"
         )
         return watcher
     except Exception as exc:  # noqa: BLE001
@@ -2025,6 +2027,7 @@ class PRSMNode:
                 webhook_deliverer=self._webhook_deliverer,
                 webhook_url=_early_webhook_url,
                 webhook_secret=_early_webhook_secret,
+                dedup_store=self._watcher_event_dedup_store,
             )
         )
         self._compensation_distributor_watcher = (

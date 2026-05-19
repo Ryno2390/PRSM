@@ -86,6 +86,7 @@ class StorageSlashingWatcher:
         poll_interval_sec: float = 30.0,
         state_store=None,
         event_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+        dedup_store=None,
     ) -> None:
         if poll_interval_sec <= 0:
             raise ValueError(
@@ -110,6 +111,12 @@ class StorageSlashingWatcher:
         self._on_missing = on_heartbeat_missing_slashed
         self._poll_interval = float(poll_interval_sec)
         self._state_store = state_store
+        # Sprint 551: persistent (watcher_key, tx_hash, log_index)
+        # dedup. Without it, restart-catch-up re-dispatches every
+        # slash + heartbeat event the previous run handled between
+        # callback dispatch and post-loop baseline persist. Final
+        # sibling in the sprint-549/550 audit trifecta.
+        self._dedup_store = dedup_store
         self._event_filters = event_filters or {}
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
@@ -263,7 +270,41 @@ class StorageSlashingWatcher:
             )
             return False
         for event in events:
+            # Sprint 551: persistent dedup mirroring sprints 549 + 550.
+            # Skip events the previous run already dispatched; mark
+            # AFTER successful callback. Fail-soft on SQLite hiccups.
+            tx_hash = getattr(event, "tx_hash", None)
+            log_index = getattr(event, "log_index", None)
+            if (
+                self._dedup_store is not None
+                and tx_hash is not None
+                and log_index is not None
+            ):
+                try:
+                    if self._dedup_store.has_processed_event(
+                        self.WATCHER_KEY, tx_hash, log_index,
+                    ):
+                        continue
+                except Exception:
+                    logger.exception(
+                        "StorageSlashingWatcher: dedup lookup raised; "
+                        "dispatching anyway"
+                    )
             await self._invoke_cb(callback, event)
+            if (
+                self._dedup_store is not None
+                and tx_hash is not None
+                and log_index is not None
+            ):
+                try:
+                    self._dedup_store.mark_processed_event(
+                        self.WATCHER_KEY, tx_hash, log_index,
+                    )
+                except Exception:
+                    logger.exception(
+                        "StorageSlashingWatcher: dedup mark raised; "
+                        "next tick may re-dispatch"
+                    )
         return True
 
     async def _invoke_cb(self, callback, event) -> None:

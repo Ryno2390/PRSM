@@ -119,11 +119,43 @@ def _validate_bytes32(value: Any, field: str) -> bytes:
     return bytes(value)
 
 
+def _extract_log_identifiers(log) -> Tuple[Optional[str], Optional[int]]:
+    """Sprint 551 helper — extract (tx_hash, log_index) from a raw
+    web3.py log envelope. Mirrors sprint 550's same-named helper
+    in key_distribution.py; both kept local to their modules so
+    test stubs don't need an extra import path.
+    """
+    if isinstance(log, dict):
+        tx_bytes = log.get("transactionHash")
+        log_idx_raw = log.get("logIndex")
+    else:
+        tx_bytes = getattr(log, "transactionHash", None)
+        log_idx_raw = getattr(log, "logIndex", None)
+    if isinstance(tx_bytes, (bytes, bytearray)):
+        tx_hex: Optional[str] = "0x" + tx_bytes.hex()
+    elif isinstance(tx_bytes, str):
+        tx_hex = tx_bytes if tx_bytes.startswith("0x") else (
+            "0x" + tx_bytes
+        )
+    else:
+        tx_hex = None
+    log_idx = (
+        int(log_idx_raw) if isinstance(log_idx_raw, int) else None
+    )
+    return tx_hex, log_idx
+
+
 @dataclass(frozen=True)
 class HeartbeatRecordedEvent:
-    """Decoded ``HeartbeatRecorded(address indexed provider, uint64 timestamp)``."""
+    """Decoded ``HeartbeatRecorded(address indexed provider, uint64 timestamp)``.
+
+    Sprint 551: ``tx_hash`` + ``log_index`` carry on-chain event
+    identity for sprint-549's persistent dedup pattern.
+    """
     provider: str
     timestamp: int
+    tx_hash: Optional[str] = None
+    log_index: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.timestamp, int) or self.timestamp < 0:
@@ -132,10 +164,18 @@ class HeartbeatRecordedEvent:
             )
 
     @classmethod
-    def from_decoded_args(cls, args: Dict[str, Any]) -> "HeartbeatRecordedEvent":
+    def from_decoded_args(
+        cls,
+        args: Dict[str, Any],
+        *,
+        tx_hash: Optional[str] = None,
+        log_index: Optional[int] = None,
+    ) -> "HeartbeatRecordedEvent":
         return cls(
             provider=str(args["provider"]),
             timestamp=int(args["timestamp"]),
+            tx_hash=tx_hash,
+            log_index=log_index,
         )
 
 
@@ -143,12 +183,18 @@ class HeartbeatRecordedEvent:
 class ProofFailureSlashedEvent:
     """Decoded ``ProofFailureSlashed(address indexed provider,
     address indexed challenger, bytes32 indexed shardId,
-    bytes32 evidenceHash, bytes32 slashId)``."""
+    bytes32 evidenceHash, bytes32 slashId)``.
+
+    Sprint 551: ``tx_hash`` + ``log_index`` carry on-chain event
+    identity for sprint-549's persistent dedup pattern.
+    """
     provider: str
     challenger: str
     shard_id: bytes
     evidence_hash: bytes
     slash_id: bytes
+    tx_hash: Optional[str] = None
+    log_index: Optional[int] = None
 
     def __post_init__(self) -> None:
         # Validate via dataclass-friendly object.__setattr__ pattern;
@@ -158,24 +204,38 @@ class ProofFailureSlashedEvent:
         _validate_bytes32(self.slash_id, "slash_id")
 
     @classmethod
-    def from_decoded_args(cls, args: Dict[str, Any]) -> "ProofFailureSlashedEvent":
+    def from_decoded_args(
+        cls,
+        args: Dict[str, Any],
+        *,
+        tx_hash: Optional[str] = None,
+        log_index: Optional[int] = None,
+    ) -> "ProofFailureSlashedEvent":
         return cls(
             provider=str(args["provider"]),
             challenger=str(args["challenger"]),
             shard_id=bytes(args["shardId"]),
             evidence_hash=bytes(args["evidenceHash"]),
             slash_id=bytes(args["slashId"]),
+            tx_hash=tx_hash,
+            log_index=log_index,
         )
 
 
 @dataclass(frozen=True)
 class HeartbeatMissingSlashedEvent:
     """Decoded ``HeartbeatMissingSlashed(address indexed provider,
-    address indexed challenger, uint64 lastHeartbeatAt, bytes32 slashId)``."""
+    address indexed challenger, uint64 lastHeartbeatAt, bytes32 slashId)``.
+
+    Sprint 551: ``tx_hash`` + ``log_index`` carry on-chain event
+    identity for sprint-549's persistent dedup pattern.
+    """
     provider: str
     challenger: str
     last_heartbeat_at: int
     slash_id: bytes
+    tx_hash: Optional[str] = None
+    log_index: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.last_heartbeat_at, int) or self.last_heartbeat_at < 0:
@@ -186,12 +246,20 @@ class HeartbeatMissingSlashedEvent:
         _validate_bytes32(self.slash_id, "slash_id")
 
     @classmethod
-    def from_decoded_args(cls, args: Dict[str, Any]) -> "HeartbeatMissingSlashedEvent":
+    def from_decoded_args(
+        cls,
+        args: Dict[str, Any],
+        *,
+        tx_hash: Optional[str] = None,
+        log_index: Optional[int] = None,
+    ) -> "HeartbeatMissingSlashedEvent":
         return cls(
             provider=str(args["provider"]),
             challenger=str(args["challenger"]),
             last_heartbeat_at=int(args["lastHeartbeatAt"]),
             slash_id=bytes(args["slashId"]),
+            tx_hash=tx_hash,
+            log_index=log_index,
         )
 
 
@@ -461,10 +529,13 @@ class StorageSlashingClient:
         if argument_filters is not None:
             kwargs["argument_filters"] = argument_filters
         logs = self.contract.events.HeartbeatRecorded().get_logs(**kwargs)
-        return [
-            HeartbeatRecordedEvent.from_decoded_args(log["args"])
-            for log in logs
-        ]
+        out = []
+        for log in logs:
+            tx_hex, log_idx = _extract_log_identifiers(log)
+            out.append(HeartbeatRecordedEvent.from_decoded_args(
+                log["args"], tx_hash=tx_hex, log_index=log_idx,
+            ))
+        return out
 
     def get_proof_failure_slashed_events(
         self, from_block: int, to_block: int,
@@ -478,10 +549,13 @@ class StorageSlashingClient:
         if argument_filters is not None:
             kwargs["argument_filters"] = argument_filters
         logs = self.contract.events.ProofFailureSlashed().get_logs(**kwargs)
-        return [
-            ProofFailureSlashedEvent.from_decoded_args(log["args"])
-            for log in logs
-        ]
+        out = []
+        for log in logs:
+            tx_hex, log_idx = _extract_log_identifiers(log)
+            out.append(ProofFailureSlashedEvent.from_decoded_args(
+                log["args"], tx_hash=tx_hex, log_index=log_idx,
+            ))
+        return out
 
     def get_heartbeat_missing_slashed_events(
         self, from_block: int, to_block: int,
@@ -495,10 +569,13 @@ class StorageSlashingClient:
         if argument_filters is not None:
             kwargs["argument_filters"] = argument_filters
         logs = self.contract.events.HeartbeatMissingSlashed().get_logs(**kwargs)
-        return [
-            HeartbeatMissingSlashedEvent.from_decoded_args(log["args"])
-            for log in logs
-        ]
+        out = []
+        for log in logs:
+            tx_hex, log_idx = _extract_log_identifiers(log)
+            out.append(HeartbeatMissingSlashedEvent.from_decoded_args(
+                log["args"], tx_hash=tx_hex, log_index=log_idx,
+            ))
+        return out
 
     # ── Helpers ────────────────────────────────────────────────
 
