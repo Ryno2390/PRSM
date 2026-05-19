@@ -13179,6 +13179,56 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             probe=lambda x: x.count(),
         )
 
+        # Sprint 582 — trust-stack subsystem (read-only).
+        # Surfaces the 4 Phase-1 env-driven kinds (sprints 558-562,
+        # 576/577/578) at the REST layer so monitoring + MCP +
+        # downstream tools see the same view as `prsm node
+        # trust-stack` CLI (sprint 579). NEVER degrades health
+        # status — purely informational.
+        try:
+            _ts_entries: Dict[str, Dict[str, Any]] = {}
+            _ts_env = [
+                ("trust_stack_kind", "PRSM_PARALLAX_TRUST_STACK_KIND",
+                 ("mock", "production"), "mock"),
+                ("profile_source_kind",
+                 "PRSM_PARALLAX_PROFILE_SOURCE_KIND",
+                 ("in_memory", "dht"), "in_memory"),
+                ("consensus_submitter_kind",
+                 "PRSM_PARALLAX_CONSENSUS_SUBMITTER_KIND",
+                 ("logging", "onchain"), "logging"),
+                ("chain_executor_kind",
+                 "PRSM_PARALLAX_CHAIN_EXECUTOR_KIND",
+                 ("stub", "rpc"), "stub"),
+            ]
+            for slug, envname, valid, default in _ts_env:
+                raw = (os.environ.get(envname, "") or "").strip()
+                env_val = raw or None
+                val = (raw or default).lower()
+                if val in valid:
+                    if val == default:
+                        status = "active_default"
+                    else:
+                        status = "phase_2_pending"
+                else:
+                    status = "unknown_fallback"
+                    val = default
+                _ts_entries[slug] = {
+                    "kind": val,
+                    "env_value": env_val,
+                    "status": status,
+                    "default": default,
+                }
+            subsystems["trust_stack"] = {
+                "available": True,
+                "status": "ok",
+                "components": _ts_entries,
+            }
+        except Exception as exc:  # noqa: BLE001
+            subsystems["trust_stack"] = {
+                "available": False, "status": "error",
+                "error": str(exc),
+            }
+
         # Aggregate status.
         # Sprint 147 — `not_wired` / `disabled` is operator opt-out,
         # not a degradation. Only count an optional subsystem as
