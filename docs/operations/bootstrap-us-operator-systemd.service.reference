@@ -1,0 +1,47 @@
+# PRSM Operator Daemon systemd unit — bootstrap-us droplet reference
+#
+# Sprint 565: fleet-coordination fix. Operators co-located with a
+# bootstrap-server (e.g., the bootstrap-us droplet which also runs
+# prsm-bootstrap-v2.service) MUST bootstrap via wss://127.0.0.1:8765
+# rather than the public hostname. Per sprint 460 memory: "operators
+# co-locating with bootstrap-server must use 127.0.0.1 (NAT-hairpin
+# via public hostname fails inside the droplet)".
+#
+# Pre-sprint-565 the unit pointed at wss://bootstrap-eu.prsm-network.com:8765
+# which made the operator daemon register against bootstrap-eu, while
+# all OTHER operators in the fleet default to bootstrap-us. Different
+# bootstrap registries → no cross-discovery.
+#
+# After sprint 565: bootstrap-us /peers reports BOTH the local droplet
+# operator (registered via loopback) and remote operators (Mac, other
+# DO droplets) — first live cross-host peer discovery in PRSM.
+#
+# Deploy path: copy this content to /etc/systemd/system/prsm-operator.service
+# on the bootstrap-us droplet, then:
+#   systemctl daemon-reload
+#   systemctl restart prsm-operator.service
+
+[Unit]
+Description=PRSM Operator Node (sprint 565 fleet-coordination fix)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/prsm-operator
+Environment=HOME=/root
+Environment=PRSM_TRANSPORT_BACKEND=websocket
+ExecStart=/opt/prsm-operator/.venv/bin/python -m prsm.cli node start \
+    --no-dashboard \
+    --api-port 8002 \
+    --p2p-port 9001 \
+    --bootstrap wss://127.0.0.1:8765
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

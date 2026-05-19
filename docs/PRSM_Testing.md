@@ -97,7 +97,7 @@ journey. Each step should be live-verifiable on a single node.
 | Upload encrypted (recipient encryption) | `POST /content/upload` w/ recipients | ✅ | 430 | Live byte-identical roundtrip |
 | Retrieve by CID (Tier A, same node) | `GET /content/retrieve/{cid}` | ✅ | 428 | Local-publish shortcut |
 | Retrieve + decrypt (recipient-encrypted, same node) | `GET /content/retrieve/{cid}` + `decrypt_for_recipient` | ✅ | 430 | E2E live-tested |
-| Bootstrap-mediated peer discovery (multi-node) | bootstrap-server peer-list | ✅ | 456, 468 | Live: 2 daemons on same host (sprint 456); sprint 468 cross-HOST verified — daemon #1 (local home NAT) + daemon #2 (DO droplet) symmetric known[] via EU bootstrap |
+| Bootstrap-mediated peer discovery (multi-node) | bootstrap-server peer-list | ✅ | 456, 468, 565 | Live: 2 daemons on same host (sprint 456); sprint 468 cross-HOST verified via EU bootstrap; **sprint 565 — first live cross-host discovery on the canonical bootstrap-us fleet member**: droplet operator (`484f003c...`) + Mac (`cdefb8e5...`) symmetric `known[]` via bootstrap-us, both registered live in `/peers` with `active_connections: 2`. Closes the fleet-coordination gap (pre-565 the droplet operator was bootstrapped against bootstrap-eu while all others defaulted to bootstrap-us → different registries → no cross-discovery) |
 | Cross-host content retrieve (direct P2P) | BT swarm + gossip | ⏸️ | 468 | F20: DO cloud firewall blocks inbound TCP 9001 on droplet; direct P2P fails. Discovery works; fetch needs operator firewall config |
 | Peer lifecycle: peer_leave propagation | bootstrap-server peer-list | ✅ | 457 | Live: killed daemon #2 → 21s later daemon #1 received peer_leave → `peer_leave_events: 1`, `known_count: 0`, `discovered_peer_count: 0`. Sprint 320-329 hardening operationally verified |
 | Direct P2P connection (single-host) | WebSocket transport | ⏸️ | 456 | F14: NAT-loopback blocks single-host direct connection (announced addrs are external IP); multi-host bench is the right test |
@@ -767,6 +767,39 @@ arc proved we need.
 ---
 
 ## Changelog
+
+- **2026-05-19 sprint 565 — fleet-coordination fix: first live cross-host
+  peer discovery on the canonical bootstrap-us fleet member**. The
+  droplet operator daemon was bootstrapped against bootstrap-eu (while
+  all other operators default to bootstrap-us) → different bootstrap
+  registries → no cross-discovery possible. Fix: edit
+  `/etc/systemd/system/prsm-operator.service` `--bootstrap` arg from
+  `wss://bootstrap-eu.prsm-network.com:8765` to `wss://127.0.0.1:8765`
+  (per sprint-460 invariant: operators co-located with a bootstrap-
+  server use loopback to avoid NAT-hairpin), `systemctl daemon-reload`,
+  `systemctl restart prsm-operator.service`. Bootstrap-server-v2
+  unaffected. Live-verified: bootstrap-us `/peers` now shows BOTH
+  droplet (`484f003c...` registered via 127.0.0.1:9001) AND Mac
+  (`cdefb8e5...` registered via external 146.70.202.116:9001);
+  `active_connections: 2`; symmetric `known[]` on both daemons.
+  Reference systemd unit committed to `docs/operations/bootstrap-us-
+  operator-systemd.service.reference` so future re-deploys land
+  correctly. **First live cross-host peer discovery on the canonical
+  fleet — multi-host bench infrastructure is now operational.**
+  Remaining gaps: direct P2P connection still gated on
+  `PRSM_ADVERTISE_ADDRESS` env var (sprint-456 deferred candidate A —
+  droplet currently advertises `127.0.0.1` to peers, which is
+  unreachable from Mac) and NAT-traversal (Mac side); both deferred.
+
+- **2026-05-19 sprint 564 — multi-host bench investigation + F22 fix**.
+  Diagnostic sprint surfacing F22 (`_DeadBootstrapSentinel.get_peers`
+  AttributeError reconnect loop — fixed with typed `BootstrapDead`
+  exception), F23 (initially "empty peer registry" — reframed during
+  investigation as fleet-coordination, closed in sprint 565), F24
+  (`Reward loop error: type object 'TransactionType' has no attribute
+  'REWARD'` spamming hourly on droplet, deferred), and config drift
+  (legacy `bootstrap1.prsm-network.com` in 8+ files, deferred). 6 pin
+  tests / 107 cross-suite green.
 
 - **2026-05-19 sprint 563 — verification-campaign batch (sprints 542-562)** —
   Single sprint promoting 21 sprints of work to ✅ rows. Six arcs landed
