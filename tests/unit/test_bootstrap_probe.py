@@ -165,8 +165,11 @@ def test_canonical_urls_returns_3_default_hosts():
         import prsm.node.config as cfg
         importlib.reload(cfg)
         urls = canonical_bootstrap_urls()
+    # Sprint 575 F29: bootstrap1 → bootstrap-us DNS rename. Primary
+    # must be bootstrap-us; EU + APAC fallbacks unchanged. The
+    # retired bootstrap1 hostname must NOT appear in defaults.
     assert any(
-        "bootstrap1.prsm-network.com" in u for u in urls
+        "bootstrap-us.prsm-network.com" in u for u in urls
     )
     assert any(
         "bootstrap-eu.prsm-network.com" in u for u in urls
@@ -174,6 +177,8 @@ def test_canonical_urls_returns_3_default_hosts():
     assert any(
         "bootstrap-apac.prsm-network.com" in u for u in urls
     )
+    for u in urls:
+        assert "bootstrap1.prsm-network.com" not in u
 
 
 def test_canonical_urls_honors_env_override():

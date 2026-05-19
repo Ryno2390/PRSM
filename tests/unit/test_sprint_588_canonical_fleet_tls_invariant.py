@@ -24,14 +24,32 @@ the URL list is the surface the test harness probes.
 from __future__ import annotations
 
 
+def _canonical_with_clean_env():
+    """DEFAULT_BOOTSTRAP_NODES is frozen at module-import time;
+    earlier tests in the same process may have set env vars +
+    reloaded config (leaving custom defaults in place). Reload
+    prsm.node.config with env cleared to read the true defaults.
+    """
+    import importlib
+    import os as _os
+    for k in (
+        "BOOTSTRAP_PRIMARY", "BOOTSTRAP_FALLBACK_EU",
+        "BOOTSTRAP_FALLBACK_APAC",
+    ):
+        _os.environ.pop(k, None)
+    import prsm.node.config as cfg
+    importlib.reload(cfg)
+    from prsm.cli_helpers.bootstrap_probe import canonical_bootstrap_urls
+    return canonical_bootstrap_urls()
+
+
 def test_canonical_bootstrap_fleet_includes_three_regions():
     """Three canonical regional bootstraps. The fleet probe relies
     on this list — a sprint that drops one (e.g., the F29 rename
     moving bootstrap1 → bootstrap-us without including bootstrap-us)
     would be caught here.
     """
-    from prsm.cli_helpers.bootstrap_probe import canonical_bootstrap_urls
-    urls = canonical_bootstrap_urls()
+    urls = _canonical_with_clean_env()
     joined = " ".join(urls)
     for region in ("bootstrap-us", "bootstrap-eu", "bootstrap-apac"):
         assert region in joined, (
@@ -45,8 +63,7 @@ def test_canonical_fleet_does_not_reference_dead_bootstrap1():
     fleet defaults; canonical_bootstrap_urls() must not reintroduce
     it (the rename-aware sprint-575 fix would silently revert).
     """
-    from prsm.cli_helpers.bootstrap_probe import canonical_bootstrap_urls
-    urls = canonical_bootstrap_urls()
+    urls = _canonical_with_clean_env()
     for url in urls:
         assert "bootstrap1.prsm-network.com" not in url, (
             f"Sprint 575/588: bootstrap1 is the retired name; "

@@ -45,6 +45,10 @@ class HostProbe:
     latency_ms: Optional[float] = None
     cert_subject: Optional[str] = None
     cert_issuer: Optional[str] = None
+    # Sprint 589 — DNS entries from subjectAltName so operators see
+    # which hostnames the cert actually covers (F30 was a missing-SAN
+    # bug; without SAN visibility future regressions are silent).
+    cert_san_dns: List[str] = field(default_factory=list)
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -59,8 +63,22 @@ class HostProbe:
             "latency_ms": self.latency_ms,
             "cert_subject": self.cert_subject,
             "cert_issuer": self.cert_issuer,
+            "cert_san_dns": list(self.cert_san_dns),
             "error": self.error,
         }
+
+
+def _extract_san_dns(cert) -> List[str]:
+    """Sprint 589 — pull DNS entries from ssl.getpeercert()'s
+    ``subjectAltName`` field. Returns [] when the cert is None,
+    missing the field, or has only non-DNS entries (e.g., IP).
+    """
+    if not cert:
+        return []
+    san = cert.get("subjectAltName") if isinstance(cert, dict) else None
+    if not san:
+        return []
+    return [v for (typ, v) in san if typ == "DNS"]
 
 
 @dataclass
@@ -210,6 +228,8 @@ async def probe_host(
                 result.cert_issuer = issuer.get(
                     "organizationName",
                 ) or issuer.get("commonName")
+                # Sprint 589 — capture SAN DNS list
+                result.cert_san_dns = _extract_san_dns(cert)
         tls_writer.close()
         try:
             await tls_writer.wait_closed()
