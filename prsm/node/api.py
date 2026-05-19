@@ -875,12 +875,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         linked_eth = await local_ledger.eth_address_for_wallet(
             wallet_id,
         )
+        # Sprint 557: surface sprint-554's user-sig fields so CLI
+        # clients can read everything they need to build a signed
+        # withdraw in one HTTP call. Missing/legacy ledgers return
+        # the defaults (flag off, nonce 0) per the schema spec.
+        try:
+            requires_sig = await local_ledger.get_requires_user_signature(
+                wallet_id,
+            )
+        except Exception:  # noqa: BLE001
+            requires_sig = False
+        try:
+            next_nonce = await local_ledger.get_next_withdraw_nonce(
+                wallet_id,
+            )
+        except Exception:  # noqa: BLE001
+            next_nonce = 0
         return {
             "escrow_address": escrow_addr,
             "wallet_id": wallet_id,
             "linked_eth_address": linked_eth,
             "ftns_token_contract": ledger.contract_address,
             "chain_id": ledger.chain_id,
+            "requires_user_signature": bool(requires_sig),
+            "next_withdraw_nonce": int(next_nonce),
             "instructions": (
                 "1. Link your sending ETH address via "
                 "POST /wallet/deposit/link {wallet_id, "

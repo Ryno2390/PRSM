@@ -6945,6 +6945,229 @@ def wallet_withdraw(
     raise SystemExit(1)
 
 
+# ──────────────────────────────────────────────────────────────────
+# Sprint 557 — signed withdraw helper for sprint-556 enforcement.
+# Operators with requires_user_signature=True on their wallet use
+# this command instead of `wallet withdraw` to drive the full
+# signed-flow happy path without writing Python.
+# ──────────────────────────────────────────────────────────────────
+
+
+def _build_signed_withdraw_body(
+    *,
+    amount_ftns: float,
+    wallet_id: str,
+    to_eth_address: str,
+    nonce: int,
+    private_key,
+    expiry_unix=None,
+) -> dict:
+    """Build the JSON body for POST /wallet/withdraw with a signed
+    EIP-712 payload. Extracted from the CLI command body so tests
+    can pin the signing path without Click invocation.
+
+    `expiry_unix` defaults to now + 300 (5-minute window per sprint-
+    554 user input).
+    """
+    import time as _time
+    from prsm.economy.withdraw_signature import (
+        sign_withdraw_payload,
+    )
+    if expiry_unix is None:
+        expiry_unix = int(_time.time()) + 300
+    amount_wei = int(amount_ftns * 1e18)
+    payload = {
+        "wallet_id": wallet_id,
+        "amount_ftns_wei": amount_wei,
+        "to_eth_address": to_eth_address,
+        "nonce": int(nonce),
+        "expiry_unix": int(expiry_unix),
+    }
+    sig = sign_withdraw_payload(payload, private_key)
+    return {
+        "amount_ftns": amount_ftns,
+        "wallet_id": wallet_id,
+        "to_eth_address": to_eth_address,
+        "signature": "0x" + sig.hex(),
+        "nonce": int(nonce),
+        "expiry_unix": int(expiry_unix),
+    }
+
+
+@wallet.command("sign-withdraw")
+@click.option(
+    "--amount", required=True, type=float,
+    help="FTNS to withdraw from off-chain balance to on-chain",
+)
+@click.option(
+    "--to", "to_eth_address", default=None,
+    help="Recipient ETH address (default: this wallet's linked addr)",
+)
+@click.option(
+    "--wallet-id", default=None,
+    help="Wallet to debit (default: this node's identity)",
+)
+@click.option(
+    "--nonce", default=None, type=int,
+    help="Nonce to use (default: fetched from /wallet/deposit/info)",
+)
+@click.option(
+    "--expiry-seconds", default=300, type=int,
+    help="Seconds until signature expires (default: 300)",
+)
+@click.option(
+    "--private-key", default=None,
+    help=(
+        "User's ECDSA private key (default: env PRSM_USER_SIGNING_KEY). "
+        "Must recover to the wallet's linked eth_address."
+    ),
+)
+@click.option(
+    "--yes", "-y", is_flag=True, default=False,
+    help="Skip confirmation prompt",
+)
+@click.option("--api-url", default=None, help="PRSM daemon API URL")
+def wallet_sign_withdraw(
+    amount: float, to_eth_address: str, wallet_id: str,
+    nonce, expiry_seconds: int, private_key, yes: bool,
+    api_url: str,
+) -> None:
+    """Withdraw off-chain FTNS to on-chain WITH a user EIP-712 signature.
+
+    Required when the wallet has requires_user_signature=True (toggle
+    via POST /wallet/require-signature). Sprint-556 enforcement at
+    /wallet/withdraw verifies the signature recovers to the wallet's
+    linked eth_address (sprint 540). Use the same private key you
+    used when linking your eth_address.
+    """
+    import os
+    import time as _time
+    import httpx
+
+    pk = private_key or os.environ.get("PRSM_USER_SIGNING_KEY", "")
+    pk = pk.strip()
+    if not pk:
+        console.print(
+            "❌ No signing key. Pass --private-key or set "
+            "PRSM_USER_SIGNING_KEY in env.",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    # Fetch wallet_id / linked / nonce from /wallet/deposit/info.
+    try:
+        r = httpx.get(f"{url}/wallet/deposit/info", timeout=15.0)
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+    if r.status_code != 200:
+        console.print(
+            f"❌ /wallet/deposit/info returned HTTP {r.status_code}: "
+            f"{r.text[:200]}",
+            style="red",
+        )
+        raise SystemExit(1)
+    info = r.json()
+    resolved_wallet = wallet_id or info.get("wallet_id")
+    resolved_to = to_eth_address or info.get("linked_eth_address")
+    resolved_nonce = (
+        nonce if nonce is not None else info.get("next_withdraw_nonce", 0)
+    )
+    if not resolved_to:
+        console.print(
+            "❌ No recipient: pass --to or link an eth_address via "
+            "`prsm wallet link-address` first.",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    expiry = int(_time.time()) + int(expiry_seconds)
+    body = _build_signed_withdraw_body(
+        amount_ftns=amount,
+        wallet_id=resolved_wallet,
+        to_eth_address=resolved_to,
+        nonce=int(resolved_nonce),
+        private_key=pk,
+        expiry_unix=expiry,
+    )
+
+    if not yes:
+        console.print(
+            f"\n[bold]About to sign + withdraw {amount:.6f} FTNS[/bold]"
+        )
+        console.print(f"  → to        : {resolved_to}")
+        console.print(f"  → wallet_id : {resolved_wallet}")
+        console.print(f"  → nonce     : {body['nonce']}")
+        console.print(
+            f"  → expires   : {expiry} ({expiry_seconds}s window)"
+        )
+        console.print(
+            "[yellow]This will broadcast a real on-chain TX. "
+            "Continue?[/yellow] (y/N): ",
+            end="",
+        )
+        ans = input().strip().lower()
+        if ans not in ("y", "yes"):
+            console.print("Cancelled.", style="dim")
+            raise SystemExit(0)
+
+    try:
+        r = httpx.post(
+            f"{url}/wallet/withdraw", json=body, timeout=90.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+
+    if r.status_code == 200:
+        d = r.json()
+        console.print(
+            "✅ Signed withdraw confirmed on-chain!",
+            style="bold green",
+        )
+        console.print(f"   tx_hash        : {d.get('tx_hash')}")
+        console.print(f"   block          : {d.get('block_number')}")
+        console.print(f"   amount         : {d.get('amount_ftns')} FTNS")
+        console.print(f"   to             : {d.get('to_eth_address')}")
+        console.print(f"   wallet_id      : {d.get('wallet_id')}")
+        console.print(f"   nonce_consumed : {d.get('nonce_consumed')}")
+        console.print(f"   debit_tx_id    : {d.get('debit_tx_id')}")
+        return
+
+    detail = ""
+    try:
+        detail = r.json().get("detail", "")
+    except Exception:
+        detail = r.text[:300]
+    if r.status_code == 401:
+        console.print(
+            "❌ Signature rejected (401):", style="red",
+        )
+        console.print(f"   {detail}")
+        console.print(
+            "[dim]Hint: re-run `prsm wallet deposit-info` to read the "
+            "current nonce + check that your linked eth_address "
+            "matches the key you're signing with.[/dim]"
+        )
+    elif r.status_code == 402:
+        console.print(f"❌ Insufficient off-chain balance: {detail}",
+                      style="red")
+    elif r.status_code == 502:
+        console.print(
+            "⚠️  Broadcast failed; off-chain refund issued; "
+            "nonce stays consumed (replay safety):",
+            style="yellow",
+        )
+        console.print(f"   {detail}")
+    else:
+        console.print(
+            f"❌ HTTP {r.status_code}: {detail}", style="red",
+        )
+    raise SystemExit(1)
+
+
 @wallet.command("claim")
 @click.option(
     "--network", "network_name",
