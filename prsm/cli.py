@@ -2287,7 +2287,7 @@ def node_uninstall(yes: bool):
 
 @node.command()
 def peers():
-    """List connected peers"""
+    """List connected + known peers (sprint 574 enhanced)."""
     from prsm.node.config import NodeConfig
     from prsm.node.identity import load_node_identity
 
@@ -2309,6 +2309,10 @@ def peers():
         if resp.status_code == 200:
             data = resp.json()
             connected = data.get("connected", [])
+            known = data.get("known", [])
+
+            connected_ids = {p["peer_id"] for p in connected}
+
             if connected:
                 table = Table(title="Connected Peers")
                 table.add_column("Peer ID", style="cyan")
@@ -2326,12 +2330,208 @@ def peers():
             else:
                 console.print("No peers connected.", style="dim")
 
-            console.print(f"\nKnown peers: {data.get('known_count', 0)}")
+            # Sprint 574 — also show known-but-unconnected so operators
+            # see the gap between bootstrap-discovered and actually-dialed
+            known_only = [
+                k for k in known if k.get("node_id") not in connected_ids
+            ]
+            if known_only:
+                console.print()
+                tbl2 = Table(title="Known (not connected)")
+                tbl2.add_column("Peer ID", style="cyan")
+                tbl2.add_column("Address", style="green")
+                tbl2.add_column("Name", style="magenta")
+                tbl2.add_column("Capabilities", style="dim")
+                for k in known_only:
+                    tbl2.add_row(
+                        (k.get("node_id", "") or "")[:16] + "...",
+                        k.get("address", ""),
+                        k.get("display_name", "") or "",
+                        ", ".join(k.get("capabilities", []) or []),
+                    )
+                console.print(tbl2)
+
+            console.print(f"\nConnected: {data.get('connected_count', 0)}  "
+                          f"Known: {data.get('known_count', 0)}")
             return
     except Exception:
         pass
 
     console.print("Node is not running. Start it with 'prsm node start'.", style="yellow")
+
+
+# ── Sprint 574 — fleet-ops CLI quartet ───────────────────────────
+
+
+def _api_base() -> str:
+    """Read NodeConfig + return http://127.0.0.1:api_port."""
+    from prsm.node.config import NodeConfig
+    cfg = NodeConfig.load()
+    return f"http://127.0.0.1:{cfg.api_port}"
+
+
+def _daemon_down_message():
+    console.print(
+        "Could not reach the daemon. Is it running? "
+        "Start it with [cyan]prsm node start[/cyan].",
+        style="yellow",
+    )
+
+
+@node.command()
+@click.argument("address")
+def dial(address: str):
+    """Dial a peer by address (host:port or ws://host:port).
+
+    Sprint 574 — wraps POST /peers/connect. Useful when auto-dial
+    sweep (sprint 573) failed or when joining a peer not in the
+    bootstrap registry.
+    """
+    import httpx
+    try:
+        resp = httpx.post(
+            f"{_api_base()}/peers/connect",
+            json={"address": address},
+            timeout=30.0,
+        )
+    except httpx.HTTPError:
+        _daemon_down_message()
+        raise SystemExit(1)
+
+    if resp.status_code == 200:
+        data = resp.json()
+        console.print(
+            f"[green]✓ Connected[/green] to "
+            f"[cyan]{data.get('peer_id', '?')[:16]}...[/cyan] "
+            f"at [magenta]{data.get('address', address)}[/magenta]"
+        )
+        return
+
+    if resp.status_code == 502:
+        console.print(
+            f"[yellow]Could not connect to {address}[/yellow] "
+            f"(502: transport returned None — peer unreachable, "
+            f"firewall, or handshake failure).",
+        )
+    elif resp.status_code == 503:
+        console.print(
+            "[yellow]Daemon transport not initialized yet "
+            "(503).[/yellow] Try again in a moment."
+        )
+    else:
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except Exception:
+            detail = resp.text
+        console.print(
+            f"[red]dial failed[/red] (HTTP {resp.status_code}): {detail}"
+        )
+    raise SystemExit(1)
+
+
+@node.command()
+@click.argument("cid")
+@click.option(
+    "--output", "-o", "output_path", default=None,
+    help="Write decoded content to this file instead of stdout.",
+)
+def fetch(cid: str, output_path):
+    """Fetch content by CID from the network.
+
+    Sprint 574 — wraps GET /content/retrieve. Base64-decodes the
+    response and writes to stdout (default) or --output file.
+    """
+    import base64
+    import httpx
+    try:
+        resp = httpx.get(
+            f"{_api_base()}/content/retrieve/{cid}",
+            timeout=60.0,
+        )
+    except httpx.HTTPError:
+        _daemon_down_message()
+        raise SystemExit(1)
+
+    if resp.status_code != 200:
+        console.print(
+            f"[red]fetch failed[/red] (HTTP {resp.status_code})"
+        )
+        raise SystemExit(1)
+
+    data = resp.json()
+    status = data.get("status")
+    if status != "success":
+        err = data.get("error") or status or "unknown"
+        console.print(f"[yellow]{status or 'not_found'}:[/yellow] {err}")
+        raise SystemExit(1)
+
+    try:
+        payload = base64.b64decode(data.get("data", ""))
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]base64 decode failed[/red]: {exc}")
+        raise SystemExit(1)
+
+    if output_path:
+        with open(output_path, "wb") as fh:
+            fh.write(payload)
+        console.print(
+            f"[green]✓ Wrote {len(payload)} bytes[/green] to "
+            f"[cyan]{output_path}[/cyan] "
+            f"(filename={data.get('filename', '?')})"
+        )
+    else:
+        # Render as text if it decodes cleanly; raw bytes otherwise
+        try:
+            console.print(payload.decode("utf-8"))
+        except UnicodeDecodeError:
+            console.print(f"[dim]{len(payload)} bytes (binary)[/dim]")
+            click.echo(payload, nl=False)
+
+
+@node.command()
+@click.argument("file_path")
+def share(file_path: str):
+    """Upload a file's text contents to the network + print the CID.
+
+    Sprint 574 — wraps POST /content/upload. Output is the CID so
+    operators can pipe to ``prsm node dial`` / share workflows.
+    """
+    import httpx
+    try:
+        if file_path == "-":
+            import sys
+            text = sys.stdin.read()
+        else:
+            with open(file_path, "r", encoding="utf-8") as fh:
+                text = fh.read()
+    except OSError as exc:
+        console.print(f"[red]cannot read[/red] {file_path}: {exc}")
+        raise SystemExit(1)
+
+    try:
+        resp = httpx.post(
+            f"{_api_base()}/content/upload",
+            json={"text": text},
+            timeout=60.0,
+        )
+    except httpx.HTTPError:
+        _daemon_down_message()
+        raise SystemExit(1)
+
+    if resp.status_code != 200:
+        console.print(
+            f"[red]share failed[/red] (HTTP {resp.status_code}): "
+            f"{resp.text}"
+        )
+        raise SystemExit(1)
+
+    data = resp.json()
+    cid = data.get("cid", "")
+    console.print(
+        f"[green]✓ Shared[/green] [cyan]{cid}[/cyan] "
+        f"({data.get('size_bytes', 0)} bytes, "
+        f"filename={data.get('filename', '?')})"
+    )
 
 
 @node.command()
