@@ -249,3 +249,43 @@ class EventDedupStore:
             (watcher_key, tx_hash, int(log_index)),
         )
         self._conn.commit()
+
+    def summary(self) -> dict:
+        """Sprint 552: per-watcher rollup for the
+        ``/admin/watcher-event-dedup`` operator visibility endpoint.
+
+        Returns a dict keyed by ``watcher_key`` with three fields:
+          - ``rows_processed`` — total dedup rows for this watcher
+          - ``latest_tx_hash`` — most-recently-marked tx_hash
+            (rowid ordering — INSERT OR IGNORE on existing tuples
+            does NOT bump rowid, so "most recent" means the last
+            distinct event marked)
+          - ``latest_log_index`` — log_index from that same row
+
+        Empty dict if no events processed yet.
+        """
+        # Aggregate count per watcher_key. Latest row per watcher_key
+        # is the max(rowid) — SQLite assigns rowids monotonically on
+        # INSERT, and INSERT OR IGNORE doesn't bump on duplicate, so
+        # this is "the last distinct event added".
+        rows = self._conn.execute(
+            "SELECT watcher_key, COUNT(*) AS n, "
+            "       MAX(rowid) AS max_rid "
+            "FROM processed_events GROUP BY watcher_key"
+        ).fetchall()
+        out: dict = {}
+        for watcher_key, count, max_rid in rows:
+            latest = self._conn.execute(
+                "SELECT tx_hash, log_index FROM processed_events "
+                "WHERE rowid = ?",
+                (max_rid,),
+            ).fetchone()
+            tx_hash, log_idx = (latest or (None, None))
+            out[watcher_key] = {
+                "rows_processed": int(count),
+                "latest_tx_hash": tx_hash,
+                "latest_log_index": (
+                    int(log_idx) if log_idx is not None else None
+                ),
+            }
+        return out

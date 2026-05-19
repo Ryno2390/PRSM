@@ -8046,6 +8046,55 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "limit": limit,
         }
 
+    @app.get("/admin/watcher-event-dedup", tags=["admin"])
+    async def get_watcher_event_dedup() -> Dict[str, Any]:
+        """Sprint 552 — operator visibility for the watcher
+        event-dedup state shipped in sprints 549/550/551.
+
+        Per-watcher summary of how many on-chain events have been
+        marked processed by the InboundMonitor + the 3 event
+        watchers, and the most recently marked
+        ``(tx_hash, log_index)`` tuple for each. Operators use this
+        to verify the dedup is actually firing on their node post-
+        restart (sprint 543's checkpoint persistence + sprint 549
+        per-event dedup together close the restart-catch-up double-
+        process gap).
+
+        Status:
+          503 — event dedup store not wired (operator hasn't set
+                PRSM_WATCHER_STATE_PERSISTENCE_ENABLED=1; without
+                it the watchers fall back to in-memory dedup and
+                this surface has nothing to report).
+          200 — {watchers: {<watcher_key>: {rows_processed,
+                latest_tx_hash, latest_log_index}}}
+        """
+        store = getattr(node, "_watcher_event_dedup_store", None)
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Watcher event-dedup store not wired. Set "
+                    "PRSM_WATCHER_STATE_PERSISTENCE_ENABLED=1 (and "
+                    "optionally PRSM_WATCHER_EVENT_DEDUP_DB=<path> "
+                    "to override the default "
+                    "~/.prsm/watcher_event_dedup.db) and restart "
+                    "the daemon. Without persistence, watchers fall "
+                    "back to in-memory dedup and this surface has "
+                    "nothing to report."
+                ),
+            )
+        try:
+            summary = store.summary()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"event-dedup summary failed: "
+                    f"{type(exc).__name__}: {exc!s}"[:300]
+                ),
+            )
+        return {"watchers": summary}
+
     @app.get("/admin/heartbeat-history")
     async def get_heartbeat_history(
         limit: int = 50,
