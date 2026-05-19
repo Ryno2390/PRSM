@@ -92,18 +92,15 @@ def _build_mock_trust_stack():
         def lookup(self, node_id: str):
             return f"{node_id}.local"
 
-    class _RecordingSubmitter:
-        """Mismatch-hook submitter that no-ops in dev."""
-        def __init__(self):
-            self.submissions = []
-
-        async def submit(self, *args, **kwargs):
-            self.submissions.append((args, kwargs))
-
     class _ZeroStakeLookup:
         def get_stake(self, node_id: str) -> int:
             return 0
 
+    # Sprint 562: mock kind uses the same _LoggingChallengeSubmitter
+    # as production — fixes the structurally-broken _RecordingSubmitter
+    # (had async def submit() but the hook invokes the submitter as
+    # a sync Callable). Sample-rate=0.0 in both kinds today so the
+    # hook never actually fires; the fix is defensive.
     return TrustStack(
         anchor_verify=AnchorVerifyAdapter(anchor=_AcceptAllAnchor()),
         tier_gate=TierGateAdapter(),
@@ -112,9 +109,69 @@ def _build_mock_trust_stack():
             stake_lookup=_ZeroStakeLookup(),
         ),
         consensus_hook=ConsensusMismatchHook(
-            submitter=_RecordingSubmitter(), sample_rate=0.0,
+            submitter=_LoggingChallengeSubmitter(),
+            sample_rate=0.0,
         ),
     )
+
+
+class _LoggingChallengeSubmitter:
+    """Sprint 562 — interim consensus_hook submitter.
+
+    The trust-stack's ``ConsensusMismatchHook`` calls this when a
+    sampled redundant execution produces a different output than the
+    primary chain. The legacy ``_NoOpSubmitter`` silently dropped
+    these — operators had zero visibility into compute-side fraud
+    attempts. This submitter emits a structured WARNING log naming
+    the request_id, both chain stage lists, and both output hashes
+    so the audit trail is complete even before the real
+    ``ConsensusChallengeSubmitter`` (Phase 7.1x on-chain dispatch)
+    is wired.
+
+    The full on-chain submitter requires a translation layer from
+    ``ChallengeRecord`` to the ``challengeReceipt(batchId, leaf,
+    merkleProof, reason, auxData)`` ABI shape — its own multi-piece
+    concern. Logging closes the silent-drop bug TODAY without
+    blocking on that translation layer.
+
+    Honors the ``ChallengeSubmitter`` Callable contract: synchronous,
+    returns None, must not raise. Malformed records (defensive
+    against future schema changes) still log + return None instead
+    of raising.
+    """
+
+    def __call__(self, record) -> None:
+        try:
+            request_id = getattr(record, "request_id", "<missing>")
+            primary = getattr(
+                record, "primary_chain_stages", "<missing>",
+            )
+            secondary = getattr(
+                record, "secondary_chain_stages", "<missing>",
+            )
+            primary_hash = getattr(
+                record, "primary_output_hash", "<missing>",
+            )
+            secondary_hash = getattr(
+                record, "secondary_output_hash", "<missing>",
+            )
+            logger.warning(
+                "Consensus mismatch detected (sprint 562 logging "
+                "submitter): request_id=%s primary_chain=%s "
+                "secondary_chain=%s primary_output_hash=%s "
+                "secondary_output_hash=%s. On-chain challenge "
+                "dispatch deferred — Phase 7.1x translation layer "
+                "not yet wired.",
+                request_id, primary, secondary,
+                primary_hash, secondary_hash,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Defensive — submitter must not raise per the
+            # ChallengeSubmitter contract. Log + swallow.
+            logger.warning(
+                "Consensus mismatch submitter raised on log "
+                "formatting (non-fatal): %s", exc,
+            )
 
 
 class AnchorMediatedStakeLookup:
@@ -290,18 +347,25 @@ def _build_production_trust_stack_or_none():
         stake_lookup = _ZeroStakeLookup()
         stake_lookup_status = "PLACEHOLDER (zero stake)"
 
-    class _NoOpSubmitter:
-        async def submit(self, *args, **kwargs):
-            return None
-
+    # Sprint 562 — consensus_hook submitter upgraded from
+    # structurally-broken _NoOpSubmitter (had .submit() method but
+    # hook invokes the submitter as a Callable) to a
+    # _LoggingChallengeSubmitter that emits WARNING per mismatch.
+    # On-chain Phase 7.1x ConsensusChallengeSubmitter wiring needs
+    # a translation layer (ChallengeRecord → on-chain ABI shape) —
+    # deferred until that translation lands.
     logger.info(
-        "Sprint 560+561 ParallaxScheduledExecutor wiring: "
+        "Sprint 560+561+562 ParallaxScheduledExecutor wiring: "
         "trust_stack=production. anchor=REAL "
         "(PublisherKeyAnchorClient @ %s); stake_lookup=%s; "
-        "profile_source=PLACEHOLDER (empty — sprint 562); "
-        "consensus_hook=PLACEHOLDER (no-op submitter — sprint 562). "
-        "Operators must not treat partial-production as fully "
-        "production-verified until all 4 components are real.",
+        "profile_source=PLACEHOLDER (empty InMemoryProfileSource "
+        "— ProfileDHT requires multi-host send_message + peers, "
+        "out of scope for single-node); consensus_hook=LOGGING "
+        "(WARNING per ChallengeRecord — on-chain dispatch via "
+        "Phase 7.1x ConsensusChallengeSubmitter deferred pending "
+        "translation layer). Operators must not treat partial-"
+        "production as fully production-verified until all 4 "
+        "components are REAL.",
         anchor_addr, stake_lookup_status,
     )
     return TrustStack(
@@ -312,7 +376,8 @@ def _build_production_trust_stack_or_none():
             stake_lookup=stake_lookup,
         ),
         consensus_hook=ConsensusMismatchHook(
-            submitter=_NoOpSubmitter(), sample_rate=0.0,
+            submitter=_LoggingChallengeSubmitter(),
+            sample_rate=0.0,
         ),
     )
 
