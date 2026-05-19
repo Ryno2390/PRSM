@@ -653,15 +653,20 @@ class InboundMonitor:
                 to_block=scan_to,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "inbound-monitor scan failed "
-                "(non-fatal): %s", exc,
+            # Sprint 545: do NOT advance the checkpoint on scan
+            # failure. The pre-sprint behavior (set _last_scanned_block
+            # = current_block then return) silently skipped the
+            # failed window forever, dropping any Transfer events in
+            # blocks 101..current that the scan was trying to cover.
+            # By leaving the checkpoint at its pre-tick value, the
+            # next tick retries the same window — idempotent under
+            # sprint 544's persistent dedup. Sustained RPC outage
+            # keeps retrying; transient outage recovers on next tick.
+            logger.warning(
+                "inbound-monitor scan failed for blocks %d-%d "
+                "(checkpoint preserved at %d, next tick retries): %s",
+                scan_from, scan_to, self._last_scanned_block, exc,
             )
-            self._last_scanned_block = current_block
-            if self._checkpoint_store is not None:
-                self._checkpoint_store.set_last_scanned_block(
-                    addr, current_block,
-                )
             return
         for t in transfers:
             logger.info(
