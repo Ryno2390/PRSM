@@ -2367,6 +2367,88 @@ def peers():
     console.print("Node is not running. Start it with 'prsm node start'.", style="yellow")
 
 
+# ── Sprint 581 — anchor probe ────────────────────────────────────
+
+
+@node.command("anchor-probe")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def anchor_probe_cli(output_format: str):
+    """Probe whether PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS wires a
+    working PublisherKeyAnchorClient.
+
+    Operator preflight before flipping PRSM_PARALLAX_TRUST_STACK_KIND
+    =production. Surfaces:
+      - The env value (or <unset>)
+      - Configured RPC URL
+      - Construction outcome: ok / unset / construction_failed
+      - Error detail when construction fails
+
+    Sprint 581 — closes the slow "set env, restart daemon, grep
+    logs" feedback loop with a one-shot operator-side check.
+    """
+    import json
+    import os as _os
+    anchor_addr = (
+        _os.environ.get("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "") or ""
+    ).strip()
+    rpc_url = _os.environ.get(
+        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+    )
+    outcome = "ok"
+    error = None
+    if not anchor_addr:
+        outcome = "unset"
+    else:
+        try:
+            from prsm.security.publisher_key_anchor.client import (
+                PublisherKeyAnchorClient,
+            )
+            PublisherKeyAnchorClient(
+                contract_address=anchor_addr,
+                rpc_url=rpc_url,
+            )
+        except Exception as exc:  # noqa: BLE001
+            outcome = "construction_failed"
+            error = f"{type(exc).__name__}: {exc}"
+
+    payload = {
+        "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS": anchor_addr or None,
+        "PRSM_BASE_RPC_URL": rpc_url,
+        "outcome": outcome,
+        "error": error,
+    }
+    if output_format == "json":
+        click.echo(json.dumps(payload, indent=2))
+        raise SystemExit(0 if outcome == "ok" else 1)
+
+    if outcome == "ok":
+        console.print(
+            f"[green]✓ ok[/green] — PublisherKeyAnchorClient constructed "
+            f"against [cyan]{anchor_addr}[/cyan] on "
+            f"[magenta]{rpc_url}[/magenta]"
+        )
+        return
+    if outcome == "unset":
+        console.print(
+            "[yellow]PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS is unset[/yellow] "
+            "— required to flip PRSM_PARALLAX_TRUST_STACK_KIND=production. "
+            "Set it to the deployed Phase-3.x.3 anchor contract address."
+        )
+        raise SystemExit(1)
+    # construction_failed
+    console.print(
+        f"[red]✗ construction_failed[/red]: {error}\n"
+        f"[dim]anchor_addr={anchor_addr!r}, rpc_url={rpc_url!r}[/dim]\n"
+        f"[dim]Check the address resolves to a deployed contract on "
+        f"the RPC chain, and that the RPC endpoint is reachable.[/dim]"
+    )
+    raise SystemExit(1)
+
+
 # ── Sprint 579 — trust-stack observability ──────────────────────
 
 
