@@ -424,16 +424,35 @@ class BootstrapServer:
         version = data.get("version")
         region = data.get("region")
         public_key = data.get("public_key")
-        
+
+        # Sprint 566: honor a client-supplied `address` field when
+        # present + non-empty string. Operators co-located with a
+        # bootstrap-server bootstrap via loopback (sprint-460
+        # invariant) but need to advertise their EXTERNAL IP to
+        # remote peers. Without this, the server records `127.0.0.1`
+        # as the address, which is loopback to every other peer.
+        # Falls back to client_ip for legacy clients that don't
+        # send the field. Non-string / empty values rejected
+        # defensively to avoid storing garbage on a misbehaving
+        # client.
+        supplied_address = data.get("address")
+        if (
+            isinstance(supplied_address, str)
+            and supplied_address.strip()
+        ):
+            effective_address = supplied_address.strip()
+        else:
+            effective_address = client_ip
+
         # Check if peer is banned
         if peer_id in self.config.banned_peers:
             await websocket.close(code=1008, reason="Peer banned")
             return ""
-        
+
         # Create peer info
         peer = PeerInfo(
             peer_id=peer_id,
-            address=client_ip,
+            address=effective_address,
             port=port,
             public_key=public_key,
             status=PeerStatus.ACTIVE,

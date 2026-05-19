@@ -41,6 +41,26 @@ def _resolve_stale_threshold() -> float:
         return 600.0
 
 
+def _resolve_advertise_address() -> Optional[str]:
+    """Sprint 566 — read PRSM_ADVERTISE_ADDRESS env var, with
+    whitespace stripping + empty-string-as-unset semantics.
+
+    Operators co-located with a bootstrap-server bootstrap via
+    loopback (sprint-460 invariant) but need to tell the server
+    what address remote peers should use. Without this env var,
+    the bootstrap-server records the WS client_ip (= 127.0.0.1
+    when bootstrapping via loopback), which is unreachable to
+    remote peers.
+
+    Returns None when unset or empty; the BootstrapClient then
+    omits `address` from the register message and the server
+    falls back to client_ip (pre-566 behavior).
+    """
+    raw = os.environ.get("PRSM_ADVERTISE_ADDRESS", "")
+    stripped = raw.strip()
+    return stripped or None
+
+
 class BootstrapDead(Exception):
     """Sprint 564 — typed exception raised by ``_DeadBootstrapSentinel``
     when the poll loop calls ``get_peers`` on it.
@@ -355,6 +375,7 @@ class Libp2pDiscovery:
                     port=getattr(self.transport, "port", 9001),
                     capabilities=self._local_capabilities,
                     version=_ver,
+                    advertise_address=_resolve_advertise_address(),
                 )
                 peers = await client.connect()
                 await client.start_heartbeat()

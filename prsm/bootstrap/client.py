@@ -74,6 +74,7 @@ class BootstrapClient:
         connect_timeout: float = 10.0,
         heartbeat_interval: int = 30,
         on_peers_discovered: Optional[Callable[[List[BootstrapPeer]], Any]] = None,
+        advertise_address: Optional[str] = None,
     ):
         self.bootstrap_url = bootstrap_url
         self.node_id = node_id
@@ -84,6 +85,14 @@ class BootstrapClient:
         self.connect_timeout = connect_timeout
         self.heartbeat_interval = heartbeat_interval
         self.on_peers_discovered = on_peers_discovered
+        # Sprint 566: operator-supplied address the bootstrap-server
+        # should record + advertise to other peers. When None, the
+        # server falls back to the WS client_ip (pre-566 behavior).
+        # Needed when the operator co-locates with a bootstrap-server
+        # and bootstraps via loopback (sprint-460 invariant) — the
+        # server would otherwise record `127.0.0.1` as the operator's
+        # address, which is unreachable to remote peers.
+        self.advertise_address = advertise_address
 
         self._ws: Optional[Any] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
@@ -165,6 +174,10 @@ class BootstrapClient:
                 "version": self.version,
                 "region": self.region,
             }
+            # Sprint 566: only include `address` when explicitly set
+            # so legacy servers still see byte-identical messages.
+            if self.advertise_address:
+                register_msg["address"] = self.advertise_address
             await self._ws.send(json.dumps(register_msg))
             logger.debug("Sent register message for node %s", self.node_id)
 

@@ -224,6 +224,12 @@ class PeerDiscovery:
                 # version, not a stale literal. Pre-fix this was
                 # hardcoded "0.24.0" even after shipping v1.x.
                 import prsm as _prsm_pkg
+                # Sprint 566: PRSM_ADVERTISE_ADDRESS lets co-located
+                # operators bootstrap via loopback but still advertise
+                # their external IP to remote peers.
+                from prsm.node.libp2p_discovery import (
+                    _resolve_advertise_address,
+                )
                 client = BootstrapClient(
                     bootstrap_url=address,
                     node_id=self.transport.identity.node_id,
@@ -231,6 +237,7 @@ class PeerDiscovery:
                     capabilities=self._local_capabilities,
                     version=_prsm_pkg.__version__,
                     connect_timeout=self.bootstrap_connect_timeout,
+                    advertise_address=_resolve_advertise_address(),
                 )
 
                 peers = await client.connect()
