@@ -205,6 +205,22 @@ TOOLS = [
         },
     ),
     Tool(
+        name="prsm_section7_readiness",
+        description=(
+            "Sprint 587 — check §7 production-readiness of the local node by "
+            "probing PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS (PublisherKeyAnchorClient "
+            "construction), PRSM_STAKE_BOND_ADDRESS (StakeManagerClient "
+            "construction), and PRSM_BASE_RPC_URL (eth_chainId reachability). "
+            "Returns per-component outcomes + overall ready/not_ready. AI "
+            "triage equivalent of the sprint-585 `prsm node section7-readiness` "
+            "CLI."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
         name="prsm_hardware_benchmark",
         description=(
             "Run a hardware benchmark on the local node. Returns compute tier (T1-T4), "
@@ -4143,6 +4159,106 @@ async def handle_prsm_node_status(arguments: Dict[str, Any]) -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"Cannot reach PRSM node: {str(e)}\nStart with: prsm node start"
+
+
+async def handle_prsm_section7_readiness(arguments: Dict[str, Any]) -> str:
+    """Sprint 587 — MCP wrapper around sprint-585 §7-readiness check.
+
+    Runs the same three probes (anchor / stake-bond / rpc) in-process
+    + returns a multiline summary suitable for AI-triage agents.
+    Tolerates env-unset (most common dev state).
+    """
+    import os as _os
+    lines = ["§7 production-readiness:"]
+
+    # Anchor
+    anchor_addr = (
+        _os.environ.get("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "") or ""
+    ).strip()
+    rpc_url = _os.environ.get(
+        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+    )
+    if not anchor_addr:
+        anchor_outcome, anchor_err = "unset", None
+    else:
+        try:
+            from prsm.security.publisher_key_anchor.client import (
+                PublisherKeyAnchorClient,
+            )
+            PublisherKeyAnchorClient(
+                contract_address=anchor_addr, rpc_url=rpc_url,
+            )
+            anchor_outcome, anchor_err = "ok", None
+        except Exception as exc:  # noqa: BLE001
+            anchor_outcome = "construction_failed"
+            anchor_err = f"{type(exc).__name__}: {exc}"
+    lines.append(
+        f"  anchor:     {anchor_outcome}"
+        + (f" ({anchor_err})" if anchor_err else "")
+    )
+
+    # Stake-bond
+    stake_addr = (
+        _os.environ.get("PRSM_STAKE_BOND_ADDRESS", "") or ""
+    ).strip()
+    if not stake_addr:
+        stake_outcome, stake_err = "unset", None
+    else:
+        try:
+            from prsm.economy.web3.stake_manager import StakeManagerClient
+            StakeManagerClient(
+                contract_address=stake_addr, rpc_url=rpc_url,
+            )
+            stake_outcome, stake_err = "ok", None
+        except Exception as exc:  # noqa: BLE001
+            stake_outcome = "construction_failed"
+            stake_err = f"{type(exc).__name__}: {exc}"
+    lines.append(
+        f"  stake_bond: {stake_outcome}"
+        + (f" ({stake_err})" if stake_err else "")
+    )
+
+    # RPC
+    import httpx as _httpx
+    try:
+        resp = _httpx.post(
+            rpc_url,
+            json={
+                "jsonrpc": "2.0", "method": "eth_chainId",
+                "params": [], "id": 1,
+            },
+            timeout=10.0,
+        )
+        if resp.status_code != 200:
+            rpc_outcome = "error"
+            rpc_err = f"HTTP {resp.status_code}"
+        else:
+            body = resp.json()
+            chain_id = body.get("result")
+            if chain_id is None:
+                rpc_outcome, rpc_err = "error", f"no result: {body!r}"[:100]
+            else:
+                rpc_outcome, rpc_err = "ok", None
+    except _httpx.HTTPError as exc:
+        rpc_outcome = "unreachable"
+        rpc_err = f"{type(exc).__name__}: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        rpc_outcome, rpc_err = "error", f"{type(exc).__name__}: {exc}"
+    lines.append(
+        f"  rpc:        {rpc_outcome}"
+        + (f" ({rpc_err})" if rpc_err else "")
+    )
+
+    overall = "ready" if all(
+        o == "ok" for o in (anchor_outcome, stake_outcome, rpc_outcome)
+    ) else "not_ready"
+    lines.append(f"\noverall: {overall}")
+    if overall == "not_ready":
+        lines.append(
+            "Fix failing component(s) before flipping "
+            "PRSM_PARALLAX_TRUST_STACK_KIND=production."
+        )
+    return "\n".join(lines)
 
 
 async def handle_prsm_hardware_benchmark(arguments: Dict[str, Any]) -> str:
@@ -13597,6 +13713,7 @@ TOOL_HANDLERS = {
     "prsm_quote": handle_prsm_quote,
     "prsm_list_datasets": handle_prsm_list_datasets,
     "prsm_node_status": handle_prsm_node_status,
+    "prsm_section7_readiness": handle_prsm_section7_readiness,
     "prsm_hardware_benchmark": handle_prsm_hardware_benchmark,
     "prsm_create_agent": handle_prsm_create_agent,
     "prsm_dispatch_agent": handle_prsm_dispatch_agent,
