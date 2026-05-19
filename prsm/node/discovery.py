@@ -494,19 +494,31 @@ class PeerDiscovery:
 
     async def announce_self(self) -> int:
         """Broadcast our presence to the network."""
+        # Sprint 570 F28: only include `address` when we have a real
+        # externally-reachable value. transport.host is typically
+        # "0.0.0.0" (bind-to-all) which is unreachable when gossiped;
+        # recipients would overwrite the correct bootstrap-server-
+        # supplied IP with 0.0.0.0:port. Prefer PRSM_ADVERTISE_ADDRESS
+        # (sprint-566 env var); otherwise omit so _handle_announce's
+        # fallback to peer.address (the WS source-connection IP) kicks
+        # in — which IS routable for any inbound connection.
+        from prsm.node.libp2p_discovery import _resolve_advertise_address
+        advertise = _resolve_advertise_address()
+        payload = {
+            "subtype": DISCOVERY_ANNOUNCE,
+            "display_name": getattr(self.transport.identity, "display_name", ""),
+            "roles": [],
+            "capabilities": self._local_capabilities,
+            "supported_backends": self._local_backends,
+            "gpu_available": self._local_gpu_available,
+            "peer_count": self.transport.peer_count,
+        }
+        if advertise:
+            payload["address"] = f"{advertise}:{self.transport.port}"
         msg = P2PMessage(
             msg_type=MSG_GOSSIP,
             sender_id=self.transport.identity.node_id,
-            payload={
-                "subtype": DISCOVERY_ANNOUNCE,
-                "address": f"{self.transport.host}:{self.transport.port}",
-                "display_name": getattr(self.transport.identity, "display_name", ""),
-                "roles": [],
-                "capabilities": self._local_capabilities,
-                "supported_backends": self._local_backends,
-                "gpu_available": self._local_gpu_available,
-                "peer_count": self.transport.peer_count,
-            },
+            payload=payload,
         )
         return await self.transport.gossip(msg, fanout=3)
 
@@ -624,7 +636,20 @@ class PeerDiscovery:
 
     async def _handle_announce(self, msg: P2PMessage, peer: PeerConnection) -> None:
         """Record a peer announcement."""
-        address = msg.payload.get("address", peer.address)
+        # Sprint 570 F28 defense-in-depth: ignore 0.0.0.0:* from
+        # legacy pre-sprint-570 peers. The bind-to-all listen host
+        # is not a routable advertise value — falling back to
+        # peer.address (WS source-connection IP) gives us a real
+        # reachable address for inbound connections.
+        raw_address = msg.payload.get("address", "")
+        if (
+            not raw_address
+            or raw_address == "0.0.0.0"
+            or raw_address.startswith("0.0.0.0:")
+        ):
+            address = peer.address
+        else:
+            address = raw_address
         self.known_peers[msg.sender_id] = PeerInfo(
             node_id=msg.sender_id,
             address=address,
