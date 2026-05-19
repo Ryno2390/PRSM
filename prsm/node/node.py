@@ -2426,6 +2426,38 @@ class PRSMNode:
                 "fields. Real production deployments must wire "
                 "their own InferenceExecutor."
             )
+        elif _exec_kind == "parallax":
+            # Sprint 558 — opt-in production wiring path for the
+            # real ParallaxScheduledExecutor. The builder reads
+            # PRSM_PARALLAX_* env vars for operator-supplied
+            # components (model catalog, trust stack, gpu pool).
+            # Each missing/invalid piece logs a structured warning
+            # naming the env var; result is None and the daemon
+            # surfaces the same 503 it does today (sprint 438).
+            # Sprints 559/560/561+ progressively replace mock-kind
+            # components with real production kinds.
+            from prsm.node.inference_wiring import (
+                build_parallax_executor_or_none,
+            )
+            built = build_parallax_executor_or_none(self)
+            self.inference_executor = built
+            if built is not None:
+                logger.info(
+                    "Inference executor: ParallaxScheduledExecutor "
+                    "wired via sprint-558 opt-in. Verify each "
+                    "PRSM_PARALLAX_*_KIND env var matches your "
+                    "deployment posture (mock kinds MUST NOT be "
+                    "trusted by real verifiers)."
+                )
+            else:
+                logger.info(
+                    "Inference executor: PRSM_INFERENCE_EXECUTOR="
+                    "parallax requested but build_parallax_executor"
+                    "_or_none returned None (see preceding warnings "
+                    "for the missing PRSM_PARALLAX_* component). "
+                    "/compute/inference will surface 503 until the "
+                    "wiring is complete."
+                )
         else:
             self.inference_executor = None
 
