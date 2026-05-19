@@ -48,6 +48,29 @@ logger = logging.getLogger(__name__)
 _KNOWN_TRUST_STACK_KINDS = ("mock",)
 _KNOWN_GPU_POOL_KINDS = ("static-empty",)
 
+# Sprint 559 — catalog schema versioning. v1 shape:
+#   {
+#     "schema_version": "v1",
+#     "models": { "<model_id>": { ...ModelInfo kwargs... }, ... }
+#   }
+_CATALOG_SCHEMA_VERSIONS = ("v1",)
+
+# Required ModelInfo fields per entry. ModelInfo's __init__ silently
+# accepts ANY kwargs (no positional validation), so operator typos
+# like "model_namee" used to construct a degenerate ModelInfo that
+# failed at scheduling time with cryptic errors. Sprint 559 catches
+# the typo at boot.
+_REQUIRED_MODEL_INFO_FIELDS = (
+    "model_name",
+    "num_layers",
+    "hidden_dim",
+    "num_attention_heads",
+    "num_kv_heads",
+    "vocab_size",
+    "head_size",
+    "intermediate_dim",
+)
+
 
 def _build_mock_trust_stack():
     """Permissive trust stack — passes every GPU through unchanged.
@@ -180,20 +203,101 @@ def build_parallax_executor_or_none(node: Any) -> Optional[Any]:
             catalog_path, type(raw).__name__,
         )
         return None
+
+    # Sprint 559 — schema version + required-field validation. The
+    # canonical v1 shape is {schema_version: "v1", models: {...}}.
+    # Sprint 558's transitional shape (top-level dict of models)
+    # is rejected with a migration hint.
+    schema_version = raw.get("schema_version")
+    if schema_version is None:
+        if "models" in raw:
+            logger.warning(
+                "Sprint 559 ParallaxScheduledExecutor wiring: "
+                "model catalog %s missing required top-level "
+                "`schema_version` field. Add `\"schema_version\": "
+                "\"v1\"` to the top level.",
+                catalog_path,
+            )
+        else:
+            # Legacy sprint-558 shape (top-level dict of models).
+            logger.warning(
+                "Sprint 559 ParallaxScheduledExecutor wiring: "
+                "model catalog %s uses the deprecated sprint-558 "
+                "top-level dict format. Migrate to the v1 schema: "
+                "{\"schema_version\": \"v1\", \"models\": {...}}.",
+                catalog_path,
+            )
+        return None
+    if schema_version not in _CATALOG_SCHEMA_VERSIONS:
+        logger.warning(
+            "Sprint 559 ParallaxScheduledExecutor wiring: model "
+            "catalog %s has schema_version=%r — this daemon only "
+            "supports %s. Either upgrade the daemon or downgrade "
+            "the catalog format.",
+            catalog_path, schema_version, _CATALOG_SCHEMA_VERSIONS,
+        )
+        return None
+
+    models_section = raw.get("models")
+    if not isinstance(models_section, dict):
+        logger.warning(
+            "Sprint 559 ParallaxScheduledExecutor wiring: model "
+            "catalog %s missing/invalid `models` section "
+            "(must be a dict mapping model_id → ModelInfo kwargs; "
+            "got %s).",
+            catalog_path, type(models_section).__name__,
+        )
+        return None
+
+    # Sprint 559 — per-entry required-field validation. ModelInfo's
+    # __init__(**kwargs) silently accepts any input; operator typos
+    # in field names would otherwise fail at scheduling time with
+    # cryptic AttributeErrors.
+    for model_id, kw in models_section.items():
+        if not isinstance(kw, dict):
+            logger.warning(
+                "Sprint 559 ParallaxScheduledExecutor wiring: "
+                "model catalog %s entry %r must be a dict of "
+                "ModelInfo kwargs; got %s.",
+                catalog_path, model_id, type(kw).__name__,
+            )
+            return None
+        missing = [
+            f for f in _REQUIRED_MODEL_INFO_FIELDS if f not in kw
+        ]
+        if missing:
+            logger.warning(
+                "Sprint 559 ParallaxScheduledExecutor wiring: "
+                "model catalog %s entry %r is missing required "
+                "ModelInfo field(s): %s",
+                catalog_path, model_id, missing,
+            )
+            return None
+
     try:
         from prsm.compute.parallax_scheduling.model_info import (
             ModelInfo,
         )
         catalog = {
-            mid: ModelInfo(**(kw or {})) for mid, kw in raw.items()
+            mid: ModelInfo(**kw)
+            for mid, kw in models_section.items()
         }
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "Sprint 558 ParallaxScheduledExecutor wiring: model "
+            "Sprint 559 ParallaxScheduledExecutor wiring: model "
             "catalog %s contains an entry that failed ModelInfo "
             "construction: %s", catalog_path, exc,
         )
         return None
+
+    if not catalog:
+        logger.warning(
+            "Sprint 559 ParallaxScheduledExecutor wiring: model "
+            "catalog %s has an empty `models` section — daemon "
+            "will advertise no models. Add at least one entry to "
+            "serve inference.",
+            catalog_path,
+        )
 
     # ── trust stack ──────────────────────────────────────
     if trust_kind not in _KNOWN_TRUST_STACK_KINDS:

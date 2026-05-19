@@ -156,19 +156,23 @@ def test_returns_executor_when_all_components_present(
         ParallaxScheduledExecutor,
     )
 
+    # Sprint 559: v1 schema with top-level schema_version + models.
     catalog_path = tmp_path / "catalog.json"
     catalog_path.write_text(json.dumps({
-        "test-model": {
-            "model_name": "test-model",
-            "mlx_model_name": "test-model",
-            "head_size": 64,
-            "hidden_dim": 128,
-            "intermediate_dim": 256,
-            "num_attention_heads": 4,
-            "num_kv_heads": 4,
-            "vocab_size": 1000,
-            "num_layers": 4,
-        }
+        "schema_version": "v1",
+        "models": {
+            "test-model": {
+                "model_name": "test-model",
+                "mlx_model_name": "test-model",
+                "head_size": 64,
+                "hidden_dim": 128,
+                "intermediate_dim": 256,
+                "num_attention_heads": 4,
+                "num_kv_heads": 4,
+                "vocab_size": 1000,
+                "num_layers": 4,
+            },
+        },
     }))
     monkeypatch.setenv(
         "PRSM_PARALLAX_MODEL_CATALOG_FILE", str(catalog_path),
