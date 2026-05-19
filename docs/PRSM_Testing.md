@@ -98,6 +98,7 @@ journey. Each step should be live-verifiable on a single node.
 | Retrieve by CID (Tier A, same node) | `GET /content/retrieve/{cid}` | ✅ | 428 | Local-publish shortcut |
 | Retrieve + decrypt (recipient-encrypted, same node) | `GET /content/retrieve/{cid}` + `decrypt_for_recipient` | ✅ | 430 | E2E live-tested |
 | Bootstrap-mediated peer discovery (multi-node) | bootstrap-server peer-list | ✅ | 456, 468, 565 | Live: 2 daemons on same host (sprint 456); sprint 468 cross-HOST verified via EU bootstrap; **sprint 565 — first live cross-host discovery on the canonical bootstrap-us fleet member**: droplet operator (`484f003c...`) + Mac (`cdefb8e5...`) symmetric `known[]` via bootstrap-us, both registered live in `/peers` with `active_connections: 2`. Closes the fleet-coordination gap (pre-565 the droplet operator was bootstrapped against bootstrap-eu while all others defaulted to bootstrap-us → different registries → no cross-discovery) |
+| **Direct cross-host P2P connection** | `POST /peers/connect` + WebSocketTransport | ✅ | 569 | **First live direct cross-host P2P connection in PRSM history**. Mac dialed droplet's 159.203.129.218:9001 over WebSocket transport; both daemons report symmetric connected[1] entries (Mac sees droplet outbound; droplet sees Mac inbound at 146.70.202.116:54222). Required ALL FIVE pieces: F22 fix (564) + fleet coord (565) + advertise external IP (566) + DO firewall :9001 opened by operator (568) + auto-dial endpoint (569) + matched WebSocket transport on both sides (Mac via PRSM_TRANSPORT_BACKEND=websocket env override) |
 | Cross-host content retrieve (direct P2P) | BT swarm + gossip | ⏸️ | 468, 567, 568 | **Sprint 568 reframed**: F20 REINSTATED as stealth firewall — TCP handshake completes (`nc -zv` reports "succeeded") but external WS to `:9001` payload is dropped; loopback WS to droplet's own `:9001` works (`1002 protocol error "Missing public key"` returned). This is DO-cloud-firewall level, NOT OS-level (ufw inactive, iptables ACCEPT). Bootstrap :8765 works end-to-end → port-specific. **Needs operator action in DO dashboard** (out of autonomous scope). Sprint-567 gaps 2+3 (multiaddr/peer-ID) are libp2p-only concerns — both daemons run `PRSM_TRANSPORT_BACKEND=websocket`, so `connect_to_peer(host:port)` is sufficient at the code layer. Remaining gap (1) auto-dial is autonomous-fixable but useless until F20 cleared at DO level |
 | Peer lifecycle: peer_leave propagation | bootstrap-server peer-list | ✅ | 457 | Live: killed daemon #2 → 21s later daemon #1 received peer_leave → `peer_leave_events: 1`, `known_count: 0`, `discovered_peer_count: 0`. Sprint 320-329 hardening operationally verified |
 | Direct P2P connection (single-host) | WebSocket transport | ⏸️ | 456 | F14: NAT-loopback blocks single-host direct connection (announced addrs are external IP); multi-host bench is the right test |
@@ -767,6 +768,20 @@ arc proved we need.
 ---
 
 ## Changelog
+
+- **2026-05-19 sprint 569 — FIRST LIVE DIRECT CROSS-HOST P2P CONNECTION
+  in PRSM history**. Closes sprint-567 gap 1 via new `POST /peers/connect`
+  endpoint wrapping `transport.connect_to_peer`. After operator opened
+  DO firewall :9001 (sprint 568 handoff), Mac dialed droplet and both
+  daemons report symmetric `connected[1]`:
+    Mac:     peer_id=484f003c... addr=159.203.129.218:9001 outbound=true
+    Droplet: peer_id=cdefb8e5... addr=146.70.202.116:54222 outbound=false
+  Required ALL FIVE multi-host-arc pieces (sprints 564→569 +
+  operator-side DO firewall + matched-transport via
+  PRSM_TRANSPORT_BACKEND=websocket on Mac). Production posture noted:
+  building libp2p .so for Linux is the real fix for the transport
+  mismatch (separate future sprint); for now matched-websocket via
+  env var works.
 
 - **2026-05-19 sprint 568 — F20 REINSTATED (stealth firewall) + WebSocket
   transport reality check**. Started as "multiaddr-in-registration to close
