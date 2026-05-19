@@ -30,6 +30,13 @@ class TransactionType(str, Enum):
     # before signing on-chain transfer out.
     BRIDGE_DEPOSIT = "bridge_deposit"
     BRIDGE_WITHDRAW = "bridge_withdraw"
+    # Sprint 572 F24 — generic reward credit used by:
+    # - node.mint_tokens (staking rewards, appeal refunds)
+    # - bittorrent_provider._reward_loop (seeder per-GB rewards)
+    # - bittorrent_proofs.award_seeder (storage-proof verification)
+    # Distinct from STORAGE_REWARD which encodes "storage providers
+    # paid for capacity"; REWARD is the catch-all for other emissions.
+    REWARD = "reward"
 
 
 @dataclass

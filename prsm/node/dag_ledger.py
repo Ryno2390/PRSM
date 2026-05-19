@@ -138,6 +138,9 @@ class TransactionType(str, Enum):
     # Sprint 540 Pattern A: daemon-mediated bridge tx types
     BRIDGE_DEPOSIT = "bridge_deposit"
     BRIDGE_WITHDRAW = "bridge_withdraw"
+    # Sprint 572 F24 — parity with local_ledger.TransactionType.REWARD
+    # for call sites that funnel reward credits through dag_ledger.
+    REWARD = "reward"
 
 
 @dataclass
