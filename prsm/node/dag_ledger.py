@@ -1041,6 +1041,24 @@ class DAGLedger:
             logger.debug(f"No signature required: system transaction type")
             return False
 
+        # Sprint 541 — Pattern A bridge transactions are
+        # daemon-mediated. The cryptographic authorization is the
+        # operator's signature on the on-chain TX (which the user
+        # implicitly trusts by calling the daemon API). The off-chain
+        # debit is bookkeeping for the daemon-side accounting. In
+        # the future when user auth is wired through to /wallet/
+        # withdraw, this exemption can be tightened to require a
+        # user signature alongside.
+        if tx_type in (
+            TransactionType.BRIDGE_DEPOSIT,
+            TransactionType.BRIDGE_WITHDRAW,
+        ):
+            logger.debug(
+                f"No signature required: daemon-mediated bridge "
+                f"tx_type={tx_type.value}"
+            )
+            return False
+
         # All other transactions require signatures
         logger.debug(f"Signature required for tx_type={tx_type.value} from {from_wallet[:8]}...")
         return True

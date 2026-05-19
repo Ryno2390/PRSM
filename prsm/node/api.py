@@ -907,6 +907,175 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "status": "linked",
         }
 
+    # Sprint 541 — Pattern A withdraw half. Symmetric inverse of
+    # deposit. Atomicity strategy: debit off-chain FIRST (pre-flight
+    # balance check + ledger entry), THEN broadcast on-chain. If
+    # broadcast fails, immediately credit a refund entry so the
+    # off-chain balance is restored. Debit-first ordering avoids the
+    # double-spend window where a user submits two concurrent
+    # withdraws and both pass the balance check.
+    class _WithdrawRequest(BaseModel):
+        amount_ftns: float
+        wallet_id: Optional[str] = None
+        to_eth_address: Optional[str] = None
+
+    @app.post("/wallet/withdraw", tags=["wallet"])
+    async def post_withdraw(
+        body: _WithdrawRequest,
+    ) -> Dict[str, Any]:
+        """Withdraw off-chain FTNS to on-chain.
+
+        Debits the off-chain wallet by `amount_ftns` (Pattern A
+        BRIDGE_WITHDRAW tx type), then broadcasts an on-chain
+        ERC-20 transfer from the operator escrow address to
+        `to_eth_address`. If `to_eth_address` is omitted, defaults
+        to the wallet's linked address.
+
+        Failure modes:
+          - amount_ftns <= 0 → 422
+          - no recipient (unlinked + no to_eth_address) → 400
+          - insufficient off-chain balance → 402
+          - broadcast failure → off-chain credit refund + 502
+          - ledger/onchain not wired → 503
+        """
+        ledger = getattr(node, "ftns_ledger", None)
+        local_ledger = getattr(node, "ledger", None)
+        identity = getattr(node, "identity", None)
+        if (
+            ledger is None
+            or local_ledger is None
+            or identity is None
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Withdraw flow not initialized — daemon must "
+                    "be started with FTNS_WALLET_PRIVATE_KEY + "
+                    "off-chain ledger ready."
+                ),
+            )
+        if body.amount_ftns <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="amount_ftns must be > 0",
+            )
+        wallet_id = body.wallet_id or identity.node_id
+        # Resolve recipient: explicit > linked > fail
+        to_addr = body.to_eth_address
+        if not to_addr:
+            to_addr = await local_ledger.eth_address_for_wallet(
+                wallet_id,
+            )
+        if not to_addr or not to_addr.startswith("0x"):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No recipient address. Either pass "
+                    f"to_eth_address explicitly or link an address "
+                    f"to wallet_id={wallet_id!r} via "
+                    f"POST /wallet/deposit/link first."
+                ),
+            )
+        # Pre-flight balance check
+        balance = await local_ledger.get_balance(wallet_id)
+        if balance < body.amount_ftns:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Insufficient off-chain balance: "
+                    f"{balance:.6f} < {body.amount_ftns:.6f}"
+                ),
+            )
+        # Debit off-chain FIRST. Withdraw the off-chain balance to
+        # `system` (DAGLedger debit convention) BEFORE broadcast so
+        # concurrent withdraws can't both pass the balance check.
+        from prsm.node.dag_ledger import (
+            TransactionType as _DAG_TT,
+        )
+        from prsm.node.local_ledger import (
+            TransactionType as _LL_TT,
+        )
+        # Pick the right TransactionType enum based on ledger class
+        if isinstance(local_ledger, __import__(
+            "prsm.node.dag_ledger", fromlist=["DAGLedger"],
+        ).DAGLedger):
+            withdraw_tt = _DAG_TT.BRIDGE_WITHDRAW
+            refund_tt_for_credit = _DAG_TT.BRIDGE_WITHDRAW
+        else:
+            withdraw_tt = _LL_TT.BRIDGE_WITHDRAW
+            refund_tt_for_credit = _LL_TT.BRIDGE_WITHDRAW
+        try:
+            debit_tx = await local_ledger.debit(
+                wallet_id=wallet_id,
+                amount=body.amount_ftns,
+                tx_type=withdraw_tt,
+                description=(
+                    f"bridge withdraw to {to_addr} "
+                    f"(broadcast pending)"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=f"Off-chain debit failed: {exc!s}"[:300],
+            )
+        # Broadcast on-chain ERC-20 transfer from escrow.
+        import uuid
+        job_id = f"withdraw-{uuid.uuid4().hex[:12]}"
+        tx_record = await ledger.transfer(
+            job_id=job_id,
+            to_address=to_addr,
+            amount_ftns=body.amount_ftns,
+        )
+        if tx_record is None or getattr(
+            tx_record, "status", None,
+        ) == "rejected":
+            # Broadcast failed → refund the off-chain debit so the
+            # user is whole. The refund is its own ledger entry so
+            # the audit trail shows: debit (pending) → refund
+            # (broadcast failed). Future readers can reconstruct
+            # via tx descriptions.
+            try:
+                await local_ledger.credit(
+                    wallet_id=wallet_id,
+                    amount=body.amount_ftns,
+                    tx_type=refund_tt_for_credit,
+                    description=(
+                        f"bridge withdraw REFUND "
+                        f"(broadcast failed) — original debit "
+                        f"tx_id={debit_tx.tx_id}"
+                    ),
+                )
+            except Exception as refund_exc:  # noqa: BLE001
+                logger.error(
+                    "CRITICAL: withdraw refund failed AFTER debit "
+                    "succeeded — manual reconciliation needed. "
+                    "wallet=%s amount=%.6f debit_tx=%s "
+                    "refund_error=%s",
+                    wallet_id, body.amount_ftns,
+                    debit_tx.tx_id, refund_exc,
+                )
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"On-chain broadcast failed; off-chain debit "
+                    f"refunded. debit_tx_id={debit_tx.tx_id}"
+                ),
+            )
+        # Success path
+        return {
+            "status": "confirmed",
+            "wallet_id": wallet_id,
+            "amount_ftns": body.amount_ftns,
+            "to_eth_address": to_addr,
+            "tx_hash": getattr(tx_record, "tx_hash", None),
+            "block_number": getattr(
+                tx_record, "block_number", None,
+            ),
+            "debit_tx_id": debit_tx.tx_id,
+            "job_id": job_id,
+        }
+
     @app.get("/balance")
     async def get_balance() -> Dict[str, Any]:
         """Get FTNS balance and recent transactions."""

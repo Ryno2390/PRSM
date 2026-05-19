@@ -6839,6 +6839,112 @@ def wallet_link_address(
         raise SystemExit(1)
 
 
+@wallet.command("withdraw")
+@click.option(
+    "--amount", required=True, type=float,
+    help="FTNS to withdraw from off-chain balance to on-chain",
+)
+@click.option(
+    "--to", "to_eth_address", default=None,
+    help="Recipient ETH address (default: this wallet's linked addr)",
+)
+@click.option(
+    "--wallet-id", default=None,
+    help="Wallet to debit (default: this node's identity)",
+)
+@click.option(
+    "--yes", "-y", is_flag=True, default=False,
+    help="Skip confirmation prompt",
+)
+@click.option("--api-url", default=None, help="PRSM daemon API URL")
+def wallet_withdraw(
+    amount: float, to_eth_address: str, wallet_id: str,
+    yes: bool, api_url: str,
+) -> None:
+    """Withdraw off-chain FTNS to on-chain (Pattern A bridge).
+
+    Debits your off-chain wallet, then signs an on-chain ERC-20
+    transfer from the operator escrow to your recipient address.
+    Atomicity: if the broadcast fails, the daemon credits a refund
+    so your off-chain balance stays whole.
+    """
+    import httpx
+    url = _api_url_from_creds(api_url)
+    payload = {"amount_ftns": amount}
+    if to_eth_address:
+        payload["to_eth_address"] = to_eth_address
+    if wallet_id:
+        payload["wallet_id"] = wallet_id
+
+    if not yes:
+        console.print(
+            f"\n[bold]About to withdraw {amount:.6f} FTNS[/bold]"
+        )
+        if to_eth_address:
+            console.print(f"  → to {to_eth_address}")
+        else:
+            console.print(
+                f"  → to (linked address — daemon resolves)",
+                style="dim",
+            )
+        console.print(
+            "[yellow]This will broadcast a real on-chain TX. "
+            "Continue?[/yellow] (y/N): ",
+            end="",
+        )
+        ans = input().strip().lower()
+        if ans not in ("y", "yes"):
+            console.print("Cancelled.", style="dim")
+            raise SystemExit(0)
+
+    try:
+        r = httpx.post(
+            f"{url}/wallet/withdraw", json=payload, timeout=90.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+
+    if r.status_code == 200:
+        d = r.json()
+        console.print(
+            "✅ Withdraw confirmed on-chain!", style="bold green",
+        )
+        console.print(f"   tx_hash      : 0x{d.get('tx_hash', '').lstrip('0x')}")
+        console.print(f"   block        : {d.get('block_number')}")
+        console.print(f"   amount       : {d.get('amount_ftns')} FTNS")
+        console.print(f"   to           : {d.get('to_eth_address')}")
+        console.print(f"   wallet_id    : {d.get('wallet_id')}")
+        console.print(f"   debit_tx_id  : {d.get('debit_tx_id')}")
+        return
+    detail = ""
+    try:
+        detail = r.json().get("detail", "")
+    except Exception:
+        detail = r.text[:300]
+    if r.status_code == 402:
+        console.print(f"❌ Insufficient off-chain balance:", style="red")
+        console.print(f"   {detail}")
+    elif r.status_code == 400:
+        console.print(f"❌ Invalid request:", style="red")
+        console.print(f"   {detail}")
+    elif r.status_code == 422:
+        console.print(f"❌ Validation error:", style="red")
+        console.print(f"   {detail}")
+    elif r.status_code == 502:
+        console.print(
+            f"⚠️  Broadcast failed; off-chain refund issued:",
+            style="yellow",
+        )
+        console.print(f"   {detail}")
+    elif r.status_code == 503:
+        console.print(f"❌ Service unavailable:", style="red")
+        console.print(f"   {detail}")
+    else:
+        console.print(f"❌ HTTP {r.status_code}: {detail}", style="red")
+    raise SystemExit(1)
+
+
 @wallet.command("claim")
 @click.option(
     "--network", "network_name",
