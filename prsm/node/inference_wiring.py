@@ -266,6 +266,10 @@ def _build_production_trust_stack_or_none():
         InMemoryProfileSource,
     )
 
+    # Sprint 580 — anchor construction extracted to module helper
+    # so chain_executor Phase 2 can share. None handling stays here
+    # since "production trust-stack requires anchor" is a trust-stack
+    # invariant, not an anchor-helper concern.
     anchor_addr = os.environ.get(
         "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "",
     ).strip()
@@ -279,24 +283,11 @@ def _build_production_trust_stack_or_none():
             "PRSM_PARALLAX_TRUST_STACK_KIND=mock for dev."
         )
         return None
-    rpc_url = os.environ.get(
-        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
-    )
-    try:
-        from prsm.security.publisher_key_anchor.client import (
-            PublisherKeyAnchorClient,
-        )
-        anchor = PublisherKeyAnchorClient(
-            contract_address=anchor_addr,
-            rpc_url=rpc_url,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Sprint 560 ParallaxScheduledExecutor wiring: "
-            "PublisherKeyAnchorClient construction failed against "
-            "%s — %s. Anchor unavailable; falling back to None.",
-            anchor_addr, exc,
-        )
+    anchor = _build_anchor_or_none()
+    if anchor is None:
+        # _build_anchor_or_none already logged the underlying
+        # construction failure; the trust-stack caller surfaces
+        # the kind-specific guidance.
         return None
 
     # Sprint 561 — production stake_lookup. PRSM_STAKE_BOND_ADDRESS
@@ -308,6 +299,11 @@ def _build_production_trust_stack_or_none():
         def get_stake(self, node_id: str) -> int:
             return 0
 
+    # Sprint 580 — rpc_url resolved here (was earlier in pre-580
+    # inline construction; sprint-561 StakeManagerClient still needs it).
+    rpc_url = os.environ.get(
+        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+    )
     stake_addr = os.environ.get(
         "PRSM_STAKE_BOND_ADDRESS", "",
     ).strip()
@@ -383,6 +379,51 @@ def _build_production_trust_stack_or_none():
             sample_rate=0.0,
         ),
     )
+
+
+def _build_anchor_or_none():
+    """Sprint 580 — env-driven PublisherKeyAnchorClient construction.
+
+    Single source of truth for ``PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS``
+    interpretation. Used by:
+      - ``_build_production_trust_stack_or_none`` (existing caller)
+      - ``_build_chain_executor`` (sprint-581+ Phase 2 — needs the
+        anchor for ``make_rpc_chain_executor``)
+
+    Semantics:
+      - env unset / empty → return None (silent; the trust-stack
+        caller is the one that decides whether None is OK or
+        production-blocking)
+      - construction succeeds → return PublisherKeyAnchorClient
+      - construction fails → log WARNING + return None
+
+    RPC URL falls back to Base mainnet (PRSM_BASE_RPC_URL override
+    matches the pre-580 inline behavior).
+    """
+    anchor_addr = os.environ.get(
+        "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "",
+    ).strip()
+    if not anchor_addr:
+        return None
+    rpc_url = os.environ.get(
+        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+    )
+    try:
+        from prsm.security.publisher_key_anchor.client import (
+            PublisherKeyAnchorClient,
+        )
+        return PublisherKeyAnchorClient(
+            contract_address=anchor_addr,
+            rpc_url=rpc_url,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Sprint 580 _build_anchor_or_none: "
+            "PublisherKeyAnchorClient construction failed against "
+            "%s — %s. Anchor unavailable; returning None.",
+            anchor_addr, exc,
+        )
+        return None
 
 
 def _build_chain_executor(node: Any) -> Any:
