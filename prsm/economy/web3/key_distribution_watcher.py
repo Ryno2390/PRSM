@@ -73,11 +73,17 @@ def _validate_content_hash(value: Any) -> bytes:
 class KeyDepositedEvent:
     """Decoded ``KeyDeposited(bytes32 indexed contentHash,
     address indexed publisher, address indexed royalty,
-    uint256 releaseFeeFtnsWei)``."""
+    uint256 releaseFeeFtnsWei)``.
+
+    Sprint 550: ``tx_hash`` + ``log_index`` carry on-chain event
+    identity for sprint-549's persistent dedup pattern.
+    """
     content_hash: bytes
     publisher: str
     royalty: str
     release_fee_ftns_wei: int
+    tx_hash: Optional[str] = None
+    log_index: Optional[int] = None
 
     def __post_init__(self) -> None:
         _validate_content_hash(self.content_hash)
@@ -88,30 +94,52 @@ class KeyDepositedEvent:
             )
 
     @classmethod
-    def from_decoded_args(cls, args: Dict[str, Any]) -> "KeyDepositedEvent":
+    def from_decoded_args(
+        cls,
+        args: Dict[str, Any],
+        *,
+        tx_hash: Optional[str] = None,
+        log_index: Optional[int] = None,
+    ) -> "KeyDepositedEvent":
         return cls(
             content_hash=bytes(args["contentHash"]),
             publisher=str(args["publisher"]),
             royalty=str(args["royalty"]),
             release_fee_ftns_wei=int(args["releaseFeeFtnsWei"]),
+            tx_hash=tx_hash,
+            log_index=log_index,
         )
 
 
 @dataclass(frozen=True)
 class KeyDeauthorizedEvent:
     """Decoded ``KeyDeauthorized(bytes32 indexed contentHash,
-    address indexed publisher)``."""
+    address indexed publisher)``.
+
+    Sprint 550: ``tx_hash`` + ``log_index`` carry on-chain event
+    identity for sprint-549's persistent dedup pattern.
+    """
     content_hash: bytes
     publisher: str
+    tx_hash: Optional[str] = None
+    log_index: Optional[int] = None
 
     def __post_init__(self) -> None:
         _validate_content_hash(self.content_hash)
 
     @classmethod
-    def from_decoded_args(cls, args: Dict[str, Any]) -> "KeyDeauthorizedEvent":
+    def from_decoded_args(
+        cls,
+        args: Dict[str, Any],
+        *,
+        tx_hash: Optional[str] = None,
+        log_index: Optional[int] = None,
+    ) -> "KeyDeauthorizedEvent":
         return cls(
             content_hash=bytes(args["contentHash"]),
             publisher=str(args["publisher"]),
+            tx_hash=tx_hash,
+            log_index=log_index,
         )
 
 
@@ -176,6 +204,7 @@ class KeyDistributionWatcher:
         poll_interval_sec: float = 30.0,
         state_store=None,
         event_filters: Optional[Dict[str, Dict[str, Any]]] = None,
+        dedup_store=None,
     ) -> None:
         if poll_interval_sec <= 0:
             raise ValueError(
@@ -201,6 +230,12 @@ class KeyDistributionWatcher:
         self._poll_interval = float(poll_interval_sec)
         self._state_store = state_store
         self._event_filters = event_filters or {}
+        # Sprint 550: persistent (watcher_key, tx_hash, log_index)
+        # dedup. Without it, restart-catch-up re-dispatches every
+        # event the previous run handled between callback dispatch
+        # and post-loop baseline persist. Sibling primitive to
+        # sprint 549's CompensationDistributorWatcher fix.
+        self._dedup_store = dedup_store
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
         # Sprint 401 — tick-age tracking.
@@ -360,7 +395,41 @@ class KeyDistributionWatcher:
             )
             return False
         for event in events:
+            # Sprint 550: persistent dedup mirroring sprint 549.
+            # Skip events the previous run already dispatched; mark
+            # AFTER successful callback. Fail-soft on SQLite hiccups.
+            tx_hash = getattr(event, "tx_hash", None)
+            log_index = getattr(event, "log_index", None)
+            if (
+                self._dedup_store is not None
+                and tx_hash is not None
+                and log_index is not None
+            ):
+                try:
+                    if self._dedup_store.has_processed_event(
+                        self.WATCHER_KEY, tx_hash, log_index,
+                    ):
+                        continue
+                except Exception:
+                    logger.exception(
+                        "KeyDistributionWatcher: dedup lookup raised; "
+                        "dispatching anyway"
+                    )
             await self._invoke_cb(callback, event)
+            if (
+                self._dedup_store is not None
+                and tx_hash is not None
+                and log_index is not None
+            ):
+                try:
+                    self._dedup_store.mark_processed_event(
+                        self.WATCHER_KEY, tx_hash, log_index,
+                    )
+                except Exception:
+                    logger.exception(
+                        "KeyDistributionWatcher: dedup mark raised; "
+                        "next tick may re-dispatch"
+                    )
         return True
 
     async def _invoke_cb(self, callback, event) -> None:

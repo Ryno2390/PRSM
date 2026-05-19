@@ -75,6 +75,35 @@ class PaymentNotVerifiedError(RuntimeError):
 # ──────────────────────────────────────────────────────────────────────
 
 
+def _extract_log_identifiers(log) -> Tuple[Optional[str], Optional[int]]:
+    """Sprint 550 helper — extract (tx_hash, log_index) from a raw
+    web3.py log envelope. Used by all three get_*_events decoders to
+    populate sprint-549-style on-chain event identity on each event.
+
+    Accepts both dict-shaped logs (web3.py default) and attribute-
+    shaped logs (some test stubs). Returns ``(None, None)`` when the
+    log lacks identifiers — the watcher dedup no-ops in that case.
+    """
+    if isinstance(log, dict):
+        tx_bytes = log.get("transactionHash")
+        log_idx_raw = log.get("logIndex")
+    else:
+        tx_bytes = getattr(log, "transactionHash", None)
+        log_idx_raw = getattr(log, "logIndex", None)
+    if isinstance(tx_bytes, (bytes, bytearray)):
+        tx_hex: Optional[str] = "0x" + tx_bytes.hex()
+    elif isinstance(tx_bytes, str):
+        tx_hex = tx_bytes if tx_bytes.startswith("0x") else (
+            "0x" + tx_bytes
+        )
+    else:
+        tx_hex = None
+    log_idx = (
+        int(log_idx_raw) if isinstance(log_idx_raw, int) else None
+    )
+    return tx_hex, log_idx
+
+
 @dataclass(frozen=True)
 class KeyReleasedEvent:
     """Decoded ``KeyReleased(bytes32 indexed contentHash, address
@@ -84,10 +113,15 @@ class KeyReleasedEvent:
     receipt, decrypt with their X25519 private key (or whatever
     asymmetric scheme the publisher used to wrap the symmetric
     content-decryption key).
+
+    Sprint 550: ``tx_hash`` + ``log_index`` carry on-chain event
+    identity for sprint-549's persistent dedup pattern.
     """
     content_hash: bytes
     recipient: str
     encrypted_key: bytes
+    tx_hash: Optional[str] = None
+    log_index: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.content_hash, (bytes, bytearray)) or len(self.content_hash) != 32:
@@ -99,17 +133,20 @@ class KeyReleasedEvent:
             raise ValueError("encrypted_key must be non-empty bytes")
 
     @classmethod
-    def from_decoded_args(cls, args: Dict[str, Any]) -> "KeyReleasedEvent":
-        """Build from a Web3.py decoded-event-args dict.
-
-        ``args`` is the dict produced by
-        ``contract.events.KeyReleased().process_log(log)`` where
-        keys are the Solidity argument names in camelCase.
-        """
+    def from_decoded_args(
+        cls,
+        args: Dict[str, Any],
+        *,
+        tx_hash: Optional[str] = None,
+        log_index: Optional[int] = None,
+    ) -> "KeyReleasedEvent":
+        """Build from a Web3.py decoded-event-args dict."""
         return cls(
             content_hash=bytes(args["contentHash"]),
             recipient=str(args["recipient"]),
             encrypted_key=bytes(args["encryptedKey"]),
+            tx_hash=tx_hash,
+            log_index=log_index,
         )
 
 
@@ -324,7 +361,13 @@ class KeyDistributionClient:
         if argument_filters is not None:
             kwargs["argument_filters"] = argument_filters
         logs = self.contract.events.KeyReleased().get_logs(**kwargs)
-        return [KeyReleasedEvent.from_decoded_args(log["args"]) for log in logs]
+        out = []
+        for log in logs:
+            tx_hex, log_idx = _extract_log_identifiers(log)
+            out.append(KeyReleasedEvent.from_decoded_args(
+                log["args"], tx_hash=tx_hex, log_index=log_idx,
+            ))
+        return out
 
     def get_key_deposited_events(
         self, from_block: int, to_block: int,
@@ -345,7 +388,13 @@ class KeyDistributionClient:
         if argument_filters is not None:
             kwargs["argument_filters"] = argument_filters
         logs = self.contract.events.KeyDeposited().get_logs(**kwargs)
-        return [KeyDepositedEvent.from_decoded_args(log["args"]) for log in logs]
+        out = []
+        for log in logs:
+            tx_hex, log_idx = _extract_log_identifiers(log)
+            out.append(KeyDepositedEvent.from_decoded_args(
+                log["args"], tx_hash=tx_hex, log_index=log_idx,
+            ))
+        return out
 
     def get_key_deauthorized_events(
         self, from_block: int, to_block: int,
@@ -362,10 +411,13 @@ class KeyDistributionClient:
         if argument_filters is not None:
             kwargs["argument_filters"] = argument_filters
         logs = self.contract.events.KeyDeauthorized().get_logs(**kwargs)
-        return [
-            KeyDeauthorizedEvent.from_decoded_args(log["args"])
-            for log in logs
-        ]
+        out = []
+        for log in logs:
+            tx_hex, log_idx = _extract_log_identifiers(log)
+            out.append(KeyDeauthorizedEvent.from_decoded_args(
+                log["args"], tx_hash=tx_hex, log_index=log_idx,
+            ))
+        return out
 
     def deauthorize(
         self,

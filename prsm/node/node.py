@@ -1048,7 +1048,7 @@ def _build_watcher_event_dedup_store_or_none():
 
 def _build_key_distribution_watcher_or_none(
     *, client, state_store=None, webhook_deliverer=None,
-    webhook_url=None, webhook_secret=None,
+    webhook_url=None, webhook_secret=None, dedup_store=None,
 ):
     """Construct a KeyDistributionWatcher if operator opted in AND
     underlying client is non-None.
@@ -1122,10 +1122,12 @@ def _build_key_distribution_watcher_or_none(
             on_key_deauthorized=_on_deauthorized,
             poll_interval_sec=interval,
             state_store=state_store,
+            dedup_store=dedup_store,
         )
         logger.info(
             f"KeyDistributionWatcher wired (interval={interval}s, "
-            f"persistence={'on' if state_store is not None else 'off'})"
+            f"persistence={'on' if state_store is not None else 'off'}, "
+            f"dedup={'on' if dedup_store is not None else 'off'})"
         )
         return watcher
     except Exception as exc:  # noqa: BLE001
@@ -2011,6 +2013,7 @@ class PRSMNode:
                 webhook_deliverer=self._webhook_deliverer,
                 webhook_url=_early_webhook_url,
                 webhook_secret=_early_webhook_secret,
+                dedup_store=self._watcher_event_dedup_store,
             )
         )
         self._storage_slashing_watcher = (
