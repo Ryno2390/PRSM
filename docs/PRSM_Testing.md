@@ -769,6 +769,45 @@ arc proved we need.
 
 ## Changelog
 
+- **2026-05-19 sprint 571 — FIRST BIDIRECTIONAL LIVE CROSS-HOST CONTENT
+  EXCHANGE in PRSM history + F27 (connection persistence) closed as
+  incidental side-effect of sprint-570 F28 fix**. After droplet deploy
+  of sprint-570 code, connection held a steady 60 seconds under polling;
+  bidirectional content xfer succeeded:
+    droplet upload CID 23ca54ad... → Mac /content/retrieve →
+      status=success, size=36, byte-identical 'sprint 571 durable
+      content xfer test'
+    Mac upload CID 3e6181b4... → droplet /content/retrieve →
+      status=success, size=33, byte-identical 'sprint 571 reverse
+      Mac to droplet'
+  F27 root cause inferred: pre-570 droplet gossip carried bogus
+  address=0.0.0.0:9001 → Mac's `_handle_announce` overwrote
+  known_peers[droplet].address with the unreachable sentinel →
+  `maintain_connections` saw a "known but unconnected" peer at
+  0.0.0.0 and tried to dial it, which in some configurations tore
+  down the live conn. With droplet+Mac both on sprint-570 code, no
+  poisoning happens. **Vision §4 step-8 promoted single-node →
+  multi-host (cross-host content data-plane works durably).**
+
+- **2026-05-19 sprint 570 — FIRST LIVE CROSS-HOST CONTENT RETRIEVE
+  in PRSM history + F28 fix**. `PeerDiscovery.announce_self` was
+  gossiping `address: f"{transport.host}:{transport.port}"` where
+  transport.host="0.0.0.0" (bind-to-all sentinel, NOT a routable
+  advertise value). On recv, `_handle_announce` overwrote
+  known_peers[sender].address with the bogus value — wiping the
+  correct bootstrap-server-supplied IP. Two-layer fix: (1)
+  announce_self omits 'address' unless PRSM_ADVERTISE_ADDRESS env
+  set; recv falls back to peer.address (WS source-connection IP);
+  (2) `_handle_announce` defensively rejects 0.0.0.0:* / empty.
+  Live-verified end-to-end before droplet deploy of F28: Mac
+  (post-fix) ↔ droplet (still pre-fix, gossiping bogus); /peers
+  connected[1] entry held correct 159.203.129.218:9001 address;
+  droplet upload CID 1fdb881c... → Mac retrieved 42 bytes
+  byte-identical. **Architecture correction baked into docs**:
+  ContentRetriever uses WebSocket P2P transport
+  (transport.send_to_peer), NOT BitTorrent. Pre-sprint-570 belief
+  that "BT-only data-plane blocks cross-host retrieve" was wrong.
+
 - **2026-05-19 sprint 569 — FIRST LIVE DIRECT CROSS-HOST P2P CONNECTION
   in PRSM history**. Closes sprint-567 gap 1 via new `POST /peers/connect`
   endpoint wrapping `transport.connect_to_peer`. After operator opened
