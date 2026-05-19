@@ -4082,7 +4082,9 @@ class PRSMNode:
             # Sprint 514: inbound monitor — periodic Transfer
             # event scan for the operator wallet. Push signal
             # complementing sprint 512/513 pull surfaces.
-            from prsm.economy.ftns_onchain import InboundMonitor
+            from prsm.economy.ftns_onchain import (
+                InboundMonitor, InboundCheckpointStore,
+            )
             try:
                 _inbound_interval = float(
                     os.environ.get(
@@ -4092,6 +4094,30 @@ class PRSMNode:
                 )
             except ValueError:
                 _inbound_interval = 60.0
+            # Sprint 543: checkpoint store persists scan window
+            # across restart so deposits arriving during downtime
+            # get caught on next boot. Default path mirrors
+            # sprint-501's onchain_tx.db sibling. PRSM_INBOUND_CHECKPOINT_DB
+            # opt-out: set to ":memory:" or "" to disable.
+            _ck_db = os.environ.get("PRSM_INBOUND_CHECKPOINT_DB")
+            if _ck_db == "" or _ck_db == ":memory:":
+                _checkpoint_store = None
+            else:
+                if _ck_db is None:
+                    _ck_db = str(
+                        Path.home() / ".prsm"
+                        / "inbound_checkpoint.db"
+                    )
+                try:
+                    _checkpoint_store = InboundCheckpointStore(_ck_db)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Sprint 543: checkpoint store init failed "
+                        "(%s); monitor falling back to in-memory "
+                        "checkpoint (deposits during downtime will "
+                        "be missed).", exc,
+                    )
+                    _checkpoint_store = None
             self._inbound_monitor = InboundMonitor(
                 self.ftns_ledger,
                 interval_seconds=_inbound_interval,
@@ -4110,6 +4136,8 @@ class PRSMNode:
                 # deposit flow operates as a daemon-side hook on the
                 # existing InboundMonitor — no new contract needed.
                 local_ledger=getattr(self, "ledger", None),
+                # Sprint 543: persistent checkpoint store.
+                checkpoint_store=_checkpoint_store,
             )
             self._inbound_monitor_task = asyncio.create_task(
                 self._inbound_monitor.run_forever(),

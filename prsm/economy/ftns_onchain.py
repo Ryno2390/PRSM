@@ -419,6 +419,65 @@ class GasStatusMonitor:
                 raise
 
 
+class InboundCheckpointStore:
+    """Sprint 543 — SQLite K/V keyed by recipient address that
+    persists ``InboundMonitor`` 's last-scanned-block across daemon
+    restart. Pre-sprint, an in-memory-only checkpoint meant any
+    inbound FTNS arriving during a daemon outage was never credited
+    to the off-chain wallet (Pattern A bridge correctness gap).
+
+    Schema is intentionally minimal: ``(address TEXT PRIMARY KEY,
+    last_scanned_block INTEGER NOT NULL)`` — one row per recipient.
+    File-mode (``db_path != ":memory:"``) creates the parent dir if
+    needed, matching the sprint-501 ``onchain_tx.db`` policy.
+    """
+
+    _SCHEMA = (
+        "CREATE TABLE IF NOT EXISTS inbound_checkpoints ("
+        "  address TEXT PRIMARY KEY,"
+        "  last_scanned_block INTEGER NOT NULL"
+        ")"
+    )
+
+    def __init__(self, db_path: str):
+        import sqlite3
+        from pathlib import Path
+        self._db_path = db_path
+        if db_path != ":memory:":
+            parent = Path(db_path).parent
+            if str(parent) and not parent.exists():
+                parent.mkdir(parents=True, exist_ok=True)
+        # ``check_same_thread=False`` so the monitor's async loop and
+        # tests can share the connection without sqlite's default
+        # thread-affinity check biting us. We serialize through a
+        # single connection — no concurrent writes from this class.
+        self._conn = sqlite3.connect(
+            db_path, check_same_thread=False,
+        )
+        self._conn.execute(self._SCHEMA)
+        self._conn.commit()
+
+    def get_last_scanned_block(self, address: str) -> Optional[int]:
+        row = self._conn.execute(
+            "SELECT last_scanned_block FROM inbound_checkpoints "
+            "WHERE address = ?",
+            (address,),
+        ).fetchone()
+        return row[0] if row else None
+
+    def set_last_scanned_block(
+        self, address: str, block_number: int,
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO inbound_checkpoints "
+            "(address, last_scanned_block) VALUES (?, ?) "
+            "ON CONFLICT(address) DO UPDATE SET "
+            "last_scanned_block = excluded.last_scanned_block",
+            (address, int(block_number)),
+        )
+        self._conn.commit()
+
+
 class InboundMonitor:
     """Sprint 514: periodic background poller for inbound FTNS.
 
@@ -435,7 +494,9 @@ class InboundMonitor:
     def __init__(self, ledger, interval_seconds: float = 60.0,
                  webhook_deliverer=None,
                  webhook_url=None, webhook_secret=None,
-                 local_ledger=None):
+                 local_ledger=None,
+                 checkpoint_store: Optional["InboundCheckpointStore"] = None,
+                 max_catchup_blocks: int = 100_000):
         self.ledger = ledger
         self.interval_seconds = interval_seconds
         self._webhook_deliverer = webhook_deliverer
@@ -451,6 +512,14 @@ class InboundMonitor:
         # is provided by sprint-501's onchain_tx.db (we check the
         # status before crediting).
         self._credited_tx_hashes: set = set()
+        # Sprint 543: optional persistent checkpoint store. When
+        # provided, ``_last_scanned_block`` is loaded from it on
+        # startup so catch-up scans recover deposits that arrived
+        # during daemon downtime. ``max_catchup_blocks`` clamps the
+        # restart catch-up window — chunking (sprint 542) handles
+        # the still-wide range RPC-side.
+        self._checkpoint_store = checkpoint_store
+        self._max_catchup_blocks = max_catchup_blocks
         self._last_scanned_block: Optional[int] = None
 
     async def _fire_webhook(self, transfer: dict) -> None:
@@ -501,15 +570,49 @@ class InboundMonitor:
                 "(non-fatal): %s", exc,
             )
             return
+        # Sprint 543: lazy-load persisted checkpoint on first tick.
+        # When the store has a value for our address, we resume scan
+        # coverage from there (catching up on deposits that arrived
+        # while the daemon was down). Otherwise behave like sprint
+        # 514: record current_block as the baseline + no scan.
+        if (
+            self._last_scanned_block is None
+            and self._checkpoint_store is not None
+        ):
+            persisted = self._checkpoint_store.get_last_scanned_block(
+                addr,
+            )
+            if persisted is not None:
+                self._last_scanned_block = persisted
         if self._last_scanned_block is None:
             self._last_scanned_block = current_block
+            if self._checkpoint_store is not None:
+                self._checkpoint_store.set_last_scanned_block(
+                    addr, current_block,
+                )
             return
         if current_block <= self._last_scanned_block:
             return
+        # Sprint 543: clamp the catch-up window so a very-stale
+        # checkpoint doesn't trigger an unbounded scan on restart.
+        # Sprint 542's chunker further splits the (still-large)
+        # window into RPC-sized sub-windows.
         scan_from = self._last_scanned_block + 1
         scan_to = current_block
+        if scan_to - scan_from + 1 > self._max_catchup_blocks:
+            clamped_from = scan_to - self._max_catchup_blocks + 1
+            logger.warning(
+                "inbound-monitor catch-up clamped: "
+                "would have scanned %d blocks since checkpoint %d, "
+                "scanning last %d blocks instead (max_catchup_blocks=%d). "
+                "Older missed deposits require manual /wallet/"
+                "transactions/onchain/inbound replay.",
+                scan_to - scan_from + 1, self._last_scanned_block,
+                self._max_catchup_blocks, self._max_catchup_blocks,
+            )
+            scan_from = clamped_from
         try:
-            transfers = scan_inbound_transfers(
+            transfers = scan_inbound_transfers_chunked(
                 token,
                 recipient=addr,
                 from_block=scan_from,
@@ -521,6 +624,10 @@ class InboundMonitor:
                 "(non-fatal): %s", exc,
             )
             self._last_scanned_block = current_block
+            if self._checkpoint_store is not None:
+                self._checkpoint_store.set_last_scanned_block(
+                    addr, current_block,
+                )
             return
         for t in transfers:
             logger.info(
@@ -550,6 +657,21 @@ class InboundMonitor:
                     "raised (non-fatal): %s", exc,
                 )
         self._last_scanned_block = current_block
+        # Sprint 543: persist after every tick that scanned anything.
+        # If the daemon crashes mid-tick the deposit-side dedup
+        # (sprint 540 _credited_tx_hashes + sprint 501 onchain_tx.db
+        # status check) still prevents double-credit on the next boot
+        # — the checkpoint just advances coverage forward.
+        if self._checkpoint_store is not None:
+            try:
+                self._checkpoint_store.set_last_scanned_block(
+                    addr, current_block,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "inbound-monitor checkpoint persist failed "
+                    "(non-fatal — next tick retries): %s", exc,
+                )
 
     async def _credit_deposit(self, transfer: dict) -> None:
         """Sprint 540 Pattern A: credit off-chain wallet on detected
