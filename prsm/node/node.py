@@ -4104,6 +4104,12 @@ class PRSMNode:
                 webhook_secret=os.environ.get(
                     "PRSM_WEBHOOK_SECRET", "",
                 ).strip() or None,
+                # Sprint 540 Pattern A: pass local_ledger so detected
+                # inbound transfers from linked addresses
+                # automatically credit off-chain balances. Bridge
+                # deposit flow operates as a daemon-side hook on the
+                # existing InboundMonitor — no new contract needed.
+                local_ledger=getattr(self, "ledger", None),
             )
             self._inbound_monitor_task = asyncio.create_task(
                 self._inbound_monitor.run_forever(),

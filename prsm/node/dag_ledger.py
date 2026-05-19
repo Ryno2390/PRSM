@@ -135,6 +135,9 @@ class TransactionType(str, Enum):
     TRANSFER = "transfer"
     APPROVAL = "approval"
     SYSTEM = "system"
+    # Sprint 540 Pattern A: daemon-mediated bridge tx types
+    BRIDGE_DEPOSIT = "bridge_deposit"
+    BRIDGE_WITHDRAW = "bridge_withdraw"
 
 
 @dataclass
@@ -282,10 +285,26 @@ class DAGLedger:
         wallet_cols = {row[1] async for row in cursor}
         if "public_key" not in wallet_cols:
             await self._db.execute("ALTER TABLE wallets ADD COLUMN public_key TEXT")
+        # Sprint 540 Pattern A: bridge linkage column
+        if "eth_address" not in wallet_cols:
+            await self._db.execute(
+                "ALTER TABLE wallets ADD COLUMN eth_address TEXT"
+            )
+            await self._db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "idx_dag_wallets_eth_address "
+                "ON wallets(eth_address) "
+                "WHERE eth_address IS NOT NULL"
+            )
 
         await self._db.commit()
 
     async def _create_tables(self) -> None:
+        # Note: `eth_address` column + its partial unique index are
+        # added in `_migrate_schema()` (runs after create_tables)
+        # to handle the legacy-DB upgrade path uniformly. Adding
+        # them here as part of CREATE TABLE on a fresh DB then
+        # ALTERing on existing DBs caused split-brain init paths.
         await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS wallets (
                 wallet_id TEXT PRIMARY KEY,
@@ -533,7 +552,65 @@ class DAGLedger:
     async def wallet_exists(self, wallet_id: str) -> bool:
         cursor = await self._db.execute("SELECT 1 FROM wallets WHERE wallet_id = ?", (wallet_id,))
         return await cursor.fetchone() is not None
-    
+
+    # ── Sprint 540 Pattern A: linked-address registry ────────────
+    # Mirrors LocalLedger's interface so InboundMonitor + the
+    # /wallet/deposit/* endpoints work against either ledger type.
+
+    async def link_eth_address(
+        self, wallet_id: str, eth_address: str,
+    ) -> None:
+        """Link an Ethereum address to a wallet_id for bridge deposits."""
+        if not wallet_id:
+            raise ValueError("wallet_id must be non-empty")
+        if not eth_address or not eth_address.startswith("0x"):
+            raise ValueError(
+                f"eth_address must be 0x-prefixed; got {eth_address!r}"
+            )
+        addr_norm = eth_address.lower()
+        # Ensure wallet row exists; DAGLedger doesn't have
+        # _ensure_wallet symmetric to LocalLedger, so use INSERT OR
+        # IGNORE.
+        await self._db.execute(
+            "INSERT OR IGNORE INTO wallets "
+            "(wallet_id, display_name, created_at) "
+            "VALUES (?, '', ?)",
+            (wallet_id, time.time()),
+        )
+        await self._db.execute(
+            "UPDATE wallets SET eth_address = NULL WHERE eth_address = ?",
+            (addr_norm,),
+        )
+        await self._db.execute(
+            "UPDATE wallets SET eth_address = ? WHERE wallet_id = ?",
+            (addr_norm, wallet_id),
+        )
+        await self._db.commit()
+
+    async def wallet_for_eth_address(
+        self, eth_address: str,
+    ) -> Optional[str]:
+        """Reverse lookup: which wallet_id is linked to this address?"""
+        if not eth_address:
+            return None
+        cursor = await self._db.execute(
+            "SELECT wallet_id FROM wallets WHERE eth_address = ?",
+            (eth_address.lower(),),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def eth_address_for_wallet(
+        self, wallet_id: str,
+    ) -> Optional[str]:
+        """Forward lookup: ETH address linked to this wallet."""
+        cursor = await self._db.execute(
+            "SELECT eth_address FROM wallets WHERE wallet_id = ?",
+            (wallet_id,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
     async def get_balance(self, wallet_id: str) -> float:
         """Get the current balance for a wallet (non-atomic read)."""
         cursor = await self._db.execute(

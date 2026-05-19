@@ -24,6 +24,12 @@ class TransactionType(str, Enum):
     STORAGE_REWARD = "storage_reward"
     CONTENT_ROYALTY = "content_royalty"
     TRANSFER = "transfer"
+    # Sprint 540 Pattern A — daemon-mediated bridge (no separate
+    # contract). DEPOSIT credits off-chain balance after detected
+    # on-chain inbound to escrow address; WITHDRAW debits off-chain
+    # before signing on-chain transfer out.
+    BRIDGE_DEPOSIT = "bridge_deposit"
+    BRIDGE_WITHDRAW = "bridge_withdraw"
 
 
 @dataclass
@@ -55,14 +61,41 @@ class LocalLedger:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._create_tables()
+        # Sprint 540 Pattern A migration: existing DBs predate the
+        # `eth_address` column. ALTER wrapped in try/except so
+        # post-migration init stays idempotent (same pattern as
+        # sprint-501 onchain_transactions + sprint-528 F43 fix).
+        try:
+            await self._db.execute(
+                "ALTER TABLE wallets ADD COLUMN eth_address TEXT"
+            )
+            await self._db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "idx_wallets_eth_address ON wallets(eth_address) "
+                "WHERE eth_address IS NOT NULL"
+            )
+            await self._db.commit()
+        except Exception:
+            pass  # column already exists
 
     async def _create_tables(self) -> None:
         await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS wallets (
-                wallet_id   TEXT PRIMARY KEY,
+                wallet_id    TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL DEFAULT '',
-                created_at  REAL NOT NULL
+                created_at   REAL NOT NULL,
+                -- Sprint 540 Pattern A: link to operator's on-chain
+                -- wallet for bridge deposit/withdraw flows. Nullable
+                -- — wallets without linkage stay off-chain-only.
+                -- Unique constraint enforced via index below (SQLite
+                -- doesn't allow inline UNIQUE on nullable columns
+                -- without extra tooling, so we use partial index).
+                eth_address  TEXT
             );
+            CREATE UNIQUE INDEX IF NOT EXISTS
+                idx_wallets_eth_address
+                ON wallets(eth_address)
+                WHERE eth_address IS NOT NULL;
 
             CREATE TABLE IF NOT EXISTS transactions (
                 tx_id       TEXT PRIMARY KEY,
@@ -197,6 +230,66 @@ class LocalLedger:
             "SELECT 1 FROM wallets WHERE wallet_id = ?", (wallet_id,)
         )
         return await cursor.fetchone() is not None
+
+    # ── Sprint 540 Pattern A: linked-address registry ────────────
+
+    async def link_eth_address(
+        self, wallet_id: str, eth_address: str,
+    ) -> None:
+        """Link an Ethereum-format address to a PRSM wallet_id.
+
+        Bridge deposits route inbound on-chain transfers from this
+        address into the wallet's off-chain balance. Each address
+        can be linked to at most ONE wallet_id (UNIQUE index).
+        Re-linking the same address to a different wallet replaces
+        the prior link.
+        """
+        if not wallet_id:
+            raise ValueError("wallet_id must be non-empty")
+        if not eth_address or not eth_address.startswith("0x"):
+            raise ValueError(
+                f"eth_address must be 0x-prefixed; got {eth_address!r}"
+            )
+        # Normalize: lowercase (we'll checksum on read paths)
+        addr_norm = eth_address.lower()
+        await self._ensure_wallet(wallet_id)
+        # Clear any existing link for this eth_address (move semantics)
+        await self._db.execute(
+            "UPDATE wallets SET eth_address = NULL WHERE eth_address = ?",
+            (addr_norm,),
+        )
+        await self._db.execute(
+            "UPDATE wallets SET eth_address = ? WHERE wallet_id = ?",
+            (addr_norm, wallet_id),
+        )
+        await self._db.commit()
+
+    async def wallet_for_eth_address(
+        self, eth_address: str,
+    ) -> Optional[str]:
+        """Reverse lookup: which wallet_id is linked to this ETH addr?
+
+        Returns None if no wallet is linked.
+        """
+        if not eth_address:
+            return None
+        cursor = await self._db.execute(
+            "SELECT wallet_id FROM wallets WHERE eth_address = ?",
+            (eth_address.lower(),),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def eth_address_for_wallet(
+        self, wallet_id: str,
+    ) -> Optional[str]:
+        """Forward lookup: ETH address linked to this wallet."""
+        cursor = await self._db.execute(
+            "SELECT eth_address FROM wallets WHERE wallet_id = ?",
+            (wallet_id,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
 
     # ── Balance ──────────────────────────────────────────────────
 

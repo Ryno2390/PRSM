@@ -810,6 +810,103 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             )
 
+    # ── Sprint 540 Pattern A — daemon-mediated bridge ─────────────
+    # Replaces the polygon_mumbai-era /bridge/* scaffold (deferred
+    # in sprint 539). Deposit: user signs on-chain transfer to
+    # operator's escrow address; InboundMonitor (sprint 514) detects
+    # + credits off-chain balance via linked-address registry.
+    # Withdraw: daemon debits off-chain + signs on-chain transfer
+    # out (sprint 541 follow-on).
+
+    @app.get("/wallet/deposit/info", tags=["wallet"])
+    async def get_deposit_info() -> Dict[str, Any]:
+        """Return the operator escrow address + linkage status.
+
+        Users deposit on-chain FTNS by signing an ERC-20 transfer
+        from THEIR wallet to the operator escrow address shown here.
+        InboundMonitor detects the inbound + credits the off-chain
+        balance of the wallet_id linked to the sender address.
+        """
+        ledger = getattr(node, "ftns_ledger", None)
+        local_ledger = getattr(node, "ledger", None)
+        identity = getattr(node, "identity", None)
+        if ledger is None or local_ledger is None or identity is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Deposit flow not initialized. Daemon must be "
+                    "started with FTNS_WALLET_PRIVATE_KEY set "
+                    "(escrow address derives from operator wallet) "
+                    "and LocalLedger initialized."
+                ),
+            )
+        escrow_addr = getattr(
+            ledger, "_connected_address", None,
+        )
+        if not escrow_addr:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Operator on-chain wallet not connected. "
+                    "FTNS_WALLET_PRIVATE_KEY may be unset."
+                ),
+            )
+        wallet_id = identity.node_id
+        linked_eth = await local_ledger.eth_address_for_wallet(
+            wallet_id,
+        )
+        return {
+            "escrow_address": escrow_addr,
+            "wallet_id": wallet_id,
+            "linked_eth_address": linked_eth,
+            "ftns_token_contract": ledger.contract_address,
+            "chain_id": ledger.chain_id,
+            "instructions": (
+                "1. Link your sending ETH address via "
+                "POST /wallet/deposit/link {wallet_id, "
+                "eth_address}. "
+                "2. From your linked address, sign an ERC-20 "
+                f"transfer of FTNS to {escrow_addr}. "
+                "3. Daemon's InboundMonitor will detect the "
+                "transfer + credit your off-chain balance "
+                "automatically."
+            ),
+        }
+
+    class _LinkEthAddressRequest(BaseModel):
+        wallet_id: str
+        eth_address: str
+
+    @app.post("/wallet/deposit/link", tags=["wallet"])
+    async def link_deposit_address(
+        body: _LinkEthAddressRequest,
+    ) -> Dict[str, Any]:
+        """Link an ETH address to a PRSM wallet_id for bridge deposits.
+
+        Future on-chain transfers FROM `eth_address` TO the operator
+        escrow address will credit `wallet_id`'s off-chain balance.
+        """
+        local_ledger = getattr(node, "ledger", None)
+        if local_ledger is None:
+            raise HTTPException(
+                status_code=503,
+                detail="LocalLedger not initialized.",
+            )
+        try:
+            await local_ledger.link_eth_address(
+                body.wallet_id, body.eth_address,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=str(exc),
+            )
+        return {
+            "wallet_id": body.wallet_id,
+            "eth_address": body.eth_address.lower(),
+            "status": "linked",
+        }
+
     @app.get("/balance")
     async def get_balance() -> Dict[str, Any]:
         """Get FTNS balance and recent transactions."""

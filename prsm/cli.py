@@ -6711,6 +6711,134 @@ def wallet_gas_status(api_url: str) -> None:
     console.print()
 
 
+@wallet.command("deposit-info")
+@click.option("--api-url", default=None, help="PRSM daemon API URL")
+def wallet_deposit_info(api_url: str) -> None:
+    """Show bridge deposit escrow address + linkage status.
+
+    Sprint 540 Pattern A: daemon-mediated bridge. Deposit on-chain
+    FTNS into your off-chain PRSM balance by:
+      1. Link your sending ETH address (prsm wallet link-address)
+      2. Sign an on-chain ERC-20 transfer to the escrow address
+      3. Daemon credits your off-chain balance after detected inbound
+    """
+    import httpx
+    url = _api_url_from_creds(api_url)
+    try:
+        r = httpx.get(f"{url}/wallet/deposit/info", timeout=10.0)
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+    if r.status_code == 503:
+        try:
+            detail = r.json().get("detail", "")
+        except Exception:
+            detail = r.text[:300]
+        console.print("❌ Deposit flow unavailable:", style="red")
+        console.print(f"   {detail}")
+        raise SystemExit(1)
+    if r.status_code != 200:
+        console.print(f"❌ HTTP {r.status_code}", style="red")
+        raise SystemExit(1)
+    d = r.json()
+    console.print("\n[bold]Bridge deposit info[/bold]")
+    console.print(f"  escrow address  : [bold]{d.get('escrow_address')}[/bold]")
+    console.print(f"  wallet_id       : {d.get('wallet_id')}")
+    linked = d.get("linked_eth_address")
+    if linked:
+        console.print(
+            f"  linked ETH addr : [green]{linked}[/green]"
+        )
+    else:
+        console.print(
+            "  linked ETH addr : [yellow]NOT LINKED[/yellow]"
+        )
+        console.print(
+            "\n  → Link an address first:",
+            style="dim",
+        )
+        console.print(
+            f"    prsm wallet link-address --eth-address 0x...",
+            style="cyan",
+        )
+    console.print(f"  FTNS contract   : {d.get('ftns_token_contract')}")
+    console.print(f"  chain_id        : {d.get('chain_id')}")
+    console.print()
+    console.print(f"[dim]{d.get('instructions', '')}[/dim]")
+    console.print()
+
+
+@wallet.command("link-address")
+@click.option(
+    "--eth-address", required=True,
+    help="0x-prefixed ETH address to link to your wallet_id",
+)
+@click.option(
+    "--wallet-id", default=None,
+    help="Wallet to link (default: this node's identity)",
+)
+@click.option("--api-url", default=None, help="PRSM daemon API URL")
+def wallet_link_address(
+    eth_address: str, wallet_id: str, api_url: str,
+) -> None:
+    """Link an ETH address for bridge deposits.
+
+    Inbound on-chain FTNS transfers FROM this address will credit
+    your off-chain wallet balance automatically (sprint 540).
+    """
+    import httpx
+    url = _api_url_from_creds(api_url)
+    # Default wallet_id to this node's identity if unset
+    if not wallet_id:
+        try:
+            info = httpx.get(
+                f"{url}/wallet/deposit/info", timeout=5.0,
+            ).json()
+            wallet_id = info.get("wallet_id")
+        except Exception:
+            console.print(
+                "❌ Could not auto-resolve wallet_id; pass "
+                "--wallet-id explicitly", style="red",
+            )
+            raise SystemExit(1)
+    try:
+        r = httpx.post(
+            f"{url}/wallet/deposit/link",
+            json={
+                "wallet_id": wallet_id,
+                "eth_address": eth_address,
+            },
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+    if r.status_code == 200:
+        d = r.json()
+        console.print(
+            f"✅ Linked [bold]{d['eth_address']}[/bold] → "
+            f"wallet_id [bold]{d['wallet_id']}[/bold]",
+            style="green",
+        )
+    elif r.status_code == 422:
+        console.print(
+            f"❌ Invalid input: {r.json().get('detail', '?')}",
+            style="red",
+        )
+        raise SystemExit(1)
+    elif r.status_code == 503:
+        console.print(
+            f"❌ Service unavailable: {r.json().get('detail', '?')}",
+            style="red",
+        )
+        raise SystemExit(1)
+    else:
+        console.print(
+            f"❌ HTTP {r.status_code}: {r.text[:200]}", style="red",
+        )
+        raise SystemExit(1)
+
+
 @wallet.command("claim")
 @click.option(
     "--network", "network_name",

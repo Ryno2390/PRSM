@@ -393,12 +393,23 @@ class InboundMonitor:
 
     def __init__(self, ledger, interval_seconds: float = 60.0,
                  webhook_deliverer=None,
-                 webhook_url=None, webhook_secret=None):
+                 webhook_url=None, webhook_secret=None,
+                 local_ledger=None):
         self.ledger = ledger
         self.interval_seconds = interval_seconds
         self._webhook_deliverer = webhook_deliverer
         self._webhook_url = webhook_url
         self._webhook_secret = webhook_secret
+        # Sprint 540 Pattern A: local_ledger reference so detected
+        # inbound transfers credit the linked off-chain wallet
+        # automatically. Optional — when None, monitor still logs
+        # + fires webhook but doesn't credit anywhere.
+        self._local_ledger = local_ledger
+        # Sprint 540: track already-credited tx_hashes within this
+        # process to dedup on retries. Persistence across restart
+        # is provided by sprint-501's onchain_tx.db (we check the
+        # status before crediting).
+        self._credited_tx_hashes: set = set()
         self._last_scanned_block: Optional[int] = None
 
     async def _fire_webhook(self, transfer: dict) -> None:
@@ -479,6 +490,17 @@ class InboundMonitor:
                 t.get("block_number"),
                 (t.get("tx_hash") or "?")[:18] + "…",
             )
+            # Sprint 540 Pattern A: credit off-chain wallet if the
+            # sender is a linked address (deposit flow). Runs BEFORE
+            # webhook so listeners see consistent state.
+            try:
+                await self._credit_deposit(t)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "inbound-monitor credit failed for tx %s "
+                    "(non-fatal — webhook still fires): %s",
+                    (t.get("tx_hash") or "?")[:18], exc,
+                )
             try:
                 await self._fire_webhook(t)
             except Exception as exc:  # noqa: BLE001
@@ -487,6 +509,62 @@ class InboundMonitor:
                     "raised (non-fatal): %s", exc,
                 )
         self._last_scanned_block = current_block
+
+    async def _credit_deposit(self, transfer: dict) -> None:
+        """Sprint 540 Pattern A: credit off-chain wallet on detected
+        inbound from a linked ETH address. No-op if local_ledger
+        wasn't passed at construction time."""
+        if self._local_ledger is None:
+            return
+        from_addr = transfer.get("from_address")
+        amount = transfer.get("amount_ftns", 0) or 0
+        tx_hash = transfer.get("tx_hash") or ""
+        if not from_addr or amount <= 0 or not tx_hash:
+            return
+        # Dedup: don't double-credit if we processed this tx already
+        # in this process lifetime
+        if tx_hash in self._credited_tx_hashes:
+            return
+        # Lookup linked wallet
+        wallet_id = await self._local_ledger.wallet_for_eth_address(
+            from_addr,
+        )
+        if wallet_id is None:
+            logger.info(
+                "Inbound from unlinked address %s — %.6f FTNS not "
+                "credited (link via /wallet/deposit/link). tx %s",
+                from_addr[:10] + "…",
+                amount,
+                tx_hash[:18] + "…",
+            )
+            return
+        # Credit. Description includes tx hash so the off-chain
+        # ledger entry is traceable to the on-chain TX.
+        from prsm.node.local_ledger import TransactionType
+        try:
+            await self._local_ledger.credit(
+                wallet_id=wallet_id,
+                amount=amount,
+                tx_type=TransactionType.BRIDGE_DEPOSIT,
+                description=(
+                    f"bridge deposit from {from_addr} tx={tx_hash}"
+                ),
+            )
+            self._credited_tx_hashes.add(tx_hash)
+            logger.info(
+                "Bridge deposit credited: %.6f FTNS to wallet=%s "
+                "(from %s, tx %s)",
+                amount, wallet_id[:18] + "…",
+                from_addr[:10] + "…", tx_hash[:18] + "…",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "bridge deposit credit raised — off-chain balance "
+                "NOT updated; manual reconciliation may be needed: "
+                "%s. tx=%s, from=%s, amount=%.6f, wallet=%s",
+                exc, tx_hash, from_addr, amount, wallet_id,
+            )
+            raise
 
     async def run_forever(self) -> None:
         import asyncio as _aio
