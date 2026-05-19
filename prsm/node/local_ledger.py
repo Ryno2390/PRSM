@@ -77,6 +77,25 @@ class LocalLedger:
             await self._db.commit()
         except Exception:
             pass  # column already exists
+        # Sprint 554 user-sig groundwork: per-wallet opt-in flag +
+        # monotonic nonce counter. Same idempotent-ALTER pattern as
+        # the sprint-540 eth_address column above.
+        try:
+            await self._db.execute(
+                "ALTER TABLE wallets ADD COLUMN "
+                "requires_user_signature INTEGER NOT NULL DEFAULT 0"
+            )
+            await self._db.commit()
+        except Exception:
+            pass
+        try:
+            await self._db.execute(
+                "ALTER TABLE wallets ADD COLUMN "
+                "next_withdraw_nonce INTEGER NOT NULL DEFAULT 0"
+            )
+            await self._db.commit()
+        except Exception:
+            pass
 
     async def _create_tables(self) -> None:
         await self._db.executescript("""
@@ -290,6 +309,69 @@ class LocalLedger:
         )
         row = await cursor.fetchone()
         return row[0] if row else None
+
+    # ── Sprint 554: per-wallet signature requirement + nonce ────
+
+    async def get_requires_user_signature(
+        self, wallet_id: str,
+    ) -> bool:
+        """Return True iff withdraws from this wallet require a
+        user-signed EIP-712 payload (sprint-556 enforcement)."""
+        cursor = await self._db.execute(
+            "SELECT requires_user_signature FROM wallets "
+            "WHERE wallet_id = ?",
+            (wallet_id,),
+        )
+        row = await cursor.fetchone()
+        return bool(row[0]) if row else False
+
+    async def set_requires_user_signature(
+        self, wallet_id: str, enabled: bool,
+    ) -> None:
+        """Toggle the per-wallet user-signature requirement."""
+        cursor = await self._db.execute(
+            "SELECT 1 FROM wallets WHERE wallet_id = ?", (wallet_id,),
+        )
+        if await cursor.fetchone() is None:
+            raise KeyError(f"unknown wallet {wallet_id!r}")
+        await self._db.execute(
+            "UPDATE wallets SET requires_user_signature = ? "
+            "WHERE wallet_id = ?",
+            (1 if enabled else 0, wallet_id),
+        )
+        await self._db.commit()
+
+    async def get_next_withdraw_nonce(
+        self, wallet_id: str,
+    ) -> int:
+        """Return the nonce expected on the NEXT signed withdraw.
+        Sprint-556 verification rejects payloads whose nonce doesn't
+        match this value."""
+        cursor = await self._db.execute(
+            "SELECT next_withdraw_nonce FROM wallets WHERE wallet_id = ?",
+            (wallet_id,),
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def bump_withdraw_nonce(self, wallet_id: str) -> int:
+        """Atomically consume the current nonce + advance the counter.
+        Returns the OLD value (the nonce the caller just used)."""
+        cursor = await self._db.execute(
+            "SELECT next_withdraw_nonce FROM wallets WHERE wallet_id = ?",
+            (wallet_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            raise KeyError(f"unknown wallet {wallet_id!r}")
+        old = int(row[0])
+        await self._db.execute(
+            "UPDATE wallets SET next_withdraw_nonce = ? "
+            "WHERE wallet_id = ?",
+            (old + 1, wallet_id),
+        )
+        await self._db.commit()
+        return old
 
     # ── Balance ──────────────────────────────────────────────────
 

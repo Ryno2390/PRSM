@@ -927,6 +927,48 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "status": "linked",
         }
 
+    # ──────────────────────────────────────────────────────────────
+    # Sprint 554 — per-wallet user-signature requirement toggle.
+    # First step in the user-sig arc (554/555/556/557): groundwork
+    # for sprint-556's EIP-712 enforcement at /wallet/withdraw.
+    # ──────────────────────────────────────────────────────────────
+    class _RequireSignatureRequest(BaseModel):
+        wallet_id: str
+        enabled: bool
+
+    @app.post("/wallet/require-signature", tags=["wallet"])
+    async def post_require_signature(
+        body: _RequireSignatureRequest,
+    ) -> Dict[str, Any]:
+        """Toggle the per-wallet user-signature requirement.
+
+        When enabled, sprint-556 enforces that POST /wallet/withdraw
+        carries a valid EIP-712 signature recovered to the wallet's
+        linked eth_address (sprint 540). When disabled (default),
+        withdraws use the legacy daemon-mediated flow.
+
+        Returns 200 with the new flag state; 404 when wallet_id is
+        unknown; 503 when the ledger isn't initialized.
+        """
+        ledger = getattr(node, "ledger", None)
+        if ledger is None:
+            raise HTTPException(
+                status_code=503,
+                detail="LocalLedger not initialized.",
+            )
+        try:
+            await ledger.set_requires_user_signature(
+                body.wallet_id, body.enabled,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404, detail=str(exc),
+            )
+        return {
+            "wallet_id": body.wallet_id,
+            "requires_user_signature": bool(body.enabled),
+        }
+
     # Sprint 541 — Pattern A withdraw half. Symmetric inverse of
     # deposit. Atomicity strategy: debit off-chain FIRST (pre-flight
     # balance check + ledger entry), THEN broadcast on-chain. If

@@ -296,6 +296,18 @@ class DAGLedger:
                 "ON wallets(eth_address) "
                 "WHERE eth_address IS NOT NULL"
             )
+        # Sprint 554 user-sig groundwork: per-wallet opt-in flag +
+        # monotonic withdraw nonce counter.
+        if "requires_user_signature" not in wallet_cols:
+            await self._db.execute(
+                "ALTER TABLE wallets ADD COLUMN "
+                "requires_user_signature INTEGER NOT NULL DEFAULT 0"
+            )
+        if "next_withdraw_nonce" not in wallet_cols:
+            await self._db.execute(
+                "ALTER TABLE wallets ADD COLUMN "
+                "next_withdraw_nonce INTEGER NOT NULL DEFAULT 0"
+            )
 
         await self._db.commit()
 
@@ -610,6 +622,65 @@ class DAGLedger:
         )
         row = await cursor.fetchone()
         return row[0] if row else None
+
+    # ── Sprint 554: per-wallet signature requirement + nonce ────
+
+    async def get_requires_user_signature(
+        self, wallet_id: str,
+    ) -> bool:
+        cursor = await self._db.execute(
+            "SELECT requires_user_signature FROM wallets "
+            "WHERE wallet_id = ?",
+            (wallet_id,),
+        )
+        row = await cursor.fetchone()
+        return bool(row[0]) if row else False
+
+    async def set_requires_user_signature(
+        self, wallet_id: str, enabled: bool,
+    ) -> None:
+        cursor = await self._db.execute(
+            "SELECT 1 FROM wallets WHERE wallet_id = ?", (wallet_id,),
+        )
+        if await cursor.fetchone() is None:
+            raise KeyError(f"unknown wallet {wallet_id!r}")
+        await self._db.execute(
+            "UPDATE wallets SET requires_user_signature = ? "
+            "WHERE wallet_id = ?",
+            (1 if enabled else 0, wallet_id),
+        )
+        await self._db.commit()
+
+    async def get_next_withdraw_nonce(
+        self, wallet_id: str,
+    ) -> int:
+        cursor = await self._db.execute(
+            "SELECT next_withdraw_nonce FROM wallets "
+            "WHERE wallet_id = ?",
+            (wallet_id,),
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def bump_withdraw_nonce(self, wallet_id: str) -> int:
+        """Atomically consume the current nonce + advance. Returns
+        the OLD value (the nonce the caller just used)."""
+        cursor = await self._db.execute(
+            "SELECT next_withdraw_nonce FROM wallets "
+            "WHERE wallet_id = ?",
+            (wallet_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            raise KeyError(f"unknown wallet {wallet_id!r}")
+        old = int(row[0])
+        await self._db.execute(
+            "UPDATE wallets SET next_withdraw_nonce = ? "
+            "WHERE wallet_id = ?",
+            (old + 1, wallet_id),
+        )
+        await self._db.commit()
+        return old
 
     async def get_balance(self, wallet_id: str) -> float:
         """Get the current balance for a wallet (non-atomic read)."""
