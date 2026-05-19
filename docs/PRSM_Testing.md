@@ -769,6 +769,102 @@ arc proved we need.
 
 ## Changelog
 
+- **2026-05-19 sprint 585 — §7-readiness aggregate operator preflight**.
+  `prsm node section7-readiness [--format text|json]` runs anchor + stake-bond
+  + rpc probes (sprints 581/583/584) in one shot, reports overall ready/not_ready
+  with per-component outcomes. Exit 0 only when all three ok — CI-gating-friendly.
+  Live-verified on Mac dev: rpc ok / anchor unset / stake_bond unset → not_ready.
+
+- **2026-05-19 sprint 584 — rpc-probe completes §7 preflight trifecta**.
+  Tests PRSM_BASE_RPC_URL reachability via eth_chainId JSON-RPC. Isolates
+  RPC issues from contract-address issues when 581/583 fail with
+  construction_failed. Live-verified Base mainnet: chain_id=0x2105 (8453 dec).
+
+- **2026-05-19 sprint 583 — stake-bond-probe operator preflight**. Mirror
+  of sprint-581 anchor-probe for PRSM_STAKE_BOND_ADDRESS (sprint 561).
+  Operators now have in-process preflight for BOTH §7 production-required
+  contract addresses.
+
+- **2026-05-19 sprint 582 — /health/detailed trust_stack subsystem**. REST
+  mirror of sprint-579 CLI; surfaces 4 Phase-1 env kinds via /health/detailed
+  for monitoring + MCP consumption. Informational only — not in core[], so
+  env typos can't flip top-level health to unhealthy.
+
+- **2026-05-19 sprint 581 — anchor-probe operator preflight CLI**. Probes
+  PublisherKeyAnchorClient construction in-process; reports anchor addr,
+  RPC URL, outcome (ok/unset/construction_failed). Exit 0/1 script-friendly.
+  Closes pre-581 feedback-loop gap ("set env, restart daemon, grep logs").
+
+- **2026-05-19 sprint 580 — _build_anchor_or_none module helper refactor**.
+  Extracted PublisherKeyAnchorClient construction from
+  _build_production_trust_stack_or_none to module-level helper. Single
+  source of truth; unblocks chain_executor Phase 2 (which needs anchor
+  independently). Bonus: caught regression in sprint-561 rpc_url scope
+  (NameError) + fixed.
+
+- **2026-05-19 sprint 579 — prsm node trust-stack observability CLI**.
+  Reads 4 Phase-1 env vars (sprints 558-562/576/577/578) + reports
+  effective kind, env_value, status (active_default / phase_2_pending /
+  unknown_fallback), valid choices, description. Rich table for text;
+  JSON for agents. Closes observability gap from the four-sprint plumbing arc.
+
+- **2026-05-19 sprint 578 — chain_executor env-driven plumbing**. Same
+  pattern as sprints 576/577. New _build_chain_executor(node) helper switches
+  on PRSM_PARALLAX_CHAIN_EXECUTOR_KIND: stub (default _StubChainExecutor) /
+  rpc (Phase 2 hook for make_rpc_chain_executor — falls back to stub) /
+  unknown (warns, stub fallback). **All four ParallaxScheduledExecutor
+  constructor args now have Phase 2 swap-in hooks** (trust_stack_kind /
+  profile_source / consensus_submitter / chain_executor).
+
+- **2026-05-19 sprint 577 — consensus_hook submitter env-driven plumbing**.
+  Mirror of sprint-576 for sprint-562's deferred consensus_hook. New
+  _build_consensus_submitter() switches on
+  PRSM_PARALLAX_CONSENSUS_SUBMITTER_KIND: logging (default) / onchain (Phase 2
+  hook — needs ChallengeRecord → Phase 7.1x ABI translation) / unknown.
+
+- **2026-05-19 sprint 576 — profile_source env-driven plumbing (Phase 1)**.
+  Refactored hardcoded InMemoryProfileSource(snapshots={}) in
+  _build_production_trust_stack_or_none to _build_inner_profile_source() that
+  switches on PRSM_PARALLAX_PROFILE_SOURCE_KIND: in_memory (default) / dht
+  (Phase 2 hook — falls back to in_memory) / unknown.
+
+- **2026-05-19 sprint 575 — F29 fix: dead bootstrap1 DNS replaced + auto-migration**.
+  User renamed bootstrap1→bootstrap-us in DigitalOcean+Cloudflare on 2026-05-19;
+  old hostname stopped resolving. Every new operator booting `prsm node start`
+  failed initial bootstrap on dead DNS. Updated defaults in 4 source paths
+  (prsm/node/config.py, prsm/node/discovery.py, prsm/interface/api/onboarding_router.py,
+  templates/onboarding/network.html). Added auto-migration in BOTH
+  _load_from_json_path AND _load_from_yaml_path so existing operators get
+  redirected on next `prsm node start` without manual config edit.
+
+- **2026-05-19 sprint 574 — fleet-ops CLI quartet (peers/dial/fetch/share)**.
+  Multi-host bench (sprints 564-573) made cross-host content xfer work
+  end-to-end + auto-dial. Operators previously needed curl/python gymnastics
+  to inspect fleet state + move content. Sprint 574: enhanced
+  `prsm node peers` (now shows connected + known-but-unconnected); new
+  `prsm node dial <addr>`, `prsm node fetch <cid>`, `prsm node share <file>`.
+  Followup `9b74b575`: PRSM_API_PORT env override (operators on non-default ports).
+  Live-verified cross-host: Mac `share` → droplet `peers` shows Mac inbound →
+  droplet `fetch` returns byte-identical content.
+
+- **2026-05-19 sprint 573 — auto-dial sweep after bootstrap hydration**.
+  Closes sprint-567 gap 2 + completes multi-host autoconnect. Pre-573:
+  bootstrap returned peers → known_peers populated but transport.peers stayed
+  empty until operator manually POSTed /peers/connect. Sprint 573:
+  _auto_dial_sweep() runs post-hydration, dials each unconnected non-self
+  non-bogus peer (skips 0.0.0.0:* per sprint-570 F28 carryover). Live-verified:
+  Mac daemon restart with NO manual /peers/connect → post-startup connected=1
+  against droplet at correct external IP.
+
+- **2026-05-19 sprint 572 — F24 fix: TransactionType.REWARD enum member**.
+  Three production call sites (bittorrent_provider seeder loop, node.mint_tokens,
+  bittorrent_proofs.award_seeder) credited via TransactionType.REWARD — but enum
+  had no REWARD member in either local_ledger or dag_ledger. Hourly log spam
+  on droplet for 3 days since sprint 458/459 deploy; real reward credits silently
+  no-op'd. Added REWARD = "reward" to both enums (parity). Live-verified: post-deploy
+  droplet journal silent on Reward loop errors; FTNS Balance climbed 100.00 → 100.02
+  (first successful credit landed).
+
 - **2026-05-19 sprint 571 — FIRST BIDIRECTIONAL LIVE CROSS-HOST CONTENT
   EXCHANGE in PRSM history + F27 (connection persistence) closed as
   incidental side-effect of sprint-570 F28 fix**. After droplet deploy
