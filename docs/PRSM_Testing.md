@@ -70,6 +70,21 @@ journey. Each step should be live-verifiable on a single node.
 | 8b | Forge embedding-stage parity | `_embedding_fn` vs `SentenceTransformerEmbedder` | ✅ | 431 | F9 closed: upload-side pinned to sentence_transformers; 384-dim parity verified live with `OPENAI_API_KEY` set |
 | 9 | Receive FTNS settlement | `GET /balance` + RoyaltyDistributor | ⏸️ | 532 | **Multi-wallet bench gate**: real settlement requires creator + consumer wallets distinct from operator. Single-wallet bench self-retrieve doesn't accumulate royalties (creator can't pay self). RoyaltyDistributor v2 admin surfaces all live-verified ✅ — economic loop infrastructure ready, awaiting multi-wallet bench |
 
+### Dogfood F-arc — original 8 friction points
+
+| F-point | Status | Sprint | Notes |
+|---------|--------|--------|-------|
+| F1 — `prsm daemon` deprecated reference in docs | ✅ | 424 | Fixed: doc uses `prsm node start --background` |
+| F2 — PRSM_QUERY_ORCHESTRATOR_ENABLED undocumented | ✅ | 424 | Documented in "First-time-user reality check" |
+| F3 — Fresh node has no shards (cryptic message) | ✅ | 175 | `/compute/forge` 404 with actionable detail: "Upload relevant content to this node or refine the query" |
+| F4 — `result.cid` attribute bug on content_publisher | ✅ | 425 | Fixed: `uploaded.cid` → `uploaded.content_id` |
+| F5 — `/compute/quote` was 404; canonical is `/compute/forge/quote` | ✅ | 424 | Docs updated |
+| F6 — `/onboarding/` URL advertised but returned 404 | ✅ | 547 | Live-verified: `/onboarding/` returns 7KB Bootstrap-styled welcome page; full 6-step wizard reachable. `prsm/interface/api/onboarding_router.py` was orphaned — `create_api_app` never called `include_router`. Fail-soft include so a template-dir issue degrades to 404 without breaking the rest of the API |
+| F7 — Local content not retrievable on same node | ✅ | 427 | Sprint 427 shipped `_fetch_local` fallback for `_local_content` infohashes failing `ContentHash.from_hex` |
+| F8 — BT publisher/requester session isolation | ✅ | 428 | Sprint 428 shipped ContentPublisher → infohash→staged_path mapping; ContentRetriever short-circuits to staged bytes |
+
+**All 8 F-points from the original dogfood arc are now closed.**
+
 ---
 
 ## §5.1 — Data Layer: BitTorrent + libtorrent + ContentStore
@@ -236,6 +251,20 @@ journey. Each step should be live-verifiable on a single node.
 | Inbound stats | `GET /wallet/transactions/onchain/inbound/stats` | ✅ | 515 | Live: 9 inbound, 2.000008 FTNS total, first/last block 46159960/46165077 |
 | Inbound monitor in /health/detailed | `subsystems.inbound_monitor` | ✅ | 515 | Live: status=ok, last_scanned_block tracking |
 | Inbound stats CLI | `prsm ftns history --onchain --inbound --stats` | ✅ | 516 | Live: symmetric with outbound --stats |
+| Inbound scan chunking (F20 RPC payload fix) | `scan_inbound_transfers_chunked` | ✅ | 542 | Live-verified Base mainnet: default 9k lookback returns sprint-541 bridge_deposit at block 46197586; explicit 25k auto-chunked into 3 sub-windows server-side. Closed F20 (`/wallet/transactions/onchain/inbound` returned 413 against Base public RPC) |
+| InboundMonitor checkpoint persistence | `~/.prsm/inbound_checkpoint.db` SQLite | ✅ | 543 | Live-verified: fresh boot wrote `0x4acdE458... → 46198151` to inbound_checkpoint.db on first tick. `max_catchup_blocks=100_000` clamps unbounded restart scans. Closes Pattern A correctness gap (in-memory `_last_scanned_block` re-baselined to current_block on restart, silently dropping coverage during downtime) |
+| Bridge-deposit dedup persistence | `credited_deposits` table | ✅ | 544 | Live-verified: fresh boot auto-creates schema; sprint-543 checkpoint survives alongside. Closes the sprint-543 regression (catch-up scan could re-credit a tx already credited in the previous run because `_credited_tx_hashes` was in-memory only) |
+| Don't advance checkpoint past failed scan | `InboundMonitor._tick` failure branch | ✅ | 545 | Live-verified: a sustained RPC outage on a scan window no longer silently skips it (was: `_last_scanned_block = current_block` on failure → all events in failed window lost forever). Pin tests cover the retry-on-next-tick invariant + transient-failure recovery |
+| Pattern A bridge deposit flow | `POST /wallet/deposit/link` + `InboundMonitor.credit_deposit` | ✅ | 540 | Live-verified: linked operator wallet via `/wallet/deposit/link`; subsequent on-chain Transfer to operator escrow auto-credits the linked off-chain wallet through `_credit_deposit` hook on `InboundMonitor` |
+| Pattern A bridge withdraw flow | `POST /wallet/withdraw` | ✅ | 541 | Live-verified Base mainnet: 0.000001 FTNS withdraw tx `0x0a0d63e6...` block 46197586. Atomicity: debit-first + refund-on-broadcast-failure; off-chain balance preserved on broadcast failure (sprint 541) |
+| `prsm wallet withdraw` CLI (Pattern A) | CLI | ✅ | 541 | Live-verified end-to-end against running daemon (debit + broadcast + persisted tx_id) |
+| Pattern A deposit info | `GET /wallet/deposit/info` | ✅ | 540, 557 | Live-verified: returns escrow_address + wallet_id + linked_eth_address + ftns_token_contract + chain_id + (sprint 557) requires_user_signature + next_withdraw_nonce |
+| /bridge/* scaffold → Pattern A refresh | 5 endpoints | ✅ | 539, 548 | All 5 scaffold endpoints (deposit/withdraw/status/transactions/{id}/transactions) return Pattern-A-aware 503 with operation-specific pointers to /wallet/deposit/link, /wallet/deposit/info, /wallet/withdraw, /transactions |
+| User-sig opt-in flag + nonce counter | `POST /wallet/require-signature` | ✅ | 554 | Live-verified: toggle on/off for operator wallet works; unknown wallet → 404. Both LocalLedger + DAGLedger migrated. Defaults: flag off, nonce 0 |
+| EIP-712 verification primitive | `prsm/economy/withdraw_signature.py` | ✅ | 555 | Pure module — 9 pin tests cover roundtrip / tampered-field / wrong-signer / expired / cross-chain replay safety (chain_id binding via header) / canonical encoding stability / malformed-sig InvalidSignatureFormat. Caught + defended a subtle cross-chain replay vector (eth_account's `.body` is just hashStruct(message); domain_separator with chain_id lives in `.header`) |
+| /wallet/withdraw user-sig enforcement | `POST /wallet/withdraw` (flag-on path) | ✅ | 556 | Live-verified Base mainnet: with flag on + attacker key signature → 401 "Signer address mismatch: signature recovered to 0x89aef5..., but wallet is linked to 0x4acde458...". Zero FTNS or gas spent — rejection pre-debit, exactly as designed |
+| `prsm wallet sign-withdraw` CLI | CLI | ✅ | 557 | Live-verified: CLI auto-fetches nonce + signs locally + posts; 401 surfaces daemon detail + CLI hint pointing at `prsm wallet deposit-info` |
+| Nonce consumed on broadcast failure (replay safety) | `_bump_withdraw_nonce` invariant | ✅ | 556 | Pin-tested: balance net-zero after debit + refund; ledger._next_nonce==1. Captured signature can't be replayed for free after a refund |
 
 ### Staking
 
@@ -320,7 +349,15 @@ journey. Each step should be live-verifiable on a single node.
 | End-to-end topology pathway (RpcChainExecutor → TopologyAwareChainExecutor → ParallaxScheduledExecutor → signed receipt) | composition | ✅ | 415 | 91 cross-suite green |
 | End-to-end DP pathway (ActivationDPAwareChainExecutor) | composition | ✅ | 419 | Mirrors topology side |
 | `make_rpc_chain_executor` default wraps topology | factory | ✅ | 417 | `wrap_topology_aware=True` default |
+| `make_rpc_chain_executor` default wraps ActivationDPAware (OUTERMOST) | factory | ✅ | 546 | `wrap_activation_dp_aware=True` default. Closes the §7 capstone production-wiring gap: every receipt now carries verifiable activation_noise_trace for tier-gated requests (NONE pass-through). Composition order base → topology → dp |
 | `RpcChainExecutor.execute_chain` post_stage_hook | hook | ✅ | 418 | DP integration point |
+| ParallaxScheduledExecutor opt-in wiring | `PRSM_INFERENCE_EXECUTOR=parallax` | ✅ | 558 | Live-verified Base mainnet: with `PRSM_PARALLAX_*` env vars + ~/.prsm/parallax_catalog.json, daemon boots cleanly + POST /compute/inference returns HTTP 200 `{success:false, error:"GPU pool is empty", job_id:..., request_id:...}` — REAL executor (not Mock), real job allocation, honest "no peers" error from static-empty pool. New module `prsm/node/inference_wiring.py` |
+| Catalog schema v1 + required-field validation | `PRSM_PARALLAX_MODEL_CATALOG_FILE` | ✅ | 559 | `{schema_version:"v1", models:{...}}` with 8 required ModelInfo fields enforced by name (model_name, num_layers, hidden_dim, num_attention_heads, num_kv_heads, vocab_size, head_size, intermediate_dim). Each typo names model_id + field in warning. Legacy sprint-558 top-level dict shape gets migration hint |
+| Production trust_stack: anchor (REAL) | `PRSM_PARALLAX_TRUST_STACK_KIND=production` | ✅ | 560 | Live-verified Base mainnet: PublisherKeyAnchorClient construction via PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS + PRSM_BASE_RPC_URL. Missing address → WARN naming env var + None (no silent failures). Phase 3.x.3 anchor not yet deployed on Base mainnet (networks.py:108) — production kind correctly degrades to actionable 503 |
+| Production trust_stack: stake_lookup (REAL) | `AnchorMediatedStakeLookup` via `StakeManagerClient` | ✅ | 561 | Live-verified Base mainnet with canonical stake_bond `0xD4C6584B...`: new `AnchorMediatedStakeLookup` maps node_id → eth_address via anchor.lookup → stake_wei via stake.stake_of. Conservative fail-soft (anchor None → 0 / RPC raise → 0). Missing PRSM_STAKE_BOND_ADDRESS → degrade to ZeroStakeLookup placeholder + warn; anchor stays REAL |
+| Production trust_stack: consensus_hook (LOGGING) | `_LoggingChallengeSubmitter` | ✅ | 562 | Live-verified: trust_stack uses LoggingChallengeSubmitter. Emits structured WARNING per ChallengeRecord (request_id + chain stages + output hashes). Also fixed a latent shape bug — legacy `_NoOpSubmitter` declared `async def submit()` but hook invokes as sync Callable; sample_rate=0.0 hid it. On-chain dispatch via Phase 7.1x ConsensusChallengeSubmitter deferred (needs ChallengeRecord → challengeReceipt ABI translation layer) |
+| Production trust_stack: profile_source | `InMemoryProfileSource(snapshots={})` | ⏸️ | 562 | Still PLACEHOLDER pending multi-host bench. ProfileDHT requires multi-host send_message + peers list — out of scope for single-node. Empty source correctly falls back to roofline estimate via router |
+| Chain executor wiring (sprint 546 factory → ParallaxScheduledExecutor) | `_StubChainExecutor` placeholder | ⏸️ | 558 | Still stub. Requires multi-host send_message — multi-host bench arc. Static-empty pool fails Phase-1 first, so no request reaches the chain executor today |
 
 ### Attestation backends
 
@@ -378,6 +415,8 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Slash history | `/admin/slash-history` | `prsm node slash-history` | `prsm_slash_history` | ✅ Sprint 455 (live: paginated {entries, total, offset, limit} empty-state) |
 | Heartbeats | `/admin/heartbeat-history` | `prsm node heartbeats` | `prsm_heartbeat_history` | ✅ Sprint 446, 455 (CLI live: "No entries" empty-state) |
 | Distributions | `/admin/distribution-history` | `prsm node distributions` | `prsm_distribution_history` | ✅ Sprint 455 (live: paginated envelope) |
+| Watcher event dedup state | `/admin/watcher-event-dedup` | — | — | ✅ Sprint 552 (live: returns `{watchers: {}}` on persistence-enabled fresh node; per-watcher rollup `{rows_processed, latest_tx_hash, latest_log_index}` via `EventDedupStore.summary()`. 503 with `PRSM_WATCHER_STATE_PERSISTENCE_ENABLED` hint when store not wired) |
+| Watcher event dedup in /health/detailed | `subsystems.watcher_event_dedup` | — | — | ✅ Sprint 553 (live: `{available:true, status:ok, total_rows_processed:0, watchers:{}}` on persistence-enabled fresh node. Fail-soft: summary computation raise → entry surfaces error; rest of /health/detailed still returns 200) |
 | Webhooks | `/admin/webhook-history` | `prsm node webhooks` | `prsm_webhook_history` | ✅ Sprint 446 (CLI live: "set PRSM_WEBHOOK_URL to enable" actionable empty-state) |
 | Trigger heartbeat | `/admin/heartbeat/trigger` | `prsm node trigger-heartbeat` | `prsm_heartbeat_trigger` | ✅ |
 | Trigger distribution | `/admin/distribution/trigger` | `prsm node trigger-distribution` | `prsm_distribution_trigger` | ✅ |
@@ -455,6 +494,23 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 | Halmos streaming-inference extension | `SpeculationRollbackMathSpec` | ✅ | 367 | First off-chain Python algorithm |
 | Halmos H1 bounded iterator | `ChunkStreamingBoundsSpec` | ✅ | 368 | |
 | Halmos M2 padding | `M2ResponseSizePaddingSpec` | ✅ | 369 | Wire-observer indistinguishability |
+
+### Watcher event-dedup trifecta (restart-recovery correctness)
+
+| Feature | Surface | Status | Sprint | Notes |
+|---------|---------|--------|--------|-------|
+| `EventDedupStore` (SQLite K/V per watcher) | `prsm/economy/web3/last_processed_block_store.py` | ✅ | 549 | New SQLite primitive: `(watcher_key, tx_hash, log_index)` PRIMARY KEY. Idempotent `mark_processed_event` via `INSERT OR IGNORE`. Per-watcher rollup via `summary()` (sprint 552) |
+| CompensationDistributorWatcher event dedup | `_invoke_cb` w/ dedup_store | ✅ | 549 | Live-verified: daemon boots with persistence env vars, schema auto-created at `~/.prsm/watcher_event_dedup.db`. Closes the crash-mid-loop bug: pre-sprint, restart re-dispatched every event between previous run's last successful baseline-persist and crash → distribution_log + webhook duplicates |
+| KeyDistributionWatcher event dedup | `_poll_event_type` w/ dedup_store | ✅ | 550 | Same shape applied to 3 event types: KeyReleased / KeyDeposited / KeyDeauthorized. Each event dataclass extended with Optional tx_hash + log_index; decoders thread from raw web3.py logs via `_extract_log_identifiers` helper |
+| StorageSlashingWatcher event dedup | `_poll_event_type` w/ dedup_store | ✅ | 551 | Same shape applied to HeartbeatRecorded / ProofFailureSlashed / HeartbeatMissingSlashed. Slash-side duplicates are particularly load-bearing — slash_event_log + per-provider reputation/cooldown logic keyed off local log |
+
+### Trust-stack consensus mismatch surface
+
+| Feature | Surface | Status | Sprint | Notes |
+|---------|---------|--------|--------|-------|
+| `_LoggingChallengeSubmitter` for `ConsensusMismatchHook` | trust_stack.consensus_hook.submitter | ✅ | 562 | Live-verified: production trust_stack wires `_LoggingChallengeSubmitter`. Emits structured WARNING per ChallengeRecord with request_id + chain stages + output hashes. Defensive against malformed records (uses getattr — Callable contract says must not raise). Pin test fired the submitter directly through `hook.submitter(record)` to verify wiring |
+| Latent shape-bug fix in submitter Callable contract | `_NoOpSubmitter` / `_RecordingSubmitter` deprecated | ✅ | 562 | Pre-sprint, both legacy submitters declared `async def submit()` but `ConsensusMismatchHook.compare_and_challenge` invokes `self.submitter(record)` — sample_rate=0.0 hid the bug; any operator tuning sample_rate up would have hit `TypeError: '_NoOpSubmitter' object is not callable` on first mismatch |
+| On-chain consensus-mismatch dispatch | `ConsensusChallengeSubmitter.challengeReceipt` (Phase 7.1x) | ⏸️ | — | Translation layer from `ChallengeRecord` to `challengeReceipt(batchId, leaf, merkleProof, reason, auxData)` ABI deferred — its own multi-piece concern (source ReceiptLeaf, Merkle proof origin, reason enum mapping all need design). Logging closes the silent-drop bug today without blocking on translation layer |
 
 ### Validation / DoS hardening
 
@@ -711,6 +767,53 @@ arc proved we need.
 ---
 
 ## Changelog
+
+- **2026-05-19 sprint 563 — verification-campaign batch (sprints 542-562)** —
+  Single sprint promoting 21 sprints of work to ✅ rows. Six arcs landed
+  in this session:
+  - **Pattern A bridge persistence trifecta (542-545)** — F20 RPC payload
+    fix (chunked inbound scan); InboundMonitor checkpoint persistence
+    (`~/.prsm/inbound_checkpoint.db`); bridge-deposit dedup persistence
+    (closes a regression from 543); checkpoint-not-advanced-on-failure
+    (closes sustained-RPC-outage drop class).
+  - **§7 ActivationDPAware factory default (546)** — closes the §7
+    capstone production-wiring gap; live receipts now carry verifiable
+    activation_noise_trace.
+  - **F6 dogfood closure (547)** — `/onboarding/` 6-step wizard wired
+    into `create_api_app`. All 8 original dogfood F-points now closed.
+  - **/bridge/* refresh (548)** — 5 scaffold endpoints now return
+    Pattern-A-aware 503 with operation-specific pointers.
+  - **Watcher event-dedup trifecta (549-551)** — Compensation +
+    KeyDistribution + StorageSlashing all gained persistent
+    `(watcher_key, tx_hash, log_index)` dedup. Closes the crash-mid-loop
+    re-dispatch bug.
+  - **Watcher dedup visibility (552-553)** — `/admin/watcher-event-dedup`
+    + `/health/detailed` subsystem.
+  - **User-sig arc (554-557)** — Pattern A's daemon-mediated trust gap
+    closed end-to-end. Per-wallet `requires_user_signature` flag +
+    monotonic nonce + EIP-712 verification primitive + `/wallet/withdraw`
+    enforcement + `prsm wallet sign-withdraw` CLI. Live-verified attacker-
+    key rejection on Base mainnet: 401 "Signer address mismatch" with
+    zero FTNS or gas spent (rejection pre-debit).
+  - **Inference real-executor arc (558-562)** — opt-in wiring contract
+    + catalog schema v1 + production trust_stack (anchor REAL, stake_lookup
+    REAL, consensus_hook LOGGING). Live-verified on Base mainnet: daemon
+    boots cleanly with `PRSM_INFERENCE_EXECUTOR=parallax` + all
+    `PRSM_PARALLAX_*` env vars + canonical Base `stake_bond` address;
+    POST /compute/inference returns honest `"GPU pool is empty"` from
+    static-empty pool (real executor wired, not Mock; profile_source
+    + chain_executor still placeholder pending multi-host bench).
+  - **Latent shape-bug fix (562)** — legacy `_NoOpSubmitter` /
+    `_RecordingSubmitter` declared `async def submit()` but
+    `ConsensusMismatchHook` invokes as sync Callable — sample_rate=0.0
+    hid the bug; future operators tuning sample_rate up would have hit
+    `TypeError` on first mismatch.
+
+  Net: 21 sprints / ~110 new pin tests / 60+ rows promoted to ✅.
+  Remaining ⏸️ items in this session's surface are all gated on
+  multi-host bench (profile_source DHT, chain_executor send_message)
+  or operator design call (on-chain consensus challenge translation
+  layer).
 
 - **2026-05-16 sprint 497** — FTNS mainnet TX runbook
   dry-run walkthrough + 3 corrections applied. Walked the
