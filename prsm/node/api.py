@@ -421,6 +421,26 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         servers=[{"url": _default_server, "description": "PRSM node"}],
     )
 
+    # Sprint 547 — wire the interactive operator onboarding wizard
+    # (prsm/interface/api/onboarding_router.py). User-perspective
+    # dogfood arc sprint 424 surfaced F6: node-start log advertised
+    # the /onboarding/ URL but the path returned 404 because the
+    # router existed in the tree but was never included in the
+    # FastAPI app. Include happens fail-soft — a missing template
+    # dir or pydantic mismatch on import shouldn't break the rest
+    # of the API surface.
+    try:
+        from prsm.interface.api.onboarding_router import (
+            router as _onboarding_router,
+        )
+        app.include_router(_onboarding_router)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Sprint 547: onboarding router include failed (%s); "
+            "/onboarding/* will return 404. Non-fatal — the rest "
+            "of the API surface still works.", exc,
+        )
+
     # Audit log middleware (ships 2026-05-09). Records every
     # non-GET request to the in-process ring buffer for operator
     # review via /audit/recent. GET excluded so the buffer stays
