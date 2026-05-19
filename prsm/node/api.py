@@ -14032,6 +14032,76 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         completed_at: Optional[str]
         error_message: Optional[str]
 
+    # ──────────────────────────────────────────────────────────────
+    # Sprint 548 — /bridge/* scaffold refresh.
+    #
+    # The 5 /bridge/* endpoints target a polygon_mumbai-era scaffold
+    # with no Base-mainnet bridge contract deployed (sprint 539
+    # investigation). Sprints 540 + 541 then shipped Pattern A —
+    # daemon-mediated bridge — exposing exactly the missing
+    # operations under /wallet/deposit/* + /wallet/withdraw.
+    # Helper builds operation-specific 503 messages so operators
+    # hitting the scaffold get the right working endpoint name.
+    # ──────────────────────────────────────────────────────────────
+    def _bridge_scaffold_503_detail(operation: str) -> str:
+        """Build a Pattern-A-aware 503 detail body for a scaffold
+        /bridge/* endpoint.
+
+        ``operation`` selects the operation-specific working endpoint:
+          "deposit"   → /wallet/deposit/link + /wallet/deposit/info
+          "withdraw"  → /wallet/withdraw
+          "status"    → /wallet/deposit/info + /transactions
+          "tx_lookup" → /transactions
+          "tx_list"   → /transactions
+        """
+        base = (
+            "FTNS bridge endpoints are SCAFFOLD-ONLY in current PRSM "
+            "builds. The FTNSBridge module "
+            "(prsm/economy/blockchain/ftns_bridge.py) targets "
+            "polygon_mumbai-era contracts; no bridge contract is "
+            "deployed on Base mainnet. **Pattern A** "
+            "(daemon-mediated bridge, sprints 540 + 541) is the "
+            "current production-ready bridge surface — no separate "
+            "contract; the daemon owns the on-chain wallet + the "
+            "off-chain ledger and reconciles via InboundMonitor + "
+            "_credit_deposit (deposits) and a debit-first / refund-"
+            "on-failure broadcast path (withdrawals)."
+        )
+        per_op = {
+            "deposit": (
+                " For this operation use POST `/wallet/deposit/link` "
+                "(one-time linkage of your eth address) followed by "
+                "an on-chain Transfer to the daemon's escrow "
+                "address shown in GET `/wallet/deposit/info` — the "
+                "InboundMonitor auto-credits your off-chain wallet."
+            ),
+            "withdraw": (
+                " For this operation use POST `/wallet/withdraw` "
+                "(direct broadcast: off-chain debit FIRST, then "
+                "on-chain Transfer; refund on broadcast failure)."
+            ),
+            "status": (
+                " For linkage + escrow status use GET "
+                "`/wallet/deposit/info`; for bridge transaction "
+                "history use GET `/transactions` (rows with type "
+                "`bridge_deposit` / `bridge_withdraw`)."
+            ),
+            "tx_lookup": (
+                " For bridge transaction lookup use GET "
+                "`/transactions` — Pattern A records each bridge "
+                "leg in the off-chain ledger with type "
+                "`bridge_deposit` / `bridge_withdraw` and includes "
+                "the on-chain tx hash in the description."
+            ),
+            "tx_list": (
+                " For bridge transaction history use GET "
+                "`/transactions?limit=N` — Pattern A records each "
+                "bridge leg as `bridge_deposit` / `bridge_withdraw` "
+                "in the off-chain ledger."
+            ),
+        }
+        return base + per_op.get(operation, "")
+
     @app.post("/bridge/deposit", tags=["bridge"])
     async def bridge_deposit(request: BridgeDepositRequest) -> Dict[str, Any]:
         """
@@ -14051,45 +14121,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 500: If bridge operation fails
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
-            # Sprint 539: investigation found that FTNSBridge is
-            # pre-Base-mainnet scaffold code (defaults to network=
-            # polygon_mumbai, ContractManager only knows Polygon/
-            # Sepolia, no deployed bridge contract exists on any
-            # network). The bridge concept is fulfilled in current
-            # PRSM by two paths:
-            #   1. /wallet/transfer/onchain (operator-initiated
-            #      same-chain FTNS moves)
-            #   2. RoyaltyDispatcher (automatic off-chain → on-chain
-            #      payouts to content creators)
-            # See /admin/royalty-dispatch-summary for current
-            # dispatcher state. The /bridge/* endpoints are kept as
-            # API stubs for future bridge contract deployment; they
-            # are intentionally not wired in this build.
             raise HTTPException(
                 status_code=503,
-                detail=(
-                    "FTNS bridge endpoints are SCAFFOLD-ONLY in "
-                    "current PRSM builds. The FTNSBridge module "
-                    "(prsm/economy/blockchain/ftns_bridge.py) targets "
-                    "polygon_mumbai-era contracts; no bridge contract "
-                    "is deployed on Base mainnet. The functionally "
-                    "equivalent flows on current PRSM are: "
-                    "(a) `/wallet/transfer/onchain` for operator-"
-                    "initiated FTNS moves; "
-                    "(b) `/admin/royalty-dispatch-summary` for "
-                    "automatic off-chain → on-chain creator payouts. "
-                    "Track sprint-X bridge re-implementation against "
-                    "Base mainnet."
-                ),
+                detail=_bridge_scaffold_503_detail("deposit"),
             )
-        
+
         if not node.identity:
             raise HTTPException(status_code=503, detail="Node identity not initialized")
-        
+
         try:
             # Convert amount to wei (assuming 18 decimals like ETH)
             amount_wei = int(request.amount * 10**18)
-            
+
             # Execute deposit
             tx = await node.ftns_bridge.deposit_to_chain(
                 user_id=node.identity.node_id,
@@ -14136,45 +14179,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 500: If bridge operation fails
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
-            # Sprint 539: investigation found that FTNSBridge is
-            # pre-Base-mainnet scaffold code (defaults to network=
-            # polygon_mumbai, ContractManager only knows Polygon/
-            # Sepolia, no deployed bridge contract exists on any
-            # network). The bridge concept is fulfilled in current
-            # PRSM by two paths:
-            #   1. /wallet/transfer/onchain (operator-initiated
-            #      same-chain FTNS moves)
-            #   2. RoyaltyDispatcher (automatic off-chain → on-chain
-            #      payouts to content creators)
-            # See /admin/royalty-dispatch-summary for current
-            # dispatcher state. The /bridge/* endpoints are kept as
-            # API stubs for future bridge contract deployment; they
-            # are intentionally not wired in this build.
             raise HTTPException(
                 status_code=503,
-                detail=(
-                    "FTNS bridge endpoints are SCAFFOLD-ONLY in "
-                    "current PRSM builds. The FTNSBridge module "
-                    "(prsm/economy/blockchain/ftns_bridge.py) targets "
-                    "polygon_mumbai-era contracts; no bridge contract "
-                    "is deployed on Base mainnet. The functionally "
-                    "equivalent flows on current PRSM are: "
-                    "(a) `/wallet/transfer/onchain` for operator-"
-                    "initiated FTNS moves; "
-                    "(b) `/admin/royalty-dispatch-summary` for "
-                    "automatic off-chain → on-chain creator payouts. "
-                    "Track sprint-X bridge re-implementation against "
-                    "Base mainnet."
-                ),
+                detail=_bridge_scaffold_503_detail("withdraw"),
             )
-        
+
         if not node.identity:
             raise HTTPException(status_code=503, detail="Node identity not initialized")
-        
+
         try:
             # Convert amount to wei (assuming 18 decimals like ETH)
             amount_wei = int(request.amount * 10**18)
-            
+
             # Execute withdraw
             tx = await node.ftns_bridge.withdraw_from_chain(
                 chain_address=request.chain_address,
@@ -14221,38 +14237,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 503: If bridge not initialized
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
-            # Sprint 539: investigation found that FTNSBridge is
-            # pre-Base-mainnet scaffold code (defaults to network=
-            # polygon_mumbai, ContractManager only knows Polygon/
-            # Sepolia, no deployed bridge contract exists on any
-            # network). The bridge concept is fulfilled in current
-            # PRSM by two paths:
-            #   1. /wallet/transfer/onchain (operator-initiated
-            #      same-chain FTNS moves)
-            #   2. RoyaltyDispatcher (automatic off-chain → on-chain
-            #      payouts to content creators)
-            # See /admin/royalty-dispatch-summary for current
-            # dispatcher state. The /bridge/* endpoints are kept as
-            # API stubs for future bridge contract deployment; they
-            # are intentionally not wired in this build.
             raise HTTPException(
                 status_code=503,
-                detail=(
-                    "FTNS bridge endpoints are SCAFFOLD-ONLY in "
-                    "current PRSM builds. The FTNSBridge module "
-                    "(prsm/economy/blockchain/ftns_bridge.py) targets "
-                    "polygon_mumbai-era contracts; no bridge contract "
-                    "is deployed on Base mainnet. The functionally "
-                    "equivalent flows on current PRSM are: "
-                    "(a) `/wallet/transfer/onchain` for operator-"
-                    "initiated FTNS moves; "
-                    "(b) `/admin/royalty-dispatch-summary` for "
-                    "automatic off-chain → on-chain creator payouts. "
-                    "Track sprint-X bridge re-implementation against "
-                    "Base mainnet."
-                ),
+                detail=_bridge_scaffold_503_detail("status"),
             )
-        
+
         try:
             stats = await node.ftns_bridge.get_bridge_stats()
             limits = await node.ftns_bridge.get_bridge_limits()
@@ -14289,38 +14278,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 404: If transaction not found
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
-            # Sprint 539: investigation found that FTNSBridge is
-            # pre-Base-mainnet scaffold code (defaults to network=
-            # polygon_mumbai, ContractManager only knows Polygon/
-            # Sepolia, no deployed bridge contract exists on any
-            # network). The bridge concept is fulfilled in current
-            # PRSM by two paths:
-            #   1. /wallet/transfer/onchain (operator-initiated
-            #      same-chain FTNS moves)
-            #   2. RoyaltyDispatcher (automatic off-chain → on-chain
-            #      payouts to content creators)
-            # See /admin/royalty-dispatch-summary for current
-            # dispatcher state. The /bridge/* endpoints are kept as
-            # API stubs for future bridge contract deployment; they
-            # are intentionally not wired in this build.
             raise HTTPException(
                 status_code=503,
-                detail=(
-                    "FTNS bridge endpoints are SCAFFOLD-ONLY in "
-                    "current PRSM builds. The FTNSBridge module "
-                    "(prsm/economy/blockchain/ftns_bridge.py) targets "
-                    "polygon_mumbai-era contracts; no bridge contract "
-                    "is deployed on Base mainnet. The functionally "
-                    "equivalent flows on current PRSM are: "
-                    "(a) `/wallet/transfer/onchain` for operator-"
-                    "initiated FTNS moves; "
-                    "(b) `/admin/royalty-dispatch-summary` for "
-                    "automatic off-chain → on-chain creator payouts. "
-                    "Track sprint-X bridge re-implementation against "
-                    "Base mainnet."
-                ),
+                detail=_bridge_scaffold_503_detail("tx_lookup"),
             )
-        
+
         tx = await node.ftns_bridge.get_bridge_status(tx_id)
         
         if not tx:
@@ -14346,38 +14308,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             HTTPException 503: If bridge not initialized
         """
         if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
-            # Sprint 539: investigation found that FTNSBridge is
-            # pre-Base-mainnet scaffold code (defaults to network=
-            # polygon_mumbai, ContractManager only knows Polygon/
-            # Sepolia, no deployed bridge contract exists on any
-            # network). The bridge concept is fulfilled in current
-            # PRSM by two paths:
-            #   1. /wallet/transfer/onchain (operator-initiated
-            #      same-chain FTNS moves)
-            #   2. RoyaltyDispatcher (automatic off-chain → on-chain
-            #      payouts to content creators)
-            # See /admin/royalty-dispatch-summary for current
-            # dispatcher state. The /bridge/* endpoints are kept as
-            # API stubs for future bridge contract deployment; they
-            # are intentionally not wired in this build.
             raise HTTPException(
                 status_code=503,
-                detail=(
-                    "FTNS bridge endpoints are SCAFFOLD-ONLY in "
-                    "current PRSM builds. The FTNSBridge module "
-                    "(prsm/economy/blockchain/ftns_bridge.py) targets "
-                    "polygon_mumbai-era contracts; no bridge contract "
-                    "is deployed on Base mainnet. The functionally "
-                    "equivalent flows on current PRSM are: "
-                    "(a) `/wallet/transfer/onchain` for operator-"
-                    "initiated FTNS moves; "
-                    "(b) `/admin/royalty-dispatch-summary` for "
-                    "automatic off-chain → on-chain creator payouts. "
-                    "Track sprint-X bridge re-implementation against "
-                    "Base mainnet."
-                ),
+                detail=_bridge_scaffold_503_detail("tx_list"),
             )
-        
+
         # Sprint 194 — bounds validation. Pre-fix `min(limit, 200)`
         # capped upper but accepted negative — limit=-1 returned
         # all bridge transactions for the user.
