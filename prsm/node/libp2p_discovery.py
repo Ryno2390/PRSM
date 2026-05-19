@@ -41,6 +41,21 @@ def _resolve_stale_threshold() -> float:
         return 600.0
 
 
+class BootstrapDead(Exception):
+    """Sprint 564 — typed exception raised by ``_DeadBootstrapSentinel``
+    when the poll loop calls ``get_peers`` on it.
+
+    Pre-sprint-564 the sentinel had no ``get_peers`` method, so the
+    poll loop's `await client.get_peers()` raised AttributeError on
+    every tick — surrounding exception handler caught it but the log
+    message read ``'_DeadBootstrapSentinel' object has no attribute
+    'get_peers'``, which (a) leaked an internal class name into
+    operator-visible logs, and (b) was indistinguishable from a real
+    programming bug. ``BootstrapDead`` is the typed grep tag operators
+    can alert on for "bootstrap is dead, retrying" specifically.
+    """
+
+
 class _DeadBootstrapSentinel:
     """Sprint 321 — placeholder installed in `_bootstrap_client`
     when a reconnect attempt fails so the poll loop's
@@ -49,11 +64,21 @@ class _DeadBootstrapSentinel:
 
     Carries `is_connected=False` so the reconnect-on-drop branch
     keeps firing instead of treating the sentinel as a live
-    client. Has no other surface — touching anything on it
-    raises AttributeError, which the surrounding try/except
-    catches as a reconnect trigger.
+    client.
+
+    Sprint 564: ``get_peers`` is now an async stub that raises
+    ``BootstrapDead`` instead of yielding the bare AttributeError
+    that fired pre-fix. The surrounding exception handler catches
+    it the same way; the log message just stops leaking the
+    internal class name.
     """
     is_connected = False
+
+    async def get_peers(self):
+        raise BootstrapDead(
+            "dead-sentinel: previous bootstrap reconnect attempt "
+            "failed; will retry on next tick"
+        )
 
 
 class Libp2pDiscovery:
