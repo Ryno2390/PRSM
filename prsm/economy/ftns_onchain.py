@@ -439,6 +439,20 @@ class InboundCheckpointStore:
         ")"
     )
 
+    # Sprint 544: persistent credit-side dedup. Pre-sprint, the
+    # InboundMonitor's _credited_tx_hashes set was in-memory only.
+    # Sprint 543's checkpoint persistence made this a regression
+    # surface: restart catch-up scans can re-emit a Transfer event
+    # that was already credited in the previous run. Persistent
+    # (address, tx_hash) row gives correctness across restart.
+    _SCHEMA_CREDITED = (
+        "CREATE TABLE IF NOT EXISTS credited_deposits ("
+        "  address TEXT NOT NULL,"
+        "  tx_hash TEXT NOT NULL,"
+        "  PRIMARY KEY (address, tx_hash)"
+        ")"
+    )
+
     def __init__(self, db_path: str):
         import sqlite3
         from pathlib import Path
@@ -455,6 +469,7 @@ class InboundCheckpointStore:
             db_path, check_same_thread=False,
         )
         self._conn.execute(self._SCHEMA)
+        self._conn.execute(self._SCHEMA_CREDITED)
         self._conn.commit()
 
     def get_last_scanned_block(self, address: str) -> Optional[int]:
@@ -474,6 +489,25 @@ class InboundCheckpointStore:
             "ON CONFLICT(address) DO UPDATE SET "
             "last_scanned_block = excluded.last_scanned_block",
             (address, int(block_number)),
+        )
+        self._conn.commit()
+
+    def has_credited_tx(self, address: str, tx_hash: str) -> bool:
+        """Sprint 544: True iff this (address, tx_hash) tuple was
+        previously passed to ``mark_credited``. Survives restart."""
+        row = self._conn.execute(
+            "SELECT 1 FROM credited_deposits "
+            "WHERE address = ? AND tx_hash = ? LIMIT 1",
+            (address, tx_hash),
+        ).fetchone()
+        return row is not None
+
+    def mark_credited(self, address: str, tx_hash: str) -> None:
+        """Sprint 544: idempotent insert — calling twice is a no-op."""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO credited_deposits "
+            "(address, tx_hash) VALUES (?, ?)",
+            (address, tx_hash),
         )
         self._conn.commit()
 
@@ -684,10 +718,38 @@ class InboundMonitor:
         tx_hash = transfer.get("tx_hash") or ""
         if not from_addr or amount <= 0 or not tx_hash:
             return
-        # Dedup: don't double-credit if we processed this tx already
-        # in this process lifetime
+        # Sprint 544: persistent dedup. In-memory fast-path first
+        # (covers retries within a process); SQLite-backed check
+        # second (covers restart catch-up scans introduced by
+        # sprint 543's checkpoint persistence — without this, a
+        # Transfer event already credited in v1 would be re-credited
+        # by v2 because the in-memory set is empty on boot).
         if tx_hash in self._credited_tx_hashes:
             return
+        # Determine the recipient address for the dedup key. Use the
+        # ledger's connected address (= the monitor's scan target) so
+        # the dedup tuple matches the scan-window scope.
+        recipient_addr = getattr(
+            self.ledger, "_connected_address", "",
+        )
+        if (
+            self._checkpoint_store is not None
+            and recipient_addr
+        ):
+            try:
+                if self._checkpoint_store.has_credited_tx(
+                    recipient_addr, tx_hash,
+                ):
+                    # Cache the result in-memory so subsequent ticks
+                    # within this process skip the SQLite lookup.
+                    self._credited_tx_hashes.add(tx_hash)
+                    return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "inbound-monitor dedup-store lookup failed "
+                    "(non-fatal — falling back to in-memory dedup, "
+                    "double-credit risk on restart): %s", exc,
+                )
         # Lookup linked wallet
         wallet_id = await self._local_ledger.wallet_for_eth_address(
             from_addr,
@@ -714,6 +776,20 @@ class InboundMonitor:
                 ),
             )
             self._credited_tx_hashes.add(tx_hash)
+            # Sprint 544: persist the dedup record alongside the
+            # in-memory cache so the next restart's catch-up scan
+            # skips this tx instead of re-crediting.
+            if self._checkpoint_store is not None and recipient_addr:
+                try:
+                    self._checkpoint_store.mark_credited(
+                        recipient_addr, tx_hash,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "inbound-monitor dedup-store mark failed "
+                        "(non-fatal — in-memory dedup still active, "
+                        "but restart could re-credit): %s", exc,
+                    )
             logger.info(
                 "Bridge deposit credited: %.6f FTNS to wallet=%s "
                 "(from %s, tx %s)",
