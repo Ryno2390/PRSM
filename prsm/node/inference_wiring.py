@@ -368,11 +368,14 @@ def _build_production_trust_stack_or_none():
         "components are REAL.",
         anchor_addr, stake_lookup_status,
     )
+    # Sprint 576 — inner ProfileSource selection is env-driven via
+    # PRSM_PARALLAX_PROFILE_SOURCE_KIND (default in_memory preserves
+    # behavior; "dht" is the Phase 2 hook).
     return TrustStack(
         anchor_verify=AnchorVerifyAdapter(anchor=anchor),
         tier_gate=TierGateAdapter(),
         profile_source=StakeWeightedTrustAdapter(
-            inner=InMemoryProfileSource(snapshots={}),
+            inner=_build_inner_profile_source(),
             stake_lookup=stake_lookup,
         ),
         consensus_hook=ConsensusMismatchHook(
@@ -380,6 +383,49 @@ def _build_production_trust_stack_or_none():
             sample_rate=0.0,
         ),
     )
+
+
+def _build_inner_profile_source():
+    """Sprint 576 — env-driven inner ProfileSource construction.
+
+    Read PRSM_PARALLAX_PROFILE_SOURCE_KIND:
+      - unset / "in_memory" → InMemoryProfileSource(snapshots={})
+        (current default behavior; existing operators unaffected)
+      - "dht"               → Phase 2 will return ProfileDHT(...);
+        Phase 1 logs a structured warning + falls back to
+        in_memory so the daemon stays up.
+      - anything else       → warn + in_memory fallback.
+
+    The trust-stack constructor calls this helper instead of
+    hardcoding the InMemoryProfileSource — Phase 2 (real DHT
+    wiring) becomes a non-churn additive change here.
+    """
+    from prsm.compute.parallax_scheduling.prsm_request_router import (
+        InMemoryProfileSource,
+    )
+    kind_raw = os.environ.get(
+        "PRSM_PARALLAX_PROFILE_SOURCE_KIND", "",
+    ).strip().lower()
+    kind = kind_raw or "in_memory"
+    if kind == "in_memory":
+        return InMemoryProfileSource(snapshots={})
+    if kind == "dht":
+        logger.warning(
+            "Sprint 576 ParallaxScheduledExecutor wiring: "
+            "PRSM_PARALLAX_PROFILE_SOURCE_KIND=dht set but Phase 2 "
+            "(real ProfileDHT integration) has not landed yet — "
+            "falling back to InMemoryProfileSource(snapshots={}). "
+            "Track sprint 577+ for the actual DHT-backed source."
+        )
+        return InMemoryProfileSource(snapshots={})
+    logger.warning(
+        "Sprint 576 ParallaxScheduledExecutor wiring: "
+        "PRSM_PARALLAX_PROFILE_SOURCE_KIND=%r is unknown; falling "
+        "back to InMemoryProfileSource. Valid values: in_memory, "
+        "dht (Phase 2 pending).",
+        kind_raw,
+    )
+    return InMemoryProfileSource(snapshots={})
 
 
 def _build_static_empty_pool_provider():
