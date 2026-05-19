@@ -1910,16 +1910,20 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     async def get_inbound_transactions(
         from_block: int = 0,
         to_block: str = "latest",
-        lookback_blocks: int = 100000,
+        lookback_blocks: int = 9000,
     ) -> Dict[str, Any]:
-        """Sprint 512: scan inbound ERC-20 Transfer events.
+        """Sprint 512 / 542: scan inbound ERC-20 Transfer events.
 
         Query params:
           from_block (int): explicit start block
           to_block (str/int): "latest" or block number
           lookback_blocks (int): if from_block=0, scan
-            current_block - lookback_blocks → current_block
-            (Base mainnet at 2s/block → 100k blocks ≈ 56 hrs)
+            current_block - lookback_blocks → current_block.
+            Default 9_000 fits in a single public-RPC call
+            (Base mainnet.base.org caps eth_getLogs near 10k
+            blocks per request). For wider history, pass an
+            explicit from_block — the server splits the range
+            into 9k-block sub-windows automatically.
         """
         ledger = getattr(node, "ftns_ledger", None)
         if ledger is None:
@@ -1944,7 +1948,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         try:
             from prsm.economy.ftns_onchain import (
-                scan_inbound_transfers,
+                scan_inbound_transfers_chunked,
             )
             if from_block == 0:
                 latest = w3.eth.block_number
@@ -1957,7 +1961,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     if to_block == "latest"
                     else int(to_block)
                 )
-            transfers = scan_inbound_transfers(
+            transfers = scan_inbound_transfers_chunked(
                 token,
                 recipient=addr,
                 from_block=start,
@@ -1980,9 +1984,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     async def get_inbound_transaction_stats(
         from_block: int = 0,
         to_block: str = "latest",
-        lookback_blocks: int = 100000,
+        lookback_blocks: int = 9000,
     ) -> Dict[str, Any]:
-        """Sprint 515 — aggregate inbound stats."""
+        """Sprint 515 / 542 — aggregate inbound stats. Default
+        lookback 9_000 fits in one public-RPC call; wider ranges
+        are auto-chunked server-side."""
         ledger = getattr(node, "ftns_ledger", None)
         if ledger is None:
             raise HTTPException(
@@ -2003,7 +2009,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         try:
             from prsm.economy.ftns_onchain import (
-                scan_inbound_transfers,
+                scan_inbound_transfers_chunked,
             )
             if from_block == 0:
                 latest = w3.eth.block_number
@@ -2016,7 +2022,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     if to_block == "latest"
                     else int(to_block)
                 )
-            transfers = scan_inbound_transfers(
+            transfers = scan_inbound_transfers_chunked(
                 token, recipient=addr,
                 from_block=start, to_block=end,
             )

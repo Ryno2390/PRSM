@@ -207,6 +207,47 @@ def scan_inbound_transfers(
     return out
 
 
+def scan_inbound_transfers_chunked(
+    contract,
+    recipient: str,
+    from_block: int,
+    to_block: int,
+    max_window: int = 9_000,
+) -> list:
+    """Sprint 542 — F20 fix: chunk a wide block range into sub-windows
+    so each underlying ``eth_getLogs`` call fits inside the public
+    RPC's per-request payload limit (Base mainnet.base.org caps
+    around 10k blocks).
+
+    ``InboundMonitor`` doesn't hit the limit because it scans the
+    per-tick delta only. The user-facing endpoint defaulted to a
+    100k-block lookback that exceeded the cap on every call, producing
+    ``413 Client Error: Payload Too Large``.
+
+    Windows are inclusive on both ends; tail window may be smaller
+    than ``max_window``. Results are returned in ascending block order
+    (the underlying provider already returns each chunk ordered).
+    """
+    if to_block < from_block:
+        return []
+    if max_window < 1:
+        raise ValueError("max_window must be >= 1")
+    out: list = []
+    start = from_block
+    while start <= to_block:
+        end = min(start + max_window - 1, to_block)
+        out.extend(scan_inbound_transfers(
+            contract,
+            recipient=recipient,
+            from_block=start,
+            to_block=end,
+        ))
+        if end == to_block:
+            break
+        start = end + 1
+    return out
+
+
 def _gas_status_for_eth(eth: float) -> str:
     """Pure helper — shared between startup log, endpoint,
     /health/detailed, and the periodic monitor. One source
