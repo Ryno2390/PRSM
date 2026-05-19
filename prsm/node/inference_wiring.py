@@ -45,7 +45,7 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
-_KNOWN_TRUST_STACK_KINDS = ("mock",)
+_KNOWN_TRUST_STACK_KINDS = ("mock", "production")
 _KNOWN_GPU_POOL_KINDS = ("static-empty",)
 
 # Sprint 559 — catalog schema versioning. v1 shape:
@@ -113,6 +113,104 @@ def _build_mock_trust_stack():
         ),
         consensus_hook=ConsensusMismatchHook(
             submitter=_RecordingSubmitter(), sample_rate=0.0,
+        ),
+    )
+
+
+def _build_production_trust_stack_or_none():
+    """Sprint 560 — `production` trust-stack kind. Today wires a
+    REAL anchor (PublisherKeyAnchorClient against the contract at
+    PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS) but the other 3 components
+    are still placeholders pending follow-on sprints:
+
+      - stake_lookup    → ZeroStakeLookup (sprint 561: real
+                          StakeBondClient).
+      - profile_source  → empty InMemoryProfileSource (sprint
+                          562: real DhtProfileSource).
+      - consensus_hook  → no-op submitter (sprint 562: arbitration
+                          queue submitter wired from
+                          node._arbitration_queue).
+
+    Returns None when the anchor address isn't set — there's no
+    sensible fallback for the anchor under `production` kind, and
+    operators on this kind explicitly want real anchor verification.
+
+    Caller logs the placeholder-component list at INFO level so
+    operators see what's verified vs not.
+    """
+    from prsm.compute.parallax_scheduling.trust_adapter import (
+        AnchorVerifyAdapter,
+        ConsensusMismatchHook,
+        StakeWeightedTrustAdapter,
+        TierGateAdapter,
+        TrustStack,
+    )
+    from prsm.compute.parallax_scheduling.prsm_request_router import (
+        InMemoryProfileSource,
+    )
+
+    anchor_addr = os.environ.get(
+        "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "",
+    ).strip()
+    if not anchor_addr:
+        logger.warning(
+            "Sprint 560 ParallaxScheduledExecutor wiring: "
+            "PRSM_PARALLAX_TRUST_STACK_KIND=production requires "
+            "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS (the Phase-3.x.3 "
+            "publisher-key anchor contract address). Set it to "
+            "the deployed anchor address on your chain, or use "
+            "PRSM_PARALLAX_TRUST_STACK_KIND=mock for dev."
+        )
+        return None
+    rpc_url = os.environ.get(
+        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+    )
+    try:
+        from prsm.security.publisher_key_anchor.client import (
+            PublisherKeyAnchorClient,
+        )
+        anchor = PublisherKeyAnchorClient(
+            contract_address=anchor_addr,
+            rpc_url=rpc_url,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Sprint 560 ParallaxScheduledExecutor wiring: "
+            "PublisherKeyAnchorClient construction failed against "
+            "%s — %s. Anchor unavailable; falling back to None.",
+            anchor_addr, exc,
+        )
+        return None
+
+    # Placeholder components — explicit zero stake, empty profile
+    # source, no-op submitter. Subsequent sprints replace each.
+    class _ZeroStakeLookup:
+        def get_stake(self, node_id: str) -> int:
+            return 0
+
+    class _NoOpSubmitter:
+        async def submit(self, *args, **kwargs):
+            return None
+
+    logger.info(
+        "Sprint 560 ParallaxScheduledExecutor wiring: trust_stack="
+        "production. anchor=REAL (PublisherKeyAnchorClient @ %s); "
+        "stake_lookup=PLACEHOLDER (zero stake — sprint 561 wires "
+        "real); profile_source=PLACEHOLDER (empty — sprint 562); "
+        "consensus_hook=PLACEHOLDER (no-op submitter — sprint 562). "
+        "Operators must not treat partial-production as fully "
+        "production-verified until all 4 components are real.",
+        anchor_addr,
+    )
+    return TrustStack(
+        anchor_verify=AnchorVerifyAdapter(anchor=anchor),
+        tier_gate=TierGateAdapter(),
+        profile_source=StakeWeightedTrustAdapter(
+            inner=InMemoryProfileSource(snapshots={}),
+            stake_lookup=_ZeroStakeLookup(),
+        ),
+        consensus_hook=ConsensusMismatchHook(
+            submitter=_NoOpSubmitter(), sample_rate=0.0,
         ),
     )
 
@@ -309,6 +407,10 @@ def build_parallax_executor_or_none(node: Any) -> Optional[Any]:
         return None
     if trust_kind == "mock":
         trust_stack = _build_mock_trust_stack()
+    elif trust_kind == "production":
+        trust_stack = _build_production_trust_stack_or_none()
+        if trust_stack is None:
+            return None
     else:  # defensive — already gated above
         return None
 
