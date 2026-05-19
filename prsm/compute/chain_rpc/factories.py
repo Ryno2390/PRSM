@@ -112,6 +112,9 @@ def make_rpc_chain_executor(
     chunk_bytes: int = DEFAULT_CHUNK_BYTES_ACTIVATION,
     default_deadline_seconds: float = 30.0,
     wrap_topology_aware: bool = True,
+    wrap_activation_dp_aware: bool = True,
+    dp_clip_norm: float = 1.0,
+    dp_delta: float = 1e-5,
 ) -> Any:
     """Build an ``RpcChainExecutor`` with production-friendly defaults.
 
@@ -176,7 +179,7 @@ def make_rpc_chain_executor(
         chunk_bytes=chunk_bytes,
         default_deadline_seconds=default_deadline_seconds,
     )
-    if not wrap_topology_aware:
+    if not wrap_topology_aware and not wrap_activation_dp_aware:
         return base
     # Sprint 417 — wrap with sprint-414's
     # TopologyAwareChainExecutor by default so live
@@ -185,10 +188,30 @@ def make_rpc_chain_executor(
     # executor (e.g., for unit-test fixtures that assert
     # on the bare receipt shape) pass
     # wrap_topology_aware=False.
-    from prsm.compute.inference.topology_aware_executor import (
-        TopologyAwareChainExecutor,
+    inner_after_topology: Any = base
+    if wrap_topology_aware:
+        from prsm.compute.inference.topology_aware_executor import (
+            TopologyAwareChainExecutor,
+        )
+        inner_after_topology = TopologyAwareChainExecutor(inner=base)
+    if not wrap_activation_dp_aware:
+        return inner_after_topology
+    # Sprint 546 — wrap with sprint-419's
+    # ActivationDPAwareChainExecutor (OUTERMOST per its
+    # docstring composition order ``base → topology → dp``)
+    # so live InferenceReceipts also carry a verifiable
+    # activation_noise_trace. Tier NONE requests pass
+    # through unchanged (the decorator skips the hook +
+    # leaves trace=None). Operators wanting topology-only
+    # receipts pass wrap_activation_dp_aware=False.
+    from prsm.compute.inference.activation_dp_aware_executor import (
+        ActivationDPAwareChainExecutor,
     )
-    return TopologyAwareChainExecutor(inner=base)
+    return ActivationDPAwareChainExecutor(
+        inner=inner_after_topology,
+        clip_norm=dp_clip_norm,
+        delta=dp_delta,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────

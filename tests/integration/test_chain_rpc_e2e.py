@@ -449,11 +449,18 @@ def _make_executor(
     anchor_client: SimulatedAnchorClient,
     deadline_seconds: float = 30.0,
 ) -> RpcChainExecutor:
+    # Sprint 546: the factory now wraps with
+    # ActivationDPAwareChainExecutor by default. The integration
+    # suite's byte-identity invariants ("output matches single-host
+    # reference") presume no activation mutation, so the helper opts
+    # out of the DP wrap. DP injection has dedicated unit coverage
+    # in tests/unit/test_*activation_dp*.py.
     return make_rpc_chain_executor(
         settler_identity=settler,
         send_message=network.send,
         anchor=anchor_client,
         default_deadline_seconds=deadline_seconds,
+        wrap_activation_dp_aware=False,
     )
 
 
@@ -1751,11 +1758,16 @@ class TestStreamingTokenOutput:
             anchor=anchor_client,
             inline_network=inline_net,
         )
-        # No token_stream_send_message wired.
+        # No token_stream_send_message wired. Opt out of both
+        # sprint-417 topology + sprint-546 DP wraps because
+        # execute_chain_streaming lives on the inner RpcChainExecutor
+        # only (the decorators wrap the non-streaming surface).
         executor = make_rpc_chain_executor(
             settler_identity=settler,
             send_message=inline_net.send,
             anchor=anchor_client,
+            wrap_topology_aware=False,
+            wrap_activation_dp_aware=False,
         )
         chain = _build_chain([alice.node_id])
         with pytest.raises(ChainExecutionError) as exc_info:

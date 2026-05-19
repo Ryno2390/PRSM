@@ -304,6 +304,7 @@ class TestMakeRpcChainExecutorStreaming:
             anchor=_FakeAnchor(),
             streamed_send_message=_stub_streamed_send,
             wrap_topology_aware=False,  # sprint 417 — probe raw inner
+            wrap_activation_dp_aware=False,  # sprint 546 — probe raw inner
         )
         # Internal field set by constructor.
         assert executor._streamed_send is _stub_streamed_send  # type: ignore[attr-defined]
@@ -317,6 +318,7 @@ class TestMakeRpcChainExecutorStreaming:
             send_message=_stub_send,
             anchor=_FakeAnchor(),
             wrap_topology_aware=False,  # sprint 417 — probe raw inner
+            wrap_activation_dp_aware=False,  # sprint 546 — probe raw inner
         )
         assert executor._streamed_send is None  # type: ignore[attr-defined]
 
@@ -331,6 +333,7 @@ class TestMakeRpcChainExecutorStreaming:
             chunk_threshold_bytes=512,
             chunk_bytes=128,
             wrap_topology_aware=False,  # sprint 417 — probe raw inner
+            wrap_activation_dp_aware=False,  # sprint 546 — probe raw inner
         )
         assert executor._chunk_threshold_bytes == 512  # type: ignore[attr-defined]
         assert executor._chunk_bytes == 128  # type: ignore[attr-defined]
@@ -348,6 +351,7 @@ class TestMakeRpcChainExecutorStreaming:
             send_message=_stub_send,
             anchor=_FakeAnchor(),
             wrap_topology_aware=False,  # sprint 417 — probe raw inner
+            wrap_activation_dp_aware=False,  # sprint 546 — probe raw inner
         )
         assert executor._chunk_threshold_bytes == CHUNK_THRESHOLD_BYTES  # type: ignore[attr-defined]
         assert executor._chunk_bytes == DEFAULT_CHUNK_BYTES_ACTIVATION  # type: ignore[attr-defined]

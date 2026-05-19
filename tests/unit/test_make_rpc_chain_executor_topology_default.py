@@ -33,11 +33,19 @@ def _identity():
 
 
 def _factory_kwargs():
-    """Minimal kwargs to satisfy make_rpc_chain_executor."""
+    """Minimal kwargs to satisfy make_rpc_chain_executor.
+
+    Sprint 546 added an outer ActivationDPAwareChainExecutor wrap by
+    default. These sprint-417 tests scope to the topology-default
+    surface only, so they explicitly opt out of the DP wrap.
+    Sprint 546's own test file owns asserting that the DP layer
+    composes correctly on top.
+    """
     return dict(
         settler_identity=_identity(),
         send_message=MagicMock(return_value=b""),
         anchor=MagicMock(),
+        wrap_activation_dp_aware=False,
     )
 
 
