@@ -724,6 +724,77 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         metrics = DashboardMetrics(node=node)
         return metrics.get_summary()
 
+    class _PeersConnectRequest(BaseModel):
+        address: str
+
+    @app.post("/peers/connect", tags=["network"])
+    async def post_peers_connect(
+        body: _PeersConnectRequest,
+    ) -> Dict[str, Any]:
+        """Sprint 569 — operator-facing trigger for
+        ``transport.connect_to_peer(address)``. Closes sprint-567 gap 1
+        (auto-dial): bootstrap-mediated discovery populates ``known[]``
+        but never auto-connects; this endpoint lets operators turn a
+        known peer into a connected one.
+
+        Accepted address forms (per WebSocketTransport.connect_to_peer):
+          - ``host:port`` (defaults to ws://; wss:// when port=443)
+          - ``ws://host:port``
+          - ``wss://host:port``
+
+        Status:
+          200 — {connected, peer_id, address}
+          400 — empty address
+          422 — body missing `address` (Pydantic)
+          502 — transport.connect_to_peer returned None (remote
+                unreachable, handshake rejected, etc.)
+          503 — transport not initialized
+          500 — transport raised an unexpected exception
+        """
+        transport = getattr(node, "transport", None)
+        if transport is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Transport not initialized — daemon is still "
+                    "starting up or transport failed to load."
+                ),
+            )
+        addr = (body.address or "").strip()
+        if not addr:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "address must be non-empty "
+                    "(`host:port` / `ws://host:port` / `wss://host:port`)"
+                ),
+            )
+        try:
+            peer = await transport.connect_to_peer(addr)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"transport.connect_to_peer raised: "
+                    f"{type(exc).__name__}: {exc!s}"[:300]
+                ),
+            )
+        if peer is None:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"transport.connect_to_peer returned None for "
+                    f"{addr!r} — remote unreachable, handshake "
+                    f"rejected, or DO firewall payload-blocking. "
+                    f"Check the daemon log for the underlying error."
+                ),
+            )
+        return {
+            "connected": True,
+            "peer_id": getattr(peer, "peer_id", None),
+            "address": getattr(peer, "address", addr),
+        }
+
     @app.get("/peers")
     async def get_peers() -> Dict[str, Any]:
         """List connected and known peers.
