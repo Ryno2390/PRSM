@@ -109,7 +109,7 @@ def _build_mock_trust_stack():
             stake_lookup=_ZeroStakeLookup(),
         ),
         consensus_hook=ConsensusMismatchHook(
-            submitter=_LoggingChallengeSubmitter(),
+            submitter=_build_consensus_submitter(),
             sample_rate=0.0,
         ),
     )
@@ -379,10 +379,52 @@ def _build_production_trust_stack_or_none():
             stake_lookup=stake_lookup,
         ),
         consensus_hook=ConsensusMismatchHook(
-            submitter=_LoggingChallengeSubmitter(),
+            submitter=_build_consensus_submitter(),
             sample_rate=0.0,
         ),
     )
+
+
+def _build_consensus_submitter():
+    """Sprint 577 — env-driven consensus_hook submitter construction.
+
+    Read PRSM_PARALLAX_CONSENSUS_SUBMITTER_KIND:
+      - unset / "logging" → _LoggingChallengeSubmitter (current
+        default; WARNING per ChallengeRecord; no on-chain dispatch).
+      - "onchain" → Phase 2 returns real OnChainChallengeSubmitter
+        that maps ChallengeRecord → Phase 7.1x
+        ConsensusChallengeSubmitter ABI + dispatches. Phase 1 logs
+        WARNING + falls back to logging so daemon stays up.
+      - anything else → WARNING + logging fallback.
+
+    Mirrors sprint-576's profile_source helper pattern. Phase 2
+    (real on-chain) becomes a non-churn additive change here.
+    """
+    kind_raw = os.environ.get(
+        "PRSM_PARALLAX_CONSENSUS_SUBMITTER_KIND", "",
+    ).strip().lower()
+    kind = kind_raw or "logging"
+    if kind == "logging":
+        return _LoggingChallengeSubmitter()
+    if kind == "onchain":
+        logger.warning(
+            "Sprint 577 ParallaxScheduledExecutor wiring: "
+            "PRSM_PARALLAX_CONSENSUS_SUBMITTER_KIND=onchain set but "
+            "Phase 2 (real OnChainChallengeSubmitter w/ "
+            "ChallengeRecord → Phase 7.1x ABI translation layer) "
+            "has not landed yet — falling back to "
+            "_LoggingChallengeSubmitter. Track sprint 578+ for the "
+            "actual on-chain dispatch wiring."
+        )
+        return _LoggingChallengeSubmitter()
+    logger.warning(
+        "Sprint 577 ParallaxScheduledExecutor wiring: "
+        "PRSM_PARALLAX_CONSENSUS_SUBMITTER_KIND=%r is unknown; "
+        "falling back to _LoggingChallengeSubmitter. Valid values: "
+        "logging, onchain (Phase 2 pending).",
+        kind_raw,
+    )
+    return _LoggingChallengeSubmitter()
 
 
 def _build_inner_profile_source():
