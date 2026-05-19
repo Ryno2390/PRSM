@@ -260,6 +260,21 @@ class PeerDiscovery:
                     "registered, heartbeat active, %d peer(s) discovered",
                     address, len(peers),
                 )
+
+                # Sprint 573 — auto-dial sweep: turn freshly-discovered
+                # known peers into connected peers without waiting for
+                # an operator to POST /peers/connect for each one. Best-
+                # effort; failures logged but don't break the bootstrap
+                # success path.
+                try:
+                    await self._auto_dial_sweep()
+                except Exception as _sweep_exc:  # noqa: BLE001
+                    logger.warning(
+                        "auto-dial sweep raised: %s "
+                        "(bootstrap registration still succeeded)",
+                        _sweep_exc,
+                    )
+
                 return True
 
             except Exception as e:
@@ -521,6 +536,65 @@ class PeerDiscovery:
             payload=payload,
         )
         return await self.transport.gossip(msg, fanout=3)
+
+    async def _auto_dial_sweep(self) -> None:
+        """Sprint 573 — turn known_peers into connected peers.
+
+        After bootstrap hydration (or any path that mass-populates
+        ``self.known_peers``), iterate the registry and dial each
+        peer that:
+          - is not self
+          - is not already in ``self.transport.peers``
+          - has a non-bogus address (skip 0.0.0.0:* / empty per
+            sprint-570 F28 defense-in-depth)
+
+        Best-effort: each dial runs in its own try/except so one
+        failed connection (NAT'd peer, stale registration, etc.)
+        doesn't abort the rest of the sweep.
+
+        Closes sprint-567 gap 2 + the operator ergonomic gap
+        sprint-569 surfaced: post-bootstrap, ``known_count`` would
+        be non-zero but ``connected_count`` stayed 0 until an
+        operator manually called ``POST /peers/connect`` for every
+        known peer. After sprint 573 the daemon does it itself.
+        """
+        own_id = self.transport.identity.node_id
+        connected_ids = set(self.transport.peers.keys())
+        for info in list(self.known_peers.values()):
+            if info.node_id == own_id:
+                continue
+            if info.node_id in connected_ids:
+                continue
+            addr = info.address or ""
+            if (
+                not addr
+                or addr.startswith("0.0.0.0:")
+                or addr == "0.0.0.0"
+                or addr.startswith(":")
+            ):
+                logger.debug(
+                    "auto-dial sweep skipping %s — bogus address %r",
+                    info.node_id[:8], addr,
+                )
+                continue
+            try:
+                peer = await self.transport.connect_to_peer(addr)
+                if peer is None:
+                    logger.debug(
+                        "auto-dial sweep: connect_to_peer returned "
+                        "None for %s (%s)",
+                        info.node_id[:8], addr,
+                    )
+                else:
+                    logger.info(
+                        "auto-dial sweep: connected to %s (%s)",
+                        info.node_id[:8], addr,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "auto-dial sweep: dial to %s (%s) raised %s: %s",
+                    info.node_id[:8], addr, type(exc).__name__, exc,
+                )
 
     async def maintain_connections(self) -> None:
         """Ensure we have enough peer connections, connecting to known peers if needed."""
