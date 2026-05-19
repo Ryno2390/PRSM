@@ -385,6 +385,47 @@ def _build_production_trust_stack_or_none():
     )
 
 
+def _build_chain_executor(node: Any) -> Any:
+    """Sprint 578 — env-driven chain_executor construction.
+
+    Read PRSM_PARALLAX_CHAIN_EXECUTOR_KIND:
+      - unset / "stub" → _StubChainExecutor (current default;
+        raises on execute_chain so callers must hit a non-empty
+        pool first — sprint 558 invariant).
+      - "rpc" → Phase 2 wires real via make_rpc_chain_executor
+        with node.identity/transport/anchor. Phase 1 logs WARNING
+        + falls back to stub so daemon stays up.
+      - anything else → WARNING + stub fallback.
+
+    Mirrors sprints-576/577 plumbing pattern. Phase 2 (real RPC
+    chain executor) becomes a non-churn additive change here.
+    """
+    kind_raw = os.environ.get(
+        "PRSM_PARALLAX_CHAIN_EXECUTOR_KIND", "",
+    ).strip().lower()
+    kind = kind_raw or "stub"
+    if kind == "stub":
+        return _StubChainExecutor()
+    if kind == "rpc":
+        logger.warning(
+            "Sprint 578 ParallaxScheduledExecutor wiring: "
+            "PRSM_PARALLAX_CHAIN_EXECUTOR_KIND=rpc set but Phase 2 "
+            "(real make_rpc_chain_executor wiring with node "
+            "settler_identity + transport.send_message + anchor) "
+            "has not landed yet — falling back to _StubChainExecutor. "
+            "Track sprint 579+ for the actual RPC chain wiring."
+        )
+        return _StubChainExecutor()
+    logger.warning(
+        "Sprint 578 ParallaxScheduledExecutor wiring: "
+        "PRSM_PARALLAX_CHAIN_EXECUTOR_KIND=%r is unknown; falling "
+        "back to _StubChainExecutor. Valid values: stub, rpc "
+        "(Phase 2 pending).",
+        kind_raw,
+    )
+    return _StubChainExecutor()
+
+
 def _build_consensus_submitter():
     """Sprint 577 — env-driven consensus_hook submitter construction.
 
@@ -701,7 +742,7 @@ def build_parallax_executor_or_none(node: Any) -> Optional[Any]:
             gpu_pool_provider=pool_provider,
             trust_stack=trust_stack,
             model_catalog=catalog,
-            chain_executor=_StubChainExecutor(),
+            chain_executor=_build_chain_executor(node),
             node_identity=identity,
         )
     except Exception as exc:  # noqa: BLE001
