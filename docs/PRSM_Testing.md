@@ -98,7 +98,7 @@ journey. Each step should be live-verifiable on a single node.
 | Retrieve by CID (Tier A, same node) | `GET /content/retrieve/{cid}` | ✅ | 428 | Local-publish shortcut |
 | Retrieve + decrypt (recipient-encrypted, same node) | `GET /content/retrieve/{cid}` + `decrypt_for_recipient` | ✅ | 430 | E2E live-tested |
 | Bootstrap-mediated peer discovery (multi-node) | bootstrap-server peer-list | ✅ | 456, 468, 565 | Live: 2 daemons on same host (sprint 456); sprint 468 cross-HOST verified via EU bootstrap; **sprint 565 — first live cross-host discovery on the canonical bootstrap-us fleet member**: droplet operator (`484f003c...`) + Mac (`cdefb8e5...`) symmetric `known[]` via bootstrap-us, both registered live in `/peers` with `active_connections: 2`. Closes the fleet-coordination gap (pre-565 the droplet operator was bootstrapped against bootstrap-eu while all others defaulted to bootstrap-us → different registries → no cross-discovery) |
-| Cross-host content retrieve (direct P2P) | BT swarm + gossip | ⏸️ | 468 | F20: DO cloud firewall blocks inbound TCP 9001 on droplet; direct P2P fails. Discovery works; fetch needs operator firewall config |
+| Cross-host content retrieve (direct P2P) | BT swarm + gossip | ⏸️ | 468, 567 | **Sprint 567 reframed**: F20 ("DO firewall blocks 9001") is stale — `nc -zv 159.203.129.218 9001` succeeds from Mac; ufw inactive; iptables INPUT default ACCEPT. Droplet listens on `0.0.0.0:9001` TCP. **Actual remaining gaps for direct P2P**: (1) auto-dial gap — `_hydrate_peers_from_bootstrap` populates `known[]` only, never calls `transport.connect_to_peer(addr)` on discovered peers; `connected[]` stays empty. (2) Address format mismatch — bootstrap shares `host:port`; transport's `_to_multiaddr` translates to `/ip4/host/udp/port/quic-v1` (QUIC/UDP) but daemon listens on TCP. (3) Peer ID requirement — libp2p multiaddr needs `/p2p/<peerID>` suffix; bootstrap-shared addresses lack it. Each is its own sprint candidate |
 | Peer lifecycle: peer_leave propagation | bootstrap-server peer-list | ✅ | 457 | Live: killed daemon #2 → 21s later daemon #1 received peer_leave → `peer_leave_events: 1`, `known_count: 0`, `discovered_peer_count: 0`. Sprint 320-329 hardening operationally verified |
 | Direct P2P connection (single-host) | WebSocket transport | ⏸️ | 456 | F14: NAT-loopback blocks single-host direct connection (announced addrs are external IP); multi-host bench is the right test |
 | Retrieve by CID (Tier A, cross-node) | `GET /content/retrieve/{cid}` | ⏸️ | 532 | Same-node retrieve ✅ live-verified; cross-node retrieve blocked on F14 (NAT-loopback single-host) + F20 (DO cloud firewall). Multi-host test bench is the right answer — sprint 456-457 verified discovery + lifecycle |
@@ -767,6 +767,34 @@ arc proved we need.
 ---
 
 ## Changelog
+
+- **2026-05-19 sprint 567 — F20 verification: stale; direct-P2P gaps
+  documented**. Sprint-468's F20 ("DO cloud firewall blocks inbound
+  TCP 9001 on droplet") is no longer reproducible:
+  - `nc -zv 159.203.129.218 9001` succeeds from Mac
+  - `ufw status` → inactive
+  - `iptables -L INPUT` → policy ACCEPT, no rules
+  - Operator daemon listens on `0.0.0.0:9001` TCP (kernel-confirmed)
+
+  Either DO removed the cloud firewall since sprint 468 or the
+  original finding had a different root cause. Either way the port
+  is reachable today.
+
+  **Actual remaining direct-P2P gaps surfaced during the verification**:
+  1. **Auto-dial**: bootstrap-mediated discovery populates `known[]`
+     but never calls `transport.connect_to_peer()` on discovered
+     peers. `connected[]` stays empty post-discovery.
+  2. **Address format mismatch**: bootstrap shares `host:port`;
+     `_to_multiaddr("host:port")` returns
+     `/ip4/host/udp/port/quic-v1` (UDP/QUIC), but the daemon's p2p
+     socket listens on **TCP**. Connect dials the wrong transport.
+  3. **Peer ID suffix**: libp2p multiaddrs require `/p2p/<peerID>`
+     for the C-bridge to identify the remote; bootstrap-shared
+     addresses lack the suffix. Currently rejected at the C-bridge
+     with "invalid p2p multiaddr".
+
+  Each gap is its own sprint candidate. No code change shipped this
+  sprint — pure verification + finding-documentation sprint.
 
 - **2026-05-19 sprint 566 — PRSM_ADVERTISE_ADDRESS env var (sprint-456
   candidate A) + F25 subprocess scoping fix**. Sprint 565 closed
