@@ -49,6 +49,11 @@ class HostProbe:
     # which hostnames the cert actually covers (F30 was a missing-SAN
     # bug; without SAN visibility future regressions are silent).
     cert_san_dns: List[str] = field(default_factory=list)
+    # Sprint 590 — TLS handshake succeeded but cert SAN does not
+    # cover the probe URL's hostname. Surfaces F30-class regressions
+    # (cert mismatched after DNS rename) which were previously
+    # silent under permissive TLS verification.
+    san_mismatch: bool = False
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -64,6 +69,7 @@ class HostProbe:
             "cert_subject": self.cert_subject,
             "cert_issuer": self.cert_issuer,
             "cert_san_dns": list(self.cert_san_dns),
+            "san_mismatch": self.san_mismatch,
             "error": self.error,
         }
 
@@ -79,6 +85,36 @@ def _extract_san_dns(cert) -> List[str]:
     if not san:
         return []
     return [v for (typ, v) in san if typ == "DNS"]
+
+
+def _check_san_match(hostname: str, san_dns: List[str]) -> bool:
+    """Sprint 590 — does ``hostname`` appear in the cert's SAN list?
+
+    Supports exact matches + single-label wildcard SANs (e.g.,
+    ``*.example.com`` matches ``a.example.com`` but NOT
+    ``a.b.example.com`` nor the bare ``example.com``). Case-insensitive
+    per DNS norms.
+
+    Returns False on empty SAN list (conservative: no SAN data → no
+    claim of match).
+    """
+    if not san_dns:
+        return False
+    h = hostname.lower().strip(".")
+    for entry in san_dns:
+        e = entry.lower().strip(".")
+        if e == h:
+            return True
+        if e.startswith("*."):
+            tail = e[2:]
+            # Wildcard matches single-label subdomain only:
+            #   h must end with "." + tail
+            #   AND have exactly one label before that
+            if h.endswith("." + tail):
+                prefix = h[: -(len(tail) + 1)]
+                if prefix and "." not in prefix:
+                    return True
+    return False
 
 
 @dataclass
@@ -230,6 +266,13 @@ async def probe_host(
                 ) or issuer.get("commonName")
                 # Sprint 589 — capture SAN DNS list
                 result.cert_san_dns = _extract_san_dns(cert)
+                # Sprint 590 — flag if probe hostname not in SAN
+                # (F30-class regression detector: TLS handshake
+                # succeeded but cert doesn't cover this name).
+                if result.cert_san_dns and not _check_san_match(
+                    host, result.cert_san_dns,
+                ):
+                    result.san_mismatch = True
         tls_writer.close()
         try:
             await tls_writer.wait_closed()
