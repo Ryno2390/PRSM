@@ -12278,6 +12278,47 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "available": False, "status": "not_wired",
             }
 
+        # Sprint 553 — watcher_event_dedup subsystem. Sprints
+        # 549/550/551 ship persistent (watcher_key, tx_hash,
+        # log_index) dedup for the 3 event watchers; sprint 552
+        # exposed an /admin endpoint. This entry surfaces the same
+        # state on the canonical operator probe surface so
+        # monitoring tools see whether dedup is wired without
+        # discovering /admin/watcher-event-dedup independently.
+        dedup_store = getattr(
+            node, "_watcher_event_dedup_store", None,
+        )
+        if dedup_store is not None:
+            try:
+                summary = dedup_store.summary()
+                total = sum(
+                    s.get("rows_processed", 0)
+                    for s in summary.values()
+                )
+                subsystems["watcher_event_dedup"] = {
+                    "available": True,
+                    "status": "ok",
+                    "total_rows_processed": total,
+                    "watchers": summary,
+                }
+            except Exception as exc:  # noqa: BLE001
+                subsystems["watcher_event_dedup"] = {
+                    "available": False,
+                    "status": "error",
+                    "error": str(exc)[:200],
+                }
+        else:
+            subsystems["watcher_event_dedup"] = {
+                "available": False,
+                "status": "not_wired",
+                "hint": (
+                    "Set PRSM_WATCHER_STATE_PERSISTENCE_ENABLED=1 "
+                    "(and optionally PRSM_WATCHER_EVENT_DEDUP_DB="
+                    "<path>) and restart the daemon to enable "
+                    "persistent watcher event dedup."
+                ),
+            }
+
         # Payment escrow (core).
         escrow_svc = getattr(node, "_payment_escrow", None)
         if escrow_svc is not None:
