@@ -1002,6 +1002,50 @@ def _build_watcher_state_store_or_none():
         return None
 
 
+def _build_watcher_event_dedup_store_or_none():
+    """Sprint 549 — sibling to the block-store builder. Returns an
+    ``EventDedupStore`` so watchers can persistently dedup
+    ``(tx_hash, log_index)`` event identifiers across restart.
+
+    Without this, restart catch-up re-dispatches every event the
+    previous run handled between callback dispatch and the post-loop
+    baseline persist — duplicating distribution-log rows + webhook
+    fires (CompensationDistributorWatcher) and similar in
+    KeyDistribution + StorageSlashing (deferred follow-ons).
+
+    Activation: piggybacks on the same env var as the block-store
+    so operators get watcher persistence holistically:
+      PRSM_WATCHER_STATE_PERSISTENCE_ENABLED=1   (required)
+      PRSM_WATCHER_EVENT_DEDUP_DB=<path>         (optional override;
+        default ~/.prsm/watcher_event_dedup.db)
+    """
+    if os.getenv(
+        "PRSM_WATCHER_STATE_PERSISTENCE_ENABLED", "",
+    ).lower() not in ("1", "true", "yes"):
+        return None
+    try:
+        from prsm.economy.web3.last_processed_block_store import (
+            EventDedupStore,
+        )
+        override = os.getenv("PRSM_WATCHER_EVENT_DEDUP_DB", "").strip()
+        if override:
+            db_path = override
+        else:
+            db_path = str(
+                Path.home() / ".prsm" / "watcher_event_dedup.db"
+            )
+        store = EventDedupStore(db_path)
+        logger.info(f"EventDedupStore wired ({db_path})")
+        return store
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"EventDedupStore construction failed: "
+            f"{type(exc).__name__}: {exc} — watcher event dedup "
+            f"disabled (restart catch-up may double-dispatch)."
+        )
+        return None
+
+
 def _build_key_distribution_watcher_or_none(
     *, client, state_store=None, webhook_deliverer=None,
     webhook_url=None, webhook_secret=None,
@@ -1258,6 +1302,7 @@ def _build_storage_slashing_watcher_or_none(
 def _build_compensation_distributor_watcher_or_none(
     *, client, state_store=None, webhook_deliverer=None,
     webhook_url=None, webhook_secret=None, distribution_log=None,
+    dedup_store=None,
 ):
     """Construct a CompensationDistributorWatcher if operator opted in
     AND underlying client is non-None.
@@ -1325,10 +1370,12 @@ def _build_compensation_distributor_watcher_or_none(
             on_distributed=_on_distributed,
             poll_interval_sec=interval,
             state_store=state_store,
+            dedup_store=dedup_store,
         )
         logger.info(
             f"CompensationDistributorWatcher wired (interval={interval}s, "
-            f"persistence={'on' if state_store is not None else 'off'})"
+            f"persistence={'on' if state_store is not None else 'off'}, "
+            f"dedup={'on' if dedup_store is not None else 'off'})"
         )
         return watcher
     except Exception as exc:  # noqa: BLE001
@@ -1948,6 +1995,15 @@ class PRSMNode:
         # 3 watcher_key namespaces inside. None when persistence is
         # disabled (legacy chain-tip-baseline behavior preserved).
         self._watcher_state_store = _build_watcher_state_store_or_none()
+        # Sprint 549: shared event-dedup store, sibling to the block
+        # store. Without it, restart catch-up re-dispatches every
+        # event between the previous run's last successful baseline-
+        # persist and the crash. KeyDistribution + StorageSlashing
+        # watchers don't consume this yet (deferred to sprint 550 +
+        # 551 follow-ons) — only CompensationDistributorWatcher.
+        self._watcher_event_dedup_store = (
+            _build_watcher_event_dedup_store_or_none()
+        )
         self._key_distribution_watcher = (
             _build_key_distribution_watcher_or_none(
                 client=self._key_distribution_client,
@@ -1976,6 +2032,7 @@ class PRSMNode:
                 webhook_url=_early_webhook_url,
                 webhook_secret=_early_webhook_secret,
                 distribution_log=self._distribution_log,
+                dedup_store=self._watcher_event_dedup_store,
             )
         )
         # Operator on-chain address for /admin/earnings-summary

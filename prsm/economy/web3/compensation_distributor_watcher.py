@@ -62,6 +62,7 @@ class CompensationDistributorWatcher:
         on_distributed: Optional[DistributedCallback] = None,
         poll_interval_sec: float = 30.0,
         state_store=None,
+        dedup_store=None,
     ) -> None:
         if poll_interval_sec <= 0:
             raise ValueError(
@@ -71,6 +72,14 @@ class CompensationDistributorWatcher:
         self._on_distributed = on_distributed
         self._poll_interval = float(poll_interval_sec)
         self._state_store = state_store
+        # Sprint 549: persistent (watcher_key, tx_hash, log_index)
+        # dedup. Without it, restart-catch-up re-dispatches every
+        # event between the previous run's last successful baseline-
+        # persist and the crash — duplicating distribution-log rows
+        # + duplicating distribution.distributed webhook fires. None
+        # is back-compat (the daemon opts into persistence in
+        # node.py wiring; tests + ephemeral runs pass None).
+        self._dedup_store = dedup_store
         self._stop_event = asyncio.Event()
         self.last_processed_block: Optional[int] = None
         # Sprint 401 — tick-age tracking. Bumped on each
@@ -161,7 +170,47 @@ class CompensationDistributorWatcher:
             return  # do NOT advance baseline OR last_tick_at
 
         for event in events:
+            # Sprint 549: persistent dedup. Skip events the previous
+            # run already dispatched (the crash-between-callback-and-
+            # baseline-persist scenario). Mark only AFTER the callback
+            # completes — if the callback raises, _invoke_cb's
+            # exception handler swallows it but the lack of mark
+            # means the next tick can retry. Dedup is best-effort:
+            # both has_processed_event + mark_processed_event are
+            # wrapped so a SQLite hiccup degrades to pre-sprint
+            # behavior with a warning, not a crash.
+            tx_hash = getattr(event, "tx_hash", None)
+            log_index = getattr(event, "log_index", None)
+            if (
+                self._dedup_store is not None
+                and tx_hash is not None
+                and log_index is not None
+            ):
+                try:
+                    if self._dedup_store.has_processed_event(
+                        self.WATCHER_KEY, tx_hash, log_index,
+                    ):
+                        continue
+                except Exception:
+                    logger.exception(
+                        "CompensationDistributorWatcher: dedup lookup "
+                        "raised; dispatching anyway"
+                    )
             await self._invoke_cb(event)
+            if (
+                self._dedup_store is not None
+                and tx_hash is not None
+                and log_index is not None
+            ):
+                try:
+                    self._dedup_store.mark_processed_event(
+                        self.WATCHER_KEY, tx_hash, log_index,
+                    )
+                except Exception:
+                    logger.exception(
+                        "CompensationDistributorWatcher: dedup mark "
+                        "raised; next tick may re-dispatch"
+                    )
         self.last_processed_block = to_block
         self._persist_baseline()
         # Sprint 401 — full poll-and-dispatch success.

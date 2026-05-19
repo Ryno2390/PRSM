@@ -176,3 +176,76 @@ class FilesystemLastProcessedBlockStore:
                 "%s: %s",
                 path, exc,
             )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Sprint 549 — persistent event-level dedup
+# ──────────────────────────────────────────────────────────────────────
+#
+# Sibling concern to LastProcessedBlockStore. The block store handles
+# "where did I last scan to"; this handles "did I already dispatch
+# THIS event". Without it, restart catch-up re-emits any events the
+# previous run handled between callback dispatch and the post-loop
+# baseline persist — duplicate distribution-log rows, duplicate
+# webhook fires, etc. Sprint-544's InboundCheckpointStore.credited_
+# deposits pattern carried over to the sibling watchers.
+#
+# Schema is intentionally minimal:
+#   (watcher_key TEXT, tx_hash TEXT, log_index INT) PRIMARY KEY
+# One row per (watcher, on-chain-event-identity) tuple.
+# ──────────────────────────────────────────────────────────────────────
+
+
+class EventDedupStore:
+    """SQLite-backed (watcher_key, tx_hash, log_index) dedup.
+
+    Lazily creates the parent dir + schema on first construction.
+    Used by ``CompensationDistributorWatcher`` (sprint 549) and —
+    deferred to sprints 550/551 — ``KeyDistributionWatcher`` +
+    ``StorageSlashingWatcher``.
+    """
+
+    _SCHEMA = (
+        "CREATE TABLE IF NOT EXISTS processed_events ("
+        "  watcher_key TEXT NOT NULL,"
+        "  tx_hash TEXT NOT NULL,"
+        "  log_index INTEGER NOT NULL,"
+        "  PRIMARY KEY (watcher_key, tx_hash, log_index)"
+        ")"
+    )
+
+    def __init__(self, db_path: str) -> None:
+        import sqlite3
+        self._db_path = db_path
+        if db_path != ":memory:":
+            parent = Path(db_path).parent
+            if str(parent) and not parent.exists():
+                parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(
+            db_path, check_same_thread=False,
+        )
+        self._conn.execute(self._SCHEMA)
+        self._conn.commit()
+
+    def has_processed_event(
+        self, watcher_key: str, tx_hash: str, log_index: int,
+    ) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM processed_events "
+            "WHERE watcher_key = ? AND tx_hash = ? "
+            "AND log_index = ? LIMIT 1",
+            (watcher_key, tx_hash, int(log_index)),
+        ).fetchone()
+        return row is not None
+
+    def mark_processed_event(
+        self, watcher_key: str, tx_hash: str, log_index: int,
+    ) -> None:
+        """Idempotent insert — calling twice on the same tuple is
+        a no-op."""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO processed_events "
+            "(watcher_key, tx_hash, log_index) VALUES (?, ?, ?)",
+            (watcher_key, tx_hash, int(log_index)),
+        )
+        self._conn.commit()

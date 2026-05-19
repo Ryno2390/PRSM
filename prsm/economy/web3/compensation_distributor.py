@@ -105,10 +105,19 @@ class DistributedEvent:
     Each amount is FTNS wei (18 decimals). Sum equals the FTNS
     balance of the distributor at the time of distribution; per
     contract integer-bps math, dust accrues to ``to_grant``.
+
+    Sprint 549: ``tx_hash`` + ``log_index`` carry the on-chain
+    identity of the event so the watcher can dedup across restart
+    (mirrors sprint 544's persistent dedup for InboundMonitor).
+    Both are Optional — pre-sprint-549 producers without identity
+    info still build valid events; the watcher dedup just no-ops
+    when either is missing.
     """
     to_creator: int
     to_operator: int
     to_grant: int
+    tx_hash: Optional[str] = None
+    log_index: Optional[int] = None
 
     def __post_init__(self) -> None:
         for field, value in (
@@ -122,17 +131,27 @@ class DistributedEvent:
                 )
 
     @classmethod
-    def from_decoded_args(cls, args: Dict[str, Any]) -> "DistributedEvent":
+    def from_decoded_args(
+        cls,
+        args: Dict[str, Any],
+        *,
+        tx_hash: Optional[str] = None,
+        log_index: Optional[int] = None,
+    ) -> "DistributedEvent":
         """Build from a Web3.py decoded-event-args dict.
 
         ``args`` is the dict produced by
         ``contract.events.Distributed().process_log(log)`` where keys
-        are the Solidity argument names in camelCase.
+        are the Solidity argument names in camelCase. ``tx_hash`` +
+        ``log_index`` (sprint 549) are populated by the client's
+        ``get_distributed_events`` from the raw log envelope.
         """
         return cls(
             to_creator=int(args["toCreator"]),
             to_operator=int(args["toOperator"]),
             to_grant=int(args["toGrant"]),
+            tx_hash=tx_hash,
+            log_index=log_index,
         )
 
 
@@ -343,9 +362,35 @@ class CompensationDistributorClient:
         logs = self.contract.events.Distributed().get_logs(
             from_block=from_block, to_block=to_block,
         )
-        return [
-            DistributedEvent.from_decoded_args(log["args"]) for log in logs
-        ]
+        out = []
+        for log in logs:
+            # Sprint 549: thread tx_hash + log_index into the
+            # DistributedEvent so the watcher can dedup. Raw web3.py
+            # log objects expose transactionHash (bytes) + logIndex
+            # (int); coerce to a canonical "0x..." hex string for
+            # tx_hash so it matches the EventDedupStore key shape.
+            tx_bytes = log.get("transactionHash") if isinstance(
+                log, dict,
+            ) else getattr(log, "transactionHash", None)
+            if isinstance(tx_bytes, (bytes, bytearray)):
+                tx_hex: Optional[str] = "0x" + tx_bytes.hex()
+            elif isinstance(tx_bytes, str):
+                tx_hex = tx_bytes if tx_bytes.startswith("0x") else (
+                    "0x" + tx_bytes
+                )
+            else:
+                tx_hex = None
+            log_idx = log.get("logIndex") if isinstance(
+                log, dict,
+            ) else getattr(log, "logIndex", None)
+            out.append(DistributedEvent.from_decoded_args(
+                log["args"],
+                tx_hash=tx_hex,
+                log_index=(
+                    int(log_idx) if isinstance(log_idx, int) else None
+                ),
+            ))
+        return out
 
     # ── Helpers ────────────────────────────────────────────────
 
