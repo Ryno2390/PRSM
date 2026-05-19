@@ -2367,6 +2367,124 @@ def peers():
     console.print("Node is not running. Start it with 'prsm node start'.", style="yellow")
 
 
+# ── Sprint 585 — §7 readiness aggregate ──────────────────────────
+
+
+def _probe_anchor_outcome():
+    """Returns (outcome, error_str_or_None) for anchor construction."""
+    import os as _os
+    addr = (_os.environ.get("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "") or "").strip()
+    rpc = _os.environ.get(
+        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+    )
+    if not addr:
+        return "unset", None
+    try:
+        from prsm.security.publisher_key_anchor.client import (
+            PublisherKeyAnchorClient,
+        )
+        PublisherKeyAnchorClient(contract_address=addr, rpc_url=rpc)
+        return "ok", None
+    except Exception as exc:  # noqa: BLE001
+        return "construction_failed", f"{type(exc).__name__}: {exc}"
+
+
+def _probe_stake_bond_outcome():
+    import os as _os
+    addr = (_os.environ.get("PRSM_STAKE_BOND_ADDRESS", "") or "").strip()
+    rpc = _os.environ.get(
+        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+    )
+    if not addr:
+        return "unset", None
+    try:
+        from prsm.economy.web3.stake_manager import StakeManagerClient
+        StakeManagerClient(contract_address=addr, rpc_url=rpc)
+        return "ok", None
+    except Exception as exc:  # noqa: BLE001
+        return "construction_failed", f"{type(exc).__name__}: {exc}"
+
+
+def _probe_rpc_outcome():
+    import os as _os
+    import httpx as _httpx
+    rpc = _os.environ.get(
+        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+    )
+    try:
+        resp = _httpx.post(
+            rpc,
+            json={
+                "jsonrpc": "2.0", "method": "eth_chainId",
+                "params": [], "id": 1,
+            },
+            timeout=10.0,
+        )
+        if resp.status_code != 200:
+            return "error", f"HTTP {resp.status_code}"
+        body = resp.json()
+        if body.get("result") is None:
+            return "error", f"no result: {body!r}"[:200]
+        return "ok", None
+    except _httpx.HTTPError as exc:
+        return "unreachable", f"{type(exc).__name__}: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        return "error", f"{type(exc).__name__}: {exc}"
+
+
+@node.command("section7-readiness")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def section7_readiness_cli(output_format: str):
+    """Aggregate §7 production-readiness check.
+
+    Sprint 585 — runs anchor-probe + stake-bond-probe + rpc-probe
+    in one shot, reports overall readiness. Exit 0 only when ALL
+    three probes return ok (suitable for CI gating).
+    """
+    import json
+    components = {
+        "anchor": dict(zip(("outcome", "error"), _probe_anchor_outcome())),
+        "stake_bond": dict(zip(("outcome", "error"), _probe_stake_bond_outcome())),
+        "rpc": dict(zip(("outcome", "error"), _probe_rpc_outcome())),
+    }
+    overall = (
+        "ready"
+        if all(c["outcome"] == "ok" for c in components.values())
+        else "not_ready"
+    )
+    payload = {"overall": overall, "components": components}
+
+    if output_format == "json":
+        click.echo(json.dumps(payload, indent=2))
+        raise SystemExit(0 if overall == "ready" else 1)
+
+    table = Table(title="§7 production-readiness (sprint 585)")
+    table.add_column("Component", style="cyan", no_wrap=True)
+    table.add_column("Outcome", style="green", no_wrap=True)
+    table.add_column("Error", style="red", no_wrap=False)
+    for name, c in components.items():
+        out = c["outcome"]
+        out_style = "[green]✓ ok[/green]" if out == "ok" else f"[red]{out}[/red]"
+        table.add_row(name, out_style, c.get("error") or "")
+    console.print(table)
+    if overall == "ready":
+        console.print(
+            "\n[green]✓ ready[/green] — all three §7 components "
+            "pass preflight. Safe to set "
+            "PRSM_PARALLAX_TRUST_STACK_KIND=production."
+        )
+    else:
+        console.print(
+            "\n[yellow]not_ready[/yellow] — fix the failing "
+            "component(s) above before flipping production."
+        )
+        raise SystemExit(1)
+
+
 # ── Sprint 584 — RPC probe ───────────────────────────────────────
 
 
