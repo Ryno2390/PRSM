@@ -2367,6 +2367,88 @@ def peers():
     console.print("Node is not running. Start it with 'prsm node start'.", style="yellow")
 
 
+# ── Sprint 584 — RPC probe ───────────────────────────────────────
+
+
+@node.command("rpc-probe")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def rpc_probe_cli(output_format: str):
+    """Probe whether PRSM_BASE_RPC_URL is reachable + responds.
+
+    Sprint 584 — completes the §7 production preflight trifecta
+    with sprints 581 (anchor) + 583 (stake-bond). Tests RPC
+    reachability via eth_chainId JSON-RPC call so operators can
+    distinguish "wrong contract address" from "unreachable RPC"
+    when 581/583 fail with construction_failed.
+    """
+    import json
+    import os as _os
+    import httpx as _httpx
+
+    rpc_url = _os.environ.get(
+        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
+    )
+    outcome = "ok"
+    error = None
+    chain_id_hex = None
+    try:
+        resp = _httpx.post(
+            rpc_url,
+            json={
+                "jsonrpc": "2.0",
+                "method": "eth_chainId",
+                "params": [],
+                "id": 1,
+            },
+            timeout=10.0,
+        )
+        if resp.status_code != 200:
+            outcome = "error"
+            error = f"HTTP {resp.status_code}: {resp.text[:200]}"
+        else:
+            try:
+                body = resp.json()
+            except ValueError as exc:
+                outcome = "error"
+                error = f"non-JSON response: {exc}"
+            else:
+                chain_id_hex = body.get("result")
+                if chain_id_hex is None:
+                    outcome = "error"
+                    error = f"no 'result' field: {body!r}"[:200]
+    except _httpx.HTTPError as exc:
+        outcome = "unreachable"
+        error = f"{type(exc).__name__}: {exc}"
+
+    payload = {
+        "PRSM_BASE_RPC_URL": rpc_url,
+        "outcome": outcome,
+        "chain_id_hex": chain_id_hex,
+        "error": error,
+    }
+    if output_format == "json":
+        click.echo(json.dumps(payload, indent=2))
+        raise SystemExit(0 if outcome == "ok" else 1)
+
+    if outcome == "ok":
+        console.print(
+            f"[green]✓ ok[/green] — RPC at [cyan]{rpc_url}[/cyan] "
+            f"responded with chain_id=[magenta]{chain_id_hex}[/magenta]"
+        )
+        return
+    console.print(
+        f"[red]✗ {outcome}[/red]: {error}\n"
+        f"[dim]rpc_url={rpc_url!r}[/dim]\n"
+        f"[dim]Check the URL is reachable (try `curl -s {rpc_url}`) "
+        f"and that any auth tokens (Infura/Alchemy key) are valid.[/dim]"
+    )
+    raise SystemExit(1)
+
+
 # ── Sprint 581 — anchor probe ────────────────────────────────────
 
 
