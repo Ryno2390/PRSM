@@ -109,7 +109,18 @@ def detect_resources() -> SystemResources:
             resources.cpu_freq_mhz = freq.current
         elif platform.system() == "Darwin":
             try:
-                import subprocess
+                # Sprint 566 F25 fix: do NOT re-import `subprocess`
+                # here. The module is already imported at the top
+                # (line 17). Re-importing inside a conditional
+                # branch makes Python treat `subprocess` as a
+                # function-local variable for the WHOLE function
+                # (scoping rule: any assignment makes the name
+                # local). On non-Darwin systems the Darwin branch
+                # is skipped, the local `subprocess` stays unbound,
+                # and line 142 (`subprocess.TimeoutExpired`) raises
+                # UnboundLocalError at module load — crashing every
+                # Linux daemon startup. Mac dev hid the bug because
+                # Darwin branch always runs there.
                 brand = subprocess.check_output(
                     ["sysctl", "-n", "machdep.cpu.brand_string"],
                     text=True, timeout=2,
