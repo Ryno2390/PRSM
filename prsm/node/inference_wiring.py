@@ -117,26 +117,86 @@ def _build_mock_trust_stack():
     )
 
 
-def _build_production_trust_stack_or_none():
-    """Sprint 560 — `production` trust-stack kind. Today wires a
-    REAL anchor (PublisherKeyAnchorClient against the contract at
-    PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS) but the other 3 components
-    are still placeholders pending follow-on sprints:
+class AnchorMediatedStakeLookup:
+    """Sprint 561 — production stake_lookup. Maps trust-stack node_id
+    (32-char hex publisher ID) → ETH address via the anchor's
+    ``lookup`` method, then queries on-chain stake via the
+    StakeManagerClient.
 
-      - stake_lookup    → ZeroStakeLookup (sprint 561: real
-                          StakeBondClient).
-      - profile_source  → empty InMemoryProfileSource (sprint
-                          562: real DhtProfileSource).
-      - consensus_hook  → no-op submitter (sprint 562: arbitration
-                          queue submitter wired from
-                          node._arbitration_queue).
+    Conservative fail-soft semantics:
+      - anchor.lookup returns None  → 0 stake (unknown node)
+      - stake_of raises (RPC error) → 0 stake (logged at DEBUG to
+                                      avoid log spam on transient
+                                      network errors)
+
+    Returning 0 under uncertainty matches the
+    ``StakeWeightedTrustAdapter`` design: zero stake = "effectively
+    excluded from routing" — the conservative posture under any
+    resolution failure.
+    """
+
+    def __init__(self, *, anchor, stake_client):
+        if anchor is None or not hasattr(anchor, "lookup"):
+            raise RuntimeError(
+                "AnchorMediatedStakeLookup requires an anchor with "
+                ".lookup(node_id) → Optional[str]"
+            )
+        if stake_client is None or not hasattr(
+            stake_client, "stake_of",
+        ):
+            raise RuntimeError(
+                "AnchorMediatedStakeLookup requires a stake_client "
+                "with .stake_of(provider) → StakeRecord"
+            )
+        self._anchor = anchor
+        self._stake = stake_client
+
+    def get_stake(self, node_id: str) -> int:
+        try:
+            eth = self._anchor.lookup(node_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "AnchorMediatedStakeLookup: anchor.lookup raised "
+                "for node_id=%s: %s", node_id, exc,
+            )
+            return 0
+        if not eth:
+            return 0
+        try:
+            record = self._stake.stake_of(eth)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "AnchorMediatedStakeLookup: stake_of raised for "
+                "node_id=%s eth=%s: %s", node_id, eth, exc,
+            )
+            return 0
+        return int(getattr(record, "amount_wei", 0))
+
+
+def _build_production_trust_stack_or_none():
+    """Sprint 560 + 561 — `production` trust-stack kind.
+
+    Wires REAL components from operator-supplied env vars:
+
+      - anchor          : PublisherKeyAnchorClient @
+                          PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS
+                          (required — no fallback).
+      - stake_lookup    : (sprint 561) AnchorMediatedStakeLookup
+                          via StakeManagerClient @
+                          PRSM_STAKE_BOND_ADDRESS. Falls back to
+                          ZeroStakeLookup PLACEHOLDER + warning
+                          when the env var is unset OR construction
+                          fails (operator on partial-production).
+
+    Still PLACEHOLDER (pending sprint 562):
+      - profile_source  → empty InMemoryProfileSource.
+      - consensus_hook  → no-op submitter.
 
     Returns None when the anchor address isn't set — there's no
-    sensible fallback for the anchor under `production` kind, and
-    operators on this kind explicitly want real anchor verification.
+    sensible fallback for the anchor under `production` kind.
 
-    Caller logs the placeholder-component list at INFO level so
-    operators see what's verified vs not.
+    Caller logs the per-component REAL/PLACEHOLDER enumeration at
+    INFO level so operators see what's actually verified.
     """
     from prsm.compute.parallax_scheduling.trust_adapter import (
         AnchorVerifyAdapter,
@@ -182,32 +242,74 @@ def _build_production_trust_stack_or_none():
         )
         return None
 
-    # Placeholder components — explicit zero stake, empty profile
-    # source, no-op submitter. Subsequent sprints replace each.
+    # Sprint 561 — production stake_lookup. PRSM_STAKE_BOND_ADDRESS
+    # set → build real StakeManagerClient + AnchorMediatedStakeLookup.
+    # Unset OR construction fails → fall back to ZeroStakeLookup
+    # placeholder with a structured warning (operator on partial-
+    # production keeps a working daemon).
     class _ZeroStakeLookup:
         def get_stake(self, node_id: str) -> int:
             return 0
+
+    stake_addr = os.environ.get(
+        "PRSM_STAKE_BOND_ADDRESS", "",
+    ).strip()
+    if stake_addr:
+        try:
+            from prsm.economy.web3.stake_manager import (
+                StakeManagerClient,
+            )
+            stake_client = StakeManagerClient(
+                contract_address=stake_addr,
+                rpc_url=rpc_url,
+            )
+            stake_lookup = AnchorMediatedStakeLookup(
+                anchor=anchor, stake_client=stake_client,
+            )
+            stake_lookup_status = "REAL"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Sprint 561 ParallaxScheduledExecutor wiring: "
+                "StakeManagerClient construction failed against %s "
+                "— %s. Falling back to ZeroStakeLookup placeholder.",
+                stake_addr, exc,
+            )
+            stake_lookup = _ZeroStakeLookup()
+            stake_lookup_status = (
+                "PLACEHOLDER (StakeManagerClient construction failed)"
+            )
+    else:
+        logger.warning(
+            "Sprint 561 ParallaxScheduledExecutor wiring: "
+            "PRSM_STAKE_BOND_ADDRESS not set; stake_lookup falls "
+            "back to ZeroStakeLookup placeholder. Set it to the "
+            "deployed StakeBond contract address (Base mainnet "
+            "default: see networks.py:stake_bond) to wire real "
+            "on-chain stake verification."
+        )
+        stake_lookup = _ZeroStakeLookup()
+        stake_lookup_status = "PLACEHOLDER (zero stake)"
 
     class _NoOpSubmitter:
         async def submit(self, *args, **kwargs):
             return None
 
     logger.info(
-        "Sprint 560 ParallaxScheduledExecutor wiring: trust_stack="
-        "production. anchor=REAL (PublisherKeyAnchorClient @ %s); "
-        "stake_lookup=PLACEHOLDER (zero stake — sprint 561 wires "
-        "real); profile_source=PLACEHOLDER (empty — sprint 562); "
+        "Sprint 560+561 ParallaxScheduledExecutor wiring: "
+        "trust_stack=production. anchor=REAL "
+        "(PublisherKeyAnchorClient @ %s); stake_lookup=%s; "
+        "profile_source=PLACEHOLDER (empty — sprint 562); "
         "consensus_hook=PLACEHOLDER (no-op submitter — sprint 562). "
         "Operators must not treat partial-production as fully "
         "production-verified until all 4 components are real.",
-        anchor_addr,
+        anchor_addr, stake_lookup_status,
     )
     return TrustStack(
         anchor_verify=AnchorVerifyAdapter(anchor=anchor),
         tier_gate=TierGateAdapter(),
         profile_source=StakeWeightedTrustAdapter(
             inner=InMemoryProfileSource(snapshots={}),
-            stake_lookup=_ZeroStakeLookup(),
+            stake_lookup=stake_lookup,
         ),
         consensus_hook=ConsensusMismatchHook(
             submitter=_NoOpSubmitter(), sample_rate=0.0,
