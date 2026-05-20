@@ -698,6 +698,120 @@ class HuggingFaceLayerSliceRunner:
             epsilon_spent=0.0,
         )
 
+    def run_layer_range_incremental(
+        self,
+        *,
+        model: Any,
+        layer_range: Any,
+        activation: Any,
+        privacy_tier: Any,
+        is_final_stage: bool,
+        prev_kv_state: Any,
+    ) -> Any:
+        """Sprint 656 (KV-cache arc piece 3) — incremental forward
+        using HF DynamicCache.
+
+        Returns ``(LayerSliceResult, new_kv_state)``:
+          - LayerSliceResult: same shape as ``run_layer_range``
+          - new_kv_state: the ``DynamicCache`` object after this
+            forward — sprint 657's KVCacheManager wiring stores
+            it for the next INCREMENTAL call
+
+        When ``prev_kv_state is None``: cold cache — the activation
+        carries the FULL prefix's embeddings, we forward all S
+        positions, return a freshly-initialized DynamicCache. This
+        is equivalent to PREFILL with cache-building.
+
+        When ``prev_kv_state`` is given (a DynamicCache): hot cache —
+        the activation should carry ONLY the new token's embedding
+        (S=1). cache_position starts at past_seq_len so positional
+        encoding aligns with the cached prefix. The Cache object
+        is mutated in-place (HF API) AND returned for clarity.
+        """
+        import time as _time
+        hf_model = self._ensure_model_loaded()
+        import torch as _torch
+        from transformers.cache_utils import DynamicCache
+        from prsm.compute.chain_rpc.server import LayerSliceResult
+        from prsm.compute.tee.models import TEEType
+
+        start_t = _time.monotonic()
+        layers = _resolve_hf_layers(hf_model)
+        start, end = int(layer_range[0]), int(layer_range[1])
+        if start < 0 or end > len(layers) or start >= end:
+            raise StageExecutionError(
+                f"HuggingFaceLayerSliceRunner: invalid layer_range "
+                f"({start}, {end}) for model with {len(layers)} layers"
+            )
+        original_ndim = activation.ndim
+        hidden = _torch.from_numpy(activation).to(self.device)
+        if hidden.dim() == 2:
+            hidden = hidden.unsqueeze(0)
+
+        # past_seq_len from the cache OR 0 for cold start.
+        if prev_kv_state is not None:
+            past_seq_len = int(prev_kv_state.get_seq_length())
+            cache = prev_kv_state
+        else:
+            past_seq_len = 0
+            cache = DynamicCache()
+        seq_len = hidden.shape[-2] if hidden.dim() >= 2 else 1
+        # cache_position: which positions THESE new hidden states
+        # occupy in the FULL [past + new] sequence.
+        cache_position = _torch.arange(
+            past_seq_len, past_seq_len + seq_len, device=self.device,
+        )
+
+        try:
+            with _torch.no_grad():
+                for i in range(start, end):
+                    out = layers[i](
+                        hidden,
+                        past_key_values=cache,
+                        cache_position=cache_position,
+                        use_cache=True,
+                    )
+                    hidden = out[0] if isinstance(out, tuple) else out
+                # Final-stage: same ln_f + lm_head as run_layer_range
+                if is_final_stage:
+                    final_ln = None
+                    if hasattr(hf_model, "transformer") and hasattr(
+                        hf_model.transformer, "ln_f",
+                    ):
+                        final_ln = hf_model.transformer.ln_f
+                    elif hasattr(hf_model, "model") and hasattr(
+                        hf_model.model, "norm",
+                    ):
+                        final_ln = hf_model.model.norm
+                    elif hasattr(hf_model, "gpt_neox") and hasattr(
+                        hf_model.gpt_neox, "final_layer_norm",
+                    ):
+                        final_ln = hf_model.gpt_neox.final_layer_norm
+                    if final_ln is not None:
+                        hidden = final_ln(hidden)
+                    lm_head = _resolve_hf_lm_head(hf_model)
+                    hidden = lm_head(hidden)
+        except StageExecutionError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise StageExecutionError(
+                f"HuggingFaceLayerSliceRunner incremental forward "
+                f"failed in {self.model_id!r}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if original_ndim == 2:
+            hidden = hidden.squeeze(0)
+        output_np = hidden.cpu().numpy()
+        duration = _time.monotonic() - start_t
+        result = LayerSliceResult(
+            output=output_np,
+            duration_seconds=duration,
+            tee_attestation=b"hf-runner-software-attestation-incremental",
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
+        )
+        return (result, cache)
+
 
 class IdentityLayerSliceRunner:
     """Sprint 608 (Phase 2F-3) — smallest possible LayerSliceRunner.
