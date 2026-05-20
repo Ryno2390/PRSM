@@ -8506,6 +8506,14 @@ def node_models_list_cli(output_format: str, registry_root: Optional[str]):
     "PublisherKeyAnchor.",
 )
 @click.option(
+    "--output-file", "output_file", type=click.Path(),
+    default=None,
+    help="Sprint 666 — write ONLY the generated text (no per-token "
+    "logs, no receipts) to this file. The text is the full prompt "
+    "+ generated tokens. Separate from --save-receipts so automation "
+    "pipelines can grab clean text without parsing log lines.",
+)
+@click.option(
     "--temperature", type=float, default=None,
     help="Sprint 639 — sampling temperature. Omit (default) for "
     "greedy argmax (deterministic, audit-chain-friendly). Values "
@@ -8589,6 +8597,7 @@ def node_infer_cli(
     incremental: bool,
     stop_strings: tuple,
     stop_on_eos: bool,
+    output_file: Optional[str],
 ):
     """Generate tokens via the live PRSM P2P inference path.
 
@@ -9105,6 +9114,19 @@ def node_infer_cli(
             console.print(
                 f"[yellow]⚠ receipts file close failed: {exc}[/yellow]"
             )
+    # Sprint 666 — write generated text to --output-file when set.
+    # Operators use this for automation pipelines that want clean
+    # text (no log lines, no receipt JSON).
+    if output_file:
+        try:
+            out_p = _Path(output_file)
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            out_p.write_text(text)
+        except OSError as exc:
+            console.print(
+                f"[yellow]⚠ output-file write failed: "
+                f"{output_file!r}: {exc}[/yellow]"
+            )
     if output_format == "json":
         click.echo(_json.dumps({
             "prompt": prompt,
@@ -9127,6 +9149,10 @@ def node_infer_cli(
         console.print(
             f"[dim]{max_tokens} signed receipt(s) saved to "
             f"{save_receipts_path}[/dim]"
+        )
+    if output_file:
+        console.print(
+            f"[dim]Generated text saved to {output_file}[/dim]"
         )
 
 

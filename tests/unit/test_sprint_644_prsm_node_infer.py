@@ -585,6 +585,46 @@ def test_no_incremental_defaults_to_prefill_mode(
     assert all(m == "prefill" for m in decode_modes)
 
 
+def test_output_file_writes_only_generated_text(
+    runner, hf_stubs, identity_stub, tmp_path,
+):
+    """Sprint 666 — --output-file writes ONLY the prompt +
+    generated text. No log lines, no JSON receipts. Useful for
+    automation pipelines that pipe output between tools.
+    """
+    output_path = tmp_path / "out.txt"
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", return_value=_chain_exec_ping_ok()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "Hi", "-n", "2",
+            "--output-file", str(output_path),
+        ])
+    assert result.exit_code == 0, result.output
+    # File contains the prompt + generated tokens, nothing else
+    content = output_path.read_text()
+    assert content.startswith("Hi"), content
+    # Our fake tokenizer returns " tok7" per generation step
+    assert " tok7" in content
+    # No JSON, no log noise
+    assert "{" not in content
+    assert "[step" not in content
+
+
+def test_output_file_parent_dir_created(
+    runner, hf_stubs, identity_stub, tmp_path,
+):
+    """--output-file with nested non-existent dir → parent created."""
+    nested = tmp_path / "deep" / "nested" / "out.txt"
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", return_value=_chain_exec_ping_ok()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "1",
+            "--output-file", str(nested),
+        ])
+    assert result.exit_code == 0
+    assert nested.exists()
+
+
 def test_stop_string_halts_generation_early(
     runner, hf_stubs, identity_stub,
 ):
