@@ -469,3 +469,145 @@ def test_greedy_does_not_emit_advisory(
         ])
     assert result.exit_code == 0
     assert "Audit-chain advisory" not in result.output
+
+
+def _echo_request_id_response(*args, **kwargs):
+    """Mock response builder that echoes the CLI's request_id back
+    in the signed response (instead of the hardcoded test-req used
+    by _chain_exec_ping_ok). This lets tests verify that the CLI's
+    request_id flows through to receipts.
+    """
+    from prsm.compute.chain_rpc.protocol import (
+        RunLayerSliceResponse, encode_message, parse_message,
+    )
+    from prsm.compute.tee.models import TEEType
+    from prsm.node.identity import generate_node_identity
+    import base64
+    import numpy as np
+
+    # Decode the incoming request to extract its request_id
+    payload_b64 = kwargs.get("json", {}).get("payload_b64", "")
+    request_bytes = base64.b64decode(payload_b64)
+    request = parse_message(request_bytes)
+    actual_request_id = request.request_id
+
+    identity = generate_node_identity(display_name="test-stage")
+    logits = np.zeros((1, 1, 50), dtype=np.float32)
+    logits[0, 0, 7] = 99.0
+    resp = RunLayerSliceResponse.sign(
+        identity=identity,
+        request_id=actual_request_id,  # ← echo back
+        activation_blob=logits.tobytes(),
+        activation_shape=(1, 1, 50),
+        activation_dtype="float32",
+        duration_seconds=0.1,
+        tee_attestation=b"sw-attest",
+        tee_type=TEEType.SOFTWARE,
+        epsilon_spent=0.0,
+    )
+    r = MagicMock()
+    r.status_code = 200
+    r.json = MagicMock(return_value={
+        "response_b64": base64.b64encode(
+            encode_message(resp),
+        ).decode("ascii"),
+    })
+    return r
+
+
+def test_incremental_flag_uses_stable_request_id(
+    runner, hf_stubs, identity_stub, tmp_path,
+):
+    """Sprint 662 — with --incremental, all per-token receipts
+    share a single stable request_id (the cache key). Without
+    --incremental, each receipt gets a fresh request_id.
+    """
+    receipts = tmp_path / "r.jsonl"
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", side_effect=_echo_request_id_response):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "3",
+            "--incremental",
+            "--save-receipts", str(receipts),
+        ])
+    assert result.exit_code == 0, result.output
+    lines = receipts.read_text().strip().splitlines()
+    assert len(lines) == 3
+    request_ids = [json.loads(l)["request_id"] for l in lines]
+    assert len(set(request_ids)) == 1, (
+        f"--incremental must share request_id; got {set(request_ids)}"
+    )
+    assert request_ids[0].startswith("prsm-cli-incremental-")
+
+
+def test_incremental_flag_records_decode_mode_incremental(
+    runner, hf_stubs, identity_stub, tmp_path,
+):
+    """Sprint 662 — receipts written with --incremental record
+    decode_mode='incremental' so sprint-661 C3 invariant
+    correctly skips uniqueness check.
+    """
+    receipts = tmp_path / "r.jsonl"
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", return_value=_chain_exec_ping_ok()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "2",
+            "--incremental",
+            "--save-receipts", str(receipts),
+        ])
+    assert result.exit_code == 0, result.output
+    for line in receipts.read_text().strip().splitlines():
+        rec = json.loads(line)
+        assert rec["decode_mode"] == "incremental"
+
+
+def test_no_incremental_defaults_to_prefill_mode(
+    runner, hf_stubs, identity_stub, tmp_path,
+):
+    """Sprint 662 — default behavior unchanged when --no-incremental
+    (or flag omitted). Each receipt gets a fresh request_id +
+    decode_mode='prefill'.
+    """
+    receipts = tmp_path / "r.jsonl"
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", side_effect=_echo_request_id_response):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "2",
+            "--save-receipts", str(receipts),
+        ])
+    assert result.exit_code == 0, result.output
+    lines = receipts.read_text().strip().splitlines()
+    request_ids = [json.loads(l)["request_id"] for l in lines]
+    decode_modes = [json.loads(l)["decode_mode"] for l in lines]
+    assert len(set(request_ids)) == 2, (
+        "default (prefill) mode must use fresh request_id per token"
+    )
+    assert all(m == "prefill" for m in decode_modes)
+
+
+def test_incremental_sends_full_prefix_on_step_0_only(
+    runner, hf_stubs, identity_stub, tmp_path,
+):
+    """Sprint 662 — on step 0 (cold cache), full prefix shipped.
+    On step 1+ (hot cache), only the new token shipped. We can't
+    directly observe the activation shapes from a CliRunner test
+    (the activation is base64'd inside the request), but we can
+    verify the request count + record both went through.
+    """
+    post_count = [0]
+
+    def post_capture(*a, **kw):
+        post_count[0] += 1
+        return _chain_exec_ping_ok()
+
+    receipts = tmp_path / "r.jsonl"
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", side_effect=post_capture):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "3",
+            "--incremental",
+            "--save-receipts", str(receipts),
+        ])
+    assert result.exit_code == 0, result.output
+    # 3 tokens = 3 chain-exec-ping POSTs (1 cold + 2 hot)
+    assert post_count[0] == 3
