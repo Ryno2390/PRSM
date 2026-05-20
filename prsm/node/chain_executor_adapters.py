@@ -251,6 +251,66 @@ class LayerStageServerStageExecutor:
             ) from exc
 
 
+class HuggingFaceLayerSliceRunner:
+    """Sprint 610 (Phase 2F-5a) — first real-model LayerSliceRunner
+    skeleton.
+
+    Constructor accepts a HuggingFace ``model_id`` (e.g.,
+    "meta-llama/Llama-3.2-1B") + target device (default "cpu" —
+    safe on GPU-less machines).
+
+    Phase 2F-5a is interface only. Phase 2F-5b ships:
+      - Lazy ``transformers`` import + model loading from HF Hub
+        or local checkpoint
+      - Layer extraction + forward pass on the activation tensor
+      - Layer-range validation against the model's actual depth
+      - TEE attestation hook (Phase 2F-5c)
+
+    Conforms to ``LayerSliceRunner`` Protocol. The ``model`` arg
+    in ``run_layer_range`` (which the LayerStageServer passes from
+    ``registry.get(model_id)``) is IGNORED by the HF runner — the
+    HF runner owns its own model loading via the ``transformers``
+    library. ShardedModel-based registry is for PRSM's own
+    sharding scheme; HF runner is a parallel path.
+    """
+
+    def __init__(
+        self,
+        *,
+        model_id: str,
+        device: str = "cpu",
+    ) -> None:
+        if not model_id or not isinstance(model_id, str):
+            raise ValueError(
+                "HuggingFaceLayerSliceRunner requires model_id "
+                "(HuggingFace model identifier, e.g., "
+                "'meta-llama/Llama-3.2-1B')"
+            )
+        self.model_id = model_id
+        self.device = device or "cpu"
+
+    def run_layer_range(
+        self,
+        *,
+        model: Any,
+        layer_range: Any,
+        activation: Any,
+        privacy_tier: Any,
+        is_final_stage: bool,
+    ) -> Any:
+        raise StageExecutionError(
+            f"Sprint 610 Phase 2F-5a skeleton: "
+            f"HuggingFaceLayerSliceRunner.run_layer_range() is not "
+            f"yet implemented (model_id={self.model_id!r}, "
+            f"device={self.device!r}). Phase 2F-5b (next sprint) "
+            f"will ship: lazy `transformers` import, model loading "
+            f"from HF Hub or local checkpoint, layer extraction + "
+            f"forward pass on the activation tensor. Until then, "
+            f"use PRSM_PARALLAX_LAYER_SLICE_RUNNER_KIND=identity "
+            f"(sprint 608 passthrough) for wire testing."
+        )
+
+
 class IdentityLayerSliceRunner:
     """Sprint 608 (Phase 2F-3) — smallest possible LayerSliceRunner.
 
