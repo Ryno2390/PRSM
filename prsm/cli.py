@@ -8588,6 +8588,18 @@ def node_infer_cli(
             logits_sha256 = _hashlib.sha256(
                 resp.activation_blob,
             ).hexdigest()
+            # Sprint 635: include the bytes the stage_signature was
+            # COMPUTED over, so receipts are self-verifying offline.
+            # Without these, the activation_sha256 is observation-
+            # only (proves the operator saw these specific bytes
+            # come back, but can't independently reconstruct the
+            # signing payload). With them, anyone can rebuild the
+            # canonical signing payload + verify Ed25519 against
+            # the stage_node_id's pubkey (from PublisherKeyAnchor).
+            #
+            # Cost: gpt2 logits are ~1.3MB per token → ~13MB per
+            # 10-token run base64-encoded. Operators with size
+            # concerns can post-process (gzip the file → ~50%).
             receipt_record = {
                 "step": step,
                 "wall_unix": _time.time(),
@@ -8600,6 +8612,12 @@ def node_infer_cli(
                 "activation_shape": list(resp.activation_shape),
                 "activation_dtype": resp.activation_dtype,
                 "activation_sha256": logits_sha256,
+                "activation_blob_b64": base64.b64encode(
+                    bytes(resp.activation_blob),
+                ).decode("ascii"),
+                "tee_attestation_b64": base64.b64encode(
+                    bytes(resp.tee_attestation),
+                ).decode("ascii"),
                 "duration_seconds": resp.duration_seconds,
                 "epsilon_spent": resp.epsilon_spent,
                 "tee_type": getattr(
@@ -8665,6 +8683,193 @@ def node_infer_cli(
             f"[dim]{max_tokens} signed receipt(s) saved to "
             f"{save_receipts_path}[/dim]"
         )
+
+
+@node.command("verify-receipts")
+@click.argument(
+    "receipts_path", type=click.Path(exists=True, dir_okay=False),
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def node_verify_receipts_cli(receipts_path: str, output_format: str):
+    """Verify per-token signed receipts written by `prsm node infer
+    --save-receipts`.
+
+    Sprint 635 — closes the Vision §7 truth-surfacing loop. Each
+    receipt's stage_signature_b64 was produced by the stage node
+    over the canonical signing payload (chain_rpc.protocol
+    RunLayerSliceResponse.signing_payload). This command:
+
+      1. Reads each JSON line from `receipts_path`.
+      2. Looks up the stage_node_id's pubkey via the live
+         PublisherKeyAnchor (using `_build_anchor_or_none()`).
+      3. Reconstructs RunLayerSliceResponse from the receipt's
+         fields (activation_blob_b64, tee_attestation_b64, etc.).
+      4. Calls verify_with_anchor with expected_stage_node_id =
+         the receipt's stage_node_id.
+      5. Reports pass/fail per line + an aggregate summary.
+
+    Exit code: 0 if every receipt verified, non-zero otherwise.
+
+    Requires sprint 635+ receipts (activation_blob_b64 field).
+    Pre-sprint-635 receipts (sha256 only) will be marked
+    UNVERIFIABLE — the receipt proved observation but the
+    activation bytes weren't persisted for signature reconstruction.
+    """
+    import base64 as _base64
+    import json as _json
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    from prsm.compute.chain_rpc.protocol import (
+        RunLayerSliceResponse,
+    )
+    from prsm.compute.tee.models import TEEType
+    from prsm.node.inference_wiring import _build_anchor_or_none
+
+    anchor = _build_anchor_or_none()
+    if anchor is None:
+        console.print(
+            "[red]✗ No anchor available[/red]: cannot resolve "
+            "stage pubkeys for signature verification.\n"
+            "[dim]Set PRSM_NETWORK=mainnet (sprint 629 default "
+            "honors networks.py) or pass an explicit "
+            "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS.[/dim]"
+        )
+        _sys.exit(2)
+
+    results = []
+    pubkey_cache: Dict[str, Optional[str]] = {}
+    text_p = _Path(receipts_path)
+    for line_idx, raw in enumerate(text_p.read_text().splitlines()):
+        if not raw.strip():
+            continue
+        try:
+            rec = _json.loads(raw)
+        except _json.JSONDecodeError as exc:
+            results.append({
+                "line": line_idx,
+                "status": "MALFORMED_JSON",
+                "reason": f"{exc}",
+            })
+            continue
+        if "activation_blob_b64" not in rec:
+            results.append({
+                "line": line_idx,
+                "status": "UNVERIFIABLE",
+                "reason": (
+                    "receipt lacks activation_blob_b64 (pre-sprint-635 "
+                    "format); cannot reconstruct signing payload"
+                ),
+                "stage_node_id": rec.get("stage_node_id"),
+                "request_id": rec.get("request_id"),
+            })
+            continue
+        try:
+            activation_bytes = _base64.b64decode(rec["activation_blob_b64"])
+            tee_attest = _base64.b64decode(
+                rec.get("tee_attestation_b64", ""),
+            )
+            resp = RunLayerSliceResponse(
+                request_id=rec["request_id"],
+                activation_blob=activation_bytes,
+                activation_shape=tuple(rec["activation_shape"]),
+                activation_dtype=rec["activation_dtype"],
+                duration_seconds=float(rec["duration_seconds"]),
+                tee_attestation=tee_attest,
+                tee_type=TEEType(rec["tee_type"]),
+                epsilon_spent=float(rec["epsilon_spent"]),
+                stage_signature_b64=rec["stage_signature_b64"],
+                stage_node_id=rec["stage_node_id"],
+                protocol_version=int(rec.get("protocol_version", 2)),
+            )
+        except Exception as exc:  # noqa: BLE001
+            results.append({
+                "line": line_idx,
+                "status": "RECONSTRUCT_FAILED",
+                "reason": f"{type(exc).__name__}: {exc}",
+                "stage_node_id": rec.get("stage_node_id"),
+                "request_id": rec.get("request_id"),
+            })
+            continue
+        # Cache pubkey lookups so a 10-token receipts file doesn't
+        # do 10 redundant on-chain reads for the same stage.
+        if resp.stage_node_id not in pubkey_cache:
+            try:
+                pubkey_cache[resp.stage_node_id] = anchor.lookup(
+                    resp.stage_node_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                results.append({
+                    "line": line_idx,
+                    "status": "ANCHOR_LOOKUP_FAILED",
+                    "reason": f"{type(exc).__name__}: {exc}",
+                    "stage_node_id": resp.stage_node_id,
+                    "request_id": resp.request_id,
+                })
+                continue
+        if not pubkey_cache[resp.stage_node_id]:
+            results.append({
+                "line": line_idx,
+                "status": "PUBKEY_NOT_REGISTERED",
+                "reason": (
+                    f"stage_node_id {resp.stage_node_id} has no pubkey "
+                    f"in the live PublisherKeyAnchor"
+                ),
+                "stage_node_id": resp.stage_node_id,
+                "request_id": resp.request_id,
+            })
+            continue
+        ok = resp.verify_with_anchor(
+            anchor, expected_stage_node_id=resp.stage_node_id,
+        )
+        results.append({
+            "line": line_idx,
+            "status": "OK" if ok else "SIGNATURE_INVALID",
+            "stage_node_id": resp.stage_node_id,
+            "request_id": resp.request_id,
+            "next_token_text": rec.get("next_token_text"),
+        })
+
+    n_ok = sum(1 for r in results if r["status"] == "OK")
+    n_total = len(results)
+    if output_format == "json":
+        click.echo(_json.dumps({
+            "receipts_path": receipts_path,
+            "total": n_total,
+            "verified": n_ok,
+            "results": results,
+        }, indent=2))
+        _sys.exit(0 if n_ok == n_total else 1)
+
+    for r in results:
+        if r["status"] == "OK":
+            console.print(
+                f"  [green]✓[/green] line {r['line']:3d}: "
+                f"[dim]{r['stage_node_id'][:16]}...[/dim] "
+                f"token=[cyan]{r.get('next_token_text', '?')!r}[/cyan]"
+            )
+        else:
+            console.print(
+                f"  [red]✗[/red] line {r['line']:3d}: "
+                f"[bold]{r['status']}[/bold] — "
+                f"{r.get('reason', '?')}"
+            )
+    console.print()
+    if n_ok == n_total:
+        console.print(
+            f"[green]🎯 {n_ok}/{n_total} receipts verified[/green] "
+            f"against the live anchor."
+        )
+    else:
+        console.print(
+            f"[red]✗ {n_ok}/{n_total} receipts verified[/red]; "
+            f"{n_total - n_ok} failed."
+        )
+    _sys.exit(0 if n_ok == n_total else 1)
 
 
 # ──────────────────────────────────────────────────────────────
