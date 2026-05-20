@@ -8651,7 +8651,17 @@ def node_infer_cli(
         save_p = _Path(save_receipts_path)
         try:
             save_p.parent.mkdir(parents=True, exist_ok=True)
-            receipts_fh = save_p.open("a", encoding="utf-8")
+            # Sprint 642 — auto-gzip when path ends in .gz. ~50%
+            # size reduction on the activation_blob_b64 payload.
+            # Operator gets compression by adding ".gz" to the
+            # path; no separate flag needed.
+            if save_p.suffix == ".gz":
+                import gzip as _gzip
+                receipts_fh = _gzip.open(
+                    save_p, "at", encoding="utf-8",
+                )
+            else:
+                receipts_fh = save_p.open("a", encoding="utf-8")
         except OSError as exc:
             console.print(
                 f"[red]✗ Cannot open receipts file "

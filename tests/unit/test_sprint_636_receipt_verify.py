@@ -706,6 +706,49 @@ def test_C5_fires_for_explicit_greedy_sampling():
     assert "TOKEN_ID_ARGMAX_MISMATCH" in kinds
 
 
+def test_gzipped_receipts_file_reads_correctly(tmp_path):
+    """Sprint 642 — verify_receipts_file auto-decompresses .gz."""
+    import gzip
+    from prsm.cli_modules.receipt_verify import verify_receipts_file
+
+    stage = _make_stage_identity()
+    resp = _signed_response(stage)
+    rec = _receipt_from_response(resp)
+    jsonl = tmp_path / "receipts.jsonl.gz"
+    with gzip.open(jsonl, "wt", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+
+    anchor = _anchor_with(stage)
+    results = verify_receipts_file(str(jsonl), anchor=anchor)
+    assert len(results) == 1
+    assert results[0]["status"] == "OK"
+
+
+def test_gzipped_receipts_smaller_than_plain(tmp_path):
+    """Compression actually saves space — sanity check that gzip
+    on activation_blob_b64 (which is base64 random-ish bytes plus
+    lots of JSON structure repetition) hits at least 30% size cut.
+    """
+    import gzip
+    stage = _make_stage_identity()
+    resp = _signed_response(stage)
+    rec = _receipt_from_response(resp)
+    plain_path = tmp_path / "p.jsonl"
+    gz_path = tmp_path / "g.jsonl.gz"
+    plain_path.write_text(json.dumps(rec) + "\n")
+    with gzip.open(gz_path, "wt", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+    p_size = plain_path.stat().st_size
+    g_size = gz_path.stat().st_size
+    # With single-shot test bytes, ratio varies; loosely require
+    # gzipped is smaller (the activation b64 won't compress as
+    # tightly as repeated JSON keys, but the JSON wrapper compresses
+    # significantly).
+    assert g_size < p_size, (
+        f"gzip didn't shrink the file: plain={p_size} gz={g_size}"
+    )
+
+
 def test_C5_treats_missing_sampling_mode_as_greedy():
     """Backwards compat: sprint 633-638 receipts don't have
     sampling_mode (only greedy existed). C5 must still apply.

@@ -404,7 +404,16 @@ def verify_receipts_file(
     cached_anchor = _CachingAnchor(anchor)
     results: List[Dict[str, Any]] = []
     raw_records: List[Dict[str, Any]] = []
-    for line_idx, raw in enumerate(_Path(receipts_path).read_text().splitlines()):
+    # Sprint 642 — auto-decompress when path ends in .gz. Mirrors
+    # the save-receipts auto-gzip path so operators can round-trip
+    # compressed audit files seamlessly.
+    receipts_p = _Path(receipts_path)
+    if receipts_p.suffix == ".gz":
+        import gzip as _gzip
+        text = _gzip.open(receipts_p, "rt", encoding="utf-8").read()
+    else:
+        text = receipts_p.read_text()
+    for line_idx, raw in enumerate(text.splitlines()):
         if not raw.strip():
             continue
         try:
