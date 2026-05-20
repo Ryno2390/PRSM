@@ -67,7 +67,7 @@ def main() -> int:
 
     request = RunLayerSliceRequest(
         request_id=request_id,
-        model_id="sprint624-nonexistent-model",
+        model_id="sprint625-identity-test",
         layer_range=(0, 1),
         privacy_tier=PrivacyLevel.NONE,
         content_tier=ContentTier.A,
