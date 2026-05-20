@@ -69,6 +69,9 @@ def test_stage_selector_layer_stage_missing_anchor_falls_back(caplog):
         {
             "PRSM_PARALLAX_STAGE_EXECUTOR_KIND": "layer_stage",
             "PRSM_MODEL_REGISTRY_ROOT": "/tmp/registry",
+            # Sprint 629: pin sepolia so networks.py mainnet default
+            # doesn't fill in the anchor and defeat this test.
+            "PRSM_NETWORK": "sepolia",
         },
         clear=False,
     ):

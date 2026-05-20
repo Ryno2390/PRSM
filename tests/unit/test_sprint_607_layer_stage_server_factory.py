@@ -46,6 +46,10 @@ def test_factory_raises_when_registry_root_unset():
 
 
 def test_factory_raises_when_anchor_unset(tmp_path):
+    """Sprint 629: pin PRSM_NETWORK=sepolia so networks.py fallback
+    doesn't fill in the Base mainnet default — keeps this test's
+    "anchor unresolvable" semantic.
+    """
     from prsm.node.chain_executor_adapters import (
         build_layer_stage_server_executor, StageExecutionError,
     )
@@ -55,7 +59,10 @@ def test_factory_raises_when_anchor_unset(tmp_path):
     runner.run_layer_range = MagicMock()
     with patch.dict(
         os.environ,
-        {"PRSM_MODEL_REGISTRY_ROOT": str(tmp_path)},
+        {
+            "PRSM_MODEL_REGISTRY_ROOT": str(tmp_path),
+            "PRSM_NETWORK": "sepolia",
+        },
         clear=False,
     ):
         os.environ.pop("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", None)

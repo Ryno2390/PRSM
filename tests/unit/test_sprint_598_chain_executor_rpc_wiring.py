@@ -38,13 +38,21 @@ def test_stub_kind_still_returns_stub():
 
 
 def test_rpc_falls_back_when_anchor_unset(caplog):
-    """No PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS → stub fallback + warn."""
+    """No anchor resolvable → stub fallback + warn.
+
+    Sprint 629 added the networks.py fallback for Base mainnet,
+    so to exercise the "anchor unresolvable" branch this test pins
+    PRSM_NETWORK=sepolia (no default published yet).
+    """
     from prsm.node.inference_wiring import (
         _build_chain_executor, _StubChainExecutor,
     )
     with patch.dict(
         os.environ,
-        {"PRSM_PARALLAX_CHAIN_EXECUTOR_KIND": "rpc"},
+        {
+            "PRSM_PARALLAX_CHAIN_EXECUTOR_KIND": "rpc",
+            "PRSM_NETWORK": "sepolia",
+        },
         clear=False,
     ):
         os.environ.pop("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", None)

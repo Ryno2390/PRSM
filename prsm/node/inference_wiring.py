@@ -384,30 +384,43 @@ def _build_production_trust_stack_or_none():
 def _build_anchor_or_none():
     """Sprint 580 — env-driven PublisherKeyAnchorClient construction.
 
-    Single source of truth for ``PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS``
-    interpretation. Used by:
+    Single source of truth for anchor resolution. Used by:
       - ``_build_production_trust_stack_or_none`` (existing caller)
       - ``_build_chain_executor`` (sprint-581+ Phase 2 — needs the
         anchor for ``make_rpc_chain_executor``)
 
     Semantics:
-      - env unset / empty → return None (silent; the trust-stack
-        caller is the one that decides whether None is OK or
-        production-blocking)
+      - no address resolvable (env unset AND networks.py default
+        unset for current network) → return None
       - construction succeeds → return PublisherKeyAnchorClient
       - construction fails → log WARNING + return None
 
-    RPC URL falls back to Base mainnet (PRSM_BASE_RPC_URL override
-    matches the pre-580 inline behavior).
+    Sprint 629 fix: routes through ``prsm.config.networks.resolve_endpoints()``
+    so the baked-in networks.py default (e.g. Base mainnet Phase 3.x.3
+    anchor 0xd811ad99... per sprint 621) is honored when
+    PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS is unset. Pre-629 the helper
+    only honored explicit env; fresh-install operators with
+    PRSM_PARALLAX_TRUST_STACK_KIND=production silently got the stub
+    anchor when they should have gotten the deployed contract.
+
+    RPC URL also comes from resolve_endpoints() so PRSM_NETWORK +
+    BASE_RPC_URL overrides apply uniformly.
     """
-    anchor_addr = os.environ.get(
-        "PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", "",
-    ).strip()
+    try:
+        from prsm.config.networks import resolve_endpoints
+        endpoints = resolve_endpoints()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Sprint 629 _build_anchor_or_none: "
+            "resolve_endpoints() failed — %s. Returning None.",
+            exc,
+        )
+        return None
+
+    anchor_addr = (endpoints.publisher_key_anchor or "").strip()
     if not anchor_addr:
         return None
-    rpc_url = os.environ.get(
-        "PRSM_BASE_RPC_URL", "https://mainnet.base.org",
-    )
+    rpc_url = endpoints.rpc_url
     try:
         from prsm.security.publisher_key_anchor.client import (
             PublisherKeyAnchorClient,
