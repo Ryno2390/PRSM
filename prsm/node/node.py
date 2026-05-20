@@ -4043,6 +4043,39 @@ class PRSMNode:
         self._chain_executor_pending = {}
 
         await self.transport.start()
+
+        # Sprint 599 (Phase 2D step 5) — register the chain-executor
+        # response handler on the transport's MSG_DIRECT dispatch.
+        # Co-exists with content_provider's existing MSG_DIRECT
+        # handler (transport.on_message uses append, not replace).
+        # Last piece for Phase 2 RPC chain-executor runtime
+        # functionality.
+        try:
+            from prsm.node.transport import MSG_DIRECT
+            from prsm.node.chain_executor_adapters import (
+                handle_chain_executor_response,
+            )
+            _self = self
+
+            async def _chain_executor_response_dispatch(msg, peer):
+                handle_chain_executor_response(_self, msg)
+
+            self.transport.on_message(
+                MSG_DIRECT, _chain_executor_response_dispatch,
+            )
+            logger.info(
+                "Sprint 599 chain-executor response dispatch wired "
+                "on MSG_DIRECT — Phase 2 RPC runtime functionality "
+                "now complete."
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Sprint 599 chain-executor response wiring failed: "
+                "%s. RPC chain-executor (sprint 598) will time out "
+                "on dispatch. Operators on PRSM_PARALLAX_CHAIN_EXECUTOR_KIND=rpc "
+                "should fall back to stub until this lands.",
+                exc,
+            )
         await self.gossip.start()
         await self.discovery.start()
         # T3b: bring up the DHT listener + clients on their own
