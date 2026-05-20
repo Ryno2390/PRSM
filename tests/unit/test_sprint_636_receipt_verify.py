@@ -379,3 +379,213 @@ def test_verify_receipts_file_handles_malformed_json(tmp_path):
     assert len(results) == 2
     assert results[0]["status"] == "MALFORMED_JSON"
     assert results[1]["status"] == "OK"
+
+
+# --------------------------------------------------------------------------
+# Sprint 637 — chain-of-custody invariants
+# --------------------------------------------------------------------------
+
+
+def _chain_record(
+    *,
+    settler: str = "settler-A",
+    model: str = "gpt2",
+    request_id: str = "req-0",
+    wall_unix: float = 1000.0,
+    next_token_id: int = 0,
+    activation_blob_b64: Optional[str] = None,
+    activation_shape: Optional[list] = None,
+    activation_dtype: str = "float32",
+) -> Dict:
+    """Lightweight chain-test record (no signature crypto; chain
+    invariants are orthogonal to signature verification).
+    """
+    import base64 as _b64
+    import struct as _struct
+    rec: Dict = {
+        "settler_node_id": settler,
+        "model_id": model,
+        "request_id": request_id,
+        "wall_unix": wall_unix,
+        "next_token_id": next_token_id,
+    }
+    if activation_blob_b64 is not None:
+        rec["activation_blob_b64"] = activation_blob_b64
+        rec["activation_shape"] = activation_shape or [1, 1, 4]
+        rec["activation_dtype"] = activation_dtype
+    return rec
+
+
+def _make_argmax_consistent_record(next_token_id: int, vocab: int = 8) -> Dict:
+    """Build a record where activation_blob's argmax actually equals
+    next_token_id. Useful for the happy-path C5 test.
+    """
+    import base64 as _b64
+    import numpy as _np
+    logits = _np.zeros((1, 1, vocab), dtype=_np.float32)
+    logits[0, 0, next_token_id] = 99.0  # argmax = next_token_id
+    return _chain_record(
+        next_token_id=next_token_id,
+        activation_blob_b64=_b64.b64encode(logits.tobytes()).decode("ascii"),
+        activation_shape=[1, 1, vocab],
+    )
+
+
+def _make_argmax_tampered_record(
+    claimed_token_id: int, actual_argmax: int, vocab: int = 8,
+) -> Dict:
+    """Activation's argmax = actual_argmax, but receipt claims
+    claimed_token_id. Operator-side post-sampling tampering.
+    """
+    import base64 as _b64
+    import numpy as _np
+    logits = _np.zeros((1, 1, vocab), dtype=_np.float32)
+    logits[0, 0, actual_argmax] = 99.0
+    return _chain_record(
+        next_token_id=claimed_token_id,
+        activation_blob_b64=_b64.b64encode(logits.tobytes()).decode("ascii"),
+        activation_shape=[1, 1, vocab],
+    )
+
+
+def test_chain_invariants_happy_path_no_findings():
+    """Coherent run of 3 records → empty findings."""
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+
+    recs = [
+        _make_argmax_consistent_record(next_token_id=0),
+        _make_argmax_consistent_record(next_token_id=1),
+        _make_argmax_consistent_record(next_token_id=2),
+    ]
+    # Distinct request_ids + increasing wall_unix
+    recs[0]["request_id"] = "req-0"
+    recs[0]["wall_unix"] = 1000.0
+    recs[1]["request_id"] = "req-1"
+    recs[1]["wall_unix"] = 1001.0
+    recs[2]["request_id"] = "req-2"
+    recs[2]["wall_unix"] = 1002.0
+
+    findings = verify_chain_invariants(recs)
+    assert findings == [], f"expected no findings; got {findings}"
+
+
+def test_chain_inconsistent_settler_caught():
+    """Two settlers in same file → INCONSISTENT_SETTLER."""
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+
+    recs = [
+        _chain_record(settler="settler-A", request_id="r0", wall_unix=1.0),
+        _chain_record(settler="settler-B", request_id="r1", wall_unix=2.0),
+    ]
+    findings = verify_chain_invariants(recs)
+    kinds = [f["kind"] for f in findings]
+    assert "INCONSISTENT_SETTLER" in kinds
+
+
+def test_chain_inconsistent_model_caught():
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    recs = [
+        _chain_record(model="gpt2", request_id="r0", wall_unix=1.0),
+        _chain_record(model="llama-3", request_id="r1", wall_unix=2.0),
+    ]
+    findings = verify_chain_invariants(recs)
+    kinds = [f["kind"] for f in findings]
+    assert "INCONSISTENT_MODEL" in kinds
+
+
+def test_chain_duplicate_request_id_caught():
+    """Replay attempt — same request_id twice."""
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    recs = [
+        _chain_record(request_id="dup", wall_unix=1.0),
+        _chain_record(request_id="dup", wall_unix=2.0),
+    ]
+    findings = verify_chain_invariants(recs)
+    kinds = [f["kind"] for f in findings]
+    assert "DUPLICATE_REQUEST_ID" in kinds
+
+
+def test_chain_non_monotonic_wall_unix_caught():
+    """Receipts reordered post-generation."""
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    recs = [
+        _chain_record(request_id="r0", wall_unix=10.0),
+        _chain_record(request_id="r1", wall_unix=5.0),  # back in time
+    ]
+    findings = verify_chain_invariants(recs)
+    kinds = [f["kind"] for f in findings]
+    assert "NON_MONOTONIC_WALL_UNIX" in kinds
+
+
+def test_chain_argmax_mismatch_caught():
+    """The §7 anti-tamper guarantee. Operator declares
+    next_token_id=99 but the activation bytes the stage signed over
+    have argmax=42. The signature is still valid (we didn't touch
+    the signed bytes), but the operator-recorded next_token_id is
+    a lie.
+    """
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    recs = [
+        _make_argmax_tampered_record(
+            claimed_token_id=99, actual_argmax=3, vocab=100,
+        ),
+    ]
+    findings = verify_chain_invariants(recs)
+    kinds = [f["kind"] for f in findings]
+    assert "TOKEN_ID_ARGMAX_MISMATCH" in kinds
+
+
+def test_chain_skips_argmax_check_when_no_activation_bytes():
+    """Pre-635 receipts (sha256-only) can't run C5; verifier must
+    silently skip the check rather than raising.
+    """
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    rec = _chain_record(next_token_id=5)
+    # No activation_blob_b64 in record
+    findings = verify_chain_invariants([rec])
+    assert findings == []  # C5 skipped, other invariants pass trivially
+
+
+def test_chain_findings_attached_when_check_chain_flag_set(tmp_path):
+    """End-to-end: verify_receipts_file with check_chain=True
+    surfaces findings on the last result."""
+    from prsm.cli_modules.receipt_verify import verify_receipts_file
+    # Build receipts file with 2 records that pass signatures but
+    # fail chain invariants (duplicate request_id)
+    stage = _make_stage_identity()
+    resp1 = _signed_response(stage, request_id="duplicate-id")
+    resp2 = _signed_response(stage, request_id="duplicate-id")
+    rec1 = _receipt_from_response(resp1)
+    rec2 = _receipt_from_response(resp2)
+    jsonl = tmp_path / "receipts.jsonl"
+    with jsonl.open("w") as f:
+        f.write(json.dumps(rec1) + "\n")
+        f.write(json.dumps(rec2) + "\n")
+
+    anchor = _anchor_with(stage)
+    results = verify_receipts_file(
+        str(jsonl), anchor=anchor, check_chain=True,
+    )
+    # Both signatures verify (same identity, both honest)
+    sig_results = [r for r in results if r.get("status") in ("OK", "SIGNATURE_INVALID")]
+    assert all(r["status"] == "OK" for r in sig_results)
+    # But chain invariant catches the duplicate
+    chain_findings = results[-1].get("chain_findings", [])
+    kinds = [f["kind"] for f in chain_findings]
+    assert "DUPLICATE_REQUEST_ID" in kinds
+
+
+def test_chain_findings_empty_when_no_flag(tmp_path):
+    """Default (no --check-chain) → results have no chain_findings key."""
+    from prsm.cli_modules.receipt_verify import verify_receipts_file
+    stage = _make_stage_identity()
+    resp = _signed_response(stage)
+    rec = _receipt_from_response(resp)
+    jsonl = tmp_path / "receipts.jsonl"
+    with jsonl.open("w") as f:
+        f.write(json.dumps(rec) + "\n")
+
+    anchor = _anchor_with(stage)
+    results = verify_receipts_file(str(jsonl), anchor=anchor)
+    for r in results:
+        assert "chain_findings" not in r

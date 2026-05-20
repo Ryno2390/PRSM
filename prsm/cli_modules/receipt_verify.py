@@ -140,10 +140,169 @@ class _CachingAnchor:
         return self._cache[node_id]
 
 
+def verify_chain_invariants(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sprint 637 — chain-of-custody invariants over a receipts list.
+
+    Each receipt's stage signature (verified by `verify_receipt_record`)
+    proves the stage SIGNED OVER specific bytes, but says nothing about
+    whether the sequence of receipts forms a coherent generation. An
+    auditor could:
+      - reorder receipts
+      - insert duplicates (replay)
+      - claim a receipt for a different model came from this one
+      - swap next_token_id without invalidating the stage signature
+        (since next_token_id is a CLIENT-COMPUTED derivation, not
+        part of the signed payload for non-tail-stage responses)
+
+    Sprint 637 checks the cross-receipt invariants offline. Returns
+    a list of finding dicts (empty if every invariant holds), each
+    with: ``kind`` (constant identifying the failure class),
+    ``message`` (human-readable detail), and ``line_indices``
+    (which receipts contributed to the finding).
+
+    Invariants:
+      C1: ``settler_node_id`` consistent across the run
+      C2: ``model_id`` consistent across the run
+      C3: All ``request_id``s unique (no replay)
+      C4: ``wall_unix`` monotonic non-decreasing
+      C5: ``next_token_id`` matches argmax of activation_blob (sprint
+          635+ format only; pre-635 receipts skipped — same as
+          UNVERIFIABLE in signature path)
+
+    Caller decides what to do with the findings. The CLI surface
+    treats non-empty findings as exit-code-1.
+    """
+    findings: List[Dict[str, Any]] = []
+    if not records:
+        return findings
+
+    # C1: settler consistency
+    settlers = {
+        (rec.get("settler_node_id"), idx)
+        for idx, rec in enumerate(records)
+        if rec.get("settler_node_id")
+    }
+    unique_settlers = {s for s, _ in settlers}
+    if len(unique_settlers) > 1:
+        findings.append({
+            "kind": "INCONSISTENT_SETTLER",
+            "message": (
+                f"receipts span {len(unique_settlers)} different "
+                f"settler_node_id values: "
+                f"{sorted(unique_settlers)}; an audit run must come "
+                f"from a single requester"
+            ),
+            "line_indices": [idx for _, idx in settlers],
+        })
+
+    # C2: model consistency
+    models = {
+        (rec.get("model_id"), idx)
+        for idx, rec in enumerate(records)
+        if rec.get("model_id")
+    }
+    unique_models = {m for m, _ in models}
+    if len(unique_models) > 1:
+        findings.append({
+            "kind": "INCONSISTENT_MODEL",
+            "message": (
+                f"receipts span {len(unique_models)} different "
+                f"model_id values: {sorted(unique_models)}; "
+                f"a generation run must stay on one model"
+            ),
+            "line_indices": [idx for _, idx in models],
+        })
+
+    # C3: request_id uniqueness (anti-replay)
+    seen_request_ids: Dict[str, int] = {}
+    duplicates: List[int] = []
+    for idx, rec in enumerate(records):
+        rid = rec.get("request_id")
+        if not rid:
+            continue
+        if rid in seen_request_ids:
+            duplicates.append(idx)
+        else:
+            seen_request_ids[rid] = idx
+    if duplicates:
+        findings.append({
+            "kind": "DUPLICATE_REQUEST_ID",
+            "message": (
+                f"{len(duplicates)} receipt(s) reuse a request_id "
+                f"already seen earlier in the file — replay or "
+                f"audit-trail tampering"
+            ),
+            "line_indices": duplicates,
+        })
+
+    # C4: wall_unix monotonic
+    prev_wall: Optional[float] = None
+    out_of_order: List[int] = []
+    for idx, rec in enumerate(records):
+        wall = rec.get("wall_unix")
+        if wall is None:
+            continue
+        if prev_wall is not None and wall < prev_wall:
+            out_of_order.append(idx)
+        prev_wall = wall
+    if out_of_order:
+        findings.append({
+            "kind": "NON_MONOTONIC_WALL_UNIX",
+            "message": (
+                f"{len(out_of_order)} receipt(s) have wall_unix "
+                f"smaller than a previous receipt's; receipts were "
+                f"likely reordered post-generation"
+            ),
+            "line_indices": out_of_order,
+        })
+
+    # C5: next_token_id matches argmax of activation_blob
+    # Receipt's "next_token_id" is the operator-recorded argmax;
+    # we recompute from the activation bytes that the stage signed
+    # over. Mismatch = operator-side tampering after sampling.
+    try:
+        import numpy as _np  # lazy — keeps tests lightweight
+    except ImportError:
+        return findings  # can't run C5 without numpy; skip silently
+    mismatches: List[int] = []
+    for idx, rec in enumerate(records):
+        blob_b64 = rec.get("activation_blob_b64")
+        if not blob_b64:
+            continue  # pre-635 format; can't run C5
+        claimed_id = rec.get("next_token_id")
+        if claimed_id is None:
+            continue
+        try:
+            blob = base64.b64decode(blob_b64)
+            shape = tuple(rec["activation_shape"])
+            dtype = rec["activation_dtype"]
+            logits = _np.frombuffer(blob, dtype=dtype).reshape(shape)
+            recomputed_id = int(logits[0, -1, :].argmax())
+        except Exception:  # noqa: BLE001
+            continue  # malformed numerics; C5 skipped for this row
+        if recomputed_id != int(claimed_id):
+            mismatches.append(idx)
+    if mismatches:
+        findings.append({
+            "kind": "TOKEN_ID_ARGMAX_MISMATCH",
+            "message": (
+                f"{len(mismatches)} receipt(s) declare a "
+                f"next_token_id that doesn't match argmax of the "
+                f"signed activation bytes — operator tampered with "
+                f"the sampled token after the stage signature was "
+                f"observed"
+            ),
+            "line_indices": mismatches,
+        })
+
+    return findings
+
+
 def verify_receipts_file(
     receipts_path: str,
     *,
     anchor: Any,
+    check_chain: bool = False,
 ) -> List[Dict[str, Any]]:
     """Run `verify_receipt_record` over every line in `receipts_path`.
 
@@ -160,6 +319,7 @@ def verify_receipts_file(
 
     cached_anchor = _CachingAnchor(anchor)
     results: List[Dict[str, Any]] = []
+    raw_records: List[Dict[str, Any]] = []
     for line_idx, raw in enumerate(_Path(receipts_path).read_text().splitlines()):
         if not raw.strip():
             continue
@@ -175,7 +335,27 @@ def verify_receipts_file(
                 "next_token_text": None,
             })
             continue
+        raw_records.append(rec)
         result = verify_receipt_record(rec, anchor=cached_anchor)
         result["line"] = line_idx
         results.append(result)
+
+    if check_chain:
+        # Sprint 637 — attach chain-level findings to the last result
+        # entry under a `chain_findings` key. Caller renders them
+        # specially. Empty list = chain OK.
+        findings = verify_chain_invariants(raw_records)
+        if results:
+            results[-1]["chain_findings"] = findings
+        else:
+            # No receipts to attach to; surface a synthetic record so
+            # callers can still consume the findings.
+            results.append({
+                "line": -1,
+                "status": "CHAIN_ONLY",
+                "stage_node_id": None,
+                "request_id": None,
+                "next_token_text": None,
+                "chain_findings": findings,
+            })
     return results

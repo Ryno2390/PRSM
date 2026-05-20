@@ -8694,7 +8694,17 @@ def node_infer_cli(
     type=click.Choice(["text", "json"]), default="text",
     show_default=True,
 )
-def node_verify_receipts_cli(receipts_path: str, output_format: str):
+@click.option(
+    "--check-chain", is_flag=True, default=False,
+    help="Sprint 637 — also assert chain-of-custody invariants "
+    "across receipts: settler/model consistency, request_id "
+    "uniqueness, wall_unix monotonicity, next_token_id matches "
+    "argmax of activation_blob. Defends against post-generation "
+    "tampering that doesn't invalidate per-token signatures.",
+)
+def node_verify_receipts_cli(
+    receipts_path: str, output_format: str, check_chain: bool,
+):
     """Verify per-token signed receipts written by `prsm node infer
     --save-receipts`.
 
@@ -8738,20 +8748,37 @@ def node_verify_receipts_cli(receipts_path: str, output_format: str):
 
     # Sprint 636 — verification core lives in cli_modules.receipt_verify
     # for direct unit testing. CLI is a thin renderer over the results.
-    results = verify_receipts_file(receipts_path, anchor=anchor)
+    results = verify_receipts_file(
+        receipts_path, anchor=anchor, check_chain=check_chain,
+    )
 
     n_ok = sum(1 for r in results if r["status"] == "OK")
-    n_total = len(results)
+    n_total = sum(1 for r in results if r["status"] != "CHAIN_ONLY")
+    # Sprint 637 — chain_findings is attached to the last result;
+    # extract for rendering + exit-code computation.
+    chain_findings = []
+    for r in results:
+        if "chain_findings" in r:
+            chain_findings = r["chain_findings"]
+            break
+    chain_ok = len(chain_findings) == 0
+    overall_ok = (n_ok == n_total) and (chain_ok if check_chain else True)
+
     if output_format == "json":
         click.echo(_json.dumps({
             "receipts_path": receipts_path,
             "total": n_total,
             "verified": n_ok,
+            "check_chain": check_chain,
+            "chain_ok": chain_ok if check_chain else None,
+            "chain_findings": chain_findings if check_chain else None,
             "results": results,
         }, indent=2))
-        _sys.exit(0 if n_ok == n_total else 1)
+        _sys.exit(0 if overall_ok else 1)
 
     for r in results:
+        if r.get("status") == "CHAIN_ONLY":
+            continue
         if r["status"] == "OK":
             console.print(
                 f"  [green]✓[/green] line {r['line']:3d}: "
@@ -8775,7 +8802,26 @@ def node_verify_receipts_cli(receipts_path: str, output_format: str):
             f"[red]✗ {n_ok}/{n_total} receipts verified[/red]; "
             f"{n_total - n_ok} failed."
         )
-    _sys.exit(0 if n_ok == n_total else 1)
+    # Sprint 637 — render chain findings
+    if check_chain:
+        if chain_ok:
+            console.print(
+                "[green]🔗 chain-of-custody invariants OK[/green] — "
+                "settler/model consistency, request_id uniqueness, "
+                "wall_unix monotonicity, argmax↔next_token_id match"
+            )
+        else:
+            console.print(
+                f"[red]✗ {len(chain_findings)} chain-of-custody "
+                f"invariant(s) violated:[/red]"
+            )
+            for f in chain_findings:
+                console.print(
+                    f"  [red]●[/red] [bold]{f['kind']}[/bold]: "
+                    f"{f['message']} "
+                    f"[dim](line(s): {f['line_indices']})[/dim]"
+                )
+    _sys.exit(0 if overall_ok else 1)
 
 
 # ──────────────────────────────────────────────────────────────
