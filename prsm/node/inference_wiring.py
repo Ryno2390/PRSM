@@ -448,15 +448,67 @@ def _build_chain_executor(node: Any) -> Any:
     if kind == "stub":
         return _StubChainExecutor()
     if kind == "rpc":
-        logger.warning(
-            "Sprint 578 ParallaxScheduledExecutor wiring: "
-            "PRSM_PARALLAX_CHAIN_EXECUTOR_KIND=rpc set but Phase 2 "
-            "(real make_rpc_chain_executor wiring with node "
-            "settler_identity + transport.send_message + anchor) "
-            "has not landed yet — falling back to _StubChainExecutor. "
-            "Track sprint 579+ for the actual RPC chain wiring."
-        )
-        return _StubChainExecutor()
+        # Sprint 598 (Phase 2D step 4) — real RPC chain executor.
+        # Construction needs: settler_identity, send_message
+        # (sprint-596 adapter), anchor (sprint-580 helper),
+        # address_resolver (sprint-593 helper). Falls back to stub
+        # when any dependency is missing, with structured logging
+        # so operators see WHICH piece blocked production wiring.
+        missing = []
+        if getattr(node, "identity", None) is None:
+            missing.append("node.identity")
+        if getattr(node, "transport", None) is None:
+            missing.append("node.transport")
+        if getattr(node, "_loop", None) is None:
+            missing.append("node._loop (set in sprint 595 at PRSMNode.start)")
+        anchor = _build_anchor_or_none()
+        if anchor is None:
+            missing.append(
+                "anchor (set PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS)"
+            )
+        if missing:
+            logger.warning(
+                "Sprint 598 _build_chain_executor: rpc kind cannot "
+                "wire because dependencies are missing: %s. Falling "
+                "back to _StubChainExecutor. Use "
+                "`prsm node section7-readiness` for full operator "
+                "preflight (sprint 585).",
+                ", ".join(missing),
+            )
+            return _StubChainExecutor()
+        try:
+            from prsm.compute.chain_rpc.factories import (
+                make_rpc_chain_executor,
+            )
+            from prsm.node.chain_executor_adapters import (
+                build_send_message_adapter,
+                build_address_resolver,
+            )
+            executor = make_rpc_chain_executor(
+                settler_identity=node.identity,
+                send_message=build_send_message_adapter(node),
+                anchor=anchor,
+                address_resolver=build_address_resolver(node),
+            )
+            logger.info(
+                "Sprint 598 _build_chain_executor: real "
+                "RpcChainExecutor constructed (anchor=REAL, "
+                "send_message=PHASE-2D-bridged over transport, "
+                "address_resolver=transport.peers lookup). "
+                "Note: response routing (sprint 599 follow-on) "
+                "still pending — chain dispatches will time out "
+                "until handle_chain_executor_response is wired "
+                "into transport's message dispatch."
+            )
+            return executor
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Sprint 598 _build_chain_executor: "
+                "make_rpc_chain_executor construction raised %s: %s. "
+                "Falling back to _StubChainExecutor.",
+                type(exc).__name__, exc,
+            )
+            return _StubChainExecutor()
     logger.warning(
         "Sprint 578 ParallaxScheduledExecutor wiring: "
         "PRSM_PARALLAX_CHAIN_EXECUTOR_KIND=%r is unknown; falling "
