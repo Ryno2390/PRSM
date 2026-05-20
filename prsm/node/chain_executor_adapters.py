@@ -155,6 +155,59 @@ CHAIN_PAYLOAD_KEY = "chain_payload_b64"
 CHAIN_ERROR_KEY = "chain_error"
 
 
+class StageExecutionError(RuntimeError):
+    """Sprint 602 (Phase 2E-2) — raised by StageExecutor.execute()
+    when forward execution of a chain stage fails.
+
+    Subclasses RuntimeError so generic operator error-handling
+    paths catch it via isinstance(exc, RuntimeError) naturally.
+    """
+
+
+@runtime_checkable
+class StageExecutor(Protocol):
+    """Sprint 602 (Phase 2E-2) — server-side stage executor contract.
+
+    Receives a chain stage's serialized request bytes (typically
+    activation bytes from the previous stage) and returns the
+    response bytes (output activation passed to the next stage).
+
+    Phase 2E-4 (sprint 604) wires this Protocol into
+    handle_chain_executor_request — request bytes flow in, response
+    bytes flow back out via the existing wire format.
+
+    Implementations may raise ``StageExecutionError`` on failure;
+    the request handler converts to a CHAIN_ERROR_KEY response.
+    """
+
+    async def execute(self, request_bytes: bytes) -> bytes:
+        ...
+
+
+def build_stub_stage_executor() -> StageExecutor:
+    """Sprint 602 (Phase 2E-2) — placeholder StageExecutor that
+    raises StageExecutionError with an actionable message.
+
+    Phase 2E-3 (sprint 603) ships a real implementation that
+    decodes activation bytes + forwards through a model layer.
+    Phase 2E-4 (sprint 604) wires this into the request handler
+    so it's actually called.
+    """
+
+    class _StubStageExecutor:
+        async def execute(self, request_bytes: bytes) -> bytes:
+            raise StageExecutionError(
+                "Sprint 602 Phase 2E-2 stub: StageExecutor.execute() "
+                "is not yet implemented. Phase 2E-3 (sprint 603) "
+                "will ship the real chain-stage forward execution. "
+                "Until then, this node ACKs incoming requests via "
+                "the sprint-601 request handler but cannot actually "
+                "produce next-stage activations."
+            )
+
+    return _StubStageExecutor()
+
+
 async def handle_chain_executor_request(node: Any, msg: Any) -> bool:
     """Sprint 601 (Phase 2E-1) — server-side request handler scaffolding.
 
