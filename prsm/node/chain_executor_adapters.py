@@ -251,6 +251,45 @@ class LayerStageServerStageExecutor:
             ) from exc
 
 
+class IdentityLayerSliceRunner:
+    """Sprint 608 (Phase 2F-3) — smallest possible LayerSliceRunner.
+
+    Returns the input activation UNCHANGED. Lets the FULL real-model
+    server wire (chain_rpc.server.LayerStageServer parses the
+    RunLayerSliceRequest, verifies upstream HandoffToken, signs the
+    RunLayerSliceResponse) be exercised end-to-end without needing
+    actual model weights loaded.
+
+    Analogue to sprint-603 EchoStageExecutor but at the LayerSliceRunner
+    layer (deeper in the stack — LayerStageServer.handle still runs
+    full parse + sign + validate paths).
+
+    Phase 2F-4+ ships real model-framework runners (HuggingFace
+    transformers first probable target).
+    """
+
+    def run_layer_range(
+        self,
+        *,
+        model: Any,
+        layer_range: Any,
+        activation: Any,
+        privacy_tier: Any,
+        is_final_stage: bool,
+    ) -> Any:
+        # Lazy imports — keep numpy off the import chain for daemons
+        # that never enable the rpc/layer_stage kind.
+        from prsm.compute.chain_rpc.server import LayerSliceResult
+        from prsm.compute.tee.models import TEEType
+        return LayerSliceResult(
+            output=activation.copy(),  # defensive copy
+            duration_seconds=0.0,
+            tee_attestation=b"identity-runner-no-attestation",
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
+        )
+
+
 def build_layer_stage_server_executor(
     *,
     node: Any,
