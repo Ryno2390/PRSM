@@ -295,6 +295,30 @@ def _resolve_hf_layers(hf_model: Any) -> Any:
     )
 
 
+def _resolve_hf_lm_head(hf_model: Any) -> Any:
+    """Sprint 613 (Phase 2F-5d) — polymorphic HF LM-head resolution.
+
+    Try known causal-LM head attribute paths:
+      .lm_head      LLaMA / Mistral / GPT-2 / Falcon / Qwen
+      .embed_out    GPT-NeoX / Pythia
+
+    Returns the first that's truthy. Raises StageExecutionError
+    listing attempted paths if neither resolves — operator triages
+    by name.
+    """
+    head = getattr(hf_model, "lm_head", None)
+    if head is not None:
+        return head
+    head = getattr(hf_model, "embed_out", None)
+    if head is not None:
+        return head
+    raise StageExecutionError(
+        "HuggingFaceLayerSliceRunner: model does not expose an "
+        "LM head. Attempted: .lm_head, .embed_out. Add support "
+        "for this architecture in _resolve_hf_lm_head."
+    )
+
+
 class HuggingFaceLayerSliceRunner:
     """Sprint 610 (Phase 2F-5a) — first real-model LayerSliceRunner
     skeleton.
@@ -424,10 +448,18 @@ class HuggingFaceLayerSliceRunner:
                     out = layers[i](hidden, position_ids=position_ids)
                     # LLaMA layer returns tuple (hidden_state, ...)
                     hidden = out[0] if isinstance(out, tuple) else out
+                # Sprint 613 (Phase 2F-5d) — chain tail: apply LM
+                # head to produce logits. The OutputDecoder on the
+                # client side does argmax/sampling + detokenization.
+                if is_final_stage:
+                    lm_head = _resolve_hf_lm_head(hf_model)
+                    hidden = lm_head(hidden)
+        except StageExecutionError:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise StageExecutionError(
                 f"HuggingFaceLayerSliceRunner forward pass failed "
-                f"at layer {i} of {self.model_id!r}: "
+                f"in {self.model_id!r}: "
                 f"{type(exc).__name__}: {exc}"
             ) from exc
         # Convert back to numpy, restore original ndim.
