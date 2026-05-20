@@ -256,10 +256,18 @@ def verify_chain_invariants(records: List[Dict[str, Any]]) -> List[Dict[str, Any
             "line_indices": out_of_order,
         })
 
-    # C5: next_token_id matches argmax of activation_blob
-    # Receipt's "next_token_id" is the operator-recorded argmax;
-    # we recompute from the activation bytes that the stage signed
-    # over. Mismatch = operator-side tampering after sampling.
+    # C5: next_token_id matches argmax of activation_blob.
+    # Receipt's "next_token_id" is the operator-recorded sample;
+    # we recompute argmax from the activation bytes that the stage
+    # signed over. Mismatch = operator-side tampering after sampling.
+    #
+    # Sprint 639: C5 only applies in greedy sampling mode. For
+    # temperature/top-k runs the operator recorded a SAMPLE drawn
+    # from the distribution, not the argmax — so a mismatch is
+    # expected behavior, not tampering. Receipts that omit
+    # `sampling_mode` (sprint 633-638 format) are treated as greedy
+    # for backwards compatibility (the only sampling sprint 633-638
+    # supported was greedy).
     try:
         import numpy as _np  # lazy — keeps tests lightweight
     except ImportError:
@@ -271,6 +279,10 @@ def verify_chain_invariants(records: List[Dict[str, Any]]) -> List[Dict[str, Any
             continue  # pre-635 format; can't run C5
         claimed_id = rec.get("next_token_id")
         if claimed_id is None:
+            continue
+        # Sprint 639: skip non-greedy samples
+        sampling_mode = rec.get("sampling_mode", "greedy")
+        if sampling_mode != "greedy":
             continue
         try:
             blob = base64.b64decode(blob_b64)

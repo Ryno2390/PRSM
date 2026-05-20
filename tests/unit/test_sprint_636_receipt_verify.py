@@ -589,3 +589,56 @@ def test_chain_findings_empty_when_no_flag(tmp_path):
     results = verify_receipts_file(str(jsonl), anchor=anchor)
     for r in results:
         assert "chain_findings" not in r
+
+
+# --------------------------------------------------------------------------
+# Sprint 639 — sampling-mode-aware C5
+# --------------------------------------------------------------------------
+
+
+def test_C5_skipped_for_non_greedy_sampling():
+    """A temperature/top-k receipt where next_token_id != argmax
+    must NOT trigger TOKEN_ID_ARGMAX_MISMATCH — the operator sampled
+    from the distribution, which is allowed to deviate from argmax.
+    """
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    # claimed=99, argmax=3 — would fail C5 if greedy
+    rec = _make_argmax_tampered_record(
+        claimed_token_id=99, actual_argmax=3, vocab=100,
+    )
+    rec["sampling_mode"] = "temperature:0.700,top_k:50"
+    findings = verify_chain_invariants([rec])
+    kinds = [f["kind"] for f in findings]
+    assert "TOKEN_ID_ARGMAX_MISMATCH" not in kinds, (
+        "non-greedy sampling must NOT trigger C5"
+    )
+
+
+def test_C5_fires_for_explicit_greedy_sampling():
+    """sampling_mode='greedy' (sprint 639 format) → C5 must still fire."""
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    rec = _make_argmax_tampered_record(
+        claimed_token_id=99, actual_argmax=3, vocab=100,
+    )
+    rec["sampling_mode"] = "greedy"
+    findings = verify_chain_invariants([rec])
+    kinds = [f["kind"] for f in findings]
+    assert "TOKEN_ID_ARGMAX_MISMATCH" in kinds
+
+
+def test_C5_treats_missing_sampling_mode_as_greedy():
+    """Backwards compat: sprint 633-638 receipts don't have
+    sampling_mode (only greedy existed). C5 must still apply.
+    """
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    rec = _make_argmax_tampered_record(
+        claimed_token_id=99, actual_argmax=3, vocab=100,
+    )
+    # No sampling_mode key — pre-sprint-639 format
+    assert "sampling_mode" not in rec
+    findings = verify_chain_invariants([rec])
+    kinds = [f["kind"] for f in findings]
+    assert "TOKEN_ID_ARGMAX_MISMATCH" in kinds, (
+        "missing sampling_mode must default to greedy (sprint 633-638 "
+        "backwards-compat)"
+    )

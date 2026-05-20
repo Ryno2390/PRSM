@@ -8505,6 +8505,29 @@ def node_models_list_cli(output_format: str, registry_root: Optional[str]):
     "activation hash — enough for offline verification against the "
     "PublisherKeyAnchor.",
 )
+@click.option(
+    "--temperature", type=float, default=None,
+    help="Sprint 639 — sampling temperature. Omit (default) for "
+    "greedy argmax (deterministic, audit-chain-friendly). Values "
+    "between 0 and ~2 produce increasingly random output. The "
+    "receipt's `sampling_mode` field records the choice so the "
+    "downstream `verify-receipts --check-chain` knows to skip "
+    "the argmax-vs-next_token_id invariant for non-greedy runs.",
+)
+@click.option(
+    "--top-k", type=int, default=None,
+    help="Sprint 639 — restrict sampling to the top-K tokens by "
+    "logit magnitude. Pairs with --temperature; combining the two "
+    "is the typical 'creative but not chaotic' setting. Ignored "
+    "when --temperature is unset.",
+)
+@click.option(
+    "--seed", type=int, default=None,
+    help="Sprint 639 — RNG seed for sampling. Recorded in the "
+    "receipt so a verifier with the same seed can re-derive the "
+    "sample deterministically (a partial mitigation for the "
+    "audit-chain weakening that comes with non-greedy sampling).",
+)
 def node_infer_cli(
     prompt: str,
     model: str,
@@ -8514,6 +8537,9 @@ def node_infer_cli(
     timeout: float,
     output_format: str,
     save_receipts_path: Optional[str],
+    temperature: Optional[float],
+    top_k: Optional[int],
+    seed: Optional[int],
 ):
     """Generate tokens via the live PRSM P2P inference path.
 
@@ -8721,7 +8747,52 @@ def node_infer_cli(
         logits = _np.frombuffer(
             resp.activation_blob, dtype=resp.activation_dtype,
         ).reshape(resp.activation_shape)
-        next_id = int(logits[0, -1, :].argmax())
+        # Sprint 639 — sampling. The `sampling_mode` string is also
+        # written into the receipt so verify-receipts --check-chain
+        # knows whether to apply the argmax↔next_token_id invariant
+        # (C5). Greedy mode commits the full chain-of-custody chain;
+        # temperature/top-k weakens it to "stage signed over these
+        # logits + operator recorded a sample drawn from this
+        # distribution" — verifier with the seed can re-derive.
+        last_logits = logits[0, -1, :].astype(_np.float32)
+        if temperature is None:
+            next_id = int(last_logits.argmax())
+            sampling_mode = "greedy"
+        else:
+            # Build sample-from-distribution path: optional top-k
+            # mask, divide by temperature, softmax, multinomial.
+            scaled = last_logits / max(float(temperature), 1e-8)
+            if top_k is not None and top_k > 0:
+                k = min(int(top_k), scaled.shape[-1])
+                # Mask everything below the top-K
+                top_indices = _np.argpartition(scaled, -k)[-k:]
+                mask = _np.full_like(scaled, -_np.inf)
+                mask[top_indices] = scaled[top_indices]
+                scaled = mask
+            # Softmax (subtract max for numerical stability)
+            scaled = scaled - _np.max(scaled)
+            probs = _np.exp(scaled)
+            probs = probs / probs.sum()
+            # Deterministic RNG if seed given (also passes seed
+            # through to the receipt so a verifier can re-derive).
+            if seed is not None:
+                # Use a fresh seeded RNG each step + step-offset so
+                # different tokens don't all draw from the same point
+                # in the seed-derived stream. Verifier re-derives by
+                # constructing the same generator with the same seed +
+                # step.
+                rng = _np.random.default_rng(
+                    int(seed) + step,
+                )
+            else:
+                rng = _np.random.default_rng()
+            next_id = int(rng.choice(probs.shape[-1], p=probs))
+            mode_parts = [f"temperature:{float(temperature):.3f}"]
+            if top_k is not None and top_k > 0:
+                mode_parts.append(f"top_k:{int(top_k)}")
+            if seed is not None:
+                mode_parts.append(f"seed:{int(seed)}")
+            sampling_mode = ",".join(mode_parts)
         next_token = tok.decode([next_id])
         text += next_token
         step_dt = _time.time() - step_t0
@@ -8777,6 +8848,14 @@ def node_infer_cli(
                 "protocol_version": resp.protocol_version,
                 "next_token_id": next_id,
                 "next_token_text": next_token,
+                # Sprint 639 — record sampling mode so the
+                # verify-receipts --check-chain (sprint 637) can
+                # decide whether the C5 argmax-vs-next_token_id
+                # invariant applies. Greedy mode lets C5 fire;
+                # non-greedy modes skip C5 (with the seed in the
+                # mode string, a verifier could re-derive but that's
+                # out of sprint 639's scope).
+                "sampling_mode": sampling_mode,
             }
             try:
                 receipts_fh.write(_json.dumps(receipt_record) + "\n")
