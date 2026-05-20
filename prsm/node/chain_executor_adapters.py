@@ -23,7 +23,7 @@ scaffolding lets test code reference the eventual contract today.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Coroutine, Protocol, runtime_checkable
+from typing import Any, Callable, Coroutine, Dict, Protocol, runtime_checkable
 
 
 # Re-export the canonical SendMessage signature from the factory's
@@ -293,6 +293,93 @@ def _resolve_hf_layers(hf_model: Any) -> Any:
         f"known layer-list path. Attempted: {', '.join(attempted)}. "
         f"Add support for this architecture in _resolve_hf_layers."
     )
+
+
+def build_hf_prompt_encoder(
+    *,
+    model_id: str,
+    device: str = "cpu",
+) -> Callable[[str], Any]:
+    """Sprint 614 (Phase 2F-5e) — client-side HF PromptEncoder.
+
+    Returns a closure that maps a prompt string to the first stage's
+    activation tensor (token embeddings). Wires into the
+    ``RpcChainExecutor`` factory's optional ``prompt_encoder`` arg
+    (sprint 615 ships the env-wired hookup).
+
+    Flow on first encoder() call:
+      1. Lazy-load HF AutoTokenizer + AutoModelForCausalLM
+         (cached for subsequent calls)
+      2. tokenizer.encode(prompt, return_tensors="pt") → token_ids
+      3. model.get_input_embeddings()(token_ids) → embeddings tensor
+      4. Convert to numpy ndarray, return
+
+    Failure modes (transformers missing, model 404, etc.) wrap
+    as StageExecutionError so callers see a structured error
+    instead of a bare HuggingFace exception.
+
+    Memory note: loads the FULL model just to access its embedding
+    layer. For very large models this is wasteful. Phase 2F-5e+ may
+    add a thinner path that loads only the embedding matrix +
+    vocab.
+    """
+    if not model_id or not isinstance(model_id, str):
+        raise ValueError(
+            "build_hf_prompt_encoder requires model_id "
+            "(HuggingFace identifier)"
+        )
+
+    # Closed-over cache so we only load once.
+    _state: Dict[str, Any] = {
+        "tokenizer": None,
+        "model": None,
+        "embed_layer": None,
+    }
+
+    def _encode(prompt: str) -> Any:
+        if _state["tokenizer"] is None:
+            try:
+                import transformers  # noqa: F401
+                import torch  # noqa: F401
+            except ImportError as exc:
+                raise StageExecutionError(
+                    f"build_hf_prompt_encoder requires `transformers` "
+                    f"+ `torch` packages installed: {exc}."
+                ) from exc
+            try:
+                from transformers import (
+                    AutoTokenizer, AutoModelForCausalLM,
+                )
+                import torch as _torch
+                tok = AutoTokenizer.from_pretrained(model_id)
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id, torch_dtype=_torch.float32,
+                )
+                model = model.to(device).eval()
+            except Exception as exc:  # noqa: BLE001
+                raise StageExecutionError(
+                    f"build_hf_prompt_encoder failed to load "
+                    f"{model_id!r}: {type(exc).__name__}: {exc}"
+                ) from exc
+            _state["tokenizer"] = tok
+            _state["model"] = model
+            _state["embed_layer"] = model.get_input_embeddings()
+        try:
+            import torch as _torch
+            token_ids = _state["tokenizer"].encode(
+                prompt, return_tensors="pt",
+            )
+            # Move tokens to device + run embedding lookup under no_grad
+            with _torch.no_grad():
+                embeddings = _state["embed_layer"](token_ids)
+            return embeddings.cpu().numpy()
+        except Exception as exc:  # noqa: BLE001
+            raise StageExecutionError(
+                f"build_hf_prompt_encoder encode failed for "
+                f"{model_id!r}: {type(exc).__name__}: {exc}"
+            ) from exc
+
+    return _encode
 
 
 def _resolve_hf_lm_head(hf_model: Any) -> Any:
