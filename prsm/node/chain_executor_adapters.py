@@ -208,6 +208,29 @@ def build_stub_stage_executor() -> StageExecutor:
     return _StubStageExecutor()
 
 
+def build_echo_stage_executor() -> StageExecutor:
+    """Sprint 603 (Phase 2E-3) — diagnostic StageExecutor that
+    echoes its input bytes back unchanged.
+
+    NOT a real chain-stage forward pass (no model computation).
+    Purpose: end-to-end wire testing of the Phase 2 client +
+    server round-trip without requiring a model integration.
+
+    Phase 2E-4 (sprint 604) wires this in behind an env var
+    (PRSM_PARALLAX_STAGE_EXECUTOR_KIND=echo) for operator opt-in
+    fleet diagnostics. Default stays at sprint-602 stub (raises)
+    so production behavior isn't silently masked.
+
+    Phase 2F+ ships real-model StageExecutor variants.
+    """
+
+    class _EchoStageExecutor:
+        async def execute(self, request_bytes: bytes) -> bytes:
+            return request_bytes
+
+    return _EchoStageExecutor()
+
+
 async def handle_chain_executor_request(node: Any, msg: Any) -> bool:
     """Sprint 601 (Phase 2E-1) — server-side request handler scaffolding.
 
