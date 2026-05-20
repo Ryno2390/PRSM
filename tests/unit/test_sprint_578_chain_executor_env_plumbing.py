@@ -60,9 +60,16 @@ def test_rpc_kind_falls_back_to_stub_with_warning(caplog):
     )
     with patch.dict(
         os.environ,
-        {"PRSM_PARALLAX_CHAIN_EXECUTOR_KIND": "rpc"},
+        {
+            "PRSM_PARALLAX_CHAIN_EXECUTOR_KIND": "rpc",
+            # Sprint 629: pin sepolia (no anchor default) so the
+            # rpc-fallback path is exercised. Default network is
+            # mainnet which now has a baked-in anchor.
+            "PRSM_NETWORK": "sepolia",
+        },
         clear=False,
     ):
+        os.environ.pop("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", None)
         with caplog.at_level("WARNING"):
             exe = _build_chain_executor(MagicMock())
     assert isinstance(exe, _StubChainExecutor)

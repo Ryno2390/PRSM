@@ -1129,6 +1129,18 @@ def handle_chain_executor_response(node: Any, msg: Any) -> bool:
         # No pending request (timed out + cleaned up) OR already
         # resolved (duplicate response). Silent drop is correct.
         return False
+    # Sprint 630 — CHAIN_ERROR_KEY propagation. The server-side
+    # request handler sets this field (with an empty CHAIN_PAYLOAD_KEY)
+    # when the stage executor raised. Without this branch the handler
+    # below would base64-decode the empty payload to b"" and resolve
+    # the Future with empty bytes — sprint 624 hit this and saw
+    # silent "size_bytes=0" instead of a useful error. Treat any
+    # non-empty error string as the canonical signal, regardless of
+    # whether CHAIN_PAYLOAD_KEY is also present.
+    error_msg = payload.get(CHAIN_ERROR_KEY, "")
+    if error_msg:
+        future.set_exception(StageExecutionError(error_msg))
+        return True
     payload_b64 = payload.get(CHAIN_PAYLOAD_KEY, "")
     try:
         response_bytes = base64.b64decode(payload_b64)

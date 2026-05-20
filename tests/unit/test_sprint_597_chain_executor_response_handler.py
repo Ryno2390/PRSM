@@ -139,3 +139,107 @@ def test_handler_no_pending_attr_returns_false():
         CHAIN_RESP_KEY: "x",
     })
     assert handle_chain_executor_response(node, msg) is False
+
+
+# --------------------------------------------------------------------------
+# Sprint 630 — CHAIN_ERROR_KEY propagation
+# --------------------------------------------------------------------------
+
+
+def test_handler_propagates_chain_error_key_as_exception():
+    """Sprint 630 fix: CHAIN_ERROR_KEY in response → Future raises.
+
+    Pre-630 the response-build path (server side) set
+    CHAIN_ERROR_KEY="..." + CHAIN_PAYLOAD_KEY="" when a stage
+    raised. The handler decoded the empty payload to b"" and
+    called `future.set_result(b"")`. Caller's await returned
+    empty bytes silently — sprint 624 hit this and saw
+    "size_bytes=0" instead of a useful error.
+
+    Post-630: when CHAIN_ERROR_KEY is set, future is rejected
+    with StageExecutionError carrying the server-side message
+    so callers see the actual failure mode.
+    """
+    from prsm.node.chain_executor_adapters import (
+        handle_chain_executor_response, CHAIN_MSG_TYPE,
+        CHAIN_RESP_KEY, CHAIN_PAYLOAD_KEY, CHAIN_ERROR_KEY,
+        StageExecutionError,
+    )
+
+    loop = asyncio.new_event_loop()
+    future = loop.create_future()
+    node = MagicMock()
+    node._chain_executor_pending = {"req-err": future}
+
+    msg = _make_msg({
+        "subtype": CHAIN_MSG_TYPE,
+        CHAIN_RESP_KEY: "req-err",
+        CHAIN_ERROR_KEY: "stage-executor raised RuntimeError: bad model",
+        CHAIN_PAYLOAD_KEY: "",
+    })
+
+    result = handle_chain_executor_response(node, msg)
+    assert result is True
+    assert future.done()
+    # Future must reject with StageExecutionError, not silently
+    # resolve to b"".
+    exc = future.exception()
+    assert isinstance(exc, StageExecutionError), (
+        f"expected StageExecutionError, got {type(exc).__name__}: {exc}"
+    )
+    assert "bad model" in str(exc)
+
+
+def test_handler_chain_error_key_takes_precedence_over_payload():
+    """Defense in depth: even if payload is also non-empty, the
+    presence of CHAIN_ERROR_KEY signals failure — caller must
+    not see a "success" result. This protects against any future
+    server-side branch that fills both fields by mistake.
+    """
+    from prsm.node.chain_executor_adapters import (
+        handle_chain_executor_response, CHAIN_MSG_TYPE,
+        CHAIN_RESP_KEY, CHAIN_PAYLOAD_KEY, CHAIN_ERROR_KEY,
+        StageExecutionError,
+    )
+
+    loop = asyncio.new_event_loop()
+    future = loop.create_future()
+    node = MagicMock()
+    node._chain_executor_pending = {"req-mixed": future}
+
+    msg = _make_msg({
+        "subtype": CHAIN_MSG_TYPE,
+        CHAIN_RESP_KEY: "req-mixed",
+        CHAIN_ERROR_KEY: "diagnostic error message",
+        # Defensive: even with non-empty bytes, error key wins.
+        CHAIN_PAYLOAD_KEY: base64.b64encode(b"junk").decode(),
+    })
+
+    assert handle_chain_executor_response(node, msg) is True
+    assert isinstance(future.exception(), StageExecutionError)
+
+
+def test_handler_empty_error_string_still_resolves_payload():
+    """CHAIN_ERROR_KEY="" (empty) is NOT an error; treat as success
+    branch. Distinguishes "no error field" / "empty error" / "real
+    error" cleanly.
+    """
+    from prsm.node.chain_executor_adapters import (
+        handle_chain_executor_response, CHAIN_MSG_TYPE,
+        CHAIN_RESP_KEY, CHAIN_PAYLOAD_KEY, CHAIN_ERROR_KEY,
+    )
+
+    loop = asyncio.new_event_loop()
+    future = loop.create_future()
+    node = MagicMock()
+    node._chain_executor_pending = {"req-empty-err": future}
+
+    msg = _make_msg({
+        "subtype": CHAIN_MSG_TYPE,
+        CHAIN_RESP_KEY: "req-empty-err",
+        CHAIN_ERROR_KEY: "",
+        CHAIN_PAYLOAD_KEY: base64.b64encode(b"ok").decode(),
+    })
+
+    assert handle_chain_executor_response(node, msg) is True
+    assert future.result() == b"ok"
