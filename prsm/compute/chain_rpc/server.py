@@ -713,13 +713,25 @@ class LayerStageServer:
         if self._sharded_runner is not None:
             return self._dispatch_sharded(request)
         if request.decode_mode != DecodeMode.PREFILL:
+            # Sprint 654 — improved error breadcrumb for the KV-cache
+            # arc. Pre-654 the message named only `sharded_runner`,
+            # but operators trying to engage KV-cache via the inline
+            # path (sprint 633's CLI route through chain-exec-ping)
+            # had no actionable next step. The inline-path KV-cache
+            # support is its own multi-sprint arc (sprints 654-660+);
+            # surface the plan here so operators know what path to
+            # follow.
             return self._error(
                 request.request_id,
                 StageErrorCode.MALFORMED_REQUEST,
                 f"server has no sharded_runner wired but request "
                 f"carries decode_mode={request.decode_mode.value!r}; "
-                f"sharded decode requires sharded_runner= at "
-                f"server construction",
+                f"options: (a) sharded decode requires sharded_runner= "
+                f"at server construction; (b) inline INCREMENTAL "
+                f"support is the sprint 654-660 KV-cache arc — not "
+                f"yet shipped; until then, clients hitting the inline "
+                f"path must use decode_mode=PREFILL and re-embed the "
+                f"full text-so-far each token (sprint 628 pattern)",
             )
 
         # Steps 2-6: shared validation gates.
