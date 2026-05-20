@@ -701,7 +701,7 @@ fill them.
 | TEE policy status + evaluate | ✅ | ✅ Sprint 436 | ✅ Sprint 646 (live: `status` returns effective_tier=none + "no attestation blob configured" diagnostic) | Trifecta-complete |
 | Federated learning admin | ✅ | ✅ Sprint 437 (read-only) | ✅ Sprint 646 (live: `list` returns "No active federated jobs" empty-state) | Trifecta-complete |
 | Pipeline inference admin | ✅ | ✅ Sprint 437 (read-only) | ✅ Sprint 646 (F25 fix: pre-646 `list` showed generic "HTTP 503: Service Unavailable" swallowing the server's `set PRSM_PIPELINE_ORCHESTRATOR_PRIVKEY` breadcrumb; sprint 646 decodes response body so detail reaches operator) | Trifecta-complete |
-| Bridge deposit/withdraw | ✅ | ✅ | 🟢 | Trifecta-complete |
+| Bridge deposit/withdraw | ✅ | ✅ | ✅ Sprint 649 (live: `/bridge/status` + `/bridge/transactions` return sprint-548 architectural breadcrumb pointing operators at Pattern A; Pattern A `/wallet/deposit/info` cleanly errors with `FTNS_WALLET_PRIVATE_KEY may be unset`; `/transactions?limit=5` returns real ledger entries including escrow-refund records carrying sprint 631's actionable message string in the description field) | Trifecta-complete |
 | `prsm node fiat-readiness` | (uses sprint-285 function) | ✅ | ✅ Sprint 646 (live: "✓ Phase 5 fiat surface ready — OK (no findings)") | Trifecta-complete |
 
 ---
