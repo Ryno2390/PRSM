@@ -4048,29 +4048,39 @@ class PRSMNode:
         # response handler on the transport's MSG_DIRECT dispatch.
         # Co-exists with content_provider's existing MSG_DIRECT
         # handler (transport.on_message uses append, not replace).
-        # Last piece for Phase 2 RPC chain-executor runtime
-        # functionality.
+        # Sprint 601 (Phase 2E-1) — also register the REQUEST-side
+        # handler so this node can respond to incoming chain-executor
+        # requests from peers (currently with a "not yet implemented"
+        # error response; Phase 2E-2+ adds real stage execution).
         try:
             from prsm.node.transport import MSG_DIRECT
             from prsm.node.chain_executor_adapters import (
                 handle_chain_executor_response,
+                handle_chain_executor_request,
             )
             _self = self
 
             async def _chain_executor_response_dispatch(msg, peer):
                 handle_chain_executor_response(_self, msg)
 
+            async def _chain_executor_request_dispatch(msg, peer):
+                await handle_chain_executor_request(_self, msg)
+
             self.transport.on_message(
                 MSG_DIRECT, _chain_executor_response_dispatch,
             )
+            self.transport.on_message(
+                MSG_DIRECT, _chain_executor_request_dispatch,
+            )
             logger.info(
                 "Sprint 599 chain-executor response dispatch wired "
-                "on MSG_DIRECT — Phase 2 RPC runtime functionality "
-                "now complete."
+                "+ sprint 601 request-side handler wired on "
+                "MSG_DIRECT — Phase 2 RPC client + server scaffolding "
+                "now complete (server-side stage exec still Phase 2E-2+)."
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Sprint 599 chain-executor response wiring failed: "
+                "Sprint 599/601 chain-executor wiring failed: "
                 "%s. RPC chain-executor (sprint 598) will time out "
                 "on dispatch. Operators on PRSM_PARALLAX_CHAIN_EXECUTOR_KIND=rpc "
                 "should fall back to stub until this lands.",
