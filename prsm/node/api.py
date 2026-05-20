@@ -8411,6 +8411,78 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return store.to_dict()
 
+    @app.post("/admin/chain-exec-ping", tags=["admin"])
+    async def chain_exec_ping(body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Sprint 605 — live Phase 2 round-trip verification.
+
+        Constructs a SendMessage adapter (sprint 596) against the
+        live daemon, dispatches a chain_executor_rpc REQUEST to the
+        specified peer with the operator-supplied payload, returns
+        the response.
+
+        Body: {"peer_id": "<hex>", "payload": "<utf8 string>",
+               "timeout": 10.0}
+        Returns:
+          200 {response: "<utf8>", response_b64: "<b64>"} on success
+          400 — missing peer_id / unknown peer
+          500 — round-trip failed (timeout / send error / executor
+                returned CHAIN_ERROR_KEY)
+
+        For full end-to-end test: both sides set
+        PRSM_PARALLAX_STAGE_EXECUTOR_KIND=echo so the server-side
+        request handler (sprint 604) echoes the request back.
+        """
+        peer_id = (body.get("peer_id") or "").strip()
+        if not peer_id:
+            raise HTTPException(
+                status_code=400, detail="peer_id is required",
+            )
+        payload_str = body.get("payload", "")
+        if not isinstance(payload_str, str):
+            raise HTTPException(
+                status_code=400, detail="payload must be a string",
+            )
+        timeout = float(body.get("timeout", 10.0))
+        loop = getattr(node, "_loop", None)
+        if loop is None:
+            raise HTTPException(
+                status_code=503, detail="node._loop not initialized",
+            )
+
+        from prsm.node.chain_executor_adapters import (
+            build_send_message_adapter,
+        )
+        import base64
+        adapter = build_send_message_adapter(node, timeout=timeout)
+        request_bytes = payload_str.encode("utf-8")
+
+        # The adapter is sync (drives loop via run_async_on_loop) +
+        # we're already inside the loop's thread — must dispatch the
+        # adapter call to a worker thread to avoid deadlock.
+        import asyncio
+        try:
+            response_bytes = await asyncio.get_running_loop().run_in_executor(
+                None, adapter, peer_id, request_bytes,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"chain-exec-ping failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            )
+
+        try:
+            response_utf8 = response_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            response_utf8 = None
+        return {
+            "response_b64": base64.b64encode(response_bytes).decode(),
+            "response": response_utf8,
+            "size_bytes": len(response_bytes),
+        }
+
     @app.post("/admin/content-filter/cids", tags=["admin"])
     async def add_filter_cids(
         body: Dict[str, Any] = {},
