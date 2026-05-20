@@ -9004,8 +9004,11 @@ def node_infer_cli(
             current_activation = _np.frombuffer(
                 resp.activation_blob, dtype=resp.activation_dtype,
             ).reshape(resp.activation_shape)
-            # Sprint 670 — accumulate per-stage entry for the
-            # multi-stage receipt's stage_chain array.
+            # Sprint 670/671 — accumulate per-stage entry for the
+            # multi-stage receipt's stage_chain array. Sprint 671
+            # adds activation_blob_b64 + tee_attestation_b64 so
+            # each stage's signature is self-verifiable (matches
+            # the top-level audit-chain pattern from sprint 635).
             stage_responses.append({
                 "stage_index": stage_idx,
                 "layer_range": [lo, hi],
@@ -9013,9 +9016,21 @@ def node_infer_cli(
                 "stage_node_id": resp.stage_node_id,
                 "stage_signature_b64": resp.stage_signature_b64,
                 "activation_shape": list(resp.activation_shape),
+                "activation_dtype": resp.activation_dtype,
                 "activation_sha256": _hashlib.sha256(
                     bytes(resp.activation_blob),
                 ).hexdigest(),
+                "activation_blob_b64": base64.b64encode(
+                    bytes(resp.activation_blob),
+                ).decode("ascii"),
+                "tee_attestation_b64": base64.b64encode(
+                    bytes(resp.tee_attestation),
+                ).decode("ascii"),
+                "tee_type": getattr(
+                    resp.tee_type, "value", str(resp.tee_type),
+                ),
+                "epsilon_spent": resp.epsilon_spent,
+                "protocol_version": resp.protocol_version,
                 "duration_seconds": resp.duration_seconds,
             })
         # After the per-stage loop, `resp` is the FINAL stage's

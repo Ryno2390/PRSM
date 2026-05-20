@@ -920,3 +920,166 @@ def test_C3_mixed_modes_only_flags_prefill_duplicates():
     for f in findings:
         if f["kind"] == "DUPLICATE_REQUEST_ID":
             assert f["line_indices"] == [3]
+
+
+# --------------------------------------------------------------------------
+# Sprint 671 — multi-stage receipt verification
+# --------------------------------------------------------------------------
+
+
+def test_verify_stage_chain_happy_path():
+    """Sprint 671: each stage_chain entry signed by its respective
+    stage identity verifies cleanly against the anchor.
+    """
+    from prsm.cli_modules.receipt_verify import verify_stage_chain
+
+    # Build 2 distinct stage identities
+    stage_a = _make_stage_identity()
+    stage_b = _make_stage_identity()
+    # Stage A signs over its output (hidden states)
+    resp_a = _signed_response(
+        stage_a, request_id="multi-r0",
+        activation_bytes=b"stage-a-output",
+    )
+    # Stage B signs over its output (logits)
+    resp_b = _signed_response(
+        stage_b, request_id="multi-r0",
+        activation_bytes=b"stage-b-output",
+    )
+
+    rec = {
+        "request_id": "multi-r0",
+        "stage_chain": [
+            {
+                "stage_index": 0,
+                "stage_node_id": resp_a.stage_node_id,
+                "stage_signature_b64": resp_a.stage_signature_b64,
+                "activation_shape": list(resp_a.activation_shape),
+                "activation_dtype": resp_a.activation_dtype,
+                "activation_blob_b64": base64.b64encode(
+                    bytes(resp_a.activation_blob),
+                ).decode("ascii"),
+                "tee_attestation_b64": base64.b64encode(
+                    bytes(resp_a.tee_attestation),
+                ).decode("ascii"),
+                "tee_type": resp_a.tee_type.value,
+                "epsilon_spent": resp_a.epsilon_spent,
+                "duration_seconds": resp_a.duration_seconds,
+                "protocol_version": resp_a.protocol_version,
+            },
+            {
+                "stage_index": 1,
+                "stage_node_id": resp_b.stage_node_id,
+                "stage_signature_b64": resp_b.stage_signature_b64,
+                "activation_shape": list(resp_b.activation_shape),
+                "activation_dtype": resp_b.activation_dtype,
+                "activation_blob_b64": base64.b64encode(
+                    bytes(resp_b.activation_blob),
+                ).decode("ascii"),
+                "tee_attestation_b64": base64.b64encode(
+                    bytes(resp_b.tee_attestation),
+                ).decode("ascii"),
+                "tee_type": resp_b.tee_type.value,
+                "epsilon_spent": resp_b.epsilon_spent,
+                "duration_seconds": resp_b.duration_seconds,
+                "protocol_version": resp_b.protocol_version,
+            },
+        ],
+    }
+
+    anchor = _anchor_with(stage_a, stage_b)
+    results = verify_stage_chain(rec, anchor=anchor)
+    assert len(results) == 2
+    assert all(r["status"] == "OK" for r in results)
+    assert results[0]["stage_index"] == 0
+    assert results[1]["stage_index"] == 1
+
+
+def test_verify_stage_chain_catches_tampered_stage_signature():
+    """Flip a byte in stage 0's signature → SIGNATURE_INVALID for
+    that stage; stage 1 still verifies cleanly.
+    """
+    from prsm.cli_modules.receipt_verify import verify_stage_chain
+    stage_a = _make_stage_identity()
+    stage_b = _make_stage_identity()
+    resp_a = _signed_response(stage_a, request_id="r0")
+    resp_b = _signed_response(stage_b, request_id="r0")
+
+    # Tamper stage 0's signature
+    sig_bytes = bytearray(base64.b64decode(resp_a.stage_signature_b64))
+    sig_bytes[0] ^= 0x01
+    tampered_sig = base64.b64encode(bytes(sig_bytes)).decode("ascii")
+
+    rec = {
+        "request_id": "r0",
+        "stage_chain": [
+            {
+                "stage_index": 0, "stage_node_id": resp_a.stage_node_id,
+                "stage_signature_b64": tampered_sig,
+                "activation_shape": list(resp_a.activation_shape),
+                "activation_dtype": resp_a.activation_dtype,
+                "activation_blob_b64": base64.b64encode(
+                    bytes(resp_a.activation_blob)).decode("ascii"),
+                "tee_attestation_b64": base64.b64encode(
+                    bytes(resp_a.tee_attestation)).decode("ascii"),
+                "tee_type": resp_a.tee_type.value,
+                "epsilon_spent": resp_a.epsilon_spent,
+                "duration_seconds": resp_a.duration_seconds,
+                "protocol_version": resp_a.protocol_version,
+            },
+            {
+                "stage_index": 1, "stage_node_id": resp_b.stage_node_id,
+                "stage_signature_b64": resp_b.stage_signature_b64,
+                "activation_shape": list(resp_b.activation_shape),
+                "activation_dtype": resp_b.activation_dtype,
+                "activation_blob_b64": base64.b64encode(
+                    bytes(resp_b.activation_blob)).decode("ascii"),
+                "tee_attestation_b64": base64.b64encode(
+                    bytes(resp_b.tee_attestation)).decode("ascii"),
+                "tee_type": resp_b.tee_type.value,
+                "epsilon_spent": resp_b.epsilon_spent,
+                "duration_seconds": resp_b.duration_seconds,
+                "protocol_version": resp_b.protocol_version,
+            },
+        ],
+    }
+    anchor = _anchor_with(stage_a, stage_b)
+    results = verify_stage_chain(rec, anchor=anchor)
+    assert len(results) == 2
+    assert results[0]["status"] == "SIGNATURE_INVALID"
+    assert results[1]["status"] == "OK"
+
+
+def test_verify_stage_chain_unverifiable_when_blob_missing():
+    """Pre-sprint-671 receipts (sprint 670 format) lack
+    activation_blob_b64 in stage_chain entries → UNVERIFIABLE.
+    """
+    from prsm.cli_modules.receipt_verify import verify_stage_chain
+    rec = {
+        "request_id": "r0",
+        "stage_chain": [
+            {
+                "stage_index": 0,
+                "stage_node_id": "x",
+                "stage_signature_b64": "y",
+                "activation_sha256": "hash-only",
+                # No activation_blob_b64
+            },
+        ],
+    }
+    anchor = MagicMock()
+    results = verify_stage_chain(rec, anchor=anchor)
+    assert len(results) == 1
+    assert results[0]["status"] == "UNVERIFIABLE"
+    anchor.lookup.assert_not_called()
+
+
+def test_verify_stage_chain_empty_when_field_missing():
+    """Single-stage receipts pre-sprint-670 have no stage_chain
+    field → empty results.
+    """
+    from prsm.cli_modules.receipt_verify import verify_stage_chain
+    rec = {"request_id": "r0"}
+    anchor = MagicMock()
+    results = verify_stage_chain(rec, anchor=anchor)
+    assert results == []

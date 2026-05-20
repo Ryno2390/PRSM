@@ -122,6 +122,111 @@ def verify_receipt_record(
     }
 
 
+def verify_stage_chain(
+    rec: Dict[str, Any],
+    *,
+    anchor: Any,
+) -> List[Dict[str, Any]]:
+    """Sprint 671 — verify every entry in a multi-stage receipt's
+    `stage_chain` array against its respective stage_node_id pubkey.
+
+    Returns a list of per-stage result dicts. Empty when the
+    receipt has no `stage_chain` (pre-sprint-670 format). Each
+    result has:
+      - stage_index
+      - stage_node_id
+      - status: OK / SIGNATURE_INVALID / PUBKEY_NOT_REGISTERED /
+                ANCHOR_LOOKUP_FAILED / RECONSTRUCT_FAILED /
+                UNVERIFIABLE (entry lacks activation_blob_b64)
+      - reason (non-OK statuses)
+
+    Verifier reconstructs each stage's RunLayerSliceResponse from
+    the stage_chain entry's fields + calls verify_with_anchor.
+    Sprint 670 entries lack activation_blob_b64 → UNVERIFIABLE
+    (observation-only, like pre-sprint-635 top-level receipts).
+    """
+    from prsm.compute.chain_rpc.protocol import (
+        RunLayerSliceResponse,
+    )
+    from prsm.compute.tee.models import TEEType
+    import base64 as _b64
+
+    stage_chain = rec.get("stage_chain") or []
+    results: List[Dict[str, Any]] = []
+    for entry in stage_chain:
+        base = {
+            "stage_index": entry.get("stage_index"),
+            "stage_node_id": entry.get("stage_node_id"),
+        }
+        if "activation_blob_b64" not in entry:
+            results.append({
+                **base,
+                "status": "UNVERIFIABLE",
+                "reason": (
+                    "stage_chain entry lacks activation_blob_b64 "
+                    "(pre-sprint-671 format); cannot reconstruct "
+                    "signing payload"
+                ),
+            })
+            continue
+        try:
+            activation_bytes = _b64.b64decode(
+                entry["activation_blob_b64"],
+            )
+            tee_attest = _b64.b64decode(
+                entry.get("tee_attestation_b64", ""),
+            )
+            resp = RunLayerSliceResponse(
+                request_id=rec["request_id"],
+                activation_blob=activation_bytes,
+                activation_shape=tuple(entry["activation_shape"]),
+                activation_dtype=entry["activation_dtype"],
+                duration_seconds=float(entry["duration_seconds"]),
+                tee_attestation=tee_attest,
+                tee_type=TEEType(entry["tee_type"]),
+                epsilon_spent=float(entry["epsilon_spent"]),
+                stage_signature_b64=entry["stage_signature_b64"],
+                stage_node_id=entry["stage_node_id"],
+                protocol_version=int(
+                    entry.get("protocol_version", 2),
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            results.append({
+                **base,
+                "status": "RECONSTRUCT_FAILED",
+                "reason": f"{type(exc).__name__}: {exc}",
+            })
+            continue
+        try:
+            pubkey = anchor.lookup(resp.stage_node_id)
+        except Exception as exc:  # noqa: BLE001
+            results.append({
+                **base,
+                "status": "ANCHOR_LOOKUP_FAILED",
+                "reason": f"{type(exc).__name__}: {exc}",
+            })
+            continue
+        if not pubkey:
+            results.append({
+                **base,
+                "status": "PUBKEY_NOT_REGISTERED",
+                "reason": (
+                    f"stage_node_id {resp.stage_node_id} has no "
+                    f"pubkey in the live PublisherKeyAnchor"
+                ),
+            })
+            continue
+        ok = resp.verify_with_anchor(
+            anchor, expected_stage_node_id=resp.stage_node_id,
+        )
+        results.append({
+            **base,
+            "status": "OK" if ok else "SIGNATURE_INVALID",
+        })
+    return results
+
+
 class _CachingAnchor:
     """Proxy that memoizes pubkey lookups across receipts in a single
     verify_receipts_file run. Wraps the real anchor so every code path
