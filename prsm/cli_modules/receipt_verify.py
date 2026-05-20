@@ -256,6 +256,59 @@ def verify_chain_invariants(records: List[Dict[str, Any]]) -> List[Dict[str, Any
             "line_indices": out_of_order,
         })
 
+    # ── helpers for C5 ────────────────────────────────────────
+    def _parse_sampling_mode(mode_str: str) -> Optional[Dict[str, float]]:
+        """Sprint 640 — parse the canonical sampling_mode string
+        ("temperature:0.700,top_k:40,seed:42") back into the params
+        we need to re-derive a sample. Returns None for greedy /
+        unparseable / seed-missing (each of those takes a different
+        C5 path).
+        """
+        if not mode_str or mode_str == "greedy":
+            return None
+        parts = {}
+        for token in mode_str.split(","):
+            if ":" not in token:
+                continue
+            k, v = token.split(":", 1)
+            try:
+                parts[k.strip()] = float(v.strip())
+            except ValueError:
+                return None  # malformed mode string
+        if "seed" not in parts or "temperature" not in parts:
+            return None
+        return parts
+
+    def _replay_sample(
+        logits_last: Any,
+        params: Dict[str, float],
+        step_idx: int,
+    ) -> Optional[int]:
+        """Re-derive the next_token_id given last-position logits,
+        the parsed sampling params, and the step index. Mirrors the
+        sampling logic in `prsm node infer` exactly; any drift here
+        invalidates seed-replay audits for downstream operators.
+        """
+        try:
+            import numpy as _np
+        except ImportError:
+            return None
+        temp = float(params["temperature"])
+        seed = int(params["seed"])
+        top_k = int(params.get("top_k", 0))
+        scaled = logits_last.astype(_np.float32) / max(temp, 1e-8)
+        if top_k > 0:
+            k = min(top_k, scaled.shape[-1])
+            top_indices = _np.argpartition(scaled, -k)[-k:]
+            mask = _np.full_like(scaled, -_np.inf)
+            mask[top_indices] = scaled[top_indices]
+            scaled = mask
+        scaled = scaled - _np.max(scaled)
+        probs = _np.exp(scaled)
+        probs = probs / probs.sum()
+        rng = _np.random.default_rng(seed + step_idx)
+        return int(rng.choice(probs.shape[-1], p=probs))
+
     # C5: next_token_id matches argmax of activation_blob.
     # Receipt's "next_token_id" is the operator-recorded sample;
     # we recompute argmax from the activation bytes that the stage
@@ -280,18 +333,37 @@ def verify_chain_invariants(records: List[Dict[str, Any]]) -> List[Dict[str, Any
         claimed_id = rec.get("next_token_id")
         if claimed_id is None:
             continue
-        # Sprint 639: skip non-greedy samples
         sampling_mode = rec.get("sampling_mode", "greedy")
-        if sampling_mode != "greedy":
-            continue
+        # Decode the signed activation bytes (shared by both
+        # greedy + seed-replay paths).
         try:
             blob = base64.b64decode(blob_b64)
             shape = tuple(rec["activation_shape"])
             dtype = rec["activation_dtype"]
             logits = _np.frombuffer(blob, dtype=dtype).reshape(shape)
-            recomputed_id = int(logits[0, -1, :].argmax())
+            last_logits = logits[0, -1, :]
         except Exception:  # noqa: BLE001
             continue  # malformed numerics; C5 skipped for this row
+
+        if sampling_mode == "greedy":
+            recomputed_id = int(last_logits.argmax())
+        else:
+            # Sprint 640: try seed-replay. Receipts with a recorded
+            # seed in sampling_mode can be deterministically
+            # re-sampled to verify next_token_id matches.
+            sampling_params = _parse_sampling_mode(sampling_mode)
+            if sampling_params is None:
+                # No seed (or unparseable) → can't replay; skip C5
+                # for this row. Operator who wants strong audit
+                # should always pass --seed for non-greedy runs.
+                continue
+            step_idx = int(rec.get("step", idx))
+            replayed = _replay_sample(
+                last_logits, sampling_params, step_idx,
+            )
+            if replayed is None:
+                continue  # numpy unavailable etc.
+            recomputed_id = replayed
         if recomputed_id != int(claimed_id):
             mismatches.append(idx)
     if mismatches:

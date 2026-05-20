@@ -596,21 +596,101 @@ def test_chain_findings_empty_when_no_flag(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_C5_skipped_for_non_greedy_sampling():
-    """A temperature/top-k receipt where next_token_id != argmax
-    must NOT trigger TOKEN_ID_ARGMAX_MISMATCH — the operator sampled
-    from the distribution, which is allowed to deviate from argmax.
+def test_C5_skipped_for_non_greedy_without_seed():
+    """Sprint 639 + 640: receipt with non-greedy mode but NO seed
+    can't be replayed → C5 silently skipped. Operators who want
+    strong audit must always pass --seed for sampled runs.
     """
     from prsm.cli_modules.receipt_verify import verify_chain_invariants
     # claimed=99, argmax=3 — would fail C5 if greedy
     rec = _make_argmax_tampered_record(
         claimed_token_id=99, actual_argmax=3, vocab=100,
     )
-    rec["sampling_mode"] = "temperature:0.700,top_k:50"
+    rec["sampling_mode"] = "temperature:0.700,top_k:50"  # no seed
     findings = verify_chain_invariants([rec])
     kinds = [f["kind"] for f in findings]
     assert "TOKEN_ID_ARGMAX_MISMATCH" not in kinds, (
-        "non-greedy sampling must NOT trigger C5"
+        "non-greedy without seed must NOT trigger C5 — can't replay"
+    )
+
+
+def test_C5_seed_replay_passes_for_correct_sample():
+    """Sprint 640: with seed in the mode string, C5 deterministically
+    replays the sampling and verifies the recorded next_token_id
+    matches. This test constructs a receipt by RUNNING the actual
+    sampling logic, then verifies the verifier agrees.
+    """
+    import base64 as _b64
+    import numpy as _np
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+
+    vocab = 100
+    seed = 1234
+    step = 0
+    temperature = 0.7
+    top_k = 50
+
+    # Build deterministic logits
+    _np.random.seed(7)
+    logits = _np.random.randn(1, 1, vocab).astype(_np.float32) * 3.0
+
+    # Run the same sampling logic the CLI uses to compute the
+    # ground-truth sampled token
+    last_logits = logits[0, -1, :].astype(_np.float32)
+    scaled = last_logits / temperature
+    k = min(top_k, scaled.shape[-1])
+    top_indices = _np.argpartition(scaled, -k)[-k:]
+    mask = _np.full_like(scaled, -_np.inf)
+    mask[top_indices] = scaled[top_indices]
+    scaled = mask - _np.max(mask)
+    probs = _np.exp(scaled)
+    probs = probs / probs.sum()
+    rng = _np.random.default_rng(seed + step)
+    true_token_id = int(rng.choice(probs.shape[-1], p=probs))
+
+    rec = _chain_record(
+        next_token_id=true_token_id,
+        activation_blob_b64=_b64.b64encode(logits.tobytes()).decode("ascii"),
+        activation_shape=[1, 1, vocab],
+    )
+    rec["step"] = step
+    rec["sampling_mode"] = f"temperature:{temperature},top_k:{top_k},seed:{seed}"
+
+    findings = verify_chain_invariants([rec])
+    kinds = [f["kind"] for f in findings]
+    assert "TOKEN_ID_ARGMAX_MISMATCH" not in kinds, (
+        f"seed-replay must accept the genuine sample; got {findings}"
+    )
+
+
+def test_C5_seed_replay_catches_tampering_for_sampled():
+    """Sprint 640: even in non-greedy mode with seed recorded, a
+    tampered next_token_id is caught by replaying the sample.
+    """
+    import base64 as _b64
+    import numpy as _np
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+
+    vocab = 100
+    seed = 999
+    step = 0
+    temperature = 0.5
+
+    _np.random.seed(3)
+    logits = _np.random.randn(1, 1, vocab).astype(_np.float32) * 5.0
+
+    rec = _chain_record(
+        next_token_id=42,  # tampered; replay will compute something else
+        activation_blob_b64=_b64.b64encode(logits.tobytes()).decode("ascii"),
+        activation_shape=[1, 1, vocab],
+    )
+    rec["step"] = step
+    rec["sampling_mode"] = f"temperature:{temperature},seed:{seed}"
+
+    findings = verify_chain_invariants([rec])
+    kinds = [f["kind"] for f in findings]
+    assert "TOKEN_ID_ARGMAX_MISMATCH" in kinds, (
+        f"seed-replay must catch tampered next_token_id; got {findings}"
     )
 
 
