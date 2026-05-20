@@ -22,7 +22,8 @@ scaffolding lets test code reference the eventual contract today.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Protocol, runtime_checkable
+import asyncio
+from typing import Any, Callable, Coroutine, Protocol, runtime_checkable
 
 
 # Re-export the canonical SendMessage signature from the factory's
@@ -64,6 +65,35 @@ class _Phase2AdapterNotReady(NotImplementedError):
     branch can detect Phase 2 non-readiness cleanly + log the
     structured warning sprint 578 already established.
     """
+
+
+def run_async_on_loop(
+    loop: asyncio.AbstractEventLoop,
+    coro: Coroutine[Any, Any, Any],
+    timeout: float,
+) -> Any:
+    """Sprint 594 (Phase 2C) — async-to-sync bridge primitive.
+
+    Schedules ``coro`` on a running event loop from a DIFFERENT
+    thread + returns the result synchronously. Thin wrapper around
+    ``asyncio.run_coroutine_threadsafe(coro, loop).result(timeout)``.
+
+    Thread-safety contract:
+      - ``loop`` MUST be running on a different thread than the
+        caller. Calling from the loop's own thread deadlocks
+        because the loop cannot make progress while blocked in
+        ``.result()``.
+
+    Used by Phase 2D wiring (sprint 595+) to bridge the sync
+    SendMessage contract over async transport calls. Exposed as a
+    standalone helper so the threading primitive is unit-testable
+    in isolation from the chain-executor protocol layer.
+
+    Raises whatever the coroutine raises (passed through);
+    ``concurrent.futures.TimeoutError`` on timeout expiry.
+    """
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result(timeout=timeout)
 
 
 class PeerNotFound(RuntimeError):
