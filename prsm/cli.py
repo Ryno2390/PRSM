@@ -8951,6 +8951,14 @@ def node_infer_cli(
                 # mode string, a verifier could re-derive but that's
                 # out of sprint 639's scope).
                 "sampling_mode": sampling_mode,
+                # Sprint 661 — record decode_mode so the C3
+                # uniqueness invariant can be conditional. The
+                # sprint 633 CLI path always uses PREFILL (fresh
+                # request_id per token); sprint 663 will add
+                # `--incremental` which reuses request_id across
+                # tokens (legitimate cache-key sharing). C3 fires
+                # only when prefill-mode receipts collide.
+                "decode_mode": "prefill",
             }
             try:
                 receipts_fh.write(_json.dumps(receipt_record) + "\n")

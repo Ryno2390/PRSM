@@ -217,12 +217,26 @@ def verify_chain_invariants(
             "line_indices": [idx for _, idx in models],
         })
 
-    # C3: request_id uniqueness (anti-replay)
+    # C3: request_id uniqueness (anti-replay).
+    # Sprint 661 — conditional on decode_mode. The sprint-633 CLI
+    # always sends PREFILL with a fresh request_id per token; any
+    # repeat is genuine replay or tampering. The sprint-663 CLI
+    # (`--incremental`) reuses a stable request_id across tokens
+    # so server-side KVCacheManager.get can find the cache —
+    # repeats in that mode are EXPECTED, not findings.
+    #
+    # Receipts that omit decode_mode (sprint 633-660 format) are
+    # treated as "prefill" for backwards-compat.
     seen_request_ids: Dict[str, int] = {}
     duplicates: List[int] = []
     for idx, rec in enumerate(records):
         rid = rec.get("request_id")
         if not rid:
+            continue
+        decode_mode = rec.get("decode_mode", "prefill")
+        if decode_mode != "prefill":
+            # Incremental / verify / other non-prefill modes share
+            # request_id by design; uniqueness check doesn't apply.
             continue
         if rid in seen_request_ids:
             duplicates.append(idx)
@@ -232,9 +246,9 @@ def verify_chain_invariants(
         findings.append({
             "kind": "DUPLICATE_REQUEST_ID",
             "message": (
-                f"{len(duplicates)} receipt(s) reuse a request_id "
-                f"already seen earlier in the file — replay or "
-                f"audit-trail tampering"
+                f"{len(duplicates)} prefill receipt(s) reuse a "
+                f"request_id already seen earlier in the file — "
+                f"replay or audit-trail tampering"
             ),
             "line_indices": duplicates,
         })

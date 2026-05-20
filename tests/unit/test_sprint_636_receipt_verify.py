@@ -834,3 +834,89 @@ def test_strict_does_not_affect_greedy_or_seeded():
     kinds = [f["kind"] for f in findings]
     assert "UNVERIFIABLE_NON_GREEDY_NO_SEED" not in kinds
     assert "TOKEN_ID_ARGMAX_MISMATCH" not in kinds
+
+
+# --------------------------------------------------------------------------
+# Sprint 661 — C3 conditional on decode_mode
+# --------------------------------------------------------------------------
+
+
+def test_C3_skipped_for_incremental_decode_mode():
+    """Sprint 661: receipts with decode_mode='incremental' share
+    request_id by design (cache key). C3 must NOT flag this as
+    DUPLICATE_REQUEST_ID.
+    """
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    recs = [
+        _chain_record(request_id="kvcache-session-A", wall_unix=1.0),
+        _chain_record(request_id="kvcache-session-A", wall_unix=2.0),
+        _chain_record(request_id="kvcache-session-A", wall_unix=3.0),
+    ]
+    for r in recs:
+        r["decode_mode"] = "incremental"
+
+    findings = verify_chain_invariants(recs)
+    kinds = [f["kind"] for f in findings]
+    assert "DUPLICATE_REQUEST_ID" not in kinds, (
+        "INCREMENTAL receipts legitimately share request_id"
+    )
+
+
+def test_C3_fires_for_prefill_decode_mode():
+    """Sprint 661: explicit decode_mode='prefill' with duplicate
+    request_id still trips C3 (sprint 637 anti-replay invariant).
+    """
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    recs = [
+        _chain_record(request_id="dup", wall_unix=1.0),
+        _chain_record(request_id="dup", wall_unix=2.0),
+    ]
+    for r in recs:
+        r["decode_mode"] = "prefill"
+
+    findings = verify_chain_invariants(recs)
+    kinds = [f["kind"] for f in findings]
+    assert "DUPLICATE_REQUEST_ID" in kinds
+
+
+def test_C3_missing_decode_mode_defaults_to_prefill():
+    """Backwards compat: sprint 633-660 receipts don't have
+    decode_mode. Default to prefill so C3 still applies.
+    """
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    recs = [
+        _chain_record(request_id="dup", wall_unix=1.0),
+        _chain_record(request_id="dup", wall_unix=2.0),
+    ]
+    # No decode_mode field
+    findings = verify_chain_invariants(recs)
+    kinds = [f["kind"] for f in findings]
+    assert "DUPLICATE_REQUEST_ID" in kinds
+
+
+def test_C3_mixed_modes_only_flags_prefill_duplicates():
+    """File with both PREFILL and INCREMENTAL receipts: only the
+    PREFILL duplicates trip C3. INCREMENTAL duplicates within the
+    same session are silent.
+    """
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    recs = [
+        # Two INCREMENTAL receipts sharing a session_id (OK)
+        _chain_record(request_id="kvcache-A", wall_unix=1.0),
+        _chain_record(request_id="kvcache-A", wall_unix=2.0),
+        # Two PREFILL receipts with duplicate request_id (FAIL)
+        _chain_record(request_id="prefill-X", wall_unix=3.0),
+        _chain_record(request_id="prefill-X", wall_unix=4.0),
+    ]
+    recs[0]["decode_mode"] = "incremental"
+    recs[1]["decode_mode"] = "incremental"
+    recs[2]["decode_mode"] = "prefill"
+    recs[3]["decode_mode"] = "prefill"
+
+    findings = verify_chain_invariants(recs)
+    kinds = [f["kind"] for f in findings]
+    assert "DUPLICATE_REQUEST_ID" in kinds
+    # Check it specifically flagged the PREFILL duplicate (line 3)
+    for f in findings:
+        if f["kind"] == "DUPLICATE_REQUEST_ID":
+            assert f["line_indices"] == [3]
