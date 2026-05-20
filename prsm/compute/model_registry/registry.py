@@ -133,6 +133,11 @@ def manifest_from_model(
             tensor_shape=tuple(s.tensor_shape),
             sha256=_hash_shard(s),
             size_bytes=len(s.tensor_data),
+            # Sprint 627 — preserve the source shard's layer_range on
+            # the manifest so registry.get() can reconstruct it. Default
+            # (0, 0) keeps signing-payload back-compat for old shards
+            # that don't set the field.
+            layer_range=tuple(getattr(s, "layer_range", (0, 0))),
         )
         for s in sorted(model.shards, key=lambda s: s.shard_index)
     )
@@ -602,7 +607,10 @@ class FilesystemModelRegistry(ModelRegistry):
                     total_shards=manifest.total_shards,
                     tensor_data=data,
                     tensor_shape=tuple(entry.tensor_shape),
-                    layer_range=(0, 0),
+                    # Sprint 627 — use the manifest's persisted
+                    # layer_range. Pre-627 manifests with no field
+                    # come back as (0, 0) (back-compat sentinel).
+                    layer_range=tuple(entry.layer_range),
                     size_bytes=entry.size_bytes,
                     checksum=entry.sha256,
                 )

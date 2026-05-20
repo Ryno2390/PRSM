@@ -47,6 +47,12 @@ class ManifestShardEntry:
     tensor_shape: Tuple[int, ...]
     sha256: str          # hex digest of tensor_data bytes
     size_bytes: int
+    # Sprint 627 — layer_range committed to the half-open interval
+    # [start, end) this shard covers in the model's layer stack.
+    # Default (0, 0) is the Phase 3.x.2 "unset" sentinel; with that
+    # default, the signing payload is byte-identical to pre-627 so
+    # legacy signed manifests verify unchanged (omit-when-default).
+    layer_range: Tuple[int, int] = (0, 0)
 
     def __post_init__(self) -> None:
         # Frozen dataclass — coerce types after init.
@@ -56,15 +62,26 @@ class ManifestShardEntry:
             object.__setattr__(self, "shard_index", int(self.shard_index))
         if not isinstance(self.size_bytes, int):
             object.__setattr__(self, "size_bytes", int(self.size_bytes))
+        if not isinstance(self.layer_range, tuple):
+            object.__setattr__(
+                self, "layer_range",
+                tuple(int(d) for d in self.layer_range),
+            )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "shard_id": self.shard_id,
             "shard_index": self.shard_index,
             "tensor_shape": list(self.tensor_shape),
             "sha256": self.sha256,
             "size_bytes": self.size_bytes,
         }
+        # Sprint 627 omit-when-default: only serialize layer_range
+        # when non-sentinel so pre-627 manifests on disk stay
+        # byte-identical to their original form.
+        if self.layer_range != (0, 0):
+            d["layer_range"] = list(self.layer_range)
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ManifestShardEntry":
@@ -159,12 +176,19 @@ class ModelManifest:
         # One line per shard, in canonical (shard_index ascending) order.
         # Includes shard_id + sha256 + size_bytes — these together commit
         # to which shard occupies which slot AND its exact bytes.
+        # Sprint 627 — layer_range appended ONLY when non-default so
+        # pre-627 signed manifests (no layer_range) verify byte-identical.
         for entry in self.shards:
             shape_str = ",".join(str(d) for d in entry.tensor_shape)
-            parts.append(
+            line = (
                 f"{entry.shard_index}:{entry.shard_id}:"
                 f"{entry.sha256}:{entry.size_bytes}:{shape_str}"
             )
+            if entry.layer_range != (0, 0):
+                line += (
+                    f":{entry.layer_range[0]},{entry.layer_range[1]}"
+                )
+            parts.append(line)
         return "\n".join(parts).encode("utf-8")
 
     def to_dict(self) -> Dict[str, Any]:
