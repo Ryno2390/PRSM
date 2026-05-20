@@ -9352,7 +9352,18 @@ def node_verify_receipts_cli(
             chain_findings = r["chain_findings"]
             break
     chain_ok = len(chain_findings) == 0
-    overall_ok = (n_ok == n_total) and (chain_ok if check_chain else True)
+    # Sprint 672 — multi-stage stage_chain results affect overall
+    # exit code. ANY stage failing → not overall_ok.
+    stage_chain_failures = 0
+    for r in results:
+        for sresult in r.get("stage_chain_results", []) or []:
+            if sresult.get("status") not in ("OK",):
+                stage_chain_failures += 1
+    overall_ok = (
+        n_ok == n_total
+        and (chain_ok if check_chain else True)
+        and stage_chain_failures == 0
+    )
 
     if output_format == "json":
         click.echo(_json.dumps({
@@ -9381,12 +9392,47 @@ def node_verify_receipts_cli(
                 f"[bold]{r['status']}[/bold] — "
                 f"{r.get('reason', '?')}"
             )
+        # Sprint 672 — render per-stage results when multi-stage.
+        stage_results = r.get("stage_chain_results") or []
+        if len(stage_results) > 1:
+            for sresult in stage_results:
+                status = sresult.get("status", "?")
+                sid = sresult.get("stage_node_id") or "?"
+                stage_idx = sresult.get("stage_index", "?")
+                marker = (
+                    "[green]✓[/green]" if status == "OK"
+                    else "[red]✗[/red]"
+                )
+                if status == "OK":
+                    console.print(
+                        f"    {marker} stage {stage_idx} "
+                        f"[dim]{sid[:16]}...[/dim]"
+                    )
+                else:
+                    console.print(
+                        f"    {marker} stage {stage_idx} "
+                        f"[bold]{status}[/bold] — "
+                        f"{sresult.get('reason', '?')}"
+                    )
     console.print()
     if n_ok == n_total:
         console.print(
             f"[green]🎯 {n_ok}/{n_total} receipts verified[/green] "
             f"against the live anchor."
         )
+        if stage_chain_failures == 0:
+            # Tally total per-stage signatures verified for the
+            # multi-stage path summary.
+            total_stages_verified = sum(
+                len(r.get("stage_chain_results") or [])
+                for r in results
+            )
+            if total_stages_verified > 0:
+                console.print(
+                    f"[green]🔗 {total_stages_verified} per-stage "
+                    f"signature(s) verified[/green] (multi-stage "
+                    f"audit chain complete)."
+                )
     else:
         console.print(
             f"[red]✗ {n_ok}/{n_total} receipts verified[/red]; "

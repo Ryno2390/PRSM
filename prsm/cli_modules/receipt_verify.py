@@ -113,13 +113,30 @@ def verify_receipt_record(
     ok = resp.verify_with_anchor(
         anchor, expected_stage_node_id=resp.stage_node_id,
     )
-    return {
+    result = {
         **base_result,
         "status": "OK" if ok else "SIGNATURE_INVALID",
         **({} if ok else {
             "reason": "Ed25519 verification failed against anchor pubkey",
         }),
     }
+    # Sprint 672 — when the receipt carries a multi-stage
+    # stage_chain (sprint 670 format), also verify each stage's
+    # signature. Attach the per-stage results so the CLI can
+    # render them. Caller uses these to decide overall pass/fail.
+    if "stage_chain" in rec:
+        try:
+            result["stage_chain_results"] = verify_stage_chain(
+                rec, anchor=anchor,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Defensive — stage_chain verification failure shouldn't
+            # mask the top-level result.
+            result["stage_chain_results"] = [{
+                "status": "ANCHOR_LOOKUP_FAILED",
+                "reason": f"verify_stage_chain raised: {exc}",
+            }]
+    return result
 
 
 def verify_stage_chain(
