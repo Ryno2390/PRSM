@@ -150,6 +150,59 @@ CHAIN_RESP_KEY = "chain_resp_id"
 CHAIN_PAYLOAD_KEY = "chain_payload_b64"
 
 
+def handle_chain_executor_response(node: Any, msg: Any) -> bool:
+    """Sprint 597 (Phase 2D step 3) — resolve a pending chain-executor
+    Future on receipt of a response message.
+
+    Reads the response wire-protocol fields from ``msg.payload``:
+      ``CHAIN_RESP_KEY``     → request_id (hex sha256 string)
+      ``CHAIN_PAYLOAD_KEY``  → base64-encoded response bytes
+
+    If the request_id is in ``node._chain_executor_pending``, sets
+    the Future result. If not (request already timed out + popped,
+    or unsolicited message), returns False without raising.
+
+    Must be called from the loop thread (via the transport's normal
+    inbound-message dispatch); the Future is on that loop. Use
+    ``loop.call_soon_threadsafe`` if invoking from another thread.
+
+    Returns ``True`` if the response was matched + Future resolved;
+    ``False`` if no matching pending request (silent drop).
+    """
+    import base64
+    payload = getattr(msg, "payload", None) or {}
+    # Only handle our wire-protocol envelope; ignore other subtypes
+    if payload.get("subtype") != CHAIN_MSG_TYPE:
+        return False
+    request_id = payload.get(CHAIN_RESP_KEY)
+    if not request_id:
+        return False
+    pending = getattr(node, "_chain_executor_pending", None)
+    if pending is None:
+        return False
+    future = pending.get(request_id)
+    if future is None or future.done():
+        # No pending request (timed out + cleaned up) OR already
+        # resolved (duplicate response). Silent drop is correct.
+        return False
+    payload_b64 = payload.get(CHAIN_PAYLOAD_KEY, "")
+    try:
+        response_bytes = base64.b64decode(payload_b64)
+    except Exception as exc:  # noqa: BLE001
+        # Malformed payload → reject this response. Future stays
+        # pending so the original SendMessage call still times out
+        # cleanly rather than getting bogus bytes.
+        future.set_exception(
+            RuntimeError(
+                f"chain-executor response payload base64-decode "
+                f"failed for request_id={request_id}: {exc}"
+            )
+        )
+        return True
+    future.set_result(response_bytes)
+    return True
+
+
 def build_send_message_adapter(
     node: Any,
     timeout: float = 30.0,
