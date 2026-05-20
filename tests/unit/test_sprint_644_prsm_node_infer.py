@@ -585,6 +585,97 @@ def test_no_incremental_defaults_to_prefill_mode(
     assert all(m == "prefill" for m in decode_modes)
 
 
+def test_multi_stage_receipts_have_distinct_stage_node_ids(
+    runner, hf_stubs, identity_stub, tmp_path,
+):
+    """Sprint 673 — full multi-host integration test (CI level).
+
+    Builds a 2-stage chain where each stage is signed by a
+    DIFFERENT mocked identity (simulating 2 distinct droplet
+    operators). Asserts:
+      1. Receipt's stage_chain has 2 entries
+      2. Each entry's stage_node_id matches its respective
+         mocked identity
+      3. The two stage_node_ids are DISTINCT (multi-host
+         structural attestation — different stages signed by
+         different identities)
+      4. The activation_blob_b64 fields differ between stages
+         (different bytes signed)
+    """
+    from prsm.compute.chain_rpc.protocol import (
+        RunLayerSliceResponse, encode_message,
+    )
+    from prsm.compute.tee.models import TEEType
+    from prsm.node.identity import generate_node_identity
+    import numpy as np
+
+    stage_a = generate_node_identity(display_name="stage-A")
+    stage_b = generate_node_identity(display_name="stage-B")
+    stage_identities = [stage_a, stage_b]
+    call_count = [0]
+
+    def post_capture(*a, **kw):
+        # Return a fresh signed response from the CURRENT stage's
+        # identity (round-robin through stage_identities by call
+        # count modulo 2).
+        idx = call_count[0] % 2
+        call_count[0] += 1
+        identity = stage_identities[idx]
+        # Use different output bytes per stage so activation_blob_b64
+        # fields differ in the recorded receipts.
+        logits = np.zeros((1, 1, 50), dtype=np.float32)
+        logits[0, 0, 7] = 99.0 + idx  # slight differentiator
+        resp = RunLayerSliceResponse.sign(
+            identity=identity,
+            request_id="multi-r0",
+            activation_blob=logits.tobytes(),
+            activation_shape=(1, 1, 50),
+            activation_dtype="float32",
+            duration_seconds=0.1,
+            tee_attestation=b"sw-attest",
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
+        )
+        r = MagicMock()
+        r.status_code = 200
+        r.json = MagicMock(return_value={
+            "response_b64": base64.b64encode(
+                encode_message(resp)).decode("ascii"),
+        })
+        return r
+
+    receipts = tmp_path / "multi.jsonl"
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", side_effect=post_capture):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "1",
+            "--stages", f"0-6:{stage_a.node_id}",
+            "--stages", f"6-12:{stage_b.node_id}",
+            "--save-receipts", str(receipts),
+        ])
+    assert result.exit_code == 0, result.output
+    rec = json.loads(receipts.read_text().strip().splitlines()[0])
+    stage_chain = rec["stage_chain"]
+    assert len(stage_chain) == 2
+    # Per-stage stage_node_ids match the respective signing identities
+    assert stage_chain[0]["stage_node_id"] == stage_a.node_id
+    assert stage_chain[1]["stage_node_id"] == stage_b.node_id
+    # The two stage_node_ids are DISTINCT (multi-host)
+    assert stage_a.node_id != stage_b.node_id
+    # The activation_blob_b64 fields differ (different bytes signed)
+    assert (
+        stage_chain[0]["activation_blob_b64"]
+        != stage_chain[1]["activation_blob_b64"]
+    )
+    # Both signatures present + non-empty
+    assert stage_chain[0]["stage_signature_b64"]
+    assert stage_chain[1]["stage_signature_b64"]
+    assert (
+        stage_chain[0]["stage_signature_b64"]
+        != stage_chain[1]["stage_signature_b64"]
+    )
+
+
 def test_stages_flag_parses_spec_and_dispatches_per_stage(
     runner, hf_stubs, identity_stub,
 ):
