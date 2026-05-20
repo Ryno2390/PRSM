@@ -382,6 +382,76 @@ def build_hf_prompt_encoder(
     return _encode
 
 
+def build_hf_output_decoder(
+    *,
+    model_id: str,
+    device: str = "cpu",
+) -> Callable[[Any], str]:
+    """Sprint 616 (Phase 2F-5g) — client-side HF OutputDecoder.
+
+    Symmetric inverse of sprint-614's prompt_encoder. Returns a
+    closure that maps the chain tail's final activation (logits,
+    after sprint-613 LM head) to a decoded string.
+
+    Flow on first decoder() call:
+      1. Lazy-load HF AutoTokenizer (cached for subsequent calls;
+         lighter than sprint-614 which also loads the full model
+         for embedding lookup — decoder only needs vocab)
+      2. argmax over the vocab dimension at the last sequence
+         position → token_id
+      3. tokenizer.decode([token_id]) → str
+
+    Logits shape handling:
+      [B, S, V] → argmax(logits[..., -1, :]) at last position
+      [S, V]    → argmax(logits[-1, :])
+      [V]       → argmax(logits)
+
+    Wraps load/decode failures in StageExecutionError.
+    """
+    if not model_id or not isinstance(model_id, str):
+        raise ValueError(
+            "build_hf_output_decoder requires model_id"
+        )
+    del device  # tokenizer is CPU-only; arg kept for API symmetry
+
+    _state: Dict[str, Any] = {"tokenizer": None}
+
+    def _decode(logits: Any) -> str:
+        if _state["tokenizer"] is None:
+            try:
+                import transformers  # noqa: F401
+            except ImportError as exc:
+                raise StageExecutionError(
+                    f"build_hf_output_decoder requires `transformers` "
+                    f"installed: {exc}."
+                ) from exc
+            try:
+                from transformers import AutoTokenizer
+                tok = AutoTokenizer.from_pretrained(model_id)
+            except Exception as exc:  # noqa: BLE001
+                raise StageExecutionError(
+                    f"build_hf_output_decoder failed to load "
+                    f"tokenizer for {model_id!r}: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
+            _state["tokenizer"] = tok
+        try:
+            # Normalize to last-position logits over vocab
+            arr = logits
+            while arr.ndim > 1:
+                arr = arr[-1]
+            # arr is now 1D over vocab
+            token_id = int(arr.argmax())
+            return _state["tokenizer"].decode([token_id])
+        except Exception as exc:  # noqa: BLE001
+            raise StageExecutionError(
+                f"build_hf_output_decoder decode failed for "
+                f"{model_id!r}: {type(exc).__name__}: {exc}"
+            ) from exc
+
+    return _decode
+
+
 def _resolve_hf_lm_head(hf_model: Any) -> Any:
     """Sprint 613 (Phase 2F-5d) — polymorphic HF LM-head resolution.
 
