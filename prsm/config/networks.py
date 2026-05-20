@@ -105,7 +105,7 @@ MAINNET = NetworkConfig(
     compensation_distributor="0xa9551F5a3AeAB39cc8315AcD8caC2886Bd04f244",
     storage_slashing="0x0e9cAfadCCCe0987C773B5FdFF295c2Aa6F03337",
     key_distribution="0x51AF73Aa098E3b12Da78167c25c3d1D98059c8Ff",
-    publisher_key_anchor=None,  # Phase 3.x.3 — not yet on mainnet
+    publisher_key_anchor="0xd811ad9986f44f404b0fd992168a7cc76206df03",  # Phase 3.x.3 deployed 2026-05-20 via Foundation Safe + EIP-2470 CREATE2 factory (sprints 619-621); on-chain tx 0x55087635ae9543ae2a844e112d76c04f93f19c72d0e9f7c736eafed7fb3510b0 block 46248175; admin() == Foundation Safe verified
     notes=(
         "Mainnet uses the real 2-of-3 Foundation Safe (Ledger + Trezor + OneKey) at 0x91b0...5791.",
         "Audit-bundle ownership-transfer ceremony complete 2026-05-07: all 7 Ownable2Step "
