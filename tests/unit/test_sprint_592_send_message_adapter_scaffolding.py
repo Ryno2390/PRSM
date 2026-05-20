@@ -40,7 +40,9 @@ def test_build_send_message_adapter_returns_callable():
         build_send_message_adapter,
         SendMessageAdapter,
     )
-    adapter = build_send_message_adapter(MagicMock())
+    _stub = MagicMock()
+    _stub._loop = None  # Sprint 596: triggers Phase2AdapterNotReady path
+    adapter = build_send_message_adapter(_stub)
     assert callable(adapter)
     # Per Protocol, isinstance check is runtime-checkable
     assert isinstance(adapter, SendMessageAdapter)
@@ -56,7 +58,9 @@ def test_placeholder_raises_not_ready():
         build_send_message_adapter,
         _Phase2AdapterNotReady,
     )
-    adapter = build_send_message_adapter(MagicMock())
+    _stub = MagicMock()
+    _stub._loop = None  # Sprint 596: triggers Phase2AdapterNotReady path
+    adapter = build_send_message_adapter(_stub)
     with pytest.raises(_Phase2AdapterNotReady):
         adapter("stage-1", b"request payload")
 
@@ -78,7 +82,9 @@ def test_placeholder_error_message_directs_operator_to_workaround():
         build_send_message_adapter,
         _Phase2AdapterNotReady,
     )
-    adapter = build_send_message_adapter(MagicMock())
+    _stub = MagicMock()
+    _stub._loop = None  # Sprint 596: triggers Phase2AdapterNotReady path
+    adapter = build_send_message_adapter(_stub)
     try:
         adapter("x", b"y")
     except _Phase2AdapterNotReady as exc:

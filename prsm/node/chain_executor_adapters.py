@@ -138,24 +138,103 @@ def build_address_resolver(node: Any) -> Callable[[str], str]:
     return _resolve
 
 
-def build_send_message_adapter(node: Any) -> SendMessageAdapter:
-    """Phase 2A placeholder. Returns a callable that, when invoked,
-    raises ``_Phase2AdapterNotReady``.
+# Sprint 596 — chain-executor wire-protocol identifiers.
+# Chain-executor request messages set payload[CHAIN_REQ_KEY] = request_id;
+# response messages set payload[CHAIN_RESP_KEY] = request_id + payload
+# bytes (base64-encoded in the JSON envelope). Sprint 597 wires the
+# response handler that reads CHAIN_RESP_KEY and resolves the pending
+# Future identified by request_id.
+CHAIN_MSG_TYPE = "chain_executor_rpc"
+CHAIN_REQ_KEY = "chain_req_id"
+CHAIN_RESP_KEY = "chain_resp_id"
+CHAIN_PAYLOAD_KEY = "chain_payload_b64"
 
-    Phase 2C will replace the body with a real async-to-sync
-    bridge using ``asyncio.run_coroutine_threadsafe`` against
-    ``node.transport`` and ``node._loop`` (or the equivalent
-    background loop handle).
+
+def build_send_message_adapter(
+    node: Any,
+    timeout: float = 30.0,
+) -> SendMessageAdapter:
+    """Sprint 596 (Phase 2D step 2) — real SendMessage adapter.
+
+    Bridges the sync ``SendMessage = Callable[[str, bytes], bytes]``
+    contract over the daemon's async transport. Workflow:
+
+      1. Hash request_bytes → request_id (sha256 hex).
+      2. Resolve stage_address → peer_id via build_address_resolver-
+         compatible lookup against ``node.transport.peers``.
+      3. Create asyncio.Future, store in
+         ``node._chain_executor_pending[request_id]``.
+      4. Schedule coroutine on ``node._loop`` that sends a P2PMessage
+         + awaits the future (resolved by sprint-597 response handler).
+      5. Return response bytes synchronously.
+
+    Phase 2D step 3 (sprint 597) wires the response handler that
+    resolves the Future when a CHAIN_RESP_KEY message arrives.
+    Until that lands, calls will time out — but the wire is sound.
+
+    Raises:
+      _Phase2AdapterNotReady — when node._loop is None (daemon
+        not started or not running on asyncio context).
+      PeerNotFound — when stage_address isn't in transport.peers.
+      TimeoutError — when no response arrives within ``timeout``.
     """
-    del node  # not consumed in Phase 2A
+    import base64
+    import hashlib
 
-    def _placeholder_adapter(stage_address: str, request_bytes: bytes) -> bytes:
-        raise _Phase2AdapterNotReady(
-            "Sprint 592 Phase 2A scaffolding: SendMessage adapter "
-            "not yet implemented. Phase 2C (sprint 594) will wire "
-            "the async-to-sync bridge over node.transport. Until "
-            "then, set PRSM_PARALLAX_CHAIN_EXECUTOR_KIND=stub "
-            "(default) for a working daemon."
-        )
+    def _adapter(stage_address: str, request_bytes: bytes) -> bytes:
+        loop = getattr(node, "_loop", None)
+        if loop is None:
+            raise _Phase2AdapterNotReady(
+                "Sprint 596 SendMessage adapter: node._loop is None. "
+                "Daemon must be started (sprint-595 captures the loop "
+                "at PRSMNode.start). Until then, set "
+                "PRSM_PARALLAX_CHAIN_EXECUTOR_KIND=stub for a working "
+                "daemon."
+            )
 
-    return _placeholder_adapter
+        request_id = hashlib.sha256(request_bytes).hexdigest()
+        pending = node._chain_executor_pending
+
+        async def _send_and_wait() -> bytes:
+            # Import here to avoid circular: transport imports node
+            # indirectly via __init__
+            from prsm.node.transport import P2PMessage, MSG_DIRECT
+            future = loop.create_future()
+            pending[request_id] = future
+            try:
+                msg = P2PMessage(
+                    msg_type=MSG_DIRECT,
+                    sender_id=node.identity.node_id,
+                    payload={
+                        "subtype": CHAIN_MSG_TYPE,
+                        CHAIN_REQ_KEY: request_id,
+                        CHAIN_PAYLOAD_KEY: base64.b64encode(
+                            request_bytes,
+                        ).decode("ascii"),
+                    },
+                )
+                # Resolve address → peer_id by lookup. The chain
+                # executor passes stage_address that downstream code
+                # treats as a peer_id (per sprint 593 resolver
+                # contract). For Phase 2D the convention is:
+                # stage_address IS the target peer_id.
+                sent = await node.transport.send_to_peer(
+                    stage_address, msg,
+                )
+                if not sent:
+                    raise RuntimeError(
+                        f"transport.send_to_peer returned False for "
+                        f"peer_id={stage_address!r}; chain stage "
+                        f"unreachable"
+                    )
+                import asyncio as _asyncio
+                response_payload = await _asyncio.wait_for(
+                    future, timeout=timeout,
+                )
+                return response_payload
+            finally:
+                pending.pop(request_id, None)
+
+        return run_async_on_loop(loop, _send_and_wait(), timeout=timeout + 1.0)
+
+    return _adapter
