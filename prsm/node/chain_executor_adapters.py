@@ -779,12 +779,48 @@ def build_layer_stage_server_executor(
 
     registry = FilesystemModelRegistry(root=root, anchor=anchor)
     tee_runtime = SoftwareTEERuntime()
+
+    # Sprint 618 (Phase 2F-5i) — env-tunable KVCacheManager for
+    # INCREMENTAL decode_mode. Opt-in via
+    # PRSM_PARALLAX_KV_CACHE_ENABLED=1 OR by setting any of the
+    # tuning env vars (implicit opt-in, less surprising for ops).
+    import os as _os
+    _kv_enabled_raw = (_os.environ.get(
+        "PRSM_PARALLAX_KV_CACHE_ENABLED", "",
+    ) or "").strip()
+    _kv_max_raw = (_os.environ.get(
+        "PRSM_PARALLAX_KV_CACHE_MAX_REQUESTS", "",
+    ) or "").strip()
+    _kv_ttl_raw = (_os.environ.get(
+        "PRSM_PARALLAX_KV_CACHE_TTL_SECONDS", "",
+    ) or "").strip()
+    _kv_enabled = (
+        _kv_enabled_raw.lower() in ("1", "true", "yes", "on")
+        or bool(_kv_max_raw)
+        or bool(_kv_ttl_raw)
+    )
+    kv_cache_manager = None
+    if _kv_enabled:
+        from prsm.compute.chain_rpc.kv_cache import KVCacheManager
+        try:
+            max_req = int(_kv_max_raw) if _kv_max_raw else 64
+        except ValueError:
+            max_req = 64
+        try:
+            ttl = float(_kv_ttl_raw) if _kv_ttl_raw else 300.0
+        except ValueError:
+            ttl = 300.0
+        kv_cache_manager = KVCacheManager(
+            max_cached_requests=max_req, ttl_seconds=ttl,
+        )
+
     server = LayerStageServer(
         identity=node.identity,
         registry=registry,
         runner=runner,
         tee_runtime=tee_runtime,
         anchor=anchor,
+        kv_cache_manager=kv_cache_manager,
     )
     return LayerStageServerStageExecutor(server=server)
 
