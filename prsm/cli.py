@@ -8934,6 +8934,9 @@ def node_infer_cli(
 
         current_activation = activation
         resp = None  # filled by final stage
+        # Sprint 670 — collect per-stage responses for the
+        # receipt's stage_chain array (multi-stage audit).
+        stage_responses: list = []
         for stage_idx, (lo, hi, peer_id) in enumerate(effective_stages):
             ho_token = HandoffToken.sign(
                 identity=settler, request_id=request_id,
@@ -9001,6 +9004,20 @@ def node_infer_cli(
             current_activation = _np.frombuffer(
                 resp.activation_blob, dtype=resp.activation_dtype,
             ).reshape(resp.activation_shape)
+            # Sprint 670 — accumulate per-stage entry for the
+            # multi-stage receipt's stage_chain array.
+            stage_responses.append({
+                "stage_index": stage_idx,
+                "layer_range": [lo, hi],
+                "peer_id": peer_id,
+                "stage_node_id": resp.stage_node_id,
+                "stage_signature_b64": resp.stage_signature_b64,
+                "activation_shape": list(resp.activation_shape),
+                "activation_sha256": _hashlib.sha256(
+                    bytes(resp.activation_blob),
+                ).hexdigest(),
+                "duration_seconds": resp.duration_seconds,
+            })
         # After the per-stage loop, `resp` is the FINAL stage's
         # signed response. Final activation = logits at the tail
         # stage (server applies ln_f + lm_head when
@@ -9127,6 +9144,16 @@ def node_infer_cli(
                 "decode_mode": (
                     "incremental" if incremental else "prefill"
                 ),
+                # Sprint 670 — multi-stage chain provenance.
+                # When --stages is used (len > 1), each token's
+                # receipt embeds one stage_chain entry per stage
+                # so the audit chain captures EVERY stage's
+                # signature, not just the final. Sprint 671 will
+                # extend verify-receipts to validate each entry
+                # against its respective stage_node_id pubkey.
+                # Single-stage runs (len == 1) record the field
+                # too for schema consistency.
+                "stage_chain": stage_responses,
             }
             try:
                 receipts_fh.write(_json.dumps(receipt_record) + "\n")
