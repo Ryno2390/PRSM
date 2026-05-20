@@ -8719,15 +8719,10 @@ def node_verify_receipts_cli(receipts_path: str, output_format: str):
     UNVERIFIABLE — the receipt proved observation but the
     activation bytes weren't persisted for signature reconstruction.
     """
-    import base64 as _base64
     import json as _json
     import sys as _sys
-    from pathlib import Path as _Path
 
-    from prsm.compute.chain_rpc.protocol import (
-        RunLayerSliceResponse,
-    )
-    from prsm.compute.tee.models import TEEType
+    from prsm.cli_modules.receipt_verify import verify_receipts_file
     from prsm.node.inference_wiring import _build_anchor_or_none
 
     anchor = _build_anchor_or_none()
@@ -8741,98 +8736,9 @@ def node_verify_receipts_cli(receipts_path: str, output_format: str):
         )
         _sys.exit(2)
 
-    results = []
-    pubkey_cache: Dict[str, Optional[str]] = {}
-    text_p = _Path(receipts_path)
-    for line_idx, raw in enumerate(text_p.read_text().splitlines()):
-        if not raw.strip():
-            continue
-        try:
-            rec = _json.loads(raw)
-        except _json.JSONDecodeError as exc:
-            results.append({
-                "line": line_idx,
-                "status": "MALFORMED_JSON",
-                "reason": f"{exc}",
-            })
-            continue
-        if "activation_blob_b64" not in rec:
-            results.append({
-                "line": line_idx,
-                "status": "UNVERIFIABLE",
-                "reason": (
-                    "receipt lacks activation_blob_b64 (pre-sprint-635 "
-                    "format); cannot reconstruct signing payload"
-                ),
-                "stage_node_id": rec.get("stage_node_id"),
-                "request_id": rec.get("request_id"),
-            })
-            continue
-        try:
-            activation_bytes = _base64.b64decode(rec["activation_blob_b64"])
-            tee_attest = _base64.b64decode(
-                rec.get("tee_attestation_b64", ""),
-            )
-            resp = RunLayerSliceResponse(
-                request_id=rec["request_id"],
-                activation_blob=activation_bytes,
-                activation_shape=tuple(rec["activation_shape"]),
-                activation_dtype=rec["activation_dtype"],
-                duration_seconds=float(rec["duration_seconds"]),
-                tee_attestation=tee_attest,
-                tee_type=TEEType(rec["tee_type"]),
-                epsilon_spent=float(rec["epsilon_spent"]),
-                stage_signature_b64=rec["stage_signature_b64"],
-                stage_node_id=rec["stage_node_id"],
-                protocol_version=int(rec.get("protocol_version", 2)),
-            )
-        except Exception as exc:  # noqa: BLE001
-            results.append({
-                "line": line_idx,
-                "status": "RECONSTRUCT_FAILED",
-                "reason": f"{type(exc).__name__}: {exc}",
-                "stage_node_id": rec.get("stage_node_id"),
-                "request_id": rec.get("request_id"),
-            })
-            continue
-        # Cache pubkey lookups so a 10-token receipts file doesn't
-        # do 10 redundant on-chain reads for the same stage.
-        if resp.stage_node_id not in pubkey_cache:
-            try:
-                pubkey_cache[resp.stage_node_id] = anchor.lookup(
-                    resp.stage_node_id,
-                )
-            except Exception as exc:  # noqa: BLE001
-                results.append({
-                    "line": line_idx,
-                    "status": "ANCHOR_LOOKUP_FAILED",
-                    "reason": f"{type(exc).__name__}: {exc}",
-                    "stage_node_id": resp.stage_node_id,
-                    "request_id": resp.request_id,
-                })
-                continue
-        if not pubkey_cache[resp.stage_node_id]:
-            results.append({
-                "line": line_idx,
-                "status": "PUBKEY_NOT_REGISTERED",
-                "reason": (
-                    f"stage_node_id {resp.stage_node_id} has no pubkey "
-                    f"in the live PublisherKeyAnchor"
-                ),
-                "stage_node_id": resp.stage_node_id,
-                "request_id": resp.request_id,
-            })
-            continue
-        ok = resp.verify_with_anchor(
-            anchor, expected_stage_node_id=resp.stage_node_id,
-        )
-        results.append({
-            "line": line_idx,
-            "status": "OK" if ok else "SIGNATURE_INVALID",
-            "stage_node_id": resp.stage_node_id,
-            "request_id": resp.request_id,
-            "next_token_text": rec.get("next_token_text"),
-        })
+    # Sprint 636 — verification core lives in cli_modules.receipt_verify
+    # for direct unit testing. CLI is a thin renderer over the results.
+    results = verify_receipts_file(receipts_path, anchor=anchor)
 
     n_ok = sum(1 for r in results if r["status"] == "OK")
     n_total = len(results)
