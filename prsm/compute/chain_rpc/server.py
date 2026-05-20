@@ -712,27 +712,36 @@ class LayerStageServer:
         # back-compat regular runners can't honor sharded semantics.
         if self._sharded_runner is not None:
             return self._dispatch_sharded(request)
+        # Sprint 657 — KV-cache arc piece 4: INCREMENTAL dispatch on
+        # the inline path. The kv_cache_manager must be wired AND the
+        # runner must support run_layer_range_incremental (sprint 656).
+        # If either is missing, fall through to the sprint-654 error
+        # breadcrumb with the actionable hint.
         if request.decode_mode != DecodeMode.PREFILL:
-            # Sprint 654 — improved error breadcrumb for the KV-cache
-            # arc. Pre-654 the message named only `sharded_runner`,
-            # but operators trying to engage KV-cache via the inline
-            # path (sprint 633's CLI route through chain-exec-ping)
-            # had no actionable next step. The inline-path KV-cache
-            # support is its own multi-sprint arc (sprints 654-660+);
-            # surface the plan here so operators know what path to
-            # follow.
-            return self._error(
-                request.request_id,
-                StageErrorCode.MALFORMED_REQUEST,
-                f"server has no sharded_runner wired but request "
-                f"carries decode_mode={request.decode_mode.value!r}; "
-                f"options: (a) sharded decode requires sharded_runner= "
-                f"at server construction; (b) inline INCREMENTAL "
-                f"support is the sprint 654-660 KV-cache arc — not "
-                f"yet shipped; until then, clients hitting the inline "
-                f"path must use decode_mode=PREFILL and re-embed the "
-                f"full text-so-far each token (sprint 628 pattern)",
-            )
+            if self._kv_cache_manager is None:
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    f"server has no sharded_runner AND no "
+                    f"kv_cache_manager wired but request carries "
+                    f"decode_mode={request.decode_mode.value!r}; "
+                    f"set PRSM_PARALLAX_KV_CACHE_ENABLED=1 to engage "
+                    f"the sprint-654-657 KV-cache path on the inline "
+                    f"dispatcher",
+                )
+            if not hasattr(
+                self._runner, "run_layer_range_incremental",
+            ):
+                return self._error(
+                    request.request_id,
+                    StageErrorCode.MALFORMED_REQUEST,
+                    f"server has kv_cache_manager wired but runner "
+                    f"{type(self._runner).__name__} doesn't implement "
+                    f"run_layer_range_incremental (sprint 656 adds "
+                    f"it for HuggingFaceLayerSliceRunner)",
+                )
+            # Both gates passed → INCREMENTAL inline dispatch.
+            return self._dispatch_inline_incremental(request)
 
         # Steps 2-6: shared validation gates.
         gate_result = self._run_validation_gates(request)
@@ -1848,6 +1857,122 @@ class LayerStageServer:
                 ))
 
         return _GateResult(model=model)
+
+    def _dispatch_inline_incremental(
+        self, request: RunLayerSliceRequest,
+    ) -> bytes:
+        """Sprint 657 — INCREMENTAL inline dispatch with KVCacheManager.
+
+        Steps:
+          1. Validate the request (shared validation gates)
+          2. Decode the activation
+          3. Get prev_kv_state from kv_cache_manager (None on first
+             INCREMENTAL of a new request_id, or after TTL evict)
+          4. Call _run_layer_slice_incremental
+          5. Put new_kv_state to cache
+          6. Encode + sign + return
+
+        Cache key is the request_id — sprint 658 will add TTL +
+        eviction. For now the cache lives for the daemon's lifetime
+        (KVCacheManager's bounded LRU keeps it sane).
+        """
+        gate_result = self._run_validation_gates(request)
+        if gate_result.error is not None:
+            return self._error(
+                request.request_id,
+                gate_result.error[0], gate_result.error[1],
+            )
+        model = gate_result.model
+
+        try:
+            activation = decode_activation(
+                request.activation_blob,
+                request.activation_shape,
+                request.activation_dtype,
+            )
+        except ActivationCodecError as exc:
+            return self._error(
+                request.request_id,
+                StageErrorCode.ACTIVATION_INVALID,
+                str(exc),
+            )
+
+        # Get prev_kv_state from cache. KVCacheManager.get returns
+        # None if no entry exists (or evicted).
+        prev_kv_state = None
+        try:
+            prev_kv_state = self._kv_cache_manager.get(request.request_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "LayerStageServer: kv_cache_manager.get raised for "
+                "request_id=%r — proceeding with cold cache: %s",
+                request.request_id, exc,
+            )
+
+        # Run incremental forward.
+        result_or_error = self._run_layer_slice_incremental(
+            request, model, activation, prev_kv_state,
+        )
+        if (
+            isinstance(result_or_error, tuple)
+            and len(result_or_error) == 2
+            and isinstance(result_or_error[0], StageErrorCode)
+        ):
+            return self._error(
+                request.request_id,
+                result_or_error[0], result_or_error[1],
+            )
+        # Success → unpack (result, new_kv_state)
+        result, new_kv_state = result_or_error
+
+        # Put new_kv_state back. Failure here is non-fatal — caller
+        # gets the correct response; next INCREMENTAL just re-warms
+        # from scratch.
+        try:
+            self._kv_cache_manager.put(
+                request.request_id, new_kv_state,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "LayerStageServer: kv_cache_manager.put raised for "
+                "request_id=%r — next INCREMENTAL will be cold: %s",
+                request.request_id, exc,
+            )
+
+        # Encode + sign + return (mirrors the PREFILL path).
+        try:
+            output_blob, output_shape, output_dtype = encode_activation(
+                result.output
+            )
+        except ActivationCodecError as exc:
+            return self._error(
+                request.request_id,
+                StageErrorCode.ACTIVATION_INVALID,
+                f"output encode failure: {exc}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "LayerStageServer: output encode failed for "
+                "request_id=%r (INCREMENTAL)",
+                request.request_id,
+            )
+            return self._error(
+                request.request_id,
+                StageErrorCode.INTERNAL_ERROR,
+                f"output encode failure: {exc.__class__.__name__}",
+            )
+        response = RunLayerSliceResponse.sign(
+            identity=self._identity,
+            request_id=request.request_id,
+            activation_blob=output_blob,
+            activation_shape=output_shape,
+            activation_dtype=output_dtype,
+            duration_seconds=result.duration_seconds,
+            tee_attestation=result.tee_attestation,
+            tee_type=result.tee_type,
+            epsilon_spent=result.epsilon_spent,
+        )
+        return encode_message(response)
 
     def _run_layer_slice(
         self,
