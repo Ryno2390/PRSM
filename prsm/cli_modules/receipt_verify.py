@@ -140,7 +140,11 @@ class _CachingAnchor:
         return self._cache[node_id]
 
 
-def verify_chain_invariants(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def verify_chain_invariants(
+    records: List[Dict[str, Any]],
+    *,
+    strict: bool = False,
+) -> List[Dict[str, Any]]:
     """Sprint 637 — chain-of-custody invariants over a receipts list.
 
     Each receipt's stage signature (verified by `verify_receipt_record`)
@@ -326,6 +330,7 @@ def verify_chain_invariants(records: List[Dict[str, Any]]) -> List[Dict[str, Any
     except ImportError:
         return findings  # can't run C5 without numpy; skip silently
     mismatches: List[int] = []
+    unverifiable_no_seed: List[int] = []
     for idx, rec in enumerate(records):
         blob_b64 = rec.get("activation_blob_b64")
         if not blob_b64:
@@ -353,9 +358,14 @@ def verify_chain_invariants(records: List[Dict[str, Any]]) -> List[Dict[str, Any
             # re-sampled to verify next_token_id matches.
             sampling_params = _parse_sampling_mode(sampling_mode)
             if sampling_params is None:
-                # No seed (or unparseable) → can't replay; skip C5
-                # for this row. Operator who wants strong audit
-                # should always pass --seed for non-greedy runs.
+                # No seed (or unparseable) → can't replay.
+                # Sprint 650: in --strict mode, surface this as a
+                # UNVERIFIABLE_NON_GREEDY_NO_SEED finding so the
+                # operator knows the audit chain has a weakness
+                # for these rows. Default (non-strict) preserves
+                # sprint 640's silent-skip behavior.
+                if strict:
+                    unverifiable_no_seed.append(idx)
                 continue
             step_idx = int(rec.get("step", idx))
             replayed = _replay_sample(
@@ -378,6 +388,22 @@ def verify_chain_invariants(records: List[Dict[str, Any]]) -> List[Dict[str, Any
             ),
             "line_indices": mismatches,
         })
+    # Sprint 650: --strict mode surfaces non-greedy-without-seed
+    # as a finding so operators don't ship audit trails with
+    # silently-skipped rows. Default (non-strict) keeps sprint
+    # 640's permissive behavior for backwards-compat.
+    if unverifiable_no_seed:
+        findings.append({
+            "kind": "UNVERIFIABLE_NON_GREEDY_NO_SEED",
+            "message": (
+                f"{len(unverifiable_no_seed)} non-greedy receipt(s) "
+                f"have no seed in sampling_mode — C5 (next_token_id "
+                f"matches argmax) cannot be replayed. Audit chain "
+                f"is weaker for these rows. Pass --seed N on the "
+                f"infer call to enable full audit verification."
+            ),
+            "line_indices": unverifiable_no_seed,
+        })
 
     return findings
 
@@ -387,6 +413,7 @@ def verify_receipts_file(
     *,
     anchor: Any,
     check_chain: bool = False,
+    strict: bool = False,
 ) -> List[Dict[str, Any]]:
     """Run `verify_receipt_record` over every line in `receipts_path`.
 
@@ -437,7 +464,9 @@ def verify_receipts_file(
         # Sprint 637 — attach chain-level findings to the last result
         # entry under a `chain_findings` key. Caller renders them
         # specially. Empty list = chain OK.
-        findings = verify_chain_invariants(raw_records)
+        # Sprint 650 — strict flag threads through to surface
+        # non-greedy-without-seed receipts.
+        findings = verify_chain_invariants(raw_records, strict=strict)
         if results:
             results[-1]["chain_findings"] = findings
         else:

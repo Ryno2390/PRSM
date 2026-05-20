@@ -8998,8 +8998,18 @@ def node_infer_cli(
     "argmax of activation_blob. Defends against post-generation "
     "tampering that doesn't invalidate per-token signatures.",
 )
+@click.option(
+    "--strict", is_flag=True, default=False,
+    help="Sprint 650 — escalate non-greedy receipts that lack a "
+    "seed in sampling_mode from silent-skip (sprint 640 default) "
+    "to a UNVERIFIABLE_NON_GREEDY_NO_SEED finding. Operators who "
+    "want a tamper-proof audit chain pass --strict so weak runs "
+    "(temperature without seed) are surfaced rather than waved "
+    "through. Greedy runs are unaffected (always fully verified).",
+)
 def node_verify_receipts_cli(
     receipts_path: str, output_format: str, check_chain: bool,
+    strict: bool,
 ):
     """Verify per-token signed receipts written by `prsm node infer
     --save-receipts`.
@@ -9046,6 +9056,7 @@ def node_verify_receipts_cli(
     # for direct unit testing. CLI is a thin renderer over the results.
     results = verify_receipts_file(
         receipts_path, anchor=anchor, check_chain=check_chain,
+        strict=strict,
     )
 
     n_ok = sum(1 for r in results if r["status"] == "OK")

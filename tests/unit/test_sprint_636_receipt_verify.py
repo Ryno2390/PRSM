@@ -765,3 +765,72 @@ def test_C5_treats_missing_sampling_mode_as_greedy():
         "missing sampling_mode must default to greedy (sprint 633-638 "
         "backwards-compat)"
     )
+
+
+# --------------------------------------------------------------------------
+# Sprint 650 — --strict mode surfaces non-greedy-without-seed
+# --------------------------------------------------------------------------
+
+
+def test_strict_flag_surfaces_non_greedy_no_seed():
+    """Sprint 650: a non-greedy receipt without a seed in
+    sampling_mode is silently skipped by default (sprint 640).
+    With --strict, it becomes a UNVERIFIABLE_NON_GREEDY_NO_SEED
+    finding so the operator knows their audit has a weak row.
+    """
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+    rec = _make_argmax_consistent_record(next_token_id=0, vocab=8)
+    rec["sampling_mode"] = "temperature:0.700,top_k:50"  # no seed
+
+    # Default: silent skip
+    findings = verify_chain_invariants([rec])
+    kinds = [f["kind"] for f in findings]
+    assert "UNVERIFIABLE_NON_GREEDY_NO_SEED" not in kinds
+
+    # Strict: surfaces finding
+    findings = verify_chain_invariants([rec], strict=True)
+    kinds = [f["kind"] for f in findings]
+    assert "UNVERIFIABLE_NON_GREEDY_NO_SEED" in kinds
+
+
+def test_strict_does_not_affect_greedy_or_seeded():
+    """Strict mode must NOT flag greedy receipts or seeded
+    non-greedy receipts — only the non-greedy-no-seed case.
+    """
+    import base64 as _b64
+    import numpy as _np
+    from prsm.cli_modules.receipt_verify import verify_chain_invariants
+
+    # Greedy receipt
+    rec_greedy = _make_argmax_consistent_record(next_token_id=0)
+    rec_greedy["sampling_mode"] = "greedy"
+
+    # Seeded non-greedy receipt (re-derive the sample so it's honest)
+    vocab = 100
+    seed = 555
+    step = 0
+    temperature = 0.7
+    _np.random.seed(99)
+    logits = _np.random.randn(1, 1, vocab).astype(_np.float32) * 3.0
+    last_logits = logits[0, -1, :].astype(_np.float32)
+    scaled = last_logits / temperature
+    scaled = scaled - _np.max(scaled)
+    probs = _np.exp(scaled)
+    probs = probs / probs.sum()
+    rng = _np.random.default_rng(seed + step)
+    true_id = int(rng.choice(probs.shape[-1], p=probs))
+
+    rec_seeded = _chain_record(
+        next_token_id=true_id,
+        activation_blob_b64=_b64.b64encode(logits.tobytes()).decode("ascii"),
+        activation_shape=[1, 1, vocab],
+    )
+    rec_seeded["step"] = step
+    rec_seeded["sampling_mode"] = f"temperature:{temperature},seed:{seed}"
+
+    findings = verify_chain_invariants(
+        [rec_greedy, rec_seeded], strict=True,
+    )
+    kinds = [f["kind"] for f in findings]
+    assert "UNVERIFIABLE_NON_GREEDY_NO_SEED" not in kinds
+    assert "TOKEN_ID_ARGMAX_MISMATCH" not in kinds
