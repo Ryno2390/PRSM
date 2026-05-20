@@ -769,6 +769,30 @@ arc proved we need.
 
 ## Changelog
 
+- **2026-05-20 sprint 652 — multi-region bootstrap fleet live-attested**.
+  All three bootstrap regions reachable + accepting registrations against
+  the canonical PRSM bootstrap-server protocol:
+    - `bootstrap-us.prsm-network.com:8765` → 159.203.129.218 (DigitalOcean NYC3)
+    - `bootstrap-eu.prsm-network.com:8765` → 54.93.164.206 (AWS eu-central / Frankfurt)
+    - `bootstrap-apac.prsm-network.com:8765` → 54.248.20.193 (AWS ap-northeast / Tokyo)
+  Live probe via `BootstrapClient.connect()` returns `peers=[]` cleanly on
+  all three. Multi-region SPOF protection is OPERATIONAL — sprint 375's
+  multi-region failover design has the production infrastructure to back it.
+
+  **Surfaced F26 (UX bug, not production-blocker)**: Mac's
+  `/bootstrap/status` shows all 3 nodes in `failed_nodes` even though
+  bootstrap-us is `success_node`. Root cause: P2P-handshake probe runs
+  first (line ~417 of discovery.py); bootstrap servers don't speak
+  PRSM P2P (they speak the BootstrapClient WS protocol), so each gets
+  appended to `bootstrap_failed_nodes`. Only AFTER all P2P probes fail
+  does `_try_bootstrap_client()` run + succeed via WS. The `failed_nodes`
+  status field accurately tracks P2P-handshake failures but operators
+  reading the status conclude bootstrap-eu/apac are down when they're
+  fully operational. F26 fix candidates: (a) distinguish protocol-
+  mismatch failures from unreachable; (b) re-organize status to report
+  only failures after BOTH probe paths fail; (c) add a `bootstrap_client_attempted_nodes`
+  field for the WS-protocol probe results.
+
 - **2026-05-19 sprint 585 — §7-readiness aggregate operator preflight**.
   `prsm node section7-readiness [--format text|json]` runs anchor + stake-bond
   + rpc probes (sprints 581/583/584) in one shot, reports overall ready/not_ready
