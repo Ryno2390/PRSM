@@ -653,6 +653,28 @@ class HuggingFaceLayerSliceRunner:
                 # head to produce logits. The OutputDecoder on the
                 # client side does argmax/sampling + detokenization.
                 if is_final_stage:
+                    # Sprint 626 fix — apply final LayerNorm before
+                    # lm_head when present. GPT-2 has model.transformer.ln_f;
+                    # LLaMA has model.model.norm; both must run AFTER
+                    # all transformer blocks but BEFORE lm_head. Without
+                    # this, logits are off and argmax returns garbage
+                    # (surfaced live-testing gpt2 with "The capital of
+                    # France is" → got "age" instead of " Paris").
+                    final_ln = None
+                    if hasattr(hf_model, "transformer") and hasattr(
+                        hf_model.transformer, "ln_f",
+                    ):
+                        final_ln = hf_model.transformer.ln_f
+                    elif hasattr(hf_model, "model") and hasattr(
+                        hf_model.model, "norm",
+                    ):
+                        final_ln = hf_model.model.norm
+                    elif hasattr(hf_model, "gpt_neox") and hasattr(
+                        hf_model.gpt_neox, "final_layer_norm",
+                    ):
+                        final_ln = hf_model.gpt_neox.final_layer_norm
+                    if final_ln is not None:
+                        hidden = final_ln(hidden)
                     lm_head = _resolve_hf_lm_head(hf_model)
                     hidden = lm_head(hidden)
         except StageExecutionError:
