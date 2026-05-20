@@ -8306,6 +8306,272 @@ def node_fiat_readiness(output_format):
 
 
 # ──────────────────────────────────────────────────────────────
+# Sprint 633 — `prsm node infer` operator CLI for the live P2P
+# inference path (sprint 628's multi-token GPT-2 demo wrapped as
+# a first-class operator command). Closes the dogfood gap where
+# the headline demo required hand-running a hardcoded Python
+# script — now any operator with a running fleet + registered
+# model can drive the full mainnet-anchor-verified inference
+# loop directly from the CLI.
+# ──────────────────────────────────────────────────────────────
+
+
+@node.command("infer")
+@click.option(
+    "--prompt", required=True, type=str,
+    help="Initial prompt text",
+)
+@click.option(
+    "--model", default="gpt2", show_default=True,
+    help="Model id (must be registered + available on at least one peer)",
+)
+@click.option(
+    "--max-tokens", "-n", type=int, default=10, show_default=True,
+    help="Number of tokens to generate",
+)
+@click.option(
+    "--stage-peer-id", default=None,
+    help="Peer ID of the layer-stage server. If omitted, uses the "
+    "first connected peer.",
+)
+@click.option(
+    "--api", "api_url", default="http://127.0.0.1:8000", show_default=True,
+    help="Local PRSM daemon API URL",
+)
+@click.option(
+    "--timeout", type=float, default=120.0, show_default=True,
+    help="Per-token request timeout (seconds)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+def node_infer_cli(
+    prompt: str,
+    model: str,
+    max_tokens: int,
+    stage_peer_id: Optional[str],
+    api_url: str,
+    timeout: float,
+    output_format: str,
+):
+    """Generate tokens via the live PRSM P2P inference path.
+
+    Wraps the sprint-628 demo: prompt → tokenize+embed locally →
+    sign + ship each forward to a stage peer → receive logits →
+    argmax → append → repeat. Every dispatch verifies the
+    settler's pubkey against the live PublisherKeyAnchor on Base
+    mainnet (sprint 621 deploy).
+
+    Required prerequisites (this command does NOT bootstrap them):
+      • Local daemon running with PRSM_PARALLAX_TRUST_STACK_KIND=production
+      • At least one peer connected that serves the requested model
+        via LayerStageServer (PRSM_PARALLAX_LAYER_SLICE_RUNNER_KIND=huggingface)
+      • The model registered on both sides (filesystem registry)
+
+    Example:
+        prsm node infer --prompt "The capital of France is" -n 10
+    """
+    import base64
+    import json as _json
+    import sys as _sys
+    import time as _time
+
+    import httpx as _httpx
+    import numpy as _np
+
+    from prsm.compute.chain_rpc.protocol import (
+        ContentTier, HandoffToken, PrivacyLevel, RunLayerSliceRequest,
+        encode_message, parse_message,
+    )
+    from prsm.node.config import NodeConfig
+    from prsm.node.identity import load_node_identity
+
+    # ── Resolve stage peer ──
+    try:
+        peers_resp = _httpx.get(f"{api_url}/peers", timeout=5.0)
+        peers_resp.raise_for_status()
+    except Exception as exc:
+        console.print(
+            f"[red]✗ Failed to reach local daemon at {api_url}[/red]: "
+            f"{type(exc).__name__}: {exc}\n"
+            f"[dim]Start the daemon first: prsm node start[/dim]"
+        )
+        _sys.exit(1)
+    peers_data = peers_resp.json()
+    connected = peers_data.get("connected", [])
+    if stage_peer_id is None:
+        if not connected:
+            console.print(
+                "[red]✗ No connected peers[/red]. Need at least one "
+                "peer to serve the inference stage.\n"
+                "[dim]Check fleet symmetry with `prsm node info` or "
+                "wait for bootstrap-mediated discovery.[/dim]"
+            )
+            _sys.exit(1)
+        stage_peer_id = connected[0].get("peer_id")
+        if not stage_peer_id:
+            console.print("[red]✗ First connected peer has no peer_id[/red]")
+            _sys.exit(1)
+
+    # ── Load settler identity ──
+    cfg = NodeConfig.load()
+    settler = load_node_identity(cfg.identity_path)
+
+    # ── Load tokenizer + embedding layer ──
+    # Lazy import — operators without HF installed should still see a
+    # clean error rather than a top-level ModuleNotFoundError at CLI
+    # boot.
+    try:
+        import torch as _torch
+        from transformers import (
+            AutoModelForCausalLM as _AutoModel,
+            AutoTokenizer as _AutoTok,
+        )
+    except ImportError as exc:
+        console.print(
+            f"[red]✗ HuggingFace deps missing[/red]: {exc}\n"
+            f"[dim]Install with: pip install transformers torch[/dim]"
+        )
+        _sys.exit(1)
+
+    if output_format == "text":
+        console.print(
+            f"[dim]Loading {model} for tokenize + embed...[/dim]"
+        )
+    try:
+        tok = _AutoTok.from_pretrained(model)
+        hf_model = _AutoModel.from_pretrained(
+            model, torch_dtype=_torch.float32,
+        ).eval()
+    except Exception as exc:
+        console.print(
+            f"[red]✗ Failed to load HF model {model!r}[/red]: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        _sys.exit(1)
+
+    # ── Generation loop ──
+    text = prompt
+    per_token_records = []
+    overall_t0 = _time.time()
+    for step in range(max_tokens):
+        step_t0 = _time.time()
+        input_ids = tok.encode(text, return_tensors="pt")
+        with _torch.no_grad():
+            te = hf_model.transformer.wte(input_ids)
+            pe = hf_model.transformer.wpe(
+                _torch.arange(input_ids.shape[-1]).unsqueeze(0),
+            )
+            activation = (te + pe).numpy()
+
+        request_id = f"prsm-cli-infer-step{step}-{int(_time.time())}"
+        deadline = _time.time() + timeout
+        ho_token = HandoffToken.sign(
+            identity=settler, request_id=request_id,
+            chain_stage_index=0, chain_total_stages=1,
+            deadline_unix=deadline,
+        )
+        # Layer range = (0, num_layers) so the stage runs the full
+        # stack. For gpt2 num_layers=12; the catalog drives this.
+        # Defensively read from hf_model.config when available so
+        # CLI works against any model on the registry.
+        n_layers = getattr(
+            getattr(hf_model, "config", None), "num_hidden_layers",
+            getattr(hf_model.config, "n_layer", 12),
+        )
+        request = RunLayerSliceRequest(
+            request_id=request_id, model_id=model,
+            layer_range=(0, n_layers),
+            privacy_tier=PrivacyLevel.NONE,
+            content_tier=ContentTier.A,
+            activation_blob=activation.tobytes(),
+            activation_shape=tuple(activation.shape),
+            activation_dtype=str(activation.dtype),
+            upstream_token=ho_token, deadline_unix=deadline,
+        )
+        req_bytes = encode_message(request)
+
+        try:
+            r = _httpx.post(
+                f"{api_url}/admin/chain-exec-ping",
+                json={
+                    "peer_id": stage_peer_id,
+                    "payload_b64": base64.b64encode(req_bytes).decode("ascii"),
+                    "timeout": timeout - 5.0,
+                },
+                timeout=timeout,
+            )
+        except Exception as exc:
+            console.print(
+                f"[red]✗ step {step}: chain-exec-ping failed[/red]: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            _sys.exit(1)
+        if r.status_code != 200:
+            console.print(
+                f"[red]✗ step {step}: HTTP {r.status_code}[/red]: "
+                f"{r.text[:300]}"
+            )
+            _sys.exit(1)
+        resp_bytes = base64.b64decode(r.json()["response_b64"])
+        try:
+            resp = parse_message(resp_bytes)
+        except Exception as exc:
+            console.print(
+                f"[red]✗ step {step}: parse_message failed[/red]: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            _sys.exit(1)
+        if not hasattr(resp, "activation_blob"):
+            msg = getattr(resp, "message", "?")
+            code = getattr(resp, "code", "?")
+            console.print(
+                f"[red]✗ step {step}: StageError[/red] code={code} "
+                f"message={msg}"
+            )
+            _sys.exit(1)
+        logits = _np.frombuffer(
+            resp.activation_blob, dtype=resp.activation_dtype,
+        ).reshape(resp.activation_shape)
+        next_id = int(logits[0, -1, :].argmax())
+        next_token = tok.decode([next_id])
+        text += next_token
+        step_dt = _time.time() - step_t0
+        per_token_records.append({
+            "step": step, "token_id": next_id,
+            "token_text": next_token, "elapsed_s": step_dt,
+            "seq_len_before": input_ids.shape[-1],
+        })
+        if output_format == "text":
+            console.print(
+                f"  [dim][step {step:2d}][/dim] +token "
+                f"{next_id:6d} [cyan]{next_token!r:>14s}[/cyan]  "
+                f"([dim]{step_dt:.1f}s[/dim])"
+            )
+
+    overall_dt = _time.time() - overall_t0
+    if output_format == "json":
+        click.echo(_json.dumps({
+            "prompt": prompt,
+            "model": model,
+            "stage_peer_id": stage_peer_id,
+            "max_tokens": max_tokens,
+            "generated_text": text,
+            "elapsed_s": overall_dt,
+            "per_token": per_token_records,
+        }, indent=2))
+        return
+    console.print()
+    console.print(
+        f"[green]🎯 Generated[/green] "
+        f"({max_tokens} tokens in {overall_dt:.1f}s):"
+    )
+    console.print(f"  [bold]{text!r}[/bold]")
+
+
+# ──────────────────────────────────────────────────────────────
 # Sprint 434 — `prsm node incident ...` CLI trifecta gap
 #
 # The /admin/incident/* REST surface (sprint <pre-roadmap>) +
