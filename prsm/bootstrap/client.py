@@ -96,6 +96,12 @@ class BootstrapClient:
 
         self._ws: Optional[Any] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
+        # Sprint 632 — periodic peer-list refresh task. Closes the
+        # sprint-630 race where bootstrap-server peer state grew
+        # after register-time (server restart, late-joining peer)
+        # and the client never re-fetched, requiring an operator
+        # restart cascade to recover symmetric discovery.
+        self._refresh_task: Optional[asyncio.Task] = None
         self._connected = False
         self._registered = False
         self._peers: List[BootstrapPeer] = []
@@ -273,6 +279,81 @@ class BootstrapClient:
                 self._connected = False
                 break
 
+    async def start_peer_refresh(self, interval: float = 60.0) -> None:
+        """Sprint 632 — start background periodic peer-list refresh.
+
+        Closes the race where bootstrap-server peer state grows
+        after register-time (server restart wiped state then peers
+        rejoined; peer joined the network after this client
+        registered; etc.) and the client never re-fetches. Live
+        evidence from sprint 630: fleet recovery required 3 daemon
+        restarts in specific order to coax bootstrap-mediated
+        symmetric discovery into working.
+
+        Idempotent: a second call while the task is already running
+        is a no-op (does not spawn a second task).
+
+        ``on_peers_discovered`` fires only for NEWLY-discovered
+        peers (delta vs. current ``self._peers``). Refreshes that
+        return an identical list do NOT re-fire the callback —
+        otherwise downstream auto-dial sweeps would re-attempt
+        connections every interval.
+        """
+        if self._refresh_task and not self._refresh_task.done():
+            return  # Idempotent
+        self._refresh_task = asyncio.create_task(
+            self._peer_refresh_loop(interval),
+        )
+        logger.debug(
+            "Peer refresh started (interval=%.1fs)", interval,
+        )
+
+    async def _peer_refresh_loop(self, interval: float) -> None:
+        """Periodically call get_peers; fire callback only on delta.
+
+        First tick fires immediately (after a 0s yield so concurrent
+        register-time setup completes first). Without this the operator
+        waits a full `interval` for the FIRST refresh — which defeats
+        the point when the register response was empty (sprint 630
+        live failure mode).
+        """
+        # Sprint 632 — let the register-time callback chain settle
+        # before we kick off the first refresh tick.
+        await asyncio.sleep(0)
+        first_tick = True
+        while self._connected and self._ws:
+            try:
+                if not first_tick:
+                    await asyncio.sleep(interval)
+                first_tick = False
+                if not self._connected or not self._ws:
+                    break
+                prev_ids = {p.peer_id for p in self._peers}
+                # get_peers updates self._peers + fires callback (the
+                # callback-fires-on-non-empty contract from sprint
+                # 319). We need delta-only semantics here, so:
+                # 1) temporarily swap the callback
+                # 2) recompute the delta locally
+                # 3) fire the real callback only for new peers
+                real_cb = self.on_peers_discovered
+                self.on_peers_discovered = None
+                try:
+                    peers = await self.get_peers()
+                finally:
+                    self.on_peers_discovered = real_cb
+                new_peers = [
+                    p for p in peers if p.peer_id not in prev_ids
+                ]
+                if new_peers and real_cb:
+                    real_cb(new_peers)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Peer refresh failed: %s", e)
+                # Don't break — refresh is best-effort; next tick
+                # may succeed. If the WS itself died, the
+                # `self._connected` check at top of loop will exit.
+
     async def get_peers(self) -> List[BootstrapPeer]:
         """Request an updated peer list from the bootstrap server.
 
@@ -362,6 +443,17 @@ class BootstrapClient:
             self._heartbeat_task.cancel()
             try:
                 await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+        # Sprint 632 — cancel periodic peer refresh too. Without
+        # this, the task would log "Peer refresh failed: ..." after
+        # the WS is closed (best-effort survival inside the loop)
+        # until the next interval boundary.
+        if self._refresh_task and not self._refresh_task.done():
+            self._refresh_task.cancel()
+            try:
+                await self._refresh_task
             except asyncio.CancelledError:
                 pass
 

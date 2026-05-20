@@ -10,6 +10,7 @@ and periodically share their own presence on the network.
 import asyncio
 import collections
 import logging
+import os
 import random
 import time
 from contextlib import suppress
@@ -244,6 +245,23 @@ class PeerDiscovery:
 
                 peers = await client.connect()
                 await client.start_heartbeat()
+                # Sprint 632 — periodic peer-list refresh closes the
+                # race where bootstrap-server peer state grows after
+                # this client's register-time call. Without refresh,
+                # the client never re-fetches and operators have to
+                # restart daemons in specific order to coax symmetric
+                # discovery (sprint 630 live evidence). Interval
+                # defaults to 2× heartbeat so refresh adds ~one
+                # extra request per minute per client — cheap.
+                _refresh_interval = float(
+                    os.environ.get(
+                        "PRSM_BOOTSTRAP_PEER_REFRESH_INTERVAL",
+                        str(client.heartbeat_interval * 2),
+                    )
+                )
+                await client.start_peer_refresh(
+                    interval=_refresh_interval,
+                )
 
                 self._bootstrap_client = client
                 self.bootstrap_success_node = address
