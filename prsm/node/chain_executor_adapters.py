@@ -386,18 +386,53 @@ def build_echo_stage_executor() -> StageExecutor:
     return _EchoStageExecutor()
 
 
-def _build_stage_executor_from_env() -> StageExecutor:
+def _build_layer_slice_runner_from_env() -> Any:
+    """Sprint 609 (Phase 2F-4) — env-driven LayerSliceRunner selection.
+
+    Read PRSM_PARALLAX_LAYER_SLICE_RUNNER_KIND:
+      - unset / "identity" → IdentityLayerSliceRunner (sprint 608,
+        passthrough for testing). Default keeps testing-mode
+        accessible without extra config.
+      - anything else      → identity + WARNING (future: huggingface,
+        torch, etc., shipped as Phase 2F-5+ runners).
+    """
+    import os as _os
+    kind = (_os.environ.get(
+        "PRSM_PARALLAX_LAYER_SLICE_RUNNER_KIND", "",
+    ) or "").strip().lower() or "identity"
+    if kind == "identity":
+        return IdentityLayerSliceRunner()
+    import logging as _l
+    _l.getLogger(__name__).warning(
+        "Sprint 609 layer-slice-runner selector: "
+        "PRSM_PARALLAX_LAYER_SLICE_RUNNER_KIND=%r unknown; falling "
+        "back to identity. Valid: identity (Phase 2F-5+ adds "
+        "real model-framework runners).",
+        kind,
+    )
+    return IdentityLayerSliceRunner()
+
+
+def _build_stage_executor_from_env(node: Any = None) -> StageExecutor:
     """Sprint 604 (Phase 2E-4) — env-driven StageExecutor selection.
+    Sprint 609 (Phase 2F-4) — extended with ``layer_stage`` kind.
 
     Read PRSM_PARALLAX_STAGE_EXECUTOR_KIND:
-      - unset / "stub"  → build_stub_stage_executor (raises on
-        execute() with structured Phase-2E-3 hint; production
-        default — operators opt into a real executor explicitly).
-      - "echo"          → build_echo_stage_executor (returns bytes
+      - unset / "stub"   → build_stub_stage_executor (raises on
+        execute(); production default — operators opt in explicitly).
+      - "echo"           → build_echo_stage_executor (returns bytes
         unchanged; for end-to-end wire testing only).
-      - anything else   → stub fallback + structured warning.
+      - "layer_stage"    → build_layer_stage_server_executor with
+        runner from PRSM_PARALLAX_LAYER_SLICE_RUNNER_KIND. Real-model
+        server-side path. Falls back to stub if factory raises
+        StageExecutionError (missing env, missing anchor, etc.) with
+        structured warning so operator sees the gap.
+      - anything else    → stub fallback + structured warning.
 
-    Mirrors the env-driven pattern from sprints 576/577/578.
+    The optional ``node`` arg threads through for ``layer_stage``
+    kind (needed for identity + downstream wiring). When None,
+    layer_stage falls back to stub (sprint 604 callers pre-2F-4
+    may not pass node).
     """
     import os as _os
     kind_raw = _os.environ.get(
@@ -408,12 +443,38 @@ def _build_stage_executor_from_env() -> StageExecutor:
         return build_echo_stage_executor()
     if kind == "stub":
         return build_stub_stage_executor()
+    if kind == "layer_stage":
+        if node is None:
+            import logging as _l
+            _l.getLogger(__name__).warning(
+                "Sprint 609 stage-executor selector: "
+                "PRSM_PARALLAX_STAGE_EXECUTOR_KIND=layer_stage but "
+                "the env-driven path is being called without a node "
+                "arg (legacy caller pre-Phase 2F-4). Falling back "
+                "to stub. Production callers in sprint-604 thread "
+                "node through."
+            )
+            return build_stub_stage_executor()
+        runner = _build_layer_slice_runner_from_env()
+        try:
+            return build_layer_stage_server_executor(
+                node=node, runner=runner,
+            )
+        except StageExecutionError as exc:
+            import logging as _l
+            _l.getLogger(__name__).warning(
+                "Sprint 609 stage-executor selector: "
+                "build_layer_stage_server_executor raised %s. "
+                "Falling back to stub.",
+                exc,
+            )
+            return build_stub_stage_executor()
     # Unknown — warn + fall back to stub.
     import logging as _l
     _l.getLogger(__name__).warning(
-        "Sprint 604 stage-executor selector: "
+        "Sprint 604/609 stage-executor selector: "
         "PRSM_PARALLAX_STAGE_EXECUTOR_KIND=%r unknown; falling "
-        "back to stub. Valid: stub, echo.",
+        "back to stub. Valid: stub, echo, layer_stage.",
         kind_raw,
     )
     return build_stub_stage_executor()
@@ -478,7 +539,7 @@ async def handle_chain_executor_request(node: Any, msg: Any) -> bool:
     if exec_error is None:
         executor: StageExecutor = getattr(
             node, "_chain_stage_executor", None,
-        ) or _build_stage_executor_from_env()
+        ) or _build_stage_executor_from_env(node=node)
         try:
             response_bytes = await executor.execute(payload_bytes)
         except StageExecutionError as exc:
