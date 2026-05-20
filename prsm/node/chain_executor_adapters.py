@@ -251,6 +251,50 @@ class LayerStageServerStageExecutor:
             ) from exc
 
 
+def _resolve_hf_layers(hf_model: Any) -> Any:
+    """Sprint 612 (Phase 2F-5c) — polymorphic HF layer extraction.
+
+    Try known causal-LM layer-list paths in order:
+      model.model.layers      LLaMA / Mistral / Qwen
+      model.transformer.h     GPT-2 / Falcon / GPT-J
+      model.gpt_neox.layers   GPT-NeoX / Pythia
+
+    Returns the first path that resolves. Raises StageExecutionError
+    listing all attempted paths if none match — operator triages.
+
+    The "first that resolves" rule means LLaMA-style models with a
+    populated ``model.model.layers`` always take that path even if
+    other attributes are coincidentally present.
+    """
+    attempted = []
+    # LLaMA / Mistral / Qwen style
+    attempted.append(".model.layers")
+    sub = getattr(hf_model, "model", None)
+    if sub is not None:
+        layers = getattr(sub, "layers", None)
+        if layers is not None:
+            return layers
+    # GPT-2 / Falcon / GPT-J style
+    attempted.append(".transformer.h")
+    sub = getattr(hf_model, "transformer", None)
+    if sub is not None:
+        layers = getattr(sub, "h", None)
+        if layers is not None:
+            return layers
+    # GPT-NeoX / Pythia style
+    attempted.append(".gpt_neox.layers")
+    sub = getattr(hf_model, "gpt_neox", None)
+    if sub is not None:
+        layers = getattr(sub, "layers", None)
+        if layers is not None:
+            return layers
+    raise StageExecutionError(
+        f"HuggingFaceLayerSliceRunner: model does not expose any "
+        f"known layer-list path. Attempted: {', '.join(attempted)}. "
+        f"Add support for this architecture in _resolve_hf_layers."
+    )
+
+
 class HuggingFaceLayerSliceRunner:
     """Sprint 610 (Phase 2F-5a) — first real-model LayerSliceRunner
     skeleton.
@@ -353,15 +397,10 @@ class HuggingFaceLayerSliceRunner:
         from prsm.compute.tee.models import TEEType
 
         start_t = _time.monotonic()
-        try:
-            layers = hf_model.model.layers
-        except AttributeError as exc:
-            raise StageExecutionError(
-                f"HuggingFaceLayerSliceRunner: model {self.model_id!r} "
-                f"does not expose `.model.layers` (LLaMA-style). "
-                f"Other architectures (GPT-style `.transformer.h`, "
-                f"etc.) are not yet supported by Phase 2F-5b. {exc}"
-            ) from exc
+        # Sprint 612 — polymorphic layer extraction (LLaMA / GPT-2 /
+        # GPT-NeoX). Raises StageExecutionError listing attempted
+        # paths if unsupported architecture.
+        layers = _resolve_hf_layers(hf_model)
         start, end = int(layer_range[0]), int(layer_range[1])
         if start < 0 or end > len(layers) or start >= end:
             raise StageExecutionError(
