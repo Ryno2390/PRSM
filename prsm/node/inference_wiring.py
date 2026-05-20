@@ -483,12 +483,43 @@ def _build_chain_executor(node: Any) -> Any:
             from prsm.node.chain_executor_adapters import (
                 build_send_message_adapter,
                 build_address_resolver,
+                build_hf_prompt_encoder,
             )
+            # Sprint 615 (Phase 2F-5f) — env-wired prompt_encoder.
+            # PRSM_PARALLAX_PROMPT_ENCODER_KIND=huggingface +
+            # PRSM_PARALLAX_HF_MODEL_ID=<id> → real HF tokenizer +
+            # embedding lookup at chain head. Default (unset) keeps
+            # the factory's utf8 default — fine for wire tests.
+            prompt_encoder_kwarg = {}
+            _pe_kind = (os.environ.get(
+                "PRSM_PARALLAX_PROMPT_ENCODER_KIND", "",
+            ) or "").strip().lower()
+            if _pe_kind == "huggingface":
+                _hf_id = (os.environ.get(
+                    "PRSM_PARALLAX_HF_MODEL_ID", "",
+                ) or "").strip()
+                if _hf_id:
+                    _hf_device = (os.environ.get(
+                        "PRSM_PARALLAX_HF_DEVICE", "",
+                    ) or "").strip() or "cpu"
+                    prompt_encoder_kwarg["prompt_encoder"] = (
+                        build_hf_prompt_encoder(
+                            model_id=_hf_id, device=_hf_device,
+                        )
+                    )
+                else:
+                    logger.warning(
+                        "Sprint 615 _build_chain_executor: "
+                        "PRSM_PARALLAX_PROMPT_ENCODER_KIND=huggingface "
+                        "but PRSM_PARALLAX_HF_MODEL_ID unset; "
+                        "falling back to utf8 default encoder."
+                    )
             executor = make_rpc_chain_executor(
                 settler_identity=node.identity,
                 send_message=build_send_message_adapter(node),
                 anchor=anchor,
                 address_resolver=build_address_resolver(node),
+                **prompt_encoder_kwarg,
             )
             logger.info(
                 "Sprint 598 _build_chain_executor: real "
