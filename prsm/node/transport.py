@@ -318,12 +318,19 @@ class WebSocketTransport:
     async def start(self) -> None:
         """Start the WebSocket server and background tasks."""
         self._running = True
+        # Sprint 627 — bump max_size from default 1MB to 16MB so
+        # chain-executor logit payloads (vocab × seq_len × float32 +
+        # base64 overhead) don't get silently dropped. gpt2 5-token
+        # response = ~1.3MB after base64; larger models / longer prompts
+        # need more headroom. 16MB ceiling lets us handle full Llama
+        # vocab (128k) with reasonable sequence lengths.
         self._server = await websockets.server.serve(
             self._handle_incoming,
             self.host,
             self.port,
             ping_interval=self.ws_ping_interval,
             ping_timeout=self.ws_ping_timeout,
+            max_size=16 * 1024 * 1024,
         )
         self._tasks.append(asyncio.create_task(self._nonce_cleanup_loop()))
         logger.info(f"P2P transport listening on ws://{self.host}:{self.port}")
@@ -488,11 +495,15 @@ class WebSocketTransport:
                     return None
 
             adapter = self._transport_adapter
+            # Sprint 627 — match server's 16MB max_size so large
+            # chain-executor responses aren't dropped at the client.
+            _WS_MAX_SIZE = 16 * 1024 * 1024
             if adapter.name == "direct":
                 # Fast path: let websockets manage the connect itself.
                 # Avoids the adapter round-trip for the common case.
                 websocket = await websockets.client.connect(
-                    uri, open_timeout=self.handshake_timeout
+                    uri, open_timeout=self.handshake_timeout,
+                    max_size=_WS_MAX_SIZE,
                 )
             else:
                 sock = await adapter.open_connection(
@@ -501,6 +512,7 @@ class WebSocketTransport:
                 websocket = await websockets.client.connect(
                     uri, sock=sock, open_timeout=self.handshake_timeout,
                     server_hostname=host,
+                    max_size=_WS_MAX_SIZE,
                 )
 
             # Send handshake
