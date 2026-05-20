@@ -154,6 +154,9 @@ def test_handler_response_includes_phase_2e_pending_indicator():
 
     node = MagicMock()
     node.identity.node_id = "self"
+    # Sprint 604: explicitly None so handler falls through to env
+    # selector (defaults to sprint-602 stub → raises Phase-2E msg).
+    node._chain_stage_executor = None
     sent_messages = []
     async def _capture_send(peer_id, msg):
         sent_messages.append((peer_id, msg))

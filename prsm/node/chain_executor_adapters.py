@@ -231,30 +231,64 @@ def build_echo_stage_executor() -> StageExecutor:
     return _EchoStageExecutor()
 
 
+def _build_stage_executor_from_env() -> StageExecutor:
+    """Sprint 604 (Phase 2E-4) — env-driven StageExecutor selection.
+
+    Read PRSM_PARALLAX_STAGE_EXECUTOR_KIND:
+      - unset / "stub"  → build_stub_stage_executor (raises on
+        execute() with structured Phase-2E-3 hint; production
+        default — operators opt into a real executor explicitly).
+      - "echo"          → build_echo_stage_executor (returns bytes
+        unchanged; for end-to-end wire testing only).
+      - anything else   → stub fallback + structured warning.
+
+    Mirrors the env-driven pattern from sprints 576/577/578.
+    """
+    import os as _os
+    kind_raw = _os.environ.get(
+        "PRSM_PARALLAX_STAGE_EXECUTOR_KIND", "",
+    ).strip().lower()
+    kind = kind_raw or "stub"
+    if kind == "echo":
+        return build_echo_stage_executor()
+    if kind == "stub":
+        return build_stub_stage_executor()
+    # Unknown — warn + fall back to stub.
+    import logging as _l
+    _l.getLogger(__name__).warning(
+        "Sprint 604 stage-executor selector: "
+        "PRSM_PARALLAX_STAGE_EXECUTOR_KIND=%r unknown; falling "
+        "back to stub. Valid: stub, echo.",
+        kind_raw,
+    )
+    return build_stub_stage_executor()
+
+
 async def handle_chain_executor_request(node: Any, msg: Any) -> bool:
-    """Sprint 601 (Phase 2E-1) — server-side request handler scaffolding.
+    """Sprint 601 (Phase 2E-1) — server-side request handler.
+    Sprint 604 (Phase 2E-4) — delegates execution to a StageExecutor.
 
     Receives a chain_executor_rpc REQUEST message (CHAIN_REQ_KEY set,
-    CHAIN_RESP_KEY absent) + dispatches a structured response back
-    to the sender. Phase 2E-1 ships a "not yet implemented" error
-    response so the round-trip wire is provably functional before
-    Phase 2E-2+ wires real stage execution.
+    CHAIN_RESP_KEY absent), decodes the base64 payload, hands the
+    bytes to a ``StageExecutor`` (selected via
+    ``PRSM_PARALLAX_STAGE_EXECUTOR_KIND`` env var), then ships the
+    result back as a response message.
 
     Returns:
-      True  — handled (response sent or attempted to send)
-      False — not for us (wrong subtype, or a response message
-              meant for sprint 597's response handler)
+      True  — handled (response sent or attempted)
+      False — not for us (wrong subtype, response message)
+
+    Stage-executor selection:
+      - ``node._chain_stage_executor`` attr if present (test
+        injection / future production wiring)
+      - else ``_build_stage_executor_from_env()`` (env-driven)
 
     Defensive semantics:
-      - Wrong subtype → return False (ignored)
-      - Message has CHAIN_RESP_KEY → return False (it's a RESPONSE
-        to our outbound request, not a fresh REQUEST)
-      - Malformed base64 payload → send error response anyway
-        (better than silent drop; requester knows we tried)
-
-    Future Phase 2E-2 sub-sprints replace the error response with
-    real stage execution: decode activation bytes → forward through
-    a model layer → encode response activation → ship back.
+      - Wrong subtype → False
+      - Has CHAIN_RESP_KEY → False (sprint 597 handles those)
+      - Malformed base64 payload → CHAIN_ERROR_KEY response
+      - StageExecutionError raised → CHAIN_ERROR_KEY response w/ msg
+      - send_to_peer raises → log + return True (we tried)
     """
     import base64
     payload = getattr(msg, "payload", None) or {}
@@ -263,65 +297,77 @@ async def handle_chain_executor_request(node: Any, msg: Any) -> bool:
     request_id = payload.get(CHAIN_REQ_KEY)
     if not request_id:
         return False
-    # CHAIN_RESP_KEY presence → this is a response, not a request.
-    # Sprint 597 handles responses; we (Phase 2E-1) handle requests.
     if payload.get(CHAIN_RESP_KEY):
         return False
 
-    # Phase 2E-1: decode payload defensively + build error response.
-    # We attempt the decode for parity with the real Phase 2E-2 path
-    # (which would forward the activation bytes to a stage executor);
-    # malformed-base64 still produces a response so the requester
-    # doesn't time out silently.
+    sender_id = getattr(msg, "sender_id", None)
+    if not sender_id:
+        return False
+
+    # Decode incoming payload bytes.
     decode_error = None
+    payload_bytes: bytes = b""
     try:
-        _payload_bytes = base64.b64decode(
+        payload_bytes = base64.b64decode(
             payload.get(CHAIN_PAYLOAD_KEY, ""),
         )
-        del _payload_bytes  # Phase 2E-1 doesn't actually use them
     except Exception as exc:  # noqa: BLE001
         decode_error = (
             f"chain-executor request payload base64-decode failed: "
             f"{type(exc).__name__}: {exc}"
         )
 
-    error_msg = decode_error or (
-        "Sprint 601 Phase 2E-1: server-side stage handler not yet "
-        "implemented. Phase 2E-2+ will replace this scaffolding "
-        "with real chain-stage execution. Until then, this node "
-        "ACKs incoming requests but cannot actually compute the "
-        "next stage's activation."
-    )
+    # Stage execution (skip if we already have a decode error).
+    response_bytes: bytes = b""
+    exec_error: str | None = decode_error
+    if exec_error is None:
+        executor: StageExecutor = getattr(
+            node, "_chain_stage_executor", None,
+        ) or _build_stage_executor_from_env()
+        try:
+            response_bytes = await executor.execute(payload_bytes)
+        except StageExecutionError as exc:
+            exec_error = (
+                f"stage-executor raised StageExecutionError: {exc}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            exec_error = (
+                f"stage-executor raised {type(exc).__name__}: {exc}"
+            )
 
-    sender_id = getattr(msg, "sender_id", None)
-    if not sender_id:
-        # Can't ship a response without a sender to reply to.
-        return False
-
+    # Build + ship response.
     try:
         from prsm.node.transport import P2PMessage, MSG_DIRECT
+        if exec_error is not None:
+            resp_payload = {
+                "subtype": CHAIN_MSG_TYPE,
+                CHAIN_REQ_KEY: request_id,
+                CHAIN_RESP_KEY: request_id,
+                CHAIN_ERROR_KEY: exec_error,
+                CHAIN_PAYLOAD_KEY: "",
+            }
+        else:
+            resp_payload = {
+                "subtype": CHAIN_MSG_TYPE,
+                CHAIN_REQ_KEY: request_id,
+                CHAIN_RESP_KEY: request_id,
+                CHAIN_PAYLOAD_KEY: base64.b64encode(
+                    response_bytes,
+                ).decode("ascii"),
+            }
         response = P2PMessage(
             msg_type=MSG_DIRECT,
             sender_id=getattr(
                 getattr(node, "identity", None), "node_id", "",
             ),
-            payload={
-                "subtype": CHAIN_MSG_TYPE,
-                CHAIN_REQ_KEY: request_id,  # keep for diagnostic correlation
-                CHAIN_RESP_KEY: request_id,
-                CHAIN_ERROR_KEY: error_msg,
-                CHAIN_PAYLOAD_KEY: "",  # empty in error path
-            },
+            payload=resp_payload,
         )
         await node.transport.send_to_peer(sender_id, response)
     except Exception as exc:  # noqa: BLE001
-        # Even the response-send failed — log + return True so
-        # callers know we attempted. Sprint 597's response handler
-        # on the requester side will eventually time out.
         import logging as _l
         _l.getLogger(__name__).warning(
-            "Sprint 601 chain-executor request handler: "
-            "failed to send error response to %s: %s",
+            "Sprint 601/604 chain-executor request handler: "
+            "failed to send response to %s: %s",
             sender_id, exc,
         )
     return True
