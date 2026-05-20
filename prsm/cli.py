@@ -8536,6 +8536,13 @@ def node_models_list_cli(output_format: str, registry_root: Optional[str]):
     "steady-state per-token latency. Warm-up tokens are NOT "
     "written to --save-receipts.",
 )
+@click.option(
+    "--no-seed-warning", is_flag=True, default=False,
+    help="Sprint 651 — suppress the audit-chain-weakness warning "
+    "when --temperature is set without --seed. Use this only for "
+    "intentionally non-audited runs (e.g., exploratory generation "
+    "where you don't plan to verify-receipts --strict).",
+)
 def node_infer_cli(
     prompt: str,
     model: str,
@@ -8549,6 +8556,7 @@ def node_infer_cli(
     top_k: Optional[int],
     seed: Optional[int],
     warm_up: bool,
+    no_seed_warning: bool,
 ):
     """Generate tokens via the live PRSM P2P inference path.
 
@@ -8682,6 +8690,26 @@ def node_infer_cli(
                 f"[dim]Recording per-token receipts to "
                 f"{save_receipts_path}[/dim]"
             )
+
+    # ── Audit-rigor advisory (sprint 651) ─────────────────
+    # Symmetrical with sprint-650 verify-receipts --strict: warn
+    # at GENERATION time so operators who'll audit later see the
+    # weakness coming. --no-seed-warning suppresses for intentional
+    # non-audited runs.
+    if (
+        temperature is not None
+        and seed is None
+        and not no_seed_warning
+        and output_format == "text"
+    ):
+        console.print(
+            "[yellow]⚠ Audit-chain advisory[/yellow]: "
+            "--temperature is set but --seed is not. "
+            "The resulting receipts will be UNVERIFIABLE_NON_GREEDY_NO_SEED "
+            "under `prsm node verify-receipts --strict`. "
+            "[dim]Pass --seed N for a fully-verifiable audit chain, "
+            "or --no-seed-warning to suppress this advisory.[/dim]"
+        )
 
     # ── Warm-up (sprint 643) ──────────────────────────────
     # Send one throw-away forward so the stage peer's HF model

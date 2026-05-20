@@ -413,3 +413,59 @@ def test_json_format_emits_structured_output(
         "generated_text", "elapsed_s", "per_token",
     ):
         assert field in payload, f"json output missing {field}"
+
+
+def test_temperature_without_seed_emits_audit_advisory(
+    runner, hf_stubs, identity_stub,
+):
+    """Sprint 651: --temperature without --seed → audit-chain warning."""
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", return_value=_chain_exec_ping_ok()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "1",
+            "--temperature", "1.0",
+        ])
+    assert result.exit_code == 0
+    assert "Audit-chain advisory" in result.output
+    assert "UNVERIFIABLE_NON_GREEDY_NO_SEED" in result.output
+
+
+def test_temperature_with_seed_no_advisory(
+    runner, hf_stubs, identity_stub,
+):
+    """Sprint 651: --temperature with --seed → NO advisory."""
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", return_value=_chain_exec_ping_ok()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "1",
+            "--temperature", "1.0", "--seed", "42",
+        ])
+    assert result.exit_code == 0
+    assert "Audit-chain advisory" not in result.output
+
+
+def test_no_seed_warning_flag_suppresses_advisory(
+    runner, hf_stubs, identity_stub,
+):
+    """Sprint 651: --no-seed-warning suppresses the advisory."""
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", return_value=_chain_exec_ping_ok()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "1",
+            "--temperature", "1.0", "--no-seed-warning",
+        ])
+    assert result.exit_code == 0
+    assert "Audit-chain advisory" not in result.output
+
+
+def test_greedy_does_not_emit_advisory(
+    runner, hf_stubs, identity_stub,
+):
+    """Greedy mode (no --temperature) → no advisory needed."""
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", return_value=_chain_exec_ping_ok()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "1",
+        ])
+    assert result.exit_code == 0
+    assert "Audit-chain advisory" not in result.output
