@@ -585,6 +585,91 @@ def test_no_incremental_defaults_to_prefill_mode(
     assert all(m == "prefill" for m in decode_modes)
 
 
+def test_stages_flag_parses_spec_and_dispatches_per_stage(
+    runner, hf_stubs, identity_stub,
+):
+    """Sprint 668/669 — `--stages lo-hi:peer` parses + each
+    generation step dispatches once per stage. 1 token × 2 stages
+    = 2 POSTs.
+    """
+    post_count = [0]
+    stage_peer_ids_seen = []
+
+    def post_capture(*a, **kw):
+        post_count[0] += 1
+        stage_peer_ids_seen.append(
+            kw.get("json", {}).get("peer_id")
+        )
+        return _chain_exec_ping_ok()
+
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", side_effect=post_capture):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "1",
+            "--stages", "0-6:peer-A",
+            "--stages", "6-12:peer-B",
+        ])
+    assert result.exit_code == 0, result.output
+    assert post_count[0] == 2
+    assert stage_peer_ids_seen == ["peer-A", "peer-B"]
+
+
+def test_stages_flag_invalid_spec_returns_error(runner):
+    """--stages without colon → clean error pointing at the format."""
+    with patch("httpx.get", return_value=_peers_resp()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "1",
+            "--stages", "0-6peerA",  # missing colon
+        ])
+    assert result.exit_code != 0
+    assert "Invalid --stages spec" in result.output
+    assert "lo-hi:peer_id" in result.output
+
+
+def test_stages_flag_invalid_layer_range_returns_error(runner):
+    """--stages with hi <= lo → clean error."""
+    with patch("httpx.get", return_value=_peers_resp()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "1",
+            "--stages", "6-6:peer-A",  # lo == hi
+        ])
+    assert result.exit_code != 0
+    assert "Invalid --stages layer range" in result.output
+
+
+def test_stages_flag_non_integer_range_returns_error(runner):
+    """--stages with non-int lo/hi → clean error."""
+    with patch("httpx.get", return_value=_peers_resp()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "1",
+            "--stages", "abc-def:peer-A",
+        ])
+    assert result.exit_code != 0
+    assert "Invalid --stages layer range" in result.output
+
+
+def test_no_stages_uses_first_connected_peer(
+    runner, hf_stubs, identity_stub,
+):
+    """Without --stages, default behavior unchanged: single stage
+    routes to first connected peer (or --stage-peer-id override).
+    """
+    seen_peer_ids = []
+
+    def post_capture(*a, **kw):
+        seen_peer_ids.append(kw.get("json", {}).get("peer_id"))
+        return _chain_exec_ping_ok()
+
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", side_effect=post_capture):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "2",
+        ])
+    assert result.exit_code == 0
+    # Both tokens routed to peer-0 (only one connected)
+    assert all(p == "peer-0" for p in seen_peer_ids)
+
+
 def test_output_file_writes_only_generated_text(
     runner, hf_stubs, identity_stub, tmp_path,
 ):
