@@ -8306,6 +8306,156 @@ def node_fiat_readiness(output_format):
 
 
 # ──────────────────────────────────────────────────────────────
+# Sprint 638 — `prsm node models list` discovers what's registered.
+# Pre-638 operators using `prsm node infer` had to know a model_id
+# ahead of time; nothing surfaced the local registry contents from
+# the CLI. This command reads PRSM_MODEL_REGISTRY_ROOT, enumerates
+# every model + dumps manifest metadata (publisher, shard count,
+# published_at, layer ranges). Local-only for now — peer-advertised
+# models will come in a follow-on sprint when there's a protocol-
+# level "what do you serve?" message.
+# ──────────────────────────────────────────────────────────────
+
+
+@node.command("models")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    show_default=True,
+)
+@click.option(
+    "--registry-root", default=None,
+    help="Override PRSM_MODEL_REGISTRY_ROOT for one-off probes.",
+)
+def node_models_list_cli(output_format: str, registry_root: Optional[str]):
+    """List models in the local FilesystemModelRegistry.
+
+    Sprint 638 — closes the discovery gap from sprint 633's
+    `prsm node infer`. Operators previously had to know a model_id
+    ahead of time; this command surfaces every registered model
+    with its publisher identity, shard count, and per-shard layer
+    coverage so operators can pick a target for inference.
+
+    Default registry root is read from PRSM_MODEL_REGISTRY_ROOT
+    (the same path the daemon uses at runtime); override with
+    --registry-root for one-off probes against alternate roots.
+
+    Exit code: 0 when at least one model is present; 1 when the
+    registry is empty or unreachable so scripts can branch on it.
+    """
+    import json as _json
+    import os as _os
+    import sys as _sys
+
+    from prsm.compute.model_registry.registry import (
+        FilesystemModelRegistry,
+    )
+
+    root = registry_root or _os.environ.get("PRSM_MODEL_REGISTRY_ROOT", "")
+    if not root:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "error": "registry_root_unset",
+                "models": [],
+            }, indent=2))
+        else:
+            console.print(
+                "[red]✗ Registry root not configured[/red]\n"
+                "[dim]Set PRSM_MODEL_REGISTRY_ROOT or pass "
+                "--registry-root to point at a FilesystemModelRegistry "
+                "directory.[/dim]"
+            )
+        _sys.exit(1)
+
+    try:
+        registry = FilesystemModelRegistry(root=root)
+    except Exception as exc:  # noqa: BLE001
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "error": f"{type(exc).__name__}: {exc}",
+                "registry_root": root,
+                "models": [],
+            }, indent=2))
+        else:
+            console.print(
+                f"[red]✗ Failed to open registry at {root!r}[/red]: "
+                f"{type(exc).__name__}: {exc}"
+            )
+        _sys.exit(1)
+
+    model_ids = registry.list_models()
+    summaries = []
+    for model_id in model_ids:
+        try:
+            manifest = registry.get_manifest(model_id)
+        except Exception as exc:  # noqa: BLE001
+            summaries.append({
+                "model_id": model_id,
+                "error": f"manifest load failed: "
+                         f"{type(exc).__name__}: {exc}",
+            })
+            continue
+        layer_ranges = []
+        for s in manifest.shards:
+            layer_ranges.append(list(s.layer_range))
+        summaries.append({
+            "model_id": manifest.model_id,
+            "model_name": manifest.model_name,
+            "publisher_node_id": manifest.publisher_node_id,
+            "total_shards": manifest.total_shards,
+            "published_at": manifest.published_at,
+            "schema_version": manifest.schema_version,
+            "layer_ranges": layer_ranges,
+        })
+
+    if output_format == "json":
+        click.echo(_json.dumps({
+            "registry_root": root,
+            "total": len(summaries),
+            "models": summaries,
+        }, indent=2))
+        _sys.exit(0 if summaries else 1)
+
+    if not summaries:
+        console.print(
+            f"[yellow]No models registered[/yellow] at "
+            f"[cyan]{root}[/cyan]\n"
+            f"[dim]Register a model via the registry API or "
+            f"copy a published-manifest directory into this root.[/dim]"
+        )
+        _sys.exit(1)
+
+    console.print(
+        f"[dim]Registry root: {root}[/dim]\n"
+        f"[bold]{len(summaries)} model(s) registered:[/bold]"
+    )
+    for s in summaries:
+        if "error" in s:
+            console.print(
+                f"  [red]✗ {s['model_id']}[/red]: {s['error']}"
+            )
+            continue
+        # Defense: layer_ranges may all be (0,0) for legacy
+        # manifests pre-sprint 627; render compactly when sentinel.
+        non_sentinel = [r for r in s["layer_ranges"] if r != [0, 0]]
+        layer_summary = (
+            ", ".join(f"[{r[0]}, {r[1]})" for r in non_sentinel)
+            if non_sentinel
+            else "(layer ranges unset — pre-sprint-627 manifest)"
+        )
+        console.print(
+            f"  [green]●[/green] [bold]{s['model_id']}[/bold] "
+            f"([dim]name={s['model_name']!r}[/dim])\n"
+            f"    publisher: [cyan]{s['publisher_node_id'][:16]}...[/cyan]\n"
+            f"    shards: {s['total_shards']}  "
+            f"layers: {layer_summary}\n"
+            f"    schema_v{s['schema_version']}, "
+            f"published_at {s['published_at']:.0f}"
+        )
+    _sys.exit(0)
+
+
+# ──────────────────────────────────────────────────────────────
 # Sprint 633 — `prsm node infer` operator CLI for the live P2P
 # inference path (sprint 628's multi-token GPT-2 demo wrapped as
 # a first-class operator command). Closes the dogfood gap where
