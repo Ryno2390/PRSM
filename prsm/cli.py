@@ -9188,9 +9188,9 @@ def node_incident_list(api_port, output_format, severity, phase):
         with urllib.request.urlopen(url, timeout=10) as r:
             payload = _json.loads(r.read())
     except Exception as exc:  # noqa: BLE001
-        click.echo(
-            f"Failed to fetch incidents: {exc}", err=True,
-        )
+        # Sprint 647 — F25 sweep: surface FastAPI HTTPException detail
+        from prsm.cli_modules.http_errors import render_http_error
+        click.echo(render_http_error(exc, "incidents"), err=True)
         sys.exit(2)
 
     records = payload.get("records", [])
@@ -9328,7 +9328,8 @@ def node_incident_playbook(api_port, output_format, severity):
         with urllib.request.urlopen(url, timeout=10) as r:
             payload = _json.loads(r.read())
     except Exception as exc:  # noqa: BLE001
-        click.echo(f"Failed to fetch: {exc}", err=True)
+        from prsm.cli_modules.http_errors import render_http_error
+        click.echo(render_http_error(exc, "incident playbook"), err=True)
         sys.exit(2)
 
     if output_format == "json":
@@ -9566,7 +9567,8 @@ def node_tee_status(api_port, output_format):
         with urllib.request.urlopen(url, timeout=10) as r:
             payload = _json.loads(r.read())
     except Exception as exc:  # noqa: BLE001
-        click.echo(f"Failed: {exc}", err=True)
+        from prsm.cli_modules.http_errors import render_http_error
+        click.echo(render_http_error(exc, "TEE node status"), err=True)
         sys.exit(2)
 
     if output_format == "json":
@@ -9739,33 +9741,14 @@ def _node_admin_list_details(
     try:
         with urllib.request.urlopen(url, timeout=10) as r:
             payload = _json.loads(r.read())
-    except urllib.error.HTTPError as exc:
-        # Sprint 646 fix: the server's HTTPException carries an
-        # actionable `detail` field (e.g., "set PRSM_PIPELINE_
-        # ORCHESTRATOR_PRIVKEY env") that the default urllib
-        # message ("Service Unavailable") swallows. Decode the
-        # response body so operators see the breadcrumb.
-        body_msg = ""
-        try:
-            body_raw = exc.read().decode("utf-8", errors="replace")
-            body_json = _json.loads(body_raw)
-            body_msg = body_json.get("detail", body_raw)
-        except Exception:  # noqa: BLE001
-            body_msg = ""
-        if body_msg:
-            click.echo(
-                f"Failed to fetch {group_name} jobs: "
-                f"HTTP {exc.code} — {body_msg}",
-                err=True,
-            )
-        else:
-            click.echo(
-                f"Failed to fetch {group_name} jobs: {exc}", err=True,
-            )
-        sys.exit(2)
     except Exception as exc:  # noqa: BLE001
+        # Sprint 647 — F25 sweep: delegate to shared helper that
+        # decodes FastAPI HTTPException detail from the response
+        # body. Sprint 646's inline implementation lived here;
+        # consolidated for DRY + so future fixes apply everywhere.
+        from prsm.cli_modules.http_errors import render_http_error
         click.echo(
-            f"Failed to fetch {group_name} jobs: {exc}", err=True,
+            render_http_error(exc, f"{group_name} jobs"), err=True,
         )
         sys.exit(2)
 
