@@ -251,6 +251,79 @@ class LayerStageServerStageExecutor:
             ) from exc
 
 
+def build_layer_stage_server_executor(
+    *,
+    node: Any,
+    runner: Any,
+    model_registry_root_env: str = "PRSM_MODEL_REGISTRY_ROOT",
+) -> "LayerStageServerStageExecutor":
+    """Sprint 607 (Phase 2F-2) — factory for the real-model
+    StageExecutor backed by chain_rpc.LayerStageServer.
+
+    Required operator config:
+      - ``$PRSM_MODEL_REGISTRY_ROOT`` env var (path to local
+        model-registry directory)
+      - ``$PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS`` env var
+        (sprint 580 _build_anchor_or_none reads this)
+      - ``runner`` argument — operator-supplied
+        ``LayerSliceRunner`` (Phase 2F-3+ ships specific impls)
+      - ``node.identity`` — present after PRSMNode.start
+
+    Raises ``StageExecutionError`` with a structured message naming
+    the missing piece when any prerequisite is absent, so operators
+    flipping rpc kind on get actionable feedback.
+
+    Lazy imports for the heavy ML deps (FilesystemModelRegistry,
+    LayerStageServer, SoftwareTEERuntime) — default operators on
+    PRSM_PARALLAX_STAGE_EXECUTOR_KIND=stub never trigger these.
+    """
+    import os as _os
+    root = (_os.environ.get(model_registry_root_env, "") or "").strip()
+    if not root:
+        raise StageExecutionError(
+            f"PRSM_MODEL_REGISTRY_ROOT unset; "
+            f"build_layer_stage_server_executor needs the path to "
+            f"the local FilesystemModelRegistry root directory."
+        )
+    from prsm.node.inference_wiring import _build_anchor_or_none
+    anchor = _build_anchor_or_none()
+    if anchor is None:
+        raise StageExecutionError(
+            "anchor unavailable (set PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS); "
+            "LayerStageServer requires it for upstream-token verification."
+        )
+    if runner is None or not hasattr(runner, "run_layer_range"):
+        raise StageExecutionError(
+            "runner is required (LayerSliceRunner with "
+            ".run_layer_range method). Phase 2F-3+ ships specific "
+            "runner implementations; pass one here."
+        )
+    if getattr(node, "identity", None) is None:
+        raise StageExecutionError(
+            "node.identity is None; daemon must be started "
+            "(PRSMNode.start) before constructing the LayerStageServer "
+            "executor."
+        )
+
+    # Lazy imports — only paid when this kind is actually selected.
+    from prsm.compute.model_registry.registry import (
+        FilesystemModelRegistry,
+    )
+    from prsm.compute.chain_rpc.server import LayerStageServer
+    from prsm.compute.tee.runtime import SoftwareTEERuntime
+
+    registry = FilesystemModelRegistry(root=root, anchor=anchor)
+    tee_runtime = SoftwareTEERuntime()
+    server = LayerStageServer(
+        identity=node.identity,
+        registry=registry,
+        runner=runner,
+        tee_runtime=tee_runtime,
+        anchor=anchor,
+    )
+    return LayerStageServerStageExecutor(server=server)
+
+
 def build_echo_stage_executor() -> StageExecutor:
     """Sprint 603 (Phase 2E-3) — diagnostic StageExecutor that
     echoes its input bytes back unchanged.
