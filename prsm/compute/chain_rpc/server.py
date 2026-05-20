@@ -1897,17 +1897,39 @@ class LayerStageServer:
                 str(exc),
             )
 
-        # Get prev_kv_state from cache. KVCacheManager.get returns
-        # None if no entry exists (or evicted).
-        prev_kv_state = None
+        # Sprint 658 — KVCacheManager API: allocate(request_id, n_layers)
+        # creates a fresh handle; get(request_id) returns the existing
+        # handle or None. handle.payload is the DynamicCache (mutable).
+        # The manager doesn't have a `put` method — sprint 657 used
+        # that misnamed call, corrected here.
+        handle = None
         try:
-            prev_kv_state = self._kv_cache_manager.get(request.request_id)
+            handle = self._kv_cache_manager.get(request.request_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "LayerStageServer: kv_cache_manager.get raised for "
                 "request_id=%r — proceeding with cold cache: %s",
                 request.request_id, exc,
             )
+        if handle is None:
+            # Cold path: allocate a new handle. n_layers = the layer
+            # range's width; the manager only uses it for the
+            # cached_positions accounting.
+            n_layers = int(request.layer_range[1] - request.layer_range[0])
+            try:
+                handle = self._kv_cache_manager.allocate(
+                    request.request_id,
+                    max(1, n_layers),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "LayerStageServer: kv_cache_manager.allocate "
+                    "raised for request_id=%r — INCREMENTAL forward "
+                    "will run uncached: %s",
+                    request.request_id, exc,
+                )
+
+        prev_kv_state = handle.payload if handle is not None else None
 
         # Run incremental forward.
         result_or_error = self._run_layer_slice_incremental(
@@ -1922,22 +1944,22 @@ class LayerStageServer:
                 request.request_id,
                 result_or_error[0], result_or_error[1],
             )
-        # Success → unpack (result, new_kv_state)
+        # Success → unpack (result, new_kv_state).
+        # DynamicCache is mutated in-place by the runner, but we
+        # store the reference on the handle explicitly so an
+        # observability snapshot of handle.payload reflects the
+        # latest state regardless of internal aliasing.
         result, new_kv_state = result_or_error
-
-        # Put new_kv_state back. Failure here is non-fatal — caller
-        # gets the correct response; next INCREMENTAL just re-warms
-        # from scratch.
-        try:
-            self._kv_cache_manager.put(
-                request.request_id, new_kv_state,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "LayerStageServer: kv_cache_manager.put raised for "
-                "request_id=%r — next INCREMENTAL will be cold: %s",
-                request.request_id, exc,
-            )
+        if handle is not None:
+            handle.payload = new_kv_state
+            # cached_positions accounting — at least one position
+            # was forwarded.
+            try:
+                handle.cached_positions = int(
+                    new_kv_state.get_seq_length()
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
         # Encode + sign + return (mirrors the PREFILL path).
         try:

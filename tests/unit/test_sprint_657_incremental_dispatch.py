@@ -137,26 +137,44 @@ def test_dispatch_inline_incremental_method_exists():
 
 def test_cache_get_failure_falls_back_to_cold():
     """If kv_cache_manager.get raises, the dispatch must NOT
-    propagate — it falls back to cold cache (prev_kv_state=None)
-    + logs.
+    propagate — it falls back to cold cache (allocate) + logs.
     """
     from prsm.compute.chain_rpc.server import LayerStageServer
     import inspect
     src = inspect.getsource(
         LayerStageServer._dispatch_inline_incremental,
     )
-    # Must catch exceptions on .get()
-    assert "kv_cache_manager.get raised" in src or "proceeding with cold" in src
+    assert "kv_cache_manager.get raised" in src
+    assert "proceeding with cold cache" in src
 
 
-def test_cache_put_failure_is_non_fatal():
-    """If kv_cache_manager.put raises, the response is still
-    returned — operator gets the correct output even when the
-    cache is corrupt; next INCREMENTAL just re-warms.
+def test_cache_allocate_failure_is_non_fatal():
+    """Sprint 658 — corrected API. KVCacheManager has no `put`;
+    it has `allocate` (one-time per request_id). If allocate
+    raises (e.g., CacheAlreadyAllocatedError on a request_id
+    race), the dispatch logs + falls back to uncached forward;
+    response is still produced correctly.
     """
     from prsm.compute.chain_rpc.server import LayerStageServer
     import inspect
     src = inspect.getsource(
         LayerStageServer._dispatch_inline_incremental,
     )
-    assert "kv_cache_manager.put raised" in src or "next INCREMENTAL will be cold" in src
+    assert "kv_cache_manager.allocate" in src
+    assert "raised for request_id" in src
+
+
+def test_dispatch_uses_handle_payload_not_put():
+    """Sprint 658 corrects sprint 657's misnamed `.put` calls.
+    The dispatch now uses handle.payload mutation (the actual
+    KVCacheManager API) rather than a non-existent put method.
+    """
+    from prsm.compute.chain_rpc.server import LayerStageServer
+    import inspect
+    src = inspect.getsource(
+        LayerStageServer._dispatch_inline_incremental,
+    )
+    # Affirmative: handle.payload is set
+    assert "handle.payload = new_kv_state" in src
+    # Negative: no `.put(` call against kv_cache_manager
+    assert "kv_cache_manager.put(" not in src
