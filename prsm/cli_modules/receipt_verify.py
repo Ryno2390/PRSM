@@ -284,30 +284,30 @@ def verify_chain_invariants(records: List[Dict[str, Any]]) -> List[Dict[str, Any
         params: Dict[str, float],
         step_idx: int,
     ) -> Optional[int]:
-        """Re-derive the next_token_id given last-position logits,
-        the parsed sampling params, and the step index. Mirrors the
-        sampling logic in `prsm node infer` exactly; any drift here
-        invalidates seed-replay audits for downstream operators.
+        """Sprint 641 — uses the shared sampling helper so replay is
+        byte-identical with the CLI sampling code. Drift between
+        the two would silently break audits; this delegation
+        prevents that by construction.
         """
         try:
-            import numpy as _np
+            from prsm.cli_modules.sampling import (
+                sample_token_from_logits,
+            )
         except ImportError:
             return None
         temp = float(params["temperature"])
         seed = int(params["seed"])
-        top_k = int(params.get("top_k", 0))
-        scaled = logits_last.astype(_np.float32) / max(temp, 1e-8)
-        if top_k > 0:
-            k = min(top_k, scaled.shape[-1])
-            top_indices = _np.argpartition(scaled, -k)[-k:]
-            mask = _np.full_like(scaled, -_np.inf)
-            mask[top_indices] = scaled[top_indices]
-            scaled = mask
-        scaled = scaled - _np.max(scaled)
-        probs = _np.exp(scaled)
-        probs = probs / probs.sum()
-        rng = _np.random.default_rng(seed + step_idx)
-        return int(rng.choice(probs.shape[-1], p=probs))
+        top_k = int(params.get("top_k", 0)) if params.get("top_k") else None
+        try:
+            return sample_token_from_logits(
+                logits_last,
+                temperature=temp,
+                top_k=top_k,
+                seed=seed,
+                step=step_idx,
+            )
+        except Exception:  # noqa: BLE001
+            return None
 
     # C5: next_token_id matches argmax of activation_blob.
     # Receipt's "next_token_id" is the operator-recorded sample;

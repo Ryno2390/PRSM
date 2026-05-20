@@ -8754,45 +8754,24 @@ def node_infer_cli(
         # temperature/top-k weakens it to "stage signed over these
         # logits + operator recorded a sample drawn from this
         # distribution" — verifier with the seed can re-derive.
-        last_logits = logits[0, -1, :].astype(_np.float32)
-        if temperature is None:
-            next_id = int(last_logits.argmax())
-            sampling_mode = "greedy"
-        else:
-            # Build sample-from-distribution path: optional top-k
-            # mask, divide by temperature, softmax, multinomial.
-            scaled = last_logits / max(float(temperature), 1e-8)
-            if top_k is not None and top_k > 0:
-                k = min(int(top_k), scaled.shape[-1])
-                # Mask everything below the top-K
-                top_indices = _np.argpartition(scaled, -k)[-k:]
-                mask = _np.full_like(scaled, -_np.inf)
-                mask[top_indices] = scaled[top_indices]
-                scaled = mask
-            # Softmax (subtract max for numerical stability)
-            scaled = scaled - _np.max(scaled)
-            probs = _np.exp(scaled)
-            probs = probs / probs.sum()
-            # Deterministic RNG if seed given (also passes seed
-            # through to the receipt so a verifier can re-derive).
-            if seed is not None:
-                # Use a fresh seeded RNG each step + step-offset so
-                # different tokens don't all draw from the same point
-                # in the seed-derived stream. Verifier re-derives by
-                # constructing the same generator with the same seed +
-                # step.
-                rng = _np.random.default_rng(
-                    int(seed) + step,
-                )
-            else:
-                rng = _np.random.default_rng()
-            next_id = int(rng.choice(probs.shape[-1], p=probs))
-            mode_parts = [f"temperature:{float(temperature):.3f}"]
-            if top_k is not None and top_k > 0:
-                mode_parts.append(f"top_k:{int(top_k)}")
-            if seed is not None:
-                mode_parts.append(f"seed:{int(seed)}")
-            sampling_mode = ",".join(mode_parts)
+        # Sprint 641 — single sampling helper used by both CLI infer
+        # and verify-receipts replay. Drift-free by construction.
+        from prsm.cli_modules.sampling import (
+            sample_token_from_logits, format_sampling_mode,
+        )
+        last_logits = logits[0, -1, :]
+        next_id = sample_token_from_logits(
+            last_logits,
+            temperature=temperature,
+            top_k=top_k,
+            seed=seed,
+            step=step,
+        )
+        sampling_mode = format_sampling_mode(
+            temperature=temperature,
+            top_k=top_k,
+            seed=seed,
+        )
         next_token = tok.decode([next_id])
         text += next_token
         step_dt = _time.time() - step_t0
