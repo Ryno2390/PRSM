@@ -8347,6 +8347,14 @@ def node_fiat_readiness(output_format):
     type=click.Choice(["text", "json"]), default="text",
     show_default=True,
 )
+@click.option(
+    "--save-receipts", "save_receipts_path", type=click.Path(),
+    default=None,
+    help="Append one JSON-line per token to this file. Each line "
+    "carries the stage signature, stage_node_id, request_id, and "
+    "activation hash — enough for offline verification against the "
+    "PublisherKeyAnchor.",
+)
 def node_infer_cli(
     prompt: str,
     model: str,
@@ -8355,6 +8363,7 @@ def node_infer_cli(
     api_url: str,
     timeout: float,
     output_format: str,
+    save_receipts_path: Optional[str],
 ):
     """Generate tokens via the live PRSM P2P inference path.
 
@@ -8452,6 +8461,33 @@ def node_infer_cli(
         )
         _sys.exit(1)
 
+    # ── Receipt sink (sprint 634) ──
+    # When --save-receipts is set, open the file in append-mode at
+    # the top of the loop. Each per-token write is a single JSON
+    # line so the file is friendly to `jq` + grep-based post-
+    # processing. Append rather than truncate so multi-run audit
+    # trails accumulate naturally.
+    import hashlib as _hashlib
+    import os as _os_for_dir
+    from pathlib import Path as _Path
+    receipts_fh = None
+    if save_receipts_path:
+        save_p = _Path(save_receipts_path)
+        try:
+            save_p.parent.mkdir(parents=True, exist_ok=True)
+            receipts_fh = save_p.open("a", encoding="utf-8")
+        except OSError as exc:
+            console.print(
+                f"[red]✗ Cannot open receipts file "
+                f"{save_receipts_path!r}[/red]: {exc}"
+            )
+            _sys.exit(1)
+        if output_format == "text":
+            console.print(
+                f"[dim]Recording per-token receipts to "
+                f"{save_receipts_path}[/dim]"
+            )
+
     # ── Generation loop ──
     text = prompt
     per_token_records = []
@@ -8539,6 +8575,51 @@ def node_infer_cli(
         next_token = tok.decode([next_id])
         text += next_token
         step_dt = _time.time() - step_t0
+
+        # Sprint 634 — record signed receipt for this token. The
+        # stage_signature is over the canonical signing payload
+        # (chain_rpc.protocol.RunLayerSliceResponse.signing_payload);
+        # any party with the stage_node_id's pubkey from the
+        # PublisherKeyAnchor can rebuild that payload + verify
+        # offline. We also hash the activation_blob (logits) so
+        # the receipt commits to the exact output bytes the
+        # token was sampled from.
+        if receipts_fh is not None:
+            logits_sha256 = _hashlib.sha256(
+                resp.activation_blob,
+            ).hexdigest()
+            receipt_record = {
+                "step": step,
+                "wall_unix": _time.time(),
+                "request_id": resp.request_id,
+                "settler_node_id": settler.node_id,
+                "stage_node_id": resp.stage_node_id,
+                "stage_signature_b64": resp.stage_signature_b64,
+                "model_id": model,
+                "layer_range": [0, int(n_layers)],
+                "activation_shape": list(resp.activation_shape),
+                "activation_dtype": resp.activation_dtype,
+                "activation_sha256": logits_sha256,
+                "duration_seconds": resp.duration_seconds,
+                "epsilon_spent": resp.epsilon_spent,
+                "tee_type": getattr(
+                    resp.tee_type, "value",
+                    str(resp.tee_type),
+                ),
+                "protocol_version": resp.protocol_version,
+                "next_token_id": next_id,
+                "next_token_text": next_token,
+            }
+            try:
+                receipts_fh.write(_json.dumps(receipt_record) + "\n")
+                receipts_fh.flush()
+            except OSError as exc:
+                # Don't kill the run for an audit-write failure; just
+                # surface + carry on. Operator can decide on retry.
+                console.print(
+                    f"[yellow]⚠ step {step}: receipt write failed: "
+                    f"{exc}[/yellow]"
+                )
         per_token_records.append({
             "step": step, "token_id": next_id,
             "token_text": next_token, "elapsed_s": step_dt,
@@ -8552,6 +8633,15 @@ def node_infer_cli(
             )
 
     overall_dt = _time.time() - overall_t0
+    # Sprint 634 — close receipts sink cleanly. Failure here is
+    # already-fsync'd so it doesn't lose tokens; just log.
+    if receipts_fh is not None:
+        try:
+            receipts_fh.close()
+        except OSError as exc:
+            console.print(
+                f"[yellow]⚠ receipts file close failed: {exc}[/yellow]"
+            )
     if output_format == "json":
         click.echo(_json.dumps({
             "prompt": prompt,
@@ -8561,6 +8651,7 @@ def node_infer_cli(
             "generated_text": text,
             "elapsed_s": overall_dt,
             "per_token": per_token_records,
+            "receipts_path": save_receipts_path,
         }, indent=2))
         return
     console.print()
@@ -8569,6 +8660,11 @@ def node_infer_cli(
         f"({max_tokens} tokens in {overall_dt:.1f}s):"
     )
     console.print(f"  [bold]{text!r}[/bold]")
+    if save_receipts_path:
+        console.print(
+            f"[dim]{max_tokens} signed receipt(s) saved to "
+            f"{save_receipts_path}[/dim]"
+        )
 
 
 # ──────────────────────────────────────────────────────────────
