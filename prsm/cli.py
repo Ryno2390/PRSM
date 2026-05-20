@@ -8543,6 +8543,19 @@ def node_models_list_cli(output_format: str, registry_root: Optional[str]):
     "intentionally non-audited runs (e.g., exploratory generation "
     "where you don't plan to verify-receipts --strict).",
 )
+@click.option(
+    "--incremental/--no-incremental", default=False,
+    help="Sprint 662 — engage the KV-cache fast path (sprints 654-660). "
+    "Stable request_id + decode_mode=INCREMENTAL across the run; "
+    "after the cold first request, each subsequent token forwards "
+    "only the 1 new position through cached attention. Live-attested "
+    "~5x per-token speedup vs default PREFILL path. Requires the "
+    "stage peer's daemon to have PRSM_PARALLAX_KV_CACHE_ENABLED=1 "
+    "AND a runner supporting run_layer_range_incremental (sprint 656 "
+    "added HuggingFaceLayerSliceRunner support). Receipts record "
+    "decode_mode='incremental' so sprint-661 C3 invariant doesn't "
+    "false-positive on the shared request_id.",
+)
 def node_infer_cli(
     prompt: str,
     model: str,
@@ -8557,6 +8570,7 @@ def node_infer_cli(
     seed: Optional[int],
     warm_up: bool,
     no_seed_warning: bool,
+    incremental: bool,
 ):
     """Generate tokens via the live PRSM P2P inference path.
 
@@ -8784,17 +8798,51 @@ def node_infer_cli(
     text = prompt
     per_token_records = []
     overall_t0 = _time.time()
+    # Sprint 662 — KV-cache fast path setup. When --incremental is
+    # set, we maintain a stable request_id (used as the cache key
+    # on the server) AND track token IDs explicitly so we can ship
+    # ONLY the new token's embedding on hot iterations.
+    if incremental:
+        from prsm.compute.chain_rpc.protocol import DecodeMode
+        cache_request_id = (
+            f"prsm-cli-incremental-{int(_time.time())}-"
+            f"{settler.node_id[:8]}"
+        )
+        token_ids_so_far = tok.encode(text, return_tensors="pt").squeeze(0).tolist()
     for step in range(max_tokens):
         step_t0 = _time.time()
-        input_ids = tok.encode(text, return_tensors="pt")
-        with _torch.no_grad():
-            te = hf_model.transformer.wte(input_ids)
-            pe = hf_model.transformer.wpe(
-                _torch.arange(input_ids.shape[-1]).unsqueeze(0),
-            )
-            activation = (te + pe).numpy()
+        if incremental:
+            cur_token_count = len(token_ids_so_far)
+            with _torch.no_grad():
+                if step == 0:
+                    # Cold cache: send full prefix
+                    send_ids = _torch.tensor([token_ids_so_far])
+                    pos_offset = 0
+                else:
+                    # Hot cache: send only the last appended token
+                    send_ids = _torch.tensor([[token_ids_so_far[-1]]])
+                    pos_offset = cur_token_count - 1
+                te = hf_model.transformer.wte(send_ids)
+                positions = _torch.arange(
+                    pos_offset, pos_offset + send_ids.shape[-1],
+                ).unsqueeze(0)
+                pe = hf_model.transformer.wpe(positions)
+                activation = (te + pe).numpy()
+        else:
+            input_ids = tok.encode(text, return_tensors="pt")
+            with _torch.no_grad():
+                te = hf_model.transformer.wte(input_ids)
+                pe = hf_model.transformer.wpe(
+                    _torch.arange(input_ids.shape[-1]).unsqueeze(0),
+                )
+                activation = (te + pe).numpy()
 
-        request_id = f"prsm-cli-infer-step{step}-{int(_time.time())}"
+        # Sprint 662 — request_id stable across the run when
+        # --incremental (cache key); fresh per token otherwise.
+        if incremental:
+            request_id = cache_request_id
+        else:
+            request_id = f"prsm-cli-infer-step{step}-{int(_time.time())}"
         deadline = _time.time() + timeout
         ho_token = HandoffToken.sign(
             identity=settler, request_id=request_id,
@@ -8809,7 +8857,7 @@ def node_infer_cli(
             getattr(hf_model, "config", None), "num_hidden_layers",
             getattr(hf_model.config, "n_layer", 12),
         )
-        request = RunLayerSliceRequest(
+        request_kwargs = dict(
             request_id=request_id, model_id=model,
             layer_range=(0, n_layers),
             privacy_tier=PrivacyLevel.NONE,
@@ -8819,6 +8867,9 @@ def node_infer_cli(
             activation_dtype=str(activation.dtype),
             upstream_token=ho_token, deadline_unix=deadline,
         )
+        if incremental:
+            request_kwargs["decode_mode"] = DecodeMode.INCREMENTAL
+        request = RunLayerSliceRequest(**request_kwargs)
         req_bytes = encode_message(request)
 
         try:
@@ -8890,6 +8941,11 @@ def node_infer_cli(
         )
         next_token = tok.decode([next_id])
         text += next_token
+        if incremental:
+            # Sprint 662 — track token IDs for the next iteration's
+            # send-just-the-new-token slice. Re-tokenizing text
+            # doesn't always grow by exactly +1 (BPE merges).
+            token_ids_so_far.append(next_id)
         step_dt = _time.time() - step_t0
 
         # Sprint 634 — record signed receipt for this token. The
@@ -8951,14 +9007,13 @@ def node_infer_cli(
                 # mode string, a verifier could re-derive but that's
                 # out of sprint 639's scope).
                 "sampling_mode": sampling_mode,
-                # Sprint 661 — record decode_mode so the C3
-                # uniqueness invariant can be conditional. The
-                # sprint 633 CLI path always uses PREFILL (fresh
-                # request_id per token); sprint 663 will add
-                # `--incremental` which reuses request_id across
-                # tokens (legitimate cache-key sharing). C3 fires
-                # only when prefill-mode receipts collide.
-                "decode_mode": "prefill",
+                # Sprint 661/662 — decode_mode field tells C3
+                # whether request_id duplicates are legitimate.
+                # --incremental shares request_id (cache key);
+                # PREFILL gets fresh ids per token.
+                "decode_mode": (
+                    "incremental" if incremental else "prefill"
+                ),
             }
             try:
                 receipts_fh.write(_json.dumps(receipt_record) + "\n")
@@ -8973,7 +9028,10 @@ def node_infer_cli(
         per_token_records.append({
             "step": step, "token_id": next_id,
             "token_text": next_token, "elapsed_s": step_dt,
-            "seq_len_before": input_ids.shape[-1],
+            "seq_len_before": (
+                len(token_ids_so_far) - 1 if incremental
+                else input_ids.shape[-1]
+            ),
         })
         if output_format == "text":
             console.print(
