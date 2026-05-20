@@ -8528,6 +8528,14 @@ def node_models_list_cli(output_format: str, registry_root: Optional[str]):
     "sample deterministically (a partial mitigation for the "
     "audit-chain weakening that comes with non-greedy sampling).",
 )
+@click.option(
+    "--warm-up/--no-warm-up", default=False,
+    help="Sprint 643 — fire a throw-away forward to warm the stage "
+    "peer's HF model cache before the real run begins. Eliminates "
+    "the ~15s first-token cold-start hit so wall-clock matches "
+    "steady-state per-token latency. Warm-up tokens are NOT "
+    "written to --save-receipts.",
+)
 def node_infer_cli(
     prompt: str,
     model: str,
@@ -8540,6 +8548,7 @@ def node_infer_cli(
     temperature: Optional[float],
     top_k: Optional[int],
     seed: Optional[int],
+    warm_up: bool,
 ):
     """Generate tokens via the live PRSM P2P inference path.
 
@@ -8672,6 +8681,75 @@ def node_infer_cli(
             console.print(
                 f"[dim]Recording per-token receipts to "
                 f"{save_receipts_path}[/dim]"
+            )
+
+    # ── Warm-up (sprint 643) ──────────────────────────────
+    # Send one throw-away forward so the stage peer's HF model
+    # cache is hot before we time the real run. Without this, the
+    # first generation token takes ~15s while the droplet loads
+    # gpt2-124M from disk. Doesn't count toward max_tokens; not
+    # written to --save-receipts.
+    if warm_up:
+        if output_format == "text":
+            console.print(
+                f"[dim]Warming up stage peer's HF cache "
+                f"(throw-away forward)...[/dim]"
+            )
+        warm_t0 = _time.time()
+        try:
+            warm_input_ids = tok.encode("test", return_tensors="pt")
+            with _torch.no_grad():
+                we = hf_model.transformer.wte(warm_input_ids)
+                wp = hf_model.transformer.wpe(
+                    _torch.arange(warm_input_ids.shape[-1]).unsqueeze(0),
+                )
+                warm_act = (we + wp).numpy()
+            warm_req_id = f"prsm-cli-infer-warmup-{int(_time.time())}"
+            warm_deadline = _time.time() + timeout
+            warm_token = HandoffToken.sign(
+                identity=settler, request_id=warm_req_id,
+                chain_stage_index=0, chain_total_stages=1,
+                deadline_unix=warm_deadline,
+            )
+            warm_n_layers = getattr(
+                getattr(hf_model, "config", None),
+                "num_hidden_layers",
+                getattr(hf_model.config, "n_layer", 12),
+            )
+            warm_request = RunLayerSliceRequest(
+                request_id=warm_req_id, model_id=model,
+                layer_range=(0, warm_n_layers),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=warm_act.tobytes(),
+                activation_shape=tuple(warm_act.shape),
+                activation_dtype=str(warm_act.dtype),
+                upstream_token=warm_token, deadline_unix=warm_deadline,
+            )
+            warm_bytes = encode_message(warm_request)
+            _httpx.post(
+                f"{api_url}/admin/chain-exec-ping",
+                json={
+                    "peer_id": stage_peer_id,
+                    "payload_b64": base64.b64encode(
+                        warm_bytes,
+                    ).decode("ascii"),
+                    "timeout": timeout - 5.0,
+                },
+                timeout=timeout,
+            )
+            warm_dt = _time.time() - warm_t0
+            if output_format == "text":
+                console.print(
+                    f"[dim]  warm-up completed in {warm_dt:.1f}s[/dim]"
+                )
+        except Exception as exc:  # noqa: BLE001
+            # Warm-up failure shouldn't kill the run — just log and
+            # carry on; the real loop will hit the cold-start hit
+            # like pre-643 behavior.
+            console.print(
+                f"[yellow]⚠ warm-up failed; continuing without it: "
+                f"{type(exc).__name__}: {exc}[/yellow]"
             )
 
     # ── Generation loop ──
