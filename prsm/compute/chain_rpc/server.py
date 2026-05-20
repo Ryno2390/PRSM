@@ -1879,6 +1879,64 @@ class LayerStageServer:
                 f"layer-runner failure: {exc.__class__.__name__}",
             )
 
+    def _run_layer_slice_incremental(
+        self,
+        request: RunLayerSliceRequest,
+        model: Any,
+        activation: np.ndarray,
+        prev_kv_state: Any,
+    ):
+        """Sprint 655 — INCREMENTAL inline-path delegator.
+
+        Wraps runner.run_layer_range_incremental(...) with the same
+        TIMEOUT / INTERNAL_ERROR mapping as the PREFILL delegator.
+        Returns either a (LayerSliceResult, new_kv_state) tuple on
+        success OR a (StageErrorCode, message) tuple on failure.
+
+        Sprint 656 will add `run_layer_range_incremental` to
+        HuggingFaceLayerSliceRunner. Sprint 657 will wire
+        KVCacheManager.get/put around the call site. Until those
+        sprints land, this method correctly surfaces NOT_IMPLEMENTED
+        when called against a runner that doesn't yet implement
+        INCREMENTAL — the path is structurally in place so sprints
+        656-660 are pure additive plumbing rather than scaffolding.
+
+        ``prev_kv_state``: opaque value from the previous INCREMENTAL
+        or PREFILL call's `new_kv_state` output, OR None for a fresh
+        cache (server-side TTL eviction OR client-side first INCREMENTAL).
+        """
+        if not hasattr(self._runner, "run_layer_range_incremental"):
+            return (
+                StageErrorCode.MALFORMED_REQUEST,
+                f"runner {type(self._runner).__name__} does not "
+                f"implement run_layer_range_incremental; INCREMENTAL "
+                f"decode requires runner-side support (sprint 656 "
+                f"adds it for HuggingFaceLayerSliceRunner)",
+            )
+        try:
+            return self._runner.run_layer_range_incremental(
+                model=model,
+                layer_range=request.layer_range,
+                activation=activation,
+                privacy_tier=request.privacy_tier,
+                is_final_stage=_is_final_stage(
+                    model, request.layer_range,
+                ),
+                prev_kv_state=prev_kv_state,
+            )
+        except TimeoutError as exc:
+            return (StageErrorCode.TIMEOUT, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "LayerStageServer: runner.run_layer_range_incremental "
+                "raised for request_id=%r",
+                request.request_id,
+            )
+            return (
+                StageErrorCode.INTERNAL_ERROR,
+                f"layer-runner failure: {exc.__class__.__name__}",
+            )
+
     def _validate_streamed_envelope(
         self, request: RunLayerSliceRequest
     ) -> Optional[Tuple[StageErrorCode, str]]:
