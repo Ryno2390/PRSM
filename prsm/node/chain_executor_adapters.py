@@ -208,6 +208,49 @@ def build_stub_stage_executor() -> StageExecutor:
     return _StubStageExecutor()
 
 
+class LayerStageServerStageExecutor:
+    """Sprint 606 (Phase 2F-1) — wraps a chain_rpc LayerStageServer
+    as a StageExecutor.
+
+    The existing
+    ``prsm.compute.chain_rpc.server.LayerStageServer.handle(bytes) -> bytes``
+    already has the exact signature our StageExecutor Protocol
+    expects (sync, bytes-in/bytes-out, never raises by design).
+    This adapter:
+      - Provides the async ``execute()`` Protocol method
+      - Dispatches the (sync, potentially CPU-heavy) handle()
+        call via ``loop.run_in_executor`` so the event loop
+        thread isn't blocked
+      - Wraps any unexpected exception in ``StageExecutionError``
+        (defense-in-depth — handle() shouldn't raise but if it
+        does, the request handler surfaces it cleanly)
+
+    Phase 2F-2 (sprint 607+) ships the factory that constructs
+    the underlying LayerStageServer with the operator's identity +
+    registry + runner + tee_runtime + anchor.
+    """
+
+    def __init__(self, *, server: Any) -> None:
+        if server is None or not hasattr(server, "handle"):
+            raise ValueError(
+                "LayerStageServerStageExecutor requires a server "
+                "with a .handle(bytes) -> bytes method"
+            )
+        self._server = server
+
+    async def execute(self, request_bytes: bytes) -> bytes:
+        loop = asyncio.get_event_loop()
+        try:
+            return await loop.run_in_executor(
+                None, self._server.handle, request_bytes,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise StageExecutionError(
+                f"LayerStageServer.handle raised {type(exc).__name__}: "
+                f"{exc}"
+            ) from exc
+
+
 def build_echo_stage_executor() -> StageExecutor:
     """Sprint 603 (Phase 2E-3) — diagnostic StageExecutor that
     echoes its input bytes back unchanged.
