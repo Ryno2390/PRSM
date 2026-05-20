@@ -87,6 +87,32 @@ PublisherKeyAnchor: 0x<NEW_ADDRESS>
 Admin:              0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791
 ```
 
+## Operator-side: install blockchain extra BEFORE flipping production
+
+`PRSM_PARALLAX_TRUST_STACK_KIND=production` lazy-imports
+`web3` + `eth_account` (via PublisherKeyAnchorClient + StakeManagerClient).
+These live in PRSM's `[blockchain]` extra, not required deps.
+
+Without the extra, operators get clear error messages from
+`prsm node section7-readiness`:
+
+```
+construction_failed: RuntimeError: web3 + eth_account packages required for live RPC;
+install with `pip install web3 eth-account` OR pass an injected web3/contract for tests
+```
+
+Fix on each operator host BEFORE flipping production env vars:
+
+```bash
+cd /opt/prsm-operator         # or whatever the install root is
+.venv/bin/pip install -e ".[blockchain]"
+systemctl restart prsm-operator
+```
+
+Confirmed on bootstrap-us droplet sprint 621 — pre-install
+section7-readiness showed `anchor: construction_failed`,
+post-install all 3 components flipped to `✓ ok`.
+
 ## Post-deploy steps (autonomous-able once we have the address)
 
 1. Update `prsm/config/networks.py`:
