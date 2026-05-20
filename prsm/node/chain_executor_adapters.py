@@ -288,6 +288,38 @@ class HuggingFaceLayerSliceRunner:
             )
         self.model_id = model_id
         self.device = device or "cpu"
+        # Lazy-cached on first run_layer_range call.
+        self._hf_model: Any = None
+
+    def _ensure_model_loaded(self) -> Any:
+        """Sprint 611 (Phase 2F-5b) — lazy model load + cache."""
+        if self._hf_model is not None:
+            return self._hf_model
+        # Lazy imports keep transformers off the import path for
+        # daemons not using the HF runner.
+        try:
+            import transformers  # noqa: F401
+            import torch  # noqa: F401
+        except ImportError as exc:
+            raise StageExecutionError(
+                f"HuggingFaceLayerSliceRunner requires `transformers` "
+                f"+ `torch` packages installed: {exc}. Install via "
+                f"`pip install transformers torch`."
+            ) from exc
+        try:
+            from transformers import AutoModelForCausalLM
+            import torch as _torch
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id, torch_dtype=_torch.float32,
+            )
+            model = model.to(self.device).eval()
+        except Exception as exc:  # noqa: BLE001
+            raise StageExecutionError(
+                f"HuggingFaceLayerSliceRunner failed to load "
+                f"{self.model_id!r}: {type(exc).__name__}: {exc}"
+            ) from exc
+        self._hf_model = model
+        return model
 
     def run_layer_range(
         self,
@@ -298,16 +330,78 @@ class HuggingFaceLayerSliceRunner:
         privacy_tier: Any,
         is_final_stage: bool,
     ) -> Any:
-        raise StageExecutionError(
-            f"Sprint 610 Phase 2F-5a skeleton: "
-            f"HuggingFaceLayerSliceRunner.run_layer_range() is not "
-            f"yet implemented (model_id={self.model_id!r}, "
-            f"device={self.device!r}). Phase 2F-5b (next sprint) "
-            f"will ship: lazy `transformers` import, model loading "
-            f"from HF Hub or local checkpoint, layer extraction + "
-            f"forward pass on the activation tensor. Until then, "
-            f"use PRSM_PARALLAX_LAYER_SLICE_RUNNER_KIND=identity "
-            f"(sprint 608 passthrough) for wire testing."
+        """Sprint 611 (Phase 2F-5b) — real HF model forward pass.
+
+        Workflow:
+          1. Lazy-load HF model (cached after first call)
+          2. Extract layer list (LLaMA-style ``.model.layers``)
+          3. Convert numpy activation → torch [B, S, H]
+          4. Build position_ids = arange(S)
+          5. Forward through layers[start:end]
+          6. Convert back → numpy + return LayerSliceResult
+
+        The ``model`` arg (passed from registry.get) is ignored;
+        HF runner owns its own model loading.
+
+        Assumes LLaMA-style architecture (.model.layers). Future
+        sprints handle GPT-style (.transformer.h) + other variants.
+        """
+        import time as _time
+        hf_model = self._ensure_model_loaded()
+        import torch as _torch
+        from prsm.compute.chain_rpc.server import LayerSliceResult
+        from prsm.compute.tee.models import TEEType
+
+        start_t = _time.monotonic()
+        try:
+            layers = hf_model.model.layers
+        except AttributeError as exc:
+            raise StageExecutionError(
+                f"HuggingFaceLayerSliceRunner: model {self.model_id!r} "
+                f"does not expose `.model.layers` (LLaMA-style). "
+                f"Other architectures (GPT-style `.transformer.h`, "
+                f"etc.) are not yet supported by Phase 2F-5b. {exc}"
+            ) from exc
+        start, end = int(layer_range[0]), int(layer_range[1])
+        if start < 0 or end > len(layers) or start >= end:
+            raise StageExecutionError(
+                f"HuggingFaceLayerSliceRunner: invalid layer_range "
+                f"({start}, {end}) for model with {len(layers)} layers"
+            )
+        original_ndim = activation.ndim
+        hidden = _torch.from_numpy(activation).to(self.device)
+        if hidden.dim() == 2:
+            hidden = hidden.unsqueeze(0)
+        # position_ids = arange(S) broadcast over batch — sufficient
+        # for non-cached forward; KV-cache + rolling positions land
+        # in a later phase.
+        seq_len = hidden.shape[-2] if hidden.dim() >= 2 else 1
+        position_ids = _torch.arange(
+            seq_len, device=self.device,
+        ).unsqueeze(0)
+        try:
+            with _torch.no_grad():
+                for i in range(start, end):
+                    out = layers[i](hidden, position_ids=position_ids)
+                    # LLaMA layer returns tuple (hidden_state, ...)
+                    hidden = out[0] if isinstance(out, tuple) else out
+        except Exception as exc:  # noqa: BLE001
+            raise StageExecutionError(
+                f"HuggingFaceLayerSliceRunner forward pass failed "
+                f"at layer {i} of {self.model_id!r}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        # Convert back to numpy, restore original ndim.
+        if original_ndim == 2:
+            hidden = hidden.squeeze(0)
+        output_np = hidden.cpu().numpy()
+        duration = _time.monotonic() - start_t
+        return LayerSliceResult(
+            output=output_np,
+            duration_seconds=duration,
+            tee_attestation=b"hf-runner-software-attestation",
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
         )
 
 
@@ -462,12 +556,33 @@ def _build_layer_slice_runner_from_env() -> Any:
     ) or "").strip().lower() or "identity"
     if kind == "identity":
         return IdentityLayerSliceRunner()
+    if kind == "huggingface":
+        # Sprint 611 Phase 2F-5b — real HF transformer runner.
+        # Operator MUST set PRSM_PARALLAX_HF_MODEL_ID to a valid HF
+        # model identifier (e.g., "meta-llama/Llama-3.2-1B").
+        import os as _os
+        model_id = (_os.environ.get(
+            "PRSM_PARALLAX_HF_MODEL_ID", "",
+        ) or "").strip()
+        if not model_id:
+            import logging as _l
+            _l.getLogger(__name__).warning(
+                "Sprint 611 layer-slice-runner: huggingface kind "
+                "requires PRSM_PARALLAX_HF_MODEL_ID env. Falling "
+                "back to identity."
+            )
+            return IdentityLayerSliceRunner()
+        device = (_os.environ.get(
+            "PRSM_PARALLAX_HF_DEVICE", "",
+        ) or "").strip() or "cpu"
+        return HuggingFaceLayerSliceRunner(
+            model_id=model_id, device=device,
+        )
     import logging as _l
     _l.getLogger(__name__).warning(
-        "Sprint 609 layer-slice-runner selector: "
+        "Sprint 609/611 layer-slice-runner selector: "
         "PRSM_PARALLAX_LAYER_SLICE_RUNNER_KIND=%r unknown; falling "
-        "back to identity. Valid: identity (Phase 2F-5+ adds "
-        "real model-framework runners).",
+        "back to identity. Valid: identity, huggingface.",
         kind,
     )
     return IdentityLayerSliceRunner()
