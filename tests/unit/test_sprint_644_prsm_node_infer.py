@@ -585,6 +585,84 @@ def test_no_incremental_defaults_to_prefill_mode(
     assert all(m == "prefill" for m in decode_modes)
 
 
+def test_stop_string_halts_generation_early(
+    runner, hf_stubs, identity_stub,
+):
+    """Sprint 664 — --stop "tok7" halts as soon as the generated
+    tail contains "tok7". Mock's argmax always picks token id 7,
+    which decodes to " tok7" via our fake tokenizer, so the
+    first generated token contains "tok7" → stop after step 0.
+    """
+    post_count = [0]
+
+    def post_capture(*a, **kw):
+        post_count[0] += 1
+        return _chain_exec_ping_ok()
+
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", side_effect=post_capture):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "10",
+            "--stop", "tok7",
+        ])
+    assert result.exit_code == 0
+    assert "stopped early" in result.output
+    # Only 1 POST despite max_tokens=10
+    assert post_count[0] == 1
+
+
+def test_multiple_stop_strings_match_any(
+    runner, hf_stubs, identity_stub,
+):
+    """--stop a --stop b → halt on either."""
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", return_value=_chain_exec_ping_ok()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "10",
+            "--stop", "neverhit",
+            "--stop", "tok7",
+        ])
+    assert result.exit_code == 0
+    assert "stopped early" in result.output
+
+
+def test_no_stop_strings_runs_to_max_tokens(
+    runner, hf_stubs, identity_stub,
+):
+    """Without --stop, generation runs the full max_tokens budget."""
+    post_count = [0]
+
+    def post_capture(*a, **kw):
+        post_count[0] += 1
+        return _chain_exec_ping_ok()
+
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", side_effect=post_capture):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "4",
+        ])
+    assert result.exit_code == 0
+    assert "stopped early" not in result.output
+    assert post_count[0] == 4
+
+
+def test_no_stop_on_eos_disables_eos_stopping(
+    runner, hf_stubs, identity_stub,
+):
+    """--no-stop-on-eos lets generation past EOS. With our mock
+    setting eos_token_id != 7, this flag doesn't matter for these
+    runs — the test asserts the flag is accepted and the run
+    completes (regression guard).
+    """
+    with patch("httpx.get", return_value=_peers_resp()), \
+         patch("httpx.post", return_value=_chain_exec_ping_ok()):
+        result = runner.invoke(node, [
+            "infer", "--prompt", "h", "-n", "2",
+            "--no-stop-on-eos",
+        ])
+    assert result.exit_code == 0
+
+
 def test_incremental_sends_full_prefix_on_step_0_only(
     runner, hf_stubs, identity_stub, tmp_path,
 ):

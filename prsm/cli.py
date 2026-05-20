@@ -8544,6 +8544,22 @@ def node_models_list_cli(output_format: str, registry_root: Optional[str]):
     "where you don't plan to verify-receipts --strict).",
 )
 @click.option(
+    "--stop", "stop_strings", multiple=True,
+    help="Sprint 664 — stop generation early when any of these "
+    "strings appears in the generated tail. Multi-value: pass "
+    "multiple times to stop on any-of. Common: --stop '.' --stop "
+    "$'\\n' --stop '###'. Stops AFTER appending the matched token "
+    "so the stop marker appears in the output. Greedy + sampled "
+    "modes both honor stop strings.",
+)
+@click.option(
+    "--stop-on-eos/--no-stop-on-eos", default=True,
+    help="Sprint 664 — stop generation when the model emits its "
+    "EOS token (gpt2: <|endoftext|>, id 50256; llama: </s>). "
+    "Default on; --no-stop-on-eos lets you keep generating past "
+    "the model's natural end (rarely useful — generates noise).",
+)
+@click.option(
     "--incremental/--no-incremental", default=False,
     help="Sprint 662 — engage the KV-cache fast path (sprints 654-660). "
     "Stable request_id + decode_mode=INCREMENTAL across the run; "
@@ -8571,6 +8587,8 @@ def node_infer_cli(
     warm_up: bool,
     no_seed_warning: bool,
     incremental: bool,
+    stop_strings: tuple,
+    stop_on_eos: bool,
 ):
     """Generate tokens via the live PRSM P2P inference path.
 
@@ -8948,6 +8966,26 @@ def node_infer_cli(
             token_ids_so_far.append(next_id)
         step_dt = _time.time() - step_t0
 
+        # Sprint 664 — stop conditions. Check AFTER appending so
+        # the stop marker (EOS token or stop string) appears in
+        # the output text.
+        stop_reason: Optional[str] = None
+        if stop_on_eos:
+            eos_id = getattr(
+                getattr(hf_model, "config", None), "eos_token_id", None,
+            )
+            if eos_id is not None and next_id == eos_id:
+                stop_reason = f"eos_token ({eos_id})"
+        if not stop_reason and stop_strings:
+            # Match on the FULL generated tail (text minus initial
+            # prompt). Single-token matching would miss multi-token
+            # stop strings like "###" that tokenize to multiple ids.
+            generated_tail = text[len(prompt):]
+            for stop_str in stop_strings:
+                if stop_str and stop_str in generated_tail:
+                    stop_reason = f"stop string {stop_str!r}"
+                    break
+
         # Sprint 634 — record signed receipt for this token. The
         # stage_signature is over the canonical signing payload
         # (chain_rpc.protocol.RunLayerSliceResponse.signing_payload);
@@ -9039,6 +9077,13 @@ def node_infer_cli(
                 f"{next_id:6d} [cyan]{next_token!r:>14s}[/cyan]  "
                 f"([dim]{step_dt:.1f}s[/dim])"
             )
+        # Sprint 664 — break the loop on stop condition.
+        if stop_reason is not None:
+            if output_format == "text":
+                console.print(
+                    f"  [dim]→ stopped early: {stop_reason}[/dim]"
+                )
+            break
 
     overall_dt = _time.time() - overall_t0
     # Sprint 634 — close receipts sink cleanly. Failure here is
