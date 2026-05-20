@@ -420,6 +420,13 @@ class TestFailurePaths:
         result = _run(executor.execute(_request()))
         assert result.success is False
         assert "empty" in result.error.lower()
+        # Sprint 631 — error is actionable. Pre-631 it was just "GPU
+        # pool is empty"; operators with all other PRSM_PARALLAX_*
+        # env vars wired hit this dead end without a breadcrumb. The
+        # message now names the static-empty default + the sprint
+        # that wires the canonical fix.
+        assert "static-empty" in result.error
+        assert "sprint 561" in result.error.lower()
 
     def test_pool_provider_exception_is_caught(self):
         executor, _, _ = _make_executor(pool=[_gpu("a")])

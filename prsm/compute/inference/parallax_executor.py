@@ -613,8 +613,20 @@ class ParallaxScheduledExecutor(InferenceExecutor):
                 f"GPU pool provider failure: {exc}",
             ))
         if not raw_pool:
+            # Sprint 631 — actionable error. Pre-sprint the message
+            # was just "GPU pool is empty"; operators with all other
+            # PRSM_PARALLAX_* env vars set correctly hit this and had
+            # no breadcrumb pointing at the static-empty default. The
+            # canonical fix (DHT-backed provider per sprint 561) is
+            # the right answer; this message at least documents it.
             return _GateOutcome(failure=InferenceResult.failure(
-                request.request_id, "GPU pool is empty"
+                request.request_id,
+                "GPU pool is empty (gpu_pool_provider returned []). "
+                "Default PRSM_PARALLAX_GPU_POOL_KIND=static-empty "
+                "provides no GPUs by design; sprint 561+ wires a "
+                "DHT-backed provider that discovers peer GPUs. "
+                "Until then, /compute/inference and /compute/inference/"
+                "stream cannot route through ParallaxScheduledExecutor."
             ))
         anchor_filtered = self._trust.filter_pool(raw_pool)
         if not anchor_filtered:
