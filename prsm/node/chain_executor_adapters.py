@@ -66,6 +66,48 @@ class _Phase2AdapterNotReady(NotImplementedError):
     """
 
 
+class PeerNotFound(RuntimeError):
+    """Sprint 593 (Phase 2B) — raised by the address resolver when
+    a chain stage's node_id isn't currently in ``transport.peers``.
+
+    Operators triaging chain-executor failures see the missing
+    node_id in the exception message. Sprint-595 wiring will catch
+    this at executor-startup time + report it via the trust-stack
+    observability surfaces (sprint 579 CLI + 582 /health/detailed)
+    so the failure is visible BEFORE a real inference request hits
+    the dispatch.
+    """
+
+
+def build_address_resolver(node: Any) -> Callable[[str], str]:
+    """Sprint 593 (Phase 2B) — map chain stage node_id → transport
+    peer.address by looking up ``node.transport.peers[node_id]``.
+
+    Raises ``PeerNotFound`` when the node isn't currently in
+    transport.peers. The chain executor's dispatch loop catches
+    this to surface "stage N unreachable" cleanly rather than
+    propagating a KeyError up.
+
+    Returns the canonical ``AddressResolver = Callable[[str], str]``
+    shape from ``prsm/compute/chain_rpc/client.py``.
+    """
+    transport = node.transport
+
+    def _resolve(node_id: str) -> str:
+        peer = transport.peers.get(node_id)
+        if peer is None:
+            raise PeerNotFound(
+                f"chain stage node_id {node_id!r} not currently "
+                f"in transport.peers; cannot dispatch. Likely "
+                f"causes: peer dropped connection, auto-dial sweep "
+                f"hasn't reached this peer yet (sprint 573), or "
+                f"peer never registered against the same bootstrap."
+            )
+        return peer.address
+
+    return _resolve
+
+
 def build_send_message_adapter(node: Any) -> SendMessageAdapter:
     """Phase 2A placeholder. Returns a callable that, when invoked,
     raises ``_Phase2AdapterNotReady``.
