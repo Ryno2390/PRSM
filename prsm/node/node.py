@@ -4027,6 +4027,21 @@ class PRSMNode:
         if self._started:
             return
 
+        # Sprint 595 (Phase 2D) — capture the running event loop +
+        # initialize the chain-executor pending-requests dict. Used
+        # by sprint-594's run_async_on_loop primitive to bridge the
+        # sync SendMessage contract over async transport calls
+        # (sprint-596+ wiring). Reversible: pure attribute init; if
+        # nothing reads these, no behavior change.
+        import asyncio as _asyncio
+        try:
+            self._loop = _asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
+        # Maps chain-executor request_id → Future awaiting response
+        # bytes. Sprint-597 wires the message-handler to resolve.
+        self._chain_executor_pending = {}
+
         await self.transport.start()
         await self.gossip.start()
         await self.discovery.start()
