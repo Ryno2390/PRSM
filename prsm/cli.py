@@ -9739,6 +9739,30 @@ def _node_admin_list_details(
     try:
         with urllib.request.urlopen(url, timeout=10) as r:
             payload = _json.loads(r.read())
+    except urllib.error.HTTPError as exc:
+        # Sprint 646 fix: the server's HTTPException carries an
+        # actionable `detail` field (e.g., "set PRSM_PIPELINE_
+        # ORCHESTRATOR_PRIVKEY env") that the default urllib
+        # message ("Service Unavailable") swallows. Decode the
+        # response body so operators see the breadcrumb.
+        body_msg = ""
+        try:
+            body_raw = exc.read().decode("utf-8", errors="replace")
+            body_json = _json.loads(body_raw)
+            body_msg = body_json.get("detail", body_raw)
+        except Exception:  # noqa: BLE001
+            body_msg = ""
+        if body_msg:
+            click.echo(
+                f"Failed to fetch {group_name} jobs: "
+                f"HTTP {exc.code} — {body_msg}",
+                err=True,
+            )
+        else:
+            click.echo(
+                f"Failed to fetch {group_name} jobs: {exc}", err=True,
+            )
+        sys.exit(2)
     except Exception as exc:  # noqa: BLE001
         click.echo(
             f"Failed to fetch {group_name} jobs: {exc}", err=True,

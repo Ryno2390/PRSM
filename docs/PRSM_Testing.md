@@ -697,12 +697,12 @@ fill them.
 | Feature | Has REST | Has CLI | Has MCP | Notes |
 |---------|----------|---------|---------|-------|
 | Incident response (triage) | ✅ | ✅ Sprint 434 (read-only) | ✅ | Trifecta-complete for read path; mutating commands deferred |
-| Insurance fund status + recovery compose | ✅ | ✅ Sprint 435 | 🟢 | Trifecta-complete: `prsm node insurance status/compose-recovery` |
-| TEE policy status + evaluate | ✅ | ✅ Sprint 436 | 🟢 | Trifecta-complete: `prsm node tee status/evaluate` |
-| Federated learning admin | ✅ | ✅ Sprint 437 (read-only) | 🟢 | Trifecta-complete: `prsm node federated list/details` |
-| Pipeline inference admin | ✅ | ✅ Sprint 437 (read-only) | 🟢 | Trifecta-complete: `prsm node pipeline list/details` |
+| Insurance fund status + recovery compose | ✅ | ✅ Sprint 435 | ✅ Sprint 646 (live: `status` returns Foundation Safe treasury 0x91b0e6F8... + commissioned=false in dev; `compose-recovery` errors cleanly with `PRSM_INSURANCE_FUND_ADDRESS` breadcrumb when fund unset) | Trifecta-complete |
+| TEE policy status + evaluate | ✅ | ✅ Sprint 436 | ✅ Sprint 646 (live: `status` returns effective_tier=none + "no attestation blob configured" diagnostic) | Trifecta-complete |
+| Federated learning admin | ✅ | ✅ Sprint 437 (read-only) | ✅ Sprint 646 (live: `list` returns "No active federated jobs" empty-state) | Trifecta-complete |
+| Pipeline inference admin | ✅ | ✅ Sprint 437 (read-only) | ✅ Sprint 646 (F25 fix: pre-646 `list` showed generic "HTTP 503: Service Unavailable" swallowing the server's `set PRSM_PIPELINE_ORCHESTRATOR_PRIVKEY` breadcrumb; sprint 646 decodes response body so detail reaches operator) | Trifecta-complete |
 | Bridge deposit/withdraw | ✅ | ✅ | 🟢 | Trifecta-complete |
-| `prsm node fiat-readiness` | (uses sprint-285 function) | ✅ | 🟢 (`prsm_fiat_surface_health`) | Trifecta-complete |
+| `prsm node fiat-readiness` | (uses sprint-285 function) | ✅ | ✅ Sprint 646 (live: "✓ Phase 5 fiat surface ready — OK (no findings)") | Trifecta-complete |
 
 ---
 
