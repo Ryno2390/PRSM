@@ -9077,6 +9077,16 @@ def node_infer_cli(
                 f"{next_id:6d} [cyan]{next_token!r:>14s}[/cyan]  "
                 f"([dim]{step_dt:.1f}s[/dim])"
             )
+            # Sprint 665 — force flush so operators piping the
+            # output through `head`, `tee`, or another process
+            # see tokens as they're generated, not in a buffered
+            # batch at end-of-run. Rich's default buffering when
+            # stdout is not a TTY would otherwise delay visibility
+            # by minutes for long generations.
+            try:
+                console.file.flush()
+            except Exception:  # noqa: BLE001
+                pass
         # Sprint 664 — break the loop on stop condition.
         if stop_reason is not None:
             if output_format == "text":
