@@ -8437,6 +8437,29 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             raise HTTPException(
                 status_code=400, detail="peer_id is required",
             )
+        # Sprint 624 — accept either `payload` (UTF-8 string) OR
+        # `payload_b64` (base64-encoded raw bytes). The latter is
+        # required for arbitrary binary wire payloads like
+        # encode_message(RunLayerSliceRequest) which contain
+        # non-UTF-8 bytes. Both paths feed identical bytes into
+        # the SendMessage adapter.
+        import base64 as _b64
+        payload_b64_str = body.get("payload_b64")
+        if payload_b64_str is not None:
+            if not isinstance(payload_b64_str, str):
+                raise HTTPException(
+                    status_code=400,
+                    detail="payload_b64 must be a base64 string",
+                )
+            try:
+                request_bytes_override = _b64.b64decode(payload_b64_str)
+            except Exception as exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"payload_b64 base64 decode failed: {exc}",
+                )
+        else:
+            request_bytes_override = None
         payload_str = body.get("payload", "")
         if not isinstance(payload_str, str):
             raise HTTPException(
@@ -8454,7 +8477,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         )
         import base64
         adapter = build_send_message_adapter(node, timeout=timeout)
-        request_bytes = payload_str.encode("utf-8")
+        request_bytes = (
+            request_bytes_override
+            if request_bytes_override is not None
+            else payload_str.encode("utf-8")
+        )
 
         # The adapter is sync (drives loop via run_async_on_loop) +
         # we're already inside the loop's thread — must dispatch the
