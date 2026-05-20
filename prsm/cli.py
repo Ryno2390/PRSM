@@ -8482,7 +8482,17 @@ def node_models_list_cli(output_format: str, registry_root: Optional[str]):
 @click.option(
     "--stage-peer-id", default=None,
     help="Peer ID of the layer-stage server. If omitted, uses the "
-    "first connected peer.",
+    "first connected peer. Ignored when --stages is set.",
+)
+@click.option(
+    "--stages", "stages_spec", multiple=True,
+    help="Sprint 668 — multi-stage chain spec. Format: "
+    "'lo-hi:peer_id' (e.g., '0-6:peer-A'). Pass --stages multiple "
+    "times for multi-stage. Settler mints distinct HandoffTokens "
+    "per stage with chain_stage_index ascending; each stage signs "
+    "its output. Single-host smoke test: '--stages 0-6:peer-X "
+    "--stages 6-12:peer-X' (same peer twice). When --stages is "
+    "set, --stage-peer-id is ignored.",
 )
 @click.option(
     "--api", "api_url", default="http://127.0.0.1:8000", show_default=True,
@@ -8598,6 +8608,7 @@ def node_infer_cli(
     stop_strings: tuple,
     stop_on_eos: bool,
     output_file: Optional[str],
+    stages_spec: tuple,
 ):
     """Generate tokens via the live PRSM P2P inference path.
 
@@ -8644,7 +8655,43 @@ def node_infer_cli(
         _sys.exit(1)
     peers_data = peers_resp.json()
     connected = peers_data.get("connected", [])
-    if stage_peer_id is None:
+    # Sprint 668 — parse --stages spec if provided. Format:
+    # 'lo-hi:peer_id'. Validates each entry; sets up `stages` list
+    # of (lo, hi, peer_id) tuples that the generation loop uses.
+    # When --stages is provided, --stage-peer-id is ignored.
+    stages_list = []
+    if stages_spec:
+        for spec in stages_spec:
+            if ":" not in spec or "-" not in spec.split(":", 1)[0]:
+                console.print(
+                    f"[red]✗ Invalid --stages spec[/red] {spec!r}; "
+                    f"format is 'lo-hi:peer_id' (e.g., '0-6:peer-A')"
+                )
+                _sys.exit(1)
+            range_part, peer = spec.split(":", 1)
+            try:
+                lo_str, hi_str = range_part.split("-", 1)
+                lo, hi = int(lo_str), int(hi_str)
+            except ValueError:
+                console.print(
+                    f"[red]✗ Invalid --stages layer range[/red] in "
+                    f"{spec!r}; lo/hi must be integers"
+                )
+                _sys.exit(1)
+            if lo >= hi or lo < 0:
+                console.print(
+                    f"[red]✗ Invalid --stages layer range[/red] in "
+                    f"{spec!r}; require 0 <= lo < hi"
+                )
+                _sys.exit(1)
+            stages_list.append((lo, hi, peer.strip()))
+        if output_format == "text":
+            console.print(
+                f"[dim]Multi-stage chain: {len(stages_list)} stages — "
+                f"{', '.join(f'[{s[0]},{s[1]}):{s[2][:8]}' for s in stages_list)}"
+                f"[/dim]"
+            )
+    elif stage_peer_id is None:
         if not connected:
             console.print(
                 "[red]✗ No connected peers[/red]. Need at least one "
@@ -8871,76 +8918,95 @@ def node_infer_cli(
         else:
             request_id = f"prsm-cli-infer-step{step}-{int(_time.time())}"
         deadline = _time.time() + timeout
-        ho_token = HandoffToken.sign(
-            identity=settler, request_id=request_id,
-            chain_stage_index=0, chain_total_stages=1,
-            deadline_unix=deadline,
-        )
-        # Layer range = (0, num_layers) so the stage runs the full
-        # stack. For gpt2 num_layers=12; the catalog drives this.
-        # Defensively read from hf_model.config when available so
-        # CLI works against any model on the registry.
+        # Sprint 668 — multi-stage chain. When --stages is set we
+        # build a chain definition and iterate stage-by-stage,
+        # threading each stage's output as the next stage's input.
+        # Single-stage (default) path keeps the existing behavior.
         n_layers = getattr(
             getattr(hf_model, "config", None), "num_hidden_layers",
             getattr(hf_model.config, "n_layer", 12),
         )
-        request_kwargs = dict(
-            request_id=request_id, model_id=model,
-            layer_range=(0, n_layers),
-            privacy_tier=PrivacyLevel.NONE,
-            content_tier=ContentTier.A,
-            activation_blob=activation.tobytes(),
-            activation_shape=tuple(activation.shape),
-            activation_dtype=str(activation.dtype),
-            upstream_token=ho_token, deadline_unix=deadline,
-        )
-        if incremental:
-            request_kwargs["decode_mode"] = DecodeMode.INCREMENTAL
-        request = RunLayerSliceRequest(**request_kwargs)
-        req_bytes = encode_message(request)
+        if stages_list:
+            effective_stages = stages_list
+        else:
+            effective_stages = [(0, int(n_layers), stage_peer_id)]
+        chain_total = len(effective_stages)
 
-        try:
-            r = _httpx.post(
-                f"{api_url}/admin/chain-exec-ping",
-                json={
-                    "peer_id": stage_peer_id,
-                    "payload_b64": base64.b64encode(req_bytes).decode("ascii"),
-                    "timeout": timeout - 5.0,
-                },
-                timeout=timeout,
+        current_activation = activation
+        resp = None  # filled by final stage
+        for stage_idx, (lo, hi, peer_id) in enumerate(effective_stages):
+            ho_token = HandoffToken.sign(
+                identity=settler, request_id=request_id,
+                chain_stage_index=stage_idx,
+                chain_total_stages=chain_total,
+                deadline_unix=deadline,
             )
-        except Exception as exc:
-            console.print(
-                f"[red]✗ step {step}: chain-exec-ping failed[/red]: "
-                f"{type(exc).__name__}: {exc}"
+            request_kwargs = dict(
+                request_id=request_id, model_id=model,
+                layer_range=(lo, hi),
+                privacy_tier=PrivacyLevel.NONE,
+                content_tier=ContentTier.A,
+                activation_blob=current_activation.tobytes(),
+                activation_shape=tuple(current_activation.shape),
+                activation_dtype=str(current_activation.dtype),
+                upstream_token=ho_token, deadline_unix=deadline,
             )
-            _sys.exit(1)
-        if r.status_code != 200:
-            console.print(
-                f"[red]✗ step {step}: HTTP {r.status_code}[/red]: "
-                f"{r.text[:300]}"
-            )
-            _sys.exit(1)
-        resp_bytes = base64.b64decode(r.json()["response_b64"])
-        try:
-            resp = parse_message(resp_bytes)
-        except Exception as exc:
-            console.print(
-                f"[red]✗ step {step}: parse_message failed[/red]: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            _sys.exit(1)
-        if not hasattr(resp, "activation_blob"):
-            msg = getattr(resp, "message", "?")
-            code = getattr(resp, "code", "?")
-            console.print(
-                f"[red]✗ step {step}: StageError[/red] code={code} "
-                f"message={msg}"
-            )
-            _sys.exit(1)
-        logits = _np.frombuffer(
-            resp.activation_blob, dtype=resp.activation_dtype,
-        ).reshape(resp.activation_shape)
+            if incremental:
+                request_kwargs["decode_mode"] = DecodeMode.INCREMENTAL
+            request = RunLayerSliceRequest(**request_kwargs)
+            req_bytes = encode_message(request)
+            try:
+                r = _httpx.post(
+                    f"{api_url}/admin/chain-exec-ping",
+                    json={
+                        "peer_id": peer_id,
+                        "payload_b64": base64.b64encode(req_bytes).decode("ascii"),
+                        "timeout": timeout - 5.0,
+                    },
+                    timeout=timeout,
+                )
+            except Exception as exc:
+                console.print(
+                    f"[red]✗ step {step} stage {stage_idx}: "
+                    f"chain-exec-ping failed[/red]: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                _sys.exit(1)
+            if r.status_code != 200:
+                console.print(
+                    f"[red]✗ step {step} stage {stage_idx}: "
+                    f"HTTP {r.status_code}[/red]: {r.text[:300]}"
+                )
+                _sys.exit(1)
+            resp_bytes = base64.b64decode(r.json()["response_b64"])
+            try:
+                resp = parse_message(resp_bytes)
+            except Exception as exc:
+                console.print(
+                    f"[red]✗ step {step} stage {stage_idx}: "
+                    f"parse_message failed[/red]: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                _sys.exit(1)
+            if not hasattr(resp, "activation_blob"):
+                msg = getattr(resp, "message", "?")
+                code = getattr(resp, "code", "?")
+                console.print(
+                    f"[red]✗ step {step} stage {stage_idx}: "
+                    f"StageError[/red] code={code} message={msg}"
+                )
+                _sys.exit(1)
+            # Decode response activation as input for the next
+            # stage (or as final logits if this is the tail stage).
+            current_activation = _np.frombuffer(
+                resp.activation_blob, dtype=resp.activation_dtype,
+            ).reshape(resp.activation_shape)
+        # After the per-stage loop, `resp` is the FINAL stage's
+        # signed response. Final activation = logits at the tail
+        # stage (server applies ln_f + lm_head when
+        # is_final_stage=True, which it computes from the layer
+        # range covering the model's last layer).
+        logits = current_activation
         # Sprint 639 — sampling. The `sampling_mode` string is also
         # written into the receipt so verify-receipts --check-chain
         # knows whether to apply the argmax↔next_token_id invariant
