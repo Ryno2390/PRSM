@@ -328,6 +328,8 @@ def build_hf_prompt_encoder(
             "build_hf_prompt_encoder requires model_id "
             "(HuggingFace identifier)"
         )
+    # Sprint 617 — auto-detect / safe-fallback device selection.
+    device = _resolve_hf_device(device)
 
     # Closed-over cache so we only load once.
     _state: Dict[str, Any] = {
@@ -380,6 +382,47 @@ def build_hf_prompt_encoder(
             ) from exc
 
     return _encode
+
+
+def _resolve_hf_device(requested: str) -> str:
+    """Sprint 617 (Phase 2F-5h) — centralized HF device selection.
+
+    Behavior:
+      "cpu"             → "cpu" (always honored — no override)
+      "cuda" + CUDA OK  → "cuda"
+      "cuda" + no CUDA  → "cpu" + WARNING (operator typo /
+                          missing CUDA install / cpu-only host)
+      "auto" / ""       → "cuda" if available, else "cpu"
+      other             → treat as auto
+
+    torch import failure → "cpu" safe-fallback (no torch means no
+    GPU possible; constructing the runner will still surface the
+    underlying ImportError at first use).
+
+    Used by HuggingFaceLayerSliceRunner / build_hf_prompt_encoder /
+    build_hf_output_decoder so operators flipping
+    PRSM_PARALLAX_HF_DEVICE=auto get sane defaults pipeline-wide.
+    """
+    req = (requested or "auto").lower().strip()
+    if req == "cpu":
+        return "cpu"
+    try:
+        import torch as _torch
+        cuda_ok = bool(_torch.cuda.is_available())
+    except Exception:  # noqa: BLE001
+        cuda_ok = False
+    if req == "cuda":
+        if cuda_ok:
+            return "cuda"
+        import logging as _l
+        _l.getLogger(__name__).warning(
+            "Sprint 617 _resolve_hf_device: device=cuda requested "
+            "but torch.cuda.is_available() returned False (no GPU "
+            "or torch missing CUDA build). Falling back to cpu."
+        )
+        return "cpu"
+    # auto / empty / unknown → pick best available
+    return "cuda" if cuda_ok else "cpu"
 
 
 def build_hf_output_decoder(
@@ -512,7 +555,8 @@ class HuggingFaceLayerSliceRunner:
                 "'meta-llama/Llama-3.2-1B')"
             )
         self.model_id = model_id
-        self.device = device or "cpu"
+        # Sprint 617 — auto-detect / safe-fallback device selection.
+        self.device = _resolve_hf_device(device)
         # Lazy-cached on first run_layer_range call.
         self._hf_model: Any = None
 
