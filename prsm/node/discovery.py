@@ -161,6 +161,16 @@ class PeerDiscovery:
         self.bootstrap_attempted_nodes: List[str] = []
         self.bootstrap_success_node: Optional[str] = None
         self.bootstrap_failed_nodes: List[str] = []
+        # Sprint 653 — separate tracking for the BootstrapClient WS
+        # protocol probes (sprint 568+ fallback path). Pre-653 only
+        # the P2P-handshake probe failures were tracked; bootstrap
+        # servers don't speak P2P so every probe ended up in
+        # bootstrap_failed_nodes regardless of whether the WS
+        # protocol probe later succeeded. Operators reading
+        # /bootstrap/status concluded bootstrap-eu/apac were down
+        # when they were fully operational (F26).
+        self.bootstrap_client_attempted_nodes: List[str] = []
+        self.bootstrap_client_failed_nodes: List[str] = []
 
         # Bootstrap decision telemetry (additive, never alters behavior)
         self._bootstrap_telemetry: Dict[str, Any] = {
@@ -219,6 +229,11 @@ class PeerDiscovery:
             return False
 
         for address in self.bootstrap_nodes:
+            # Sprint 653 — track WS-protocol probe attempts alongside
+            # the P2P attempts so /bootstrap/status can distinguish
+            # "P2P-handshake failed" (expected; bootstrap servers
+            # don't speak P2P) from "totally unreachable".
+            self.bootstrap_client_attempted_nodes.append(address)
             try:
                 logger.info(
                     "Trying bootstrap client protocol for %s", address
@@ -265,6 +280,16 @@ class PeerDiscovery:
 
                 self._bootstrap_client = client
                 self.bootstrap_success_node = address
+                # Sprint 653 — F26 fix: the address is reachable via
+                # the WS protocol even if it failed P2P-handshake.
+                # Remove it from the operator-facing failed_nodes
+                # list so /bootstrap/status doesn't lie about
+                # reachability. (bootstrap_failed_nodes still
+                # accurately records the P2P-probe failure history
+                # internally; this remove is purely the operator-UX
+                # correction.)
+                if address in self.bootstrap_failed_nodes:
+                    self.bootstrap_failed_nodes.remove(address)
 
                 # Feed discovered peers into known_peers
                 for bp in peers:
@@ -301,6 +326,9 @@ class PeerDiscovery:
                 logger.debug(
                     "Bootstrap client failed for %s: %s", address, e
                 )
+                # Sprint 653 — record genuine WS-protocol failures
+                # alongside the P2P-protocol failures.
+                self.bootstrap_client_failed_nodes.append(address)
                 continue
 
         return False
@@ -508,6 +536,16 @@ class PeerDiscovery:
             "bootstrap_client_active": (
                 getattr(self, '_bootstrap_client', None) is not None
                 and getattr(self._bootstrap_client, 'is_connected', False)
+            ),
+            # Sprint 653 — F26 fix: separate visibility for the WS-
+            # protocol probe history so operators can tell
+            # "P2P-probe failed (expected; bootstrap servers don't
+            # speak P2P)" from "node genuinely unreachable".
+            "bootstrap_client_attempted_nodes": list(
+                self.bootstrap_client_attempted_nodes,
+            ),
+            "bootstrap_client_failed_nodes": list(
+                self.bootstrap_client_failed_nodes,
             ),
         }
 
