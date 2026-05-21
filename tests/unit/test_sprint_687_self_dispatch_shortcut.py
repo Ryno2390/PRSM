@@ -198,6 +198,37 @@ def test_address_resolver_still_raises_for_unknown_remote():
         resolver("b" * 32)  # unknown remote
 
 
+def test_parallax_executor_runs_chain_off_event_loop():
+    """Sprint 687 F35 pin: parallax_executor.execute MUST call
+    chain_executor.execute_chain via run_in_executor, not
+    synchronously. The sync call blocks the event loop, which
+    deadlocks the sprint 687 self-dispatch path (its scheduled
+    coroutine can't run because the loop is blocked waiting for
+    execute_chain to return).
+
+    Live-attest of sprint 687 surfaced this — py-spy showed the
+    MainThread stuck in future.result(), with execute_chain on
+    the stack between FastAPI's async handler and the adapter."""
+    import inspect
+    from prsm.compute.inference import parallax_executor
+    src = inspect.getsource(parallax_executor.ParallaxScheduledExecutor.execute)
+    assert "run_in_executor" in src, (
+        "parallax_executor.execute must wrap execute_chain in "
+        "run_in_executor to avoid deadlock with self-dispatch "
+        "(sprint 687 F35)"
+    )
+    # And the run_in_executor call must be awaited (not fire-and-
+    # forget). Look for "await loop.run_in_executor" or equivalent
+    # tight binding.
+    assert "await " in src and "run_in_executor" in src
+    # Pin the exact form so a future refactor that splits them
+    # doesn't accidentally drop the await.
+    assert (
+        "await loop.run_in_executor" in src
+        or "await asyncio.get_event_loop().run_in_executor" in src
+    )
+
+
 def test_self_dispatch_path_in_source_guard():
     """Pin against a refactor that removes the sprint-687 self-
     dispatch shortcut. The adapter must contain the self-id check."""

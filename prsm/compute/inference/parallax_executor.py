@@ -35,6 +35,7 @@ the same ``execute / estimate_cost / supported_models`` surface.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -368,9 +369,21 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         model_info = gate_outcome.model_info
 
         # 7. Execute primary chain (unary).
+        # Sprint 687 F35 — `execute_chain` is SYNC and internally
+        # blocks on `send_message_adapter.future.result()`. When the
+        # send_message adapter routes a stage to self (sprint 687
+        # self-dispatch) and schedules the local executor on the
+        # SAME loop, calling execute_chain directly from this async
+        # handler deadlocks the loop. Move it to a worker thread via
+        # run_in_executor so the loop stays free to process scheduled
+        # coroutines (including the self-dispatch one).
+        loop = asyncio.get_event_loop()
         try:
-            primary_outcome = self._chain_executor.execute_chain(
-                request=request, chain=chain
+            primary_outcome = await loop.run_in_executor(
+                None,
+                lambda: self._chain_executor.execute_chain(
+                    request=request, chain=chain,
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
