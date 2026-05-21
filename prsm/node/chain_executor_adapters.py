@@ -1351,6 +1351,29 @@ def build_send_message_adapter(
                 "daemon."
             )
 
+        # Sprint 687 F34 fix — self-dispatch shortcut. When Phase-1
+        # allocation routes a stage to the local node (which IS the
+        # expected case for any 2-node deployment serving its own
+        # requests), the dispatcher must NOT try to look up
+        # transport.peers[self] — self is never in that dict.
+        # Execute the stage locally via the same StageExecutor the
+        # server-side handle_chain_executor_request uses.
+        self_node_id = getattr(
+            getattr(node, "identity", None), "node_id", None,
+        )
+        if self_node_id is not None and stage_address == self_node_id:
+            executor: StageExecutor = getattr(
+                node, "_chain_stage_executor", None,
+            ) or _build_stage_executor_from_env(node=node)
+
+            async def _local_execute() -> bytes:
+                return await executor.execute(request_bytes)
+
+            future = asyncio.run_coroutine_threadsafe(
+                _local_execute(), loop,
+            )
+            return future.result(timeout=timeout)
+
         request_id = hashlib.sha256(request_bytes).hexdigest()
         pending = node._chain_executor_pending
 
