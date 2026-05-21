@@ -1699,6 +1699,18 @@ class PRSMNode:
                     local_capabilities.append("storage")
         self._local_capabilities = local_capabilities
 
+        # Sprint 681 — best-effort load of local hardware profile for
+        # advertisement in DISCOVERY_ANNOUNCE (sprint 680 plumbing).
+        # None on any failure → peer simply doesn't advertise hardware
+        # and is excluded from the sprint 682 DHT-backed pool.
+        try:
+            from prsm.node.hardware_profile_loader import (
+                load_local_hardware_profile,
+            )
+            self._local_hardware_profile = load_local_hardware_profile()
+        except Exception:  # noqa: BLE001
+            self._local_hardware_profile = None
+
         if self.config.transport_backend == "libp2p":
             from prsm.node.libp2p_transport import Libp2pTransport
             from prsm.node.libp2p_gossip import Libp2pGossip
@@ -1763,6 +1775,7 @@ class PRSMNode:
                 maintenance_interval=self.config.maintenance_interval,
                 peer_stale_timeout=self.config.peer_stale_timeout,
                 local_capabilities=local_capabilities,
+                local_hardware_profile=self._local_hardware_profile,
             )
             logger.info("Using WebSocket transport backend (fallback)")
 
