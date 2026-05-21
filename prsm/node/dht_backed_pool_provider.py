@@ -63,6 +63,28 @@ def _hw_dict_to_parallax_gpu(
     if memory_gb <= 0:
         return None
 
+    # Sprint 695 — operator override for the advertised tflops_fp16.
+    # The Phase-2 router's optimization uses tflops_fp16 to compute
+    # per-layer compute latency; for CPU peers with realistic
+    # benchmark numbers (~0.07 tflops on a 1vCPU droplet), the
+    # router rejects the resulting chain as too slow. Operators
+    # testing multi-stage allocation on slow hardware can override
+    # this to a higher value to clear the threshold. Pure-additive.
+    _tflops_override_raw = os.environ.get(
+        "PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE", "",
+    ).strip()
+    if _tflops_override_raw:
+        try:
+            override = float(_tflops_override_raw)
+            if override > 0:
+                tflops_fp16 = override
+        except ValueError:
+            logger.debug(
+                "PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE=%r not float; "
+                "keeping detected tflops_fp16=%s",
+                _tflops_override_raw, tflops_fp16,
+            )
+
     # Sprint 695 — operator override for the advertised memory_gb.
     # The upstream Parallax allocator uses memory_gb as input to
     # its water-filling step that decides per-stage layer counts;
