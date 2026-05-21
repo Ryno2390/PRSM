@@ -1022,26 +1022,64 @@ def build_layer_stage_server_executor(
     _hf_id_raw = (_os.environ.get(
         "PRSM_PARALLAX_HF_MODEL_ID", "",
     ) or "").strip()
+    _stream_kind = (_os.environ.get(
+        "PRSM_PARALLAX_STREAMING_RUNNER_KIND", "",
+    ) or "").strip().lower() or "embedder_backed"
     if _hf_id_raw:
         try:
-            from prsm.compute.inference.streaming_runner import (
-                SyntheticStreamingRunner,
-            )
             _hf_device_raw = (_os.environ.get(
                 "PRSM_PARALLAX_HF_DEVICE", "",
             ) or "").strip() or "cpu"
-            output_decoder = build_hf_output_decoder(
-                model_id=_hf_id_raw, device=_hf_device_raw,
-            )
-            streaming_runner = SyntheticStreamingRunner(
-                runner=runner, output_decoder=output_decoder,
-            )
+            if _stream_kind == "synthetic":
+                # Sprint 692 — text-chunk streaming via unary
+                # forward + tokenizer decode + whitespace split.
+                # Functional but emits ONE forward pass's output
+                # chunked into N frames, not true token-by-token.
+                from prsm.compute.inference.streaming_runner import (
+                    SyntheticStreamingRunner,
+                )
+                output_decoder = build_hf_output_decoder(
+                    model_id=_hf_id_raw, device=_hf_device_raw,
+                )
+                streaming_runner = SyntheticStreamingRunner(
+                    runner=runner, output_decoder=output_decoder,
+                )
+            else:
+                # Sprint 693 — real autoregressive streaming via
+                # HF model.generate(inputs_embeds=activation, ...).
+                # Bypasses the F42 prompt-registry problem entirely
+                # by working from the activation tensor instead of
+                # re-tokenizing the original prompt text.
+                from prsm.compute.inference.autoregressive_runner import (
+                    EmbedderBackedStreamingRunner, SamplingDefaults,
+                )
+                from prsm.compute.tee.models import TEEType
+                # Lazy-load model + tokenizer via the same path
+                # the HF runner uses, ensuring single shared cache.
+                _model = runner._ensure_model_loaded() if hasattr(
+                    runner, "_ensure_model_loaded",
+                ) else None
+                if _model is None:
+                    raise RuntimeError(
+                        "embedder_backed streaming kind requires "
+                        "the HF layer-slice runner (model cached "
+                        "via _ensure_model_loaded)"
+                    )
+                from transformers import AutoTokenizer
+                _tok = AutoTokenizer.from_pretrained(_hf_id_raw)
+                streaming_runner = EmbedderBackedStreamingRunner(
+                    model=_model,
+                    tokenizer=_tok,
+                    tee_attestation=b"identity-runner-no-attestation",
+                    tee_type=TEEType.SOFTWARE,
+                    sampling_defaults=SamplingDefaults(),
+                )
         except Exception as exc:  # noqa: BLE001
             import logging as _l
             _l.getLogger(__name__).warning(
-                "Sprint 692 streaming_runner construction failed: "
-                "%s. LayerStageServer.handle_token_stream will "
-                "surface 'no streaming_runner configured' on "
+                "Sprint 692/693 streaming_runner construction "
+                "failed: %s. LayerStageServer.handle_token_stream "
+                "will surface 'no streaming_runner configured' on "
                 "streaming requests.", exc,
             )
             streaming_runner = None

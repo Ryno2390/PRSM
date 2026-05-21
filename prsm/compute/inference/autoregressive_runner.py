@@ -596,3 +596,217 @@ def _last_token_id(output_ids: Any) -> Optional[int]:
     if isinstance(output_ids, list) and output_ids:
         return int(output_ids[-1])
     return None
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# EmbedderBackedStreamingRunner — sprint 693 F42 bypass
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class EmbedderBackedStreamingRunner:
+    """Sprint 693 F42 bypass — autoregressive streaming runner that
+    works from the embedded activation directly.
+
+    The standard ``AutoregressiveStreamingRunner`` requires a
+    ``prompt_provider`` callable that returns the original prompt
+    text so it can tokenize + generate. PRSM's pipeline already
+    embedded the prompt (sprint 614/688 ``build_hf_prompt_encoder``
+    runs ``wte(input_ids) + wpe(positions)``) and ships the
+    activation tensor downstream — the original text isn't
+    available server-side without a per-request_id registry (F42
+    multi-sprint design problem).
+
+    This runner sidesteps the registry entirely by using HF's
+    ``model.generate(inputs_embeds=...)`` path: the activation IS
+    the initial embedding fed into the transformer blocks, and HF
+    handles the autoregressive loop (token sampling, position
+    embedding for new tokens, re-embedding, block re-run with KV
+    cache if supported by the model class).
+
+    Tradeoffs:
+      - Works for ANY causal LM that supports ``inputs_embeds=``
+        on generate() (gpt2, llama, mistral, qwen, etc. — most do)
+      - Token IDs of the prompt are unknown to the runner, so
+        ``skip_prompt`` semantics don't apply — the streamer
+        emits ONLY the generated continuation pieces (no prompt
+        echo), which IS what we want for streaming output.
+      - Same wire-frame format as AutoregressiveStreamingRunner —
+        plug-in compatible with LayerStageServer's streaming_runner.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: Any,
+        tokenizer: Any,
+        tee_attestation: bytes,
+        tee_type: TEEType,
+        sampling_defaults: Optional[SamplingDefaults] = None,
+    ) -> None:
+        if model is None or not hasattr(model, "generate"):
+            raise RuntimeError(
+                "EmbedderBackedStreamingRunner requires a model "
+                "with .generate(inputs_embeds=, streamer=, ...) — "
+                "HF transformers AutoModelForCausalLM"
+            )
+        if (
+            tokenizer is None
+            or not hasattr(tokenizer, "decode")
+        ):
+            raise RuntimeError(
+                "EmbedderBackedStreamingRunner requires a tokenizer "
+                "with .decode (HF AutoTokenizer-shaped)"
+            )
+        if not isinstance(tee_attestation, (bytes, bytearray)):
+            raise RuntimeError(
+                "EmbedderBackedStreamingRunner requires "
+                "tee_attestation as bytes"
+            )
+        self._model = model
+        self._tokenizer = tokenizer
+        self._tee_attestation = bytes(tee_attestation)
+        self._tee_type = tee_type
+        self._defaults = sampling_defaults or SamplingDefaults()
+
+    def _effective_max_tokens(self, request: Any) -> int:
+        rmax = getattr(request, "max_tokens", None) if request else None
+        if rmax is None:
+            return self._defaults.max_tokens
+        return int(rmax)
+
+    def _effective_temperature(self, request: Any) -> float:
+        rtemp = getattr(request, "temperature", None) if request else None
+        if rtemp is None:
+            return self._defaults.temperature
+        return float(rtemp)
+
+    def run_layer_slice_streaming(
+        self,
+        *,
+        model: Any,
+        layer_range: Tuple[int, int],
+        activation: np.ndarray,
+        privacy_tier: PrivacyLevel,
+        is_final_stage: bool,
+        request: Any = None,
+    ) -> Iterator[StreamingChunk]:
+        # Tail-only contract (mirror AutoregressiveStreamingRunner)
+        if not is_final_stage:
+            yield StreamingChunk(
+                sequence_index=0,
+                text_delta="",
+                finish_reason="error",
+                full_output_text="",
+                duration_seconds=0.0,
+                tee_attestation=self._tee_attestation,
+                tee_type=self._tee_type,
+                epsilon_spent=0.0,
+            )
+            return
+
+        if _torch is None:
+            raise RuntimeError(
+                "EmbedderBackedStreamingRunner requires torch installed"
+            )
+
+        # Convert numpy activation → torch tensor [B, S, H]
+        embeds = _torch.from_numpy(activation).to(
+            dtype=_torch.float32,
+        )
+        if embeds.dim() == 2:
+            embeds = embeds.unsqueeze(0)
+
+        max_new_tokens = self._effective_max_tokens(request)
+        temperature = self._effective_temperature(request)
+        do_sample = temperature > 0
+        eos_token_id = getattr(self._tokenizer, "eos_token_id", None)
+
+        pieces: List[Tuple[str, int]] = []
+
+        def on_text(piece: str, tid: int) -> None:
+            pieces.append((piece, tid))
+
+        adapter = _HFStreamerAdapter(
+            tokenizer=self._tokenizer,
+            on_text=on_text,
+            # inputs_embeds path has no prompt token ids to skip —
+            # generate() yields ONLY continuation pieces directly.
+            prompt_id_count=0,
+        )
+
+        start_ts = time.time()
+        try:
+            output_ids = self._model.generate(
+                inputs_embeds=embeds,
+                streamer=adapter,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                do_sample=do_sample,
+                top_k=self._defaults.top_k,
+                top_p=self._defaults.top_p,
+                eos_token_id=eos_token_id,
+            )
+            adapter.end()
+        except Exception as exc:  # noqa: BLE001
+            partial = "".join(p for p, _ in pieces)
+            duration = time.time() - start_ts
+            for i, (piece, tid) in enumerate(pieces):
+                yield StreamingChunk(
+                    sequence_index=i,
+                    text_delta=piece,
+                    token_id=tid if tid >= 0 else None,
+                )
+            yield StreamingChunk(
+                sequence_index=len(pieces),
+                text_delta="",
+                finish_reason="error",
+                full_output_text=partial,
+                duration_seconds=duration,
+                tee_attestation=self._tee_attestation,
+                tee_type=self._tee_type,
+                epsilon_spent=0.0,
+            )
+            return
+
+        last_token_id = _last_token_id(output_ids)
+        if eos_token_id is not None and last_token_id == eos_token_id:
+            finish_reason = "stop"
+        else:
+            finish_reason = "max_tokens"
+
+        full_output = "".join(p for p, _ in pieces)
+        duration = time.time() - start_ts
+
+        if not pieces:
+            yield StreamingChunk(
+                sequence_index=0,
+                text_delta="",
+                finish_reason=finish_reason,
+                full_output_text="",
+                duration_seconds=duration,
+                tee_attestation=self._tee_attestation,
+                tee_type=self._tee_type,
+                epsilon_spent=0.0,
+            )
+            return
+
+        last_idx = len(pieces) - 1
+        for i, (piece, tid) in enumerate(pieces):
+            if i < last_idx:
+                yield StreamingChunk(
+                    sequence_index=i,
+                    text_delta=piece,
+                    token_id=tid if tid >= 0 else None,
+                )
+            else:
+                yield StreamingChunk(
+                    sequence_index=i,
+                    text_delta=piece,
+                    token_id=tid if tid >= 0 else None,
+                    finish_reason=finish_reason,
+                    full_output_text=full_output,
+                    duration_seconds=duration,
+                    tee_attestation=self._tee_attestation,
+                    tee_type=self._tee_type,
+                    epsilon_spent=0.0,
+                )
