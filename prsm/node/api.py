@@ -382,6 +382,78 @@ async def _refund_streaming_escrow(
         )
 
 
+def register_parallax_pool_snapshot_endpoint(app: Any, node: Any) -> None:
+    """Sprint 685 — /admin/parallax/pool/snapshot.
+
+    Read-only introspection of the GPU pool the ParallaxScheduled-
+    Executor would see for its next allocation. Operators use this
+    to live-attest sprint-682's DHT-backed pool: after setting
+    PRSM_PARALLAX_GPU_POOL_KIND=dht-backed on multiple nodes,
+    confirm each daemon's snapshot reports both self + the other
+    peer(s).
+
+    Status codes:
+      503 — no inference_executor wired or executor lacks
+            _pool_provider (operator hasn't opted in).
+      500 — provider raised at invocation time.
+      200 — {pool_kind, gpu_count, gpus[]}.
+    """
+    import os as _os
+    from fastapi import HTTPException
+
+    @app.get("/admin/parallax/pool/snapshot", tags=["admin"])
+    async def parallax_pool_snapshot() -> Dict[str, Any]:
+        executor = getattr(node, "inference_executor", None)
+        if executor is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Inference executor not initialized. Opt in "
+                    "via PRSM_PARALLAX_GPU_POOL_KIND=dht-backed + "
+                    "PRSM_PARALLAX_TRUST_STACK_KIND + "
+                    "PRSM_PARALLAX_MODEL_CATALOG_FILE."
+                ),
+            )
+        provider = getattr(executor, "_pool_provider", None)
+        if provider is None or not callable(provider):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Inference executor lacks _pool_provider — "
+                    "not a ParallaxScheduledExecutor instance."
+                ),
+            )
+        try:
+            pool = list(provider())
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+
+        gpus = []
+        for g in pool:
+            gpus.append({
+                "node_id": getattr(g, "node_id", ""),
+                "region": getattr(g, "region", ""),
+                "layer_capacity": getattr(g, "layer_capacity", 0),
+                "stake_amount": getattr(g, "stake_amount", 0),
+                "tier_attestation": getattr(g, "tier_attestation", ""),
+                "tflops_fp16": getattr(g, "tflops_fp16", 0.0),
+                "memory_gb": getattr(g, "memory_gb", 0.0),
+                "memory_bandwidth_gbps": getattr(
+                    g, "memory_bandwidth_gbps", 0.0,
+                ),
+                "gpu_name": getattr(g, "gpu_name", ""),
+                "device": getattr(g, "device", ""),
+                "num_gpus": getattr(g, "num_gpus", 1),
+            })
+        return {
+            "pool_kind": _os.environ.get(
+                "PRSM_PARALLAX_GPU_POOL_KIND", "",
+            ) or None,
+            "gpu_count": len(gpus),
+            "gpus": gpus,
+        }
+
+
 def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     """
     Create the node management FastAPI app with a reference to the running node.
@@ -15100,5 +15172,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     auth_mw = get_node_auth_middleware(app)
     if auth_mw:
         app.add_middleware(NodeAuthMiddleware, api_key_hash=auth_mw._api_key_hash)
+
+    # Sprint 685 — DHT-backed pool live-attest surface
+    register_parallax_pool_snapshot_endpoint(app, node)
 
     return app
