@@ -1006,6 +1006,46 @@ def build_layer_stage_server_executor(
             max_cached_requests=max_req, ttl_seconds=ttl,
         )
 
+    # Sprint 692 F41 fix — construct a streaming_runner so
+    # LayerStageServer.handle_token_stream can actually produce
+    # frames. SyntheticStreamingRunner wraps the existing unary
+    # runner: runs full forward, decodes activation → text,
+    # chunks into streaming frames. NOT real autoregressive
+    # decode (max_tokens is honored by the chunker, not by an
+    # actual token-by-token generation loop) — that's
+    # AutoregressiveStreamingRunner / sprint 693+ work.
+    # Output_decoder reuses the HF-tokenizer wiring from sprint
+    # 616. Skipped silently if HF model id missing — server
+    # falls back to "no streaming_runner configured" error
+    # which sprint 691's adapter surfaces clearly.
+    streaming_runner = None
+    _hf_id_raw = (_os.environ.get(
+        "PRSM_PARALLAX_HF_MODEL_ID", "",
+    ) or "").strip()
+    if _hf_id_raw:
+        try:
+            from prsm.compute.inference.streaming_runner import (
+                SyntheticStreamingRunner,
+            )
+            _hf_device_raw = (_os.environ.get(
+                "PRSM_PARALLAX_HF_DEVICE", "",
+            ) or "").strip() or "cpu"
+            output_decoder = build_hf_output_decoder(
+                model_id=_hf_id_raw, device=_hf_device_raw,
+            )
+            streaming_runner = SyntheticStreamingRunner(
+                runner=runner, output_decoder=output_decoder,
+            )
+        except Exception as exc:  # noqa: BLE001
+            import logging as _l
+            _l.getLogger(__name__).warning(
+                "Sprint 692 streaming_runner construction failed: "
+                "%s. LayerStageServer.handle_token_stream will "
+                "surface 'no streaming_runner configured' on "
+                "streaming requests.", exc,
+            )
+            streaming_runner = None
+
     server = LayerStageServer(
         identity=node.identity,
         registry=registry,
@@ -1013,6 +1053,7 @@ def build_layer_stage_server_executor(
         tee_runtime=tee_runtime,
         anchor=anchor,
         kv_cache_manager=kv_cache_manager,
+        streaming_runner=streaming_runner,
     )
     return LayerStageServerStageExecutor(server=server)
 
