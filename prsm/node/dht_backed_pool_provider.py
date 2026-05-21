@@ -38,6 +38,7 @@ _BYTES_PER_LAYER_GB = 2.0
 
 def _hw_dict_to_parallax_gpu(
     node_id: str, hw: Any, region: str,
+    stake_reader: Optional[Any] = None,
 ) -> Optional[ParallaxGPU]:
     """Map a HardwareProfile.to_dict() shape → ParallaxGPU.
 
@@ -77,12 +78,27 @@ def _hw_dict_to_parallax_gpu(
     }
     device = device_map.get(gpu_api, "cpu")
 
+    # Sprint 683 — optionally resolve stake via on-chain reader
+    stake_amount = 0
+    operator_address = hw.get("operator_address", "") or ""
+    if stake_reader is not None and operator_address:
+        try:
+            stake_amount = int(
+                stake_reader.stake_amount_for(operator_address) or 0
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "stake_reader.stake_amount_for(%s) raised: %s — "
+                "treating as unstaked", operator_address[:10], exc,
+            )
+            stake_amount = 0
+
     try:
         return ParallaxGPU(
             node_id=node_id,
             region=region,
             layer_capacity=layer_capacity,
-            stake_amount=0,
+            stake_amount=stake_amount,
             tier_attestation=TIER_ATTESTATION_NONE,
             tflops_fp16=tflops_fp16,
             memory_gb=memory_gb,
@@ -101,6 +117,7 @@ def _hw_dict_to_parallax_gpu(
 
 def build_dht_backed_pool_provider(
     node: Any,
+    stake_reader: Optional[Any] = None,
 ) -> Callable[[], Sequence[ParallaxGPU]]:
     """Returns a callable suitable for the
     ``ParallaxScheduledExecutor.gpu_pool_provider`` slot.
@@ -110,6 +127,19 @@ def build_dht_backed_pool_provider(
     leaving the DHT show up in the next allocation pass without
     restarting the daemon."""
     region = os.environ.get("PRSM_PARALLAX_REGION", "default") or "default"
+
+    # Sprint 683 — lazy-construct an OnChainStakeReader when the
+    # caller didn't supply one + PRSM_STAKE_BOND_ADDRESS is set.
+    # Tests pass an explicit reader via the kwarg.
+    if stake_reader is None and os.environ.get(
+        "PRSM_STAKE_BOND_ADDRESS", "",
+    ).strip():
+        try:
+            from prsm.node.onchain_stake_reader import OnChainStakeReader
+            stake_reader = OnChainStakeReader()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("OnChainStakeReader construction failed: %s", exc)
+            stake_reader = None
 
     def _provider() -> List[ParallaxGPU]:
         gpus: List[ParallaxGPU] = []
@@ -127,7 +157,9 @@ def build_dht_backed_pool_provider(
 
         own_hw = getattr(discovery, "_local_hardware_profile", None)
         if own_id and own_hw is not None:
-            gpu = _hw_dict_to_parallax_gpu(own_id, own_hw, region)
+            gpu = _hw_dict_to_parallax_gpu(
+                own_id, own_hw, region, stake_reader=stake_reader,
+            )
             if gpu is not None:
                 gpus.append(gpu)
 
@@ -140,7 +172,9 @@ def build_dht_backed_pool_provider(
             peer_hw = getattr(info, "hardware_profile", None)
             if peer_hw is None:
                 continue
-            gpu = _hw_dict_to_parallax_gpu(peer_id, peer_hw, region)
+            gpu = _hw_dict_to_parallax_gpu(
+                peer_id, peer_hw, region, stake_reader=stake_reader,
+            )
             if gpu is not None:
                 gpus.append(gpu)
 
