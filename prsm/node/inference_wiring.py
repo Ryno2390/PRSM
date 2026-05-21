@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 _KNOWN_TRUST_STACK_KINDS = ("mock", "production")
-_KNOWN_GPU_POOL_KINDS = ("static-empty",)
+_KNOWN_GPU_POOL_KINDS = ("static-empty", "dht-backed")
 
 # Sprint 559 — catalog schema versioning. v1 shape:
 #   {
@@ -887,6 +887,13 @@ def build_parallax_executor_or_none(node: Any) -> Optional[Any]:
         return None
     if pool_kind == "static-empty":
         pool_provider = _build_static_empty_pool_provider()
+    elif pool_kind == "dht-backed":
+        # Sprint 682 — DHT-backed pool reads self + peer-advertised
+        # hardware_profile from the discovery layer at each call.
+        from prsm.node.dht_backed_pool_provider import (
+            build_dht_backed_pool_provider,
+        )
+        pool_provider = build_dht_backed_pool_provider(node)
     else:  # defensive
         return None
 
