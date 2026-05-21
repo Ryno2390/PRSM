@@ -174,6 +174,61 @@ class _LoggingChallengeSubmitter:
             )
 
 
+def _wrap_stake_lookup_for_eligibility(stake_lookup: Any) -> Any:
+    """Sprint 686 — PRSM_PARALLAX_STAKE_ELIGIBILITY=advisory bypass.
+
+    Returns the input stake_lookup unchanged unless the operator
+    has explicitly opted into ``advisory`` mode, in which case the
+    lookup is wrapped to return MIN_STAKE_FOR_PARTICIPATION for
+    every node_id — effectively disabling stake-based eligibility
+    filtering.
+
+    Why this exists: live-attest of sprint 685's DHT-backed pool
+    surfaced F31 (AnchorMediatedStakeLookup passes the anchor's
+    base64 pubkey to StakeManagerClient.stake_of which expects an
+    ETH address — the contract has no node_id → operator-address
+    mapping). Until F31 is fixed properly via a new on-chain
+    mapping OR via hardware_profile.operator_address propagation
+    in the trust stack itself, advisory mode is the live-attest
+    path.
+
+    Defaults to enforced (the safe production posture). Unknown
+    values also default to enforced — no typo'd env var can
+    accidentally disable enforcement. Advisory mode logs a loud
+    WARNING at construction so operators don't silently run
+    without stake enforcement.
+    """
+    mode = (
+        os.environ.get("PRSM_PARALLAX_STAKE_ELIGIBILITY", "")
+        .strip().lower()
+    )
+    if mode != "advisory":
+        return stake_lookup
+
+    logger.warning(
+        "Sprint 686: PRSM_PARALLAX_STAKE_ELIGIBILITY=advisory — "
+        "stake-based pool-eligibility filtering DISABLED. Every "
+        "anchor-registered peer is treated as stake-eligible "
+        "regardless of on-chain bond. This mode is intended for "
+        "pre-stake-ceremony live-attest only. Production deploy "
+        "MUST flip to PRSM_PARALLAX_STAKE_ELIGIBILITY=enforced "
+        "(or unset) once operators have posted real stake."
+    )
+
+    class _PermitAllStakeLookup:
+        def get_stake(self, node_id: str) -> int:
+            # Sprint 686 — return MIN_STAKE_FOR_PARTICIPATION so
+            # is_eligible() returns True for everyone, but don't
+            # claim more than that (StakeWeightedTrustAdapter's
+            # latency-rescaling still treats them as low-confidence).
+            from prsm.compute.parallax_scheduling.trust_adapter import (
+                MIN_STAKE_FOR_PARTICIPATION,
+            )
+            return MIN_STAKE_FOR_PARTICIPATION
+
+    return _PermitAllStakeLookup()
+
+
 class AnchorMediatedStakeLookup:
     """Sprint 561 — production stake_lookup. Maps trust-stack node_id
     (32-char hex publisher ID) → ETH address via the anchor's
@@ -342,6 +397,10 @@ def _build_production_trust_stack_or_none():
         )
         stake_lookup = _ZeroStakeLookup()
         stake_lookup_status = "PLACEHOLDER (zero stake)"
+
+    # Sprint 686 — optional advisory-mode bypass for live-attest
+    # before stake ceremony. Default enforced.
+    stake_lookup = _wrap_stake_lookup_for_eligibility(stake_lookup)
 
     # Sprint 562 — consensus_hook submitter upgraded from
     # structurally-broken _NoOpSubmitter (had .submit() method but

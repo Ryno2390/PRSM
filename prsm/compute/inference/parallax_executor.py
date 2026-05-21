@@ -630,9 +630,21 @@ class ParallaxScheduledExecutor(InferenceExecutor):
             ))
         anchor_filtered = self._trust.filter_pool(raw_pool)
         if not anchor_filtered:
+            # Sprint 686 F32 fix — `filter_pool` runs BOTH the anchor
+            # verify adapter AND the stake-eligibility check. The
+            # pre-686 message blamed anchor verification alone; in
+            # practice stake eligibility is the more common rejection
+            # path (F31 — pubkey/address mismatch) and operators
+            # correlate the wrong logs. The honest error names both.
             return _GateOutcome(failure=InferenceResult.failure(
                 request.request_id,
-                "no GPU passed anchor verification",
+                "no GPU passed pool gating (Adapter A anchor "
+                "verification AND/OR stake-eligibility check). "
+                "Check journalctl for AnchorVerifyAdapter rejections; "
+                "if those are empty, the cause is stake eligibility — "
+                "set PRSM_PARALLAX_STAKE_ELIGIBILITY=advisory for "
+                "pre-stake-ceremony live-attest, or post real stake "
+                "via StakeBond contract.",
             ))
 
         # 4. Adapter B — tier gate.

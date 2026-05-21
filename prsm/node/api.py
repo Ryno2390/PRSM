@@ -445,10 +445,19 @@ def register_parallax_pool_snapshot_endpoint(app: Any, node: Any) -> None:
                 "device": getattr(g, "device", ""),
                 "num_gpus": getattr(g, "num_gpus", 1),
             })
+        # Sprint 686 — surface stake-eligibility mode so operators
+        # can see which posture the daemon is running in without
+        # SSH-ing to read systemd-show.
+        _elig_raw = (
+            _os.environ.get("PRSM_PARALLAX_STAKE_ELIGIBILITY", "")
+            .strip().lower()
+        )
+        stake_eligibility = "advisory" if _elig_raw == "advisory" else "enforced"
         return {
             "pool_kind": _os.environ.get(
                 "PRSM_PARALLAX_GPU_POOL_KIND", "",
             ) or None,
+            "stake_eligibility": stake_eligibility,
             "gpu_count": len(gpus),
             "gpus": gpus,
         }
