@@ -1534,3 +1534,63 @@ def build_send_message_adapter(
         return run_async_on_loop(loop, _send_and_wait(), timeout=timeout + 1.0)
 
     return _adapter
+
+
+def build_token_stream_send_message_adapter(node: Any) -> Callable[
+    [str, bytes], Any,
+]:
+    """Sprint 691 F40 fix — token-stream transport adapter.
+
+    Wires the chain executor's ``token_stream_send_message`` slot
+    so ``execute_chain_streaming`` can actually dispatch streaming
+    requests. Self-dispatch case is fully supported; remote case
+    raises a structured "not yet wired" error so operators see
+    the gap clearly.
+
+    For self-dispatch:
+      - Resolves the local StageExecutor via _build_stage_executor_
+        from_env (or node._chain_stage_executor injection).
+      - If the executor's underlying ._server has handle_token_stream
+        (LayerStageServer with streaming_runner wired), call it
+        and yield each frame.
+      - Else raises StageExecutionError naming the gap so operators
+        see WHY streaming doesn't work on their config.
+
+    For remote (stage_address != self_node_id):
+      - Raises a clear "remote token streaming not yet wired"
+        RuntimeError. Sprint 692+ will ship the P2P streaming
+        transport (likely via existing chain_executor request
+        handler + a streaming response variant).
+    """
+    def _stream(stage_address: str, request_bytes: bytes) -> Any:
+        self_node_id = getattr(
+            getattr(node, "identity", None), "node_id", None,
+        )
+        # Remote dispatch — not yet wired
+        if self_node_id is None or stage_address != self_node_id:
+            raise RuntimeError(
+                f"token_stream_send_message: remote streaming "
+                f"dispatch (stage_address={stage_address!r}) "
+                f"is not yet wired. Use single-node deployment "
+                f"OR unary /compute/inference (sprint 692+ "
+                f"will add the remote-streaming transport)."
+            )
+
+        # Self-dispatch — call the local executor's streaming side
+        executor: StageExecutor = getattr(
+            node, "_chain_stage_executor", None,
+        ) or _build_stage_executor_from_env(node=node)
+        server = getattr(executor, "_server", None)
+        if server is None or not hasattr(server, "handle_token_stream"):
+            raise StageExecutionError(
+                "token_stream_send_message: local stage executor "
+                "lacks .handle_token_stream — set "
+                "PRSM_PARALLAX_STAGE_EXECUTOR_KIND=layer_stage + "
+                "ensure the runner exposes "
+                "run_layer_slice_streaming (sprint 691 surface)."
+            )
+        # handle_token_stream returns Iterable[bytes] — yield each frame
+        for frame in server.handle_token_stream(request_bytes):
+            yield frame
+
+    return _stream

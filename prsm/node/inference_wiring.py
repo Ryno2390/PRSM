@@ -699,10 +699,21 @@ def _build_chain_executor(node: Any) -> Any:
                         "not numeric; using 30.0s default",
                         _timeout_raw,
                     )
+            # Sprint 691 F40 fix — wire token_stream_send_message
+            # so /compute/inference/stream can dispatch streaming
+            # requests for self-dispatch (single-host streaming).
+            # Remote streaming raises a structured error at dispatch
+            # time per the adapter's contract.
+            from prsm.node.chain_executor_adapters import (
+                build_token_stream_send_message_adapter,
+            )
             executor = make_rpc_chain_executor(
                 settler_identity=node.identity,
                 send_message=build_send_message_adapter(
                     node, timeout=_send_timeout,
+                ),
+                token_stream_send_message=(
+                    build_token_stream_send_message_adapter(node)
                 ),
                 anchor=anchor,
                 address_resolver=build_address_resolver(node),
