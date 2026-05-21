@@ -245,6 +245,37 @@ def build_dht_backed_pool_provider(
             if gpu is not None:
                 gpus.append(gpu)
 
+        # Sprint 695 F44 fix — populate rtt_to_nodes for routing DP.
+        # Phase-2 routing's DynamicProgrammingRouting.find_optimal_path
+        # uses `node.get_rtt_to(other)` to compute inter-stage transition
+        # cost; absent rtt_to_nodes → inf → chain rejected as infeasible.
+        # Sprint 562's InMemoryProfileSource is empty in production; until
+        # a real RTT-measurement source ships, use a default RTT (env-
+        # configurable). Real numbers can be added later by populating
+        # hardware_profile.rtt_to_nodes per-peer.
+        _default_rtt_raw = os.environ.get(
+            "PRSM_PARALLAX_DEFAULT_RTT_MS", "",
+        ).strip()
+        _default_rtt = 100.0  # conservative inter-region default
+        if _default_rtt_raw:
+            try:
+                _default_rtt = float(_default_rtt_raw)
+            except ValueError:
+                pass
+        if len(gpus) > 1:
+            patched: List[ParallaxGPU] = []
+            for g in gpus:
+                rtt_map = dict(g.rtt_to_nodes) if g.rtt_to_nodes else {}
+                for other in gpus:
+                    if other.node_id != g.node_id and (
+                        other.node_id not in rtt_map
+                    ):
+                        rtt_map[other.node_id] = _default_rtt
+                # ParallaxGPU is frozen — replace via dataclasses.replace
+                from dataclasses import replace as _dc_replace
+                patched.append(_dc_replace(g, rtt_to_nodes=rtt_map))
+            gpus = patched
+
         return gpus
 
     return _provider
