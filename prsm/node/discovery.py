@@ -50,6 +50,11 @@ class PeerInfo:
     job_failure_count: int = 0
     last_failure_time: float = 0.0
     startup_timestamp: float = 0.0
+    # Sprint 680 — opt-in hardware advertisement. Carries serialized
+    # HardwareProfile.to_dict() (or a subset). Consumed by the DHT-
+    # backed GpuPoolProvider (sprint 681+) to construct ParallaxGPU
+    # entries — peers without this field are excluded from the pool.
+    hardware_profile: Optional[Dict[str, Any]] = None
 
     @property
     def reliability_score(self) -> float:
@@ -132,6 +137,7 @@ class PeerDiscovery:
         local_capabilities: Optional[List[str]] = None,
         local_backends: Optional[List[str]] = None,
         local_gpu_available: bool = False,
+        local_hardware_profile: Optional[Dict[str, Any]] = None,
     ):
         # Default bootstrap node — the live PRSM bootstrap server.
         # Sprint 575 F29 — bootstrap1 → bootstrap-us DNS rename
@@ -154,6 +160,12 @@ class PeerDiscovery:
         self._local_capabilities = local_capabilities or []
         self._local_backends = local_backends or []
         self._local_gpu_available = local_gpu_available
+        # Sprint 680 — local hardware profile, advertised via
+        # DISCOVERY_ANNOUNCE when set. None → key omitted from
+        # payload (legacy wire format preserved).
+        self._local_hardware_profile: Optional[Dict[str, Any]] = (
+            local_hardware_profile
+        )
 
         # Startup bootstrap status (for first-run observability)
         self.bootstrap_degraded_mode: bool = False
@@ -588,6 +600,11 @@ class PeerDiscovery:
         }
         if advertise:
             payload["address"] = f"{advertise}:{self.transport.port}"
+        # Sprint 680 — include hardware_profile only when locally
+        # configured. Absent key preserves the pre-680 wire format
+        # for peers that don't parse this field yet.
+        if self._local_hardware_profile is not None:
+            payload["hardware_profile"] = self._local_hardware_profile
         msg = P2PMessage(
             msg_type=MSG_GOSSIP,
             sender_id=self.transport.identity.node_id,
@@ -792,6 +809,10 @@ class PeerDiscovery:
             gpu_available=msg.payload.get("gpu_available", False),
             last_seen=time.time(),
             last_capability_update=time.time(),
+            # Sprint 680 — optional. Pre-680 announcements omit the
+            # key entirely; .get() returns None, matching the
+            # dataclass default.
+            hardware_profile=msg.payload.get("hardware_profile"),
         )
         # Re-gossip if TTL > 0
         if msg.ttl > 1:
@@ -809,7 +830,7 @@ class PeerDiscovery:
         max_peers = msg.payload.get("max_peers", 20)
         peers_data = []
         for info in list(self.known_peers.values())[:max_peers]:
-            peers_data.append({
+            entry = {
                 "node_id": info.node_id,
                 "address": info.address,
                 "display_name": info.display_name,
@@ -817,7 +838,13 @@ class PeerDiscovery:
                 "capabilities": info.capabilities,
                 "supported_backends": info.supported_backends,
                 "gpu_available": info.gpu_available,
-            })
+            }
+            # Sprint 680 — propagate hardware_profile across DHT hops
+            # when present. Absent → key omitted (legacy receivers
+            # unaffected).
+            if info.hardware_profile is not None:
+                entry["hardware_profile"] = info.hardware_profile
+            peers_data.append(entry)
 
         # Also include directly connected peers
         for pid, pc in list(self.transport.peers.items())[:max_peers]:
@@ -858,6 +885,8 @@ class PeerDiscovery:
                     gpu_available=p.get("gpu_available", False),
                     last_seen=time.time(),
                     last_capability_update=time.time(),
+                    # Sprint 680 — multi-hop hardware_profile prop
+                    hardware_profile=p.get("hardware_profile"),
                 )
         logger.debug(f"Received {len(peers_data)} peers from {peer.peer_id[:8]}")
 
