@@ -1273,6 +1273,42 @@ def handle_chain_executor_response(node: Any, msg: Any) -> bool:
     return True
 
 
+def _resolve_peer_address(node: Any, peer_id: str) -> Optional[str]:
+    """Sprint 679 — look up a peer's network address by peer_id.
+    Used by the chain-exec-ping adapter when send_to_peer fails
+    silently and we want to auto-redial before giving up.
+
+    Returns ``host:port`` string or None if unknown.
+
+    Sources, in priority order:
+      1. node.transport.peers[peer_id] — currently-known connection
+         info (may have a host:port already even if the WS is dead)
+      2. node.discovery.known_peers[peer_id] — bootstrap-mediated
+         peer registry (PeerInfo.address)
+    """
+    try:
+        transport_peers = getattr(node, "transport", None)
+        if transport_peers is not None:
+            peer = getattr(transport_peers, "peers", {}).get(peer_id)
+            if peer is not None:
+                addr = getattr(peer, "address", None)
+                if addr:
+                    return addr
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        discovery = getattr(node, "discovery", None)
+        if discovery is not None:
+            info = getattr(discovery, "known_peers", {}).get(peer_id)
+            if info is not None:
+                addr = getattr(info, "address", None)
+                if addr:
+                    return addr
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def build_send_message_adapter(
     node: Any,
     timeout: float = 30.0,
@@ -1345,11 +1381,69 @@ def build_send_message_adapter(
                     stage_address, msg,
                 )
                 if not sent:
-                    raise RuntimeError(
-                        f"transport.send_to_peer returned False for "
-                        f"peer_id={stage_address!r}; chain stage "
-                        f"unreachable"
-                    )
+                    # Sprint 679 — auto-redial on silent WS drop.
+                    # Long inference waits (gpt2 cold-load on a fresh
+                    # peer can take 25-30s) can outlast the peer's
+                    # WS idle timeout, causing send_to_peer to fail
+                    # silently on the next request. Look up the
+                    # peer's address from known_peers + reconnect.
+                    address = _resolve_peer_address(node, stage_address)
+                    if address is not None:
+                        # Sprint 679 — evict stale peer first so
+                        # connect_to_peer does a FRESH WS dial
+                        # rather than returning the dead-but-cached
+                        # PeerConnection from transport.peers.
+                        try:
+                            transport_peers = getattr(
+                                node.transport, "peers", None,
+                            )
+                            if transport_peers is not None and (
+                                stage_address in transport_peers
+                            ):
+                                stale = transport_peers.pop(
+                                    stage_address, None,
+                                )
+                                # Try to close the WS cleanly so
+                                # the OS releases the FD.
+                                if stale is not None:
+                                    close = getattr(stale, "close", None)
+                                    if callable(close):
+                                        try:
+                                            result = close()
+                                            if hasattr(result, "__await__"):
+                                                await result
+                                        except Exception:  # noqa: BLE001
+                                            pass
+                        except Exception:  # noqa: BLE001
+                            pass
+                        try:
+                            reconnected = await node.transport.connect_to_peer(
+                                address,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            reconnected = None
+                            import logging as _l
+                            _l.getLogger(__name__).debug(
+                                "Sprint 679 redial of %s @ %s raised: %s",
+                                stage_address, address, exc,
+                            )
+                        if reconnected is not None:
+                            import logging as _l
+                            _l.getLogger(__name__).info(
+                                "Sprint 679 redial succeeded for "
+                                "peer_id=%s @ %s; retrying send",
+                                stage_address, address,
+                            )
+                            sent = await node.transport.send_to_peer(
+                                stage_address, msg,
+                            )
+                    if not sent:
+                        raise RuntimeError(
+                            f"transport.send_to_peer returned False for "
+                            f"peer_id={stage_address!r}; chain stage "
+                            f"unreachable (sprint 679 redial attempt "
+                            f"also failed or peer address unknown)"
+                        )
                 import asyncio as _asyncio
                 response_payload = await _asyncio.wait_for(
                     future, timeout=timeout,
