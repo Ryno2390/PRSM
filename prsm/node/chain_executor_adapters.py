@@ -388,6 +388,34 @@ def build_hf_prompt_encoder(
             # Move tokens to device + run embedding lookup under no_grad
             with _torch.no_grad():
                 embeddings = _state["embed_layer"](token_ids)
+                # Sprint 688 F38 — add position embeddings for gpt2-
+                # style models (those with a separate `wpe` matrix).
+                # LLaMA / Qwen / Mistral use rotary embeddings inside
+                # attention so the wte-only path works. GPT-2 /
+                # Falcon / GPT-NeoX add learned position embeddings
+                # explicitly at the embedding stage — without this
+                # the layers see token vectors without position
+                # info → semantically garbage output (live-attest:
+                # "The capital of France is" → " all" instead of
+                # " the").
+                _wpe = None
+                _model = _state["model"]
+                if hasattr(_model, "transformer") and hasattr(
+                    _model.transformer, "wpe",
+                ):
+                    _wpe = _model.transformer.wpe
+                elif hasattr(_model, "gpt_neox") and hasattr(
+                    _model.gpt_neox, "embed_in",
+                ) and hasattr(_model.gpt_neox, "wpe"):
+                    # GPT-NeoX uses both embed_in (token) + wpe
+                    _wpe = _model.gpt_neox.wpe
+                if _wpe is not None:
+                    seq_len = token_ids.shape[-1]
+                    position_ids = _torch.arange(
+                        seq_len, device=token_ids.device,
+                    )
+                    pos_embeds = _wpe(position_ids)
+                    embeddings = embeddings + pos_embeds
             return embeddings.cpu().numpy()
         except Exception as exc:  # noqa: BLE001
             raise StageExecutionError(
