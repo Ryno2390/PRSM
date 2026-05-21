@@ -15130,6 +15130,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     # made every dashboard route 404 with /api/api/<path>.
     # Dogfood (sprint 136) caught it: the entire dashboard
     # rendered blank because every JS request 404'd.
+    # Sprint 685 — register DHT-backed-pool live-attest BEFORE the
+    # dashboard mount. app.mount("", ...) installs a catch-all that
+    # shadows any route added after it (sprint 685 live-attest
+    # surfaced this — endpoint registered correctly in openapi.json
+    # but returned 404 because the dashboard mount intercepted
+    # /admin/parallax/pool/snapshot first).
+    register_parallax_pool_snapshot_endpoint(app, node)
+
     try:
         from prsm.dashboard.app import create_dashboard_app as _create_dash_app
         _dash_app = _create_dash_app(node=node)
@@ -15172,8 +15180,5 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     auth_mw = get_node_auth_middleware(app)
     if auth_mw:
         app.add_middleware(NodeAuthMiddleware, api_key_hash=auth_mw._api_key_hash)
-
-    # Sprint 685 — DHT-backed pool live-attest surface
-    register_parallax_pool_snapshot_endpoint(app, node)
 
     return app

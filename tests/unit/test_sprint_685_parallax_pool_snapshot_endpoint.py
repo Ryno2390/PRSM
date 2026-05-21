@@ -140,6 +140,27 @@ def test_snapshot_handles_provider_exception():
     assert "provider blew up" in resp.json()["detail"]
 
 
+def test_registration_happens_before_dashboard_mount_in_source():
+    """Pin against the regression that surfaced during the sprint
+    685 live-attest: app.mount('', _dash_app) is a catch-all that
+    shadows routes added after it. The snapshot endpoint must be
+    registered BEFORE the dashboard mount or it 404s in
+    production even though it appears in openapi.json.
+    """
+    import inspect
+    from prsm.node import api
+    src = inspect.getsource(api.create_api_app)
+    snapshot_pos = src.find("register_parallax_pool_snapshot_endpoint(app, node)")
+    mount_pos = src.find('app.mount("", _dash_app')
+    assert snapshot_pos != -1, "registration call missing"
+    assert mount_pos != -1, "dashboard mount missing"
+    assert snapshot_pos < mount_pos, (
+        "register_parallax_pool_snapshot_endpoint must run BEFORE "
+        "app.mount('', _dash_app, ...) — the mount is a catch-all "
+        "that 404s subsequent routes (sprint 685 live-attest bug)"
+    )
+
+
 def test_snapshot_reports_pool_kind_from_env(monkeypatch):
     """The pool_kind field echoes PRSM_PARALLAX_GPU_POOL_KIND so
     operators can verify the right kind was actually picked up by
