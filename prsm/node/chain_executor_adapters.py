@@ -147,7 +147,17 @@ def build_address_resolver(node: Any) -> Callable[[str], str]:
                 f"hasn't reached this peer yet (sprint 573), or "
                 f"peer never registered against the same bootstrap."
             )
-        return peer.address
+        # Sprint 695 F45 fix — return node_id (peer_id) not peer.address.
+        # Sprint 596's convention: "stage_address IS the target peer_id".
+        # The send_message adapter calls
+        # `transport.send_to_peer(stage_address, msg)` which looks up
+        # via `self.peers.get(stage_address)` — a peer_id, not a
+        # network address. Pre-fix the resolver returned peer.address
+        # ("1.2.3.4:9001") which caused send_to_peer to fail (no
+        # such peer_id), only visible now that sprint-695's
+        # rtt_to_nodes fix lets the routing actually reach
+        # cross-host dispatch.
+        return node_id
 
     return _resolve
 
