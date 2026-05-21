@@ -121,34 +121,43 @@ def main() -> int:
         )
         return 0
 
+    # Sprint 675 fix — actual contract signature is
+    # `register(bytes publicKey)`; the contract derives nodeId on-chain
+    # via `bytes16(sha256(publicKey))`. Earlier draft of this script
+    # used a phantom `register(bytes16, bytes32)` signature → reverted
+    # at the dispatcher because the selector doesn't exist on the
+    # deployed contract (2026-05-21 attempted TX
+    # 0x37ffa34236d843135941e450221ebd849d20b3e47b4ba6c4e0a06c905ee263a8
+    # reverted with 23k gas, no logs — classic non-existent-function
+    # revert shape).
     register_abi = [{
         "name": "register",
         "type": "function",
         "stateMutability": "nonpayable",
-        "inputs": [
-            {"name": "nodeId", "type": "bytes16"},
-            {"name": "pubkey", "type": "bytes32"},
-        ],
+        "inputs": [{"name": "publicKey", "type": "bytes"}],
         "outputs": [],
     }]
     contract = w3.eth.contract(
         address=Web3.to_checksum_address(ANCHOR),
         abi=register_abi,
     )
-    node_id_bytes = bytes.fromhex(node_id)
-    if len(node_id_bytes) != 16:
+    # Defensive: cross-check the supplied node_id matches what the
+    # contract will derive. Mismatch = caller bug (sent wrong pair).
+    import hashlib as _hashlib
+    expected_node_id = _hashlib.sha256(pubkey_bytes).digest()[:16].hex()
+    if expected_node_id != node_id:
         print(
-            f"ERROR: node_id must hex-decode to 16 bytes; "
-            f"got {len(node_id_bytes)}",
+            f"ERROR: supplied node_id {node_id} doesn't match "
+            f"contract-derived sha256(pubkey)[:16] = {expected_node_id}. "
+            f"Check that OPERATOR_NODE_ID + OPERATOR_PUBKEY_B64 come "
+            f"from the same identity.json.",
             file=sys.stderr,
         )
         return 1
 
     nonce = w3.eth.get_transaction_count(deployer.address)
     gas_price = w3.eth.gas_price
-    tx = contract.functions.register(
-        node_id_bytes, pubkey_bytes,
-    ).build_transaction({
+    tx = contract.functions.register(pubkey_bytes).build_transaction({
         "from": deployer.address,
         "nonce": nonce,
         "gas": 80000,

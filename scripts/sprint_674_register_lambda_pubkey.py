@@ -122,34 +122,35 @@ def main() -> int:
     # Build + send register() TX
     # The PublisherKeyAnchor's register signature takes (node_id_bytes, pubkey_bytes)
     # — see prsm/security/publisher_key_anchor/contract.py
+    # Sprint 675 fix — actual contract signature is
+    # `register(bytes publicKey)`; node_id is derived on-chain via
+    # `bytes16(sha256(publicKey))`. Original draft used a phantom
+    # `register(bytes16, bytes32)` which reverts at dispatch.
     register_abi = [{
         "name": "register",
         "type": "function",
         "stateMutability": "nonpayable",
-        "inputs": [
-            {"name": "nodeId", "type": "bytes16"},
-            {"name": "pubkey", "type": "bytes32"},
-        ],
+        "inputs": [{"name": "publicKey", "type": "bytes"}],
         "outputs": [],
     }]
     contract = w3.eth.contract(
         address=Web3.to_checksum_address(ANCHOR),
         abi=register_abi,
     )
-    node_id_bytes = bytes.fromhex(lambda_node_id)
-    if len(node_id_bytes) != 16:
+    import hashlib as _hashlib
+    expected_node_id = _hashlib.sha256(pubkey_bytes).digest()[:16].hex()
+    if expected_node_id != lambda_node_id:
         print(
-            f"ERROR: node_id must hex-decode to 16 bytes; "
-            f"got {len(node_id_bytes)}",
+            f"ERROR: supplied LAMBDA_NODE_ID {lambda_node_id} doesn't "
+            f"match contract-derived sha256(pubkey)[:16] = "
+            f"{expected_node_id}.",
             file=sys.stderr,
         )
         return 1
 
     nonce = w3.eth.get_transaction_count(deployer.address)
     gas_price = w3.eth.gas_price
-    tx = contract.functions.register(
-        node_id_bytes, pubkey_bytes,
-    ).build_transaction({
+    tx = contract.functions.register(pubkey_bytes).build_transaction({
         "from": deployer.address,
         "nonce": nonce,
         "gas": 80000,
