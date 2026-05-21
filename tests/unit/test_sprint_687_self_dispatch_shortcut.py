@@ -165,6 +165,39 @@ def test_self_dispatch_raises_when_no_local_executor():
         loop.call_soon_threadsafe(loop.stop)
 
 
+def test_address_resolver_short_circuits_for_self():
+    """build_address_resolver must NOT raise PeerNotFound when
+    asked to resolve self's own node_id. Live-attest of sprint 687
+    surfaced that the resolver raises BEFORE the send_message
+    adapter ever runs — so the send_message-side fix alone is
+    insufficient. The resolver returns the node_id unchanged for
+    self, signaling the send adapter to short-circuit."""
+    from prsm.node.chain_executor_adapters import (
+        build_address_resolver, PeerNotFound,
+    )
+    self_id = "a" * 32
+    node = MagicMock()
+    node.identity.node_id = self_id
+    node.transport.peers = {}  # empty — self NEVER appears here
+    resolver = build_address_resolver(node)
+    # Must not raise:
+    assert resolver(self_id) == self_id
+
+
+def test_address_resolver_still_raises_for_unknown_remote():
+    """Remote node_id absent from transport.peers → still raises
+    PeerNotFound (pin against over-broadening the self-shortcut)."""
+    from prsm.node.chain_executor_adapters import (
+        build_address_resolver, PeerNotFound,
+    )
+    node = MagicMock()
+    node.identity.node_id = "a" * 32
+    node.transport.peers = {}
+    resolver = build_address_resolver(node)
+    with pytest.raises(PeerNotFound):
+        resolver("b" * 32)  # unknown remote
+
+
 def test_self_dispatch_path_in_source_guard():
     """Pin against a refactor that removes the sprint-687 self-
     dispatch shortcut. The adapter must contain the self-id check."""

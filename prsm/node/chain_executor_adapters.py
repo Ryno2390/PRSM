@@ -124,6 +124,20 @@ def build_address_resolver(node: Any) -> Callable[[str], str]:
     transport = node.transport
 
     def _resolve(node_id: str) -> str:
+        # Sprint 687 F34 — self-dispatch sentinel. When the chain
+        # routes a stage to the local node, transport.peers cannot
+        # contain self (only remote connections live there). Return
+        # the node_id unchanged so the downstream send_message
+        # adapter detects self via identity comparison + short-
+        # circuits to the local StageExecutor. Without this, the
+        # resolver raises PeerNotFound and the entire chain aborts
+        # — even though local execution doesn't need any peer
+        # connection.
+        self_node_id = getattr(
+            getattr(node, "identity", None), "node_id", None,
+        )
+        if self_node_id is not None and node_id == self_node_id:
+            return node_id
         peer = transport.peers.get(node_id)
         if peer is None:
             raise PeerNotFound(
