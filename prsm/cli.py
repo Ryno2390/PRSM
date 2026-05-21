@@ -2496,6 +2496,148 @@ def section7_readiness_cli(output_format: str):
         raise SystemExit(1)
 
 
+# ── Sprint 696 — Parallax env-var readiness ─────────────────────
+
+
+_PARALLAX_ENV_REGISTRY = [
+    # (env_var, required, valid_values_or_None, description)
+    ("PRSM_INFERENCE_EXECUTOR", True, ["parallax", "mock", ""],
+     "Inference executor kind. 'parallax' wires the real ParallaxScheduledExecutor."),
+    ("PRSM_PARALLAX_GPU_POOL_KIND", True, ["dht-backed", "static-empty"],
+     "GPU pool provider. 'dht-backed' reads peers from discovery."),
+    ("PRSM_PARALLAX_TRUST_STACK_KIND", True, ["production", "mock"],
+     "Trust stack kind. 'production' uses real anchor + stake lookups."),
+    ("PRSM_PARALLAX_MODEL_CATALOG_FILE", True, None,
+     "Path to model catalog JSON (e.g., config/parallax/model_catalog.json)."),
+    ("PRSM_PUBLISHER_KEY_ANCHOR_ADDRESS", False, None,
+     "PublisherKeyAnchor contract address (required when TRUST_STACK_KIND=production)."),
+    ("PRSM_PARALLAX_CHAIN_EXECUTOR_KIND", False, ["rpc", "stub", ""],
+     "Chain executor. 'rpc' = real cross-host dispatch; default 'stub'."),
+    ("PRSM_PARALLAX_STAGE_EXECUTOR_KIND", False, ["layer_stage", "stub", "echo", ""],
+     "Stage executor. 'layer_stage' = real HF model forward pass."),
+    ("PRSM_PARALLAX_LAYER_SLICE_RUNNER_KIND", False,
+     ["huggingface", "identity", ""],
+     "Layer runner. 'huggingface' loads a real HF model."),
+    ("PRSM_PARALLAX_HF_MODEL_ID", False, None,
+     "HF model id (e.g., 'gpt2'). Required when LAYER_SLICE_RUNNER_KIND=huggingface."),
+    ("PRSM_PARALLAX_HF_DEVICE", False, ["cpu", "cuda", "mps", "auto", ""],
+     "HF compute device. 'cpu' default; 'cuda' for GPU; 'auto' detects."),
+    ("PRSM_PARALLAX_PROMPT_ENCODER_KIND", False, ["huggingface", ""],
+     "Prompt encoder. 'huggingface' uses real tokenizer; default is utf8 byte-passthrough."),
+    ("PRSM_PARALLAX_OUTPUT_DECODER_KIND", False, ["huggingface", ""],
+     "Output decoder. Set together with PROMPT_ENCODER_KIND for real generation."),
+    ("PRSM_PARALLAX_STREAMING_RUNNER_KIND", False,
+     ["embedder_backed", "synthetic", ""],
+     "SSE streaming runner. 'embedder_backed' = real autoregressive (default)."),
+    ("PRSM_PARALLAX_KV_CACHE_ENABLED", False, ["1", "0", "true", "false", ""],
+     "KV cache toggle for streaming. Default off; '1' enables."),
+    ("PRSM_PARALLAX_STAKE_ELIGIBILITY", False, ["enforced", "advisory", ""],
+     "Stake eligibility mode. 'enforced' = production; 'advisory' = pre-stake-ceremony bypass."),
+    ("PRSM_STAKE_BOND_ADDRESS", False, None,
+     "StakeBond contract address (used by PoolBackedStakeLookup)."),
+    ("PRSM_OPERATOR_ADDRESS", False, None,
+     "Operator's EOA address (advertised in hardware_profile for stake lookup)."),
+    ("PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE", False, None,
+     "Override per-GPU layer_capacity (int). Useful for small models on small GPUs."),
+    ("PRSM_PARALLAX_MEMORY_GB_OVERRIDE", False, None,
+     "Override advertised memory_gb (float). Forces multi-stage allocation when needed."),
+    ("PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE", False, None,
+     "Override advertised tflops_fp16 (float). Useful when CPU benchmark is too low."),
+    ("PRSM_PARALLAX_DEFAULT_RTT_MS", False, None,
+     "Default inter-peer RTT in ms. Required for Phase-2 routing on pools without profile measurements."),
+    ("PRSM_PARALLAX_SEND_MESSAGE_TIMEOUT_S", False, None,
+     "Per-stage dispatch timeout in seconds (default 30)."),
+    ("PRSM_PARALLAX_REGION", False, None,
+     "Region tag for ParallaxGPU (default 'default'). Allocator never spans regions."),
+]
+
+
+@node.command("parallax-readiness")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def parallax_readiness_cli(output_format: str):
+    """Sprint 696 — operator preflight for the 22 PRSM_PARALLAX_*
+    env vars accumulated across sprints 558-695.
+
+    Reports which env vars are set, validates values against
+    known-good enumerations where applicable, and flags missing
+    required vars + bad values. Read-only — does not start any
+    daemon or touch on-chain.
+
+    Exit 0 only when all REQUIRED vars are set + all set vars
+    have valid values (suitable for CI gating).
+    """
+    import json as _json
+    import os as _os
+    rows = []
+    missing_required: List[str] = []
+    bad_values: List[Tuple[str, str]] = []
+    for env_var, required, valid_values, desc in _PARALLAX_ENV_REGISTRY:
+        raw = _os.environ.get(env_var, "").strip()
+        if not raw:
+            status = "unset" if not required else "MISSING (required)"
+            if required:
+                missing_required.append(env_var)
+            rows.append((env_var, status, "", desc))
+            continue
+        if valid_values is not None and raw not in valid_values:
+            status = f"INVALID: must be one of {valid_values}"
+            bad_values.append((env_var, raw))
+        else:
+            status = "set"
+        rows.append((env_var, status, raw, desc))
+
+    overall = "ready" if not missing_required and not bad_values else "not_ready"
+    payload = {
+        "overall": overall,
+        "missing_required": missing_required,
+        "bad_values": [{"env": e, "value": v} for e, v in bad_values],
+        "vars": [
+            {"env": r[0], "status": r[1], "value": r[2], "description": r[3]}
+            for r in rows
+        ],
+    }
+    if output_format == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        raise SystemExit(0 if overall == "ready" else 1)
+
+    table = Table(title="Parallax readiness (sprint 696)")
+    table.add_column("Env var", style="cyan", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Value", style="yellow", no_wrap=False, max_width=30)
+    for env_var, status, value, _ in rows:
+        if status == "set":
+            s = "[green]✓ set[/green]"
+        elif status == "unset":
+            s = "[dim]unset[/dim]"
+        elif status.startswith("MISSING"):
+            s = f"[red]{status}[/red]"
+        else:
+            s = f"[red]{status}[/red]"
+        table.add_row(env_var, s, value)
+    console.print(table)
+    if overall == "ready":
+        console.print(
+            "\n[green]✓ ready[/green] — all required parallax env "
+            "vars are set with valid values."
+        )
+    else:
+        if missing_required:
+            console.print(
+                f"\n[red]missing required:[/red] "
+                f"{', '.join(missing_required)}"
+            )
+        if bad_values:
+            console.print(
+                f"\n[red]invalid values:[/red] "
+                f"{', '.join(f'{e}={v}' for e, v in bad_values)}"
+            )
+        raise SystemExit(1)
+
+
 # ── Sprint 584 — RPC probe ───────────────────────────────────────
 
 
