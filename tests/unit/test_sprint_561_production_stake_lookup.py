@@ -146,11 +146,14 @@ def test_production_with_stake_address_uses_real_lookup(
     monkeypatch, tmp_path,
 ):
     """When PRSM_STAKE_BOND_ADDRESS is set alongside the anchor,
-    the production trust_stack's profile_source carries an
-    AnchorMediatedStakeLookup (not the sprint-560 ZeroStakeLookup
-    placeholder)."""
+    the production trust_stack's profile_source carries a
+    sprint-690 PoolBackedStakeLookup (NOT the broken sprint-561
+    AnchorMediatedStakeLookup — see F31 docs). The pool-backed
+    lookup reads pre-populated stake_amounts from the DHT pool
+    snapshot, avoiding the pubkey-vs-ETH-address bug that made
+    anchor-mediated lookup return 0 for every peer."""
     from prsm.node.inference_wiring import (
-        AnchorMediatedStakeLookup,
+        PoolBackedStakeLookup,
         build_parallax_executor_or_none,
     )
 
@@ -172,8 +175,8 @@ def test_production_with_stake_address_uses_real_lookup(
         result = build_parallax_executor_or_none(_stub_node())
     assert result is not None
     stake_lookup = result._trust.profile_source.stake_lookup
-    assert isinstance(stake_lookup, AnchorMediatedStakeLookup), (
-        f"expected real AnchorMediatedStakeLookup; got "
+    assert isinstance(stake_lookup, PoolBackedStakeLookup), (
+        f"expected sprint-690 PoolBackedStakeLookup; got "
         f"{type(stake_lookup).__name__}"
     )
 
@@ -264,15 +267,25 @@ def test_mock_kind_unchanged(monkeypatch, tmp_path):
     assert isinstance(result, ParallaxScheduledExecutor)
 
 
-def test_stake_client_construction_failure_falls_back(
+def test_stake_client_failure_in_pool_does_not_break_trust_stack(
     monkeypatch, tmp_path, caplog,
 ):
-    """StakeManagerClient construction failure (e.g., RPC unreachable
-    at startup) → fall back to placeholder + warn. Whole production
-    wiring must NOT fail on a stake-client construction error;
-    operators can resume wiring once RPC is healthy."""
+    """Sprint 690 supersedes the sprint-561 stake-client-fallback
+    test. The production trust stack no longer constructs a
+    StakeManagerClient directly — sprint-690's PoolBackedStakeLookup
+    reads stake from the pool provider's already-resolved
+    ParallaxGPU.stake_amount field. StakeManagerClient construction
+    happens lazily inside sprint-683's OnChainStakeReader (lazy-
+    constructed by the pool provider) with its own fail-soft path
+    returning 0 stake under RPC errors.
+
+    What this test asserts now: even with the chain RPC dead, the
+    production trust stack constructs successfully (no crash; the
+    pool-backed lookup returns 0 stake per peer, advisory mode
+    can bridge to live-attest)."""
     from prsm.node.inference_wiring import (
         build_parallax_executor_or_none,
+        PoolBackedStakeLookup,
     )
     _set_env(
         monkeypatch, tmp_path,
@@ -287,8 +300,9 @@ def test_stake_client_construction_failure_falls_back(
         "prsm.economy.web3.stake_manager.StakeManagerClient",
         side_effect=RuntimeError("rpc dead"),
     ):
-        with caplog.at_level(logging.WARNING):
-            result = build_parallax_executor_or_none(_stub_node())
+        result = build_parallax_executor_or_none(_stub_node())
     assert result is not None
-    log_text = " ".join(r.message for r in caplog.records)
-    assert "StakeManagerClient" in log_text or "stake" in log_text.lower()
+    assert isinstance(
+        result._trust.profile_source.stake_lookup,
+        PoolBackedStakeLookup,
+    )

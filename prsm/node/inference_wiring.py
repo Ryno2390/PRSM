@@ -229,6 +229,57 @@ def _wrap_stake_lookup_for_eligibility(stake_lookup: Any) -> Any:
     return _PermitAllStakeLookup()
 
 
+class PoolBackedStakeLookup:
+    """Sprint 690 F31 proper fix — read stake from the latest pool
+    snapshot rather than via the broken anchor-mediated path.
+
+    The DHT-backed GpuPoolProvider (sprint 682) already populates
+    ``ParallaxGPU.stake_amount`` correctly when a peer advertises
+    ``operator_address`` in its hardware_profile (sprint 690 piece
+    1 plumbs this from PRSM_OPERATOR_ADDRESS env). Sprint 683's
+    OnChainStakeReader reads the real on-chain stake via
+    StakeManagerClient.stake_of(operator_address).amount_wei
+    inside the pool provider, with 60s TTL caching.
+
+    This lookup just reads the ParallaxGPU.stake_amount field on
+    the GPU matching the queried node_id. No anchor.lookup call,
+    no pubkey-vs-ETH-address misuse. Closes the F31 advisory-
+    mode bypass shipped in sprint 686.
+
+    Behavior:
+      - provider raises → 0 (defensive — pre-route filter must
+        never crash)
+      - node_id absent from pool → 0 (matches
+        AnchorMediatedStakeLookup's "unknown node = unstaked"
+        semantics)
+      - matched gpu → gpu.stake_amount (already populated by
+        sprint 683's OnChainStakeReader path)
+    """
+
+    def __init__(self, *, pool_provider: Any) -> None:
+        if pool_provider is None or not callable(pool_provider):
+            raise RuntimeError(
+                "PoolBackedStakeLookup requires a callable "
+                "pool_provider"
+            )
+        self._pool_provider = pool_provider
+
+    def get_stake(self, node_id: str) -> int:
+        try:
+            pool = list(self._pool_provider())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "PoolBackedStakeLookup: pool_provider raised %s; "
+                "returning 0 stake for %s",
+                type(exc).__name__, node_id,
+            )
+            return 0
+        for gpu in pool:
+            if getattr(gpu, "node_id", None) == node_id:
+                return int(getattr(gpu, "stake_amount", 0) or 0)
+        return 0
+
+
 class AnchorMediatedStakeLookup:
     """Sprint 561 — production stake_lookup. Maps trust-stack node_id
     (32-char hex publisher ID) → ETH address via the anchor's
@@ -285,7 +336,7 @@ class AnchorMediatedStakeLookup:
         return int(getattr(record, "amount_wei", 0))
 
 
-def _build_production_trust_stack_or_none():
+def _build_production_trust_stack_or_none(pool_provider=None):
     """Sprint 560 + 561 — `production` trust-stack kind.
 
     Wires REAL components from operator-supplied env vars:
@@ -363,29 +414,44 @@ def _build_production_trust_stack_or_none():
         "PRSM_STAKE_BOND_ADDRESS", "",
     ).strip()
     if stake_addr:
-        try:
-            from prsm.economy.web3.stake_manager import (
-                StakeManagerClient,
-            )
-            stake_client = StakeManagerClient(
-                contract_address=stake_addr,
-                rpc_url=rpc_url,
-            )
-            stake_lookup = AnchorMediatedStakeLookup(
-                anchor=anchor, stake_client=stake_client,
-            )
-            stake_lookup_status = "REAL"
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Sprint 561 ParallaxScheduledExecutor wiring: "
-                "StakeManagerClient construction failed against %s "
-                "— %s. Falling back to ZeroStakeLookup placeholder.",
-                stake_addr, exc,
-            )
-            stake_lookup = _ZeroStakeLookup()
-            stake_lookup_status = (
-                "PLACEHOLDER (StakeManagerClient construction failed)"
-            )
+        # Sprint 690 F31 proper fix — prefer PoolBackedStakeLookup
+        # when a pool_provider is available. The DHT pool provider
+        # (sprint 682+683) already populates ParallaxGPU.stake_amount
+        # via OnChainStakeReader → operator_address → stake_of. The
+        # pool-backed lookup just reads that already-correct value
+        # instead of doing a doomed-from-the-start
+        # anchor.lookup(node_id) → stake_of(pubkey) dance (F31).
+        if pool_provider is not None:
+            stake_lookup = PoolBackedStakeLookup(pool_provider=pool_provider)
+            stake_lookup_status = "REAL (pool-backed, sprint 690)"
+        else:
+            try:
+                from prsm.economy.web3.stake_manager import (
+                    StakeManagerClient,
+                )
+                stake_client = StakeManagerClient(
+                    contract_address=stake_addr,
+                    rpc_url=rpc_url,
+                )
+                stake_lookup = AnchorMediatedStakeLookup(
+                    anchor=anchor, stake_client=stake_client,
+                )
+                stake_lookup_status = (
+                    "LEGACY (AnchorMediatedStakeLookup — F31 bug, "
+                    "always returns 0; supply pool_provider for "
+                    "sprint-690 PoolBackedStakeLookup)"
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Sprint 561 ParallaxScheduledExecutor wiring: "
+                    "StakeManagerClient construction failed against %s "
+                    "— %s. Falling back to ZeroStakeLookup placeholder.",
+                    stake_addr, exc,
+                )
+                stake_lookup = _ZeroStakeLookup()
+                stake_lookup_status = (
+                    "PLACEHOLDER (StakeManagerClient construction failed)"
+                )
     else:
         logger.warning(
             "Sprint 561 ParallaxScheduledExecutor wiring: "
@@ -947,16 +1013,10 @@ def build_parallax_executor_or_none(node: Any) -> Optional[Any]:
             "Known: %s", trust_kind, _KNOWN_TRUST_STACK_KINDS,
         )
         return None
-    if trust_kind == "mock":
-        trust_stack = _build_mock_trust_stack()
-    elif trust_kind == "production":
-        trust_stack = _build_production_trust_stack_or_none()
-        if trust_stack is None:
-            return None
-    else:  # defensive — already gated above
-        return None
-
     # ── gpu pool ─────────────────────────────────────────
+    # Sprint 690 — built BEFORE trust_stack so the production trust
+    # stack can wire PoolBackedStakeLookup against it (F31 proper
+    # fix replaces broken AnchorMediatedStakeLookup).
     if pool_kind not in _KNOWN_GPU_POOL_KINDS:
         logger.warning(
             "Sprint 558 ParallaxScheduledExecutor wiring: "
@@ -974,6 +1034,17 @@ def build_parallax_executor_or_none(node: Any) -> Optional[Any]:
         )
         pool_provider = build_dht_backed_pool_provider(node)
     else:  # defensive
+        return None
+
+    if trust_kind == "mock":
+        trust_stack = _build_mock_trust_stack()
+    elif trust_kind == "production":
+        trust_stack = _build_production_trust_stack_or_none(
+            pool_provider=pool_provider,
+        )
+        if trust_stack is None:
+            return None
+    else:  # defensive — already gated above
         return None
 
     # ── identity ─────────────────────────────────────────

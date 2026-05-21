@@ -64,6 +64,7 @@ def load_local_hardware_profile(
                 env_path,
             )
             return None
+        _merge_operator_address(data)
         return data
 
     # 2) on-disk cache
@@ -72,6 +73,7 @@ def load_local_hardware_profile(
         try:
             data = json.loads(cache_file.read_text())
             if isinstance(data, dict):
+                _merge_operator_address(data)
                 return data
             logger.warning(
                 "hardware_profile cache %s top-level is not a dict; "
@@ -105,4 +107,35 @@ def load_local_hardware_profile(
             "(non-fatal).", cache_file, exc,
         )
 
+    _merge_operator_address(data)
     return data
+
+
+def _merge_operator_address(data: Dict[str, Any]) -> None:
+    """Sprint 690 F31 fix piece 1 — merge PRSM_OPERATOR_ADDRESS
+    into the loaded profile so the DHT pool provider's
+    operator_address path (sprint 683) gets a real on-chain
+    address to look up stake against.
+
+    Validates 0x-prefixed 42-char hex form (Ethereum). Garbage →
+    skip + warn; absent env → no field added.
+
+    Called both on the explicit env-pin path AND on the cache/
+    compute paths so EVERY return shape gets the merge.
+    """
+    addr = os.environ.get("PRSM_OPERATOR_ADDRESS", "").strip()
+    if not addr:
+        return
+    if (
+        not addr.startswith("0x")
+        or len(addr) != 42
+        or not all(c in "0123456789abcdefABCDEF" for c in addr[2:])
+    ):
+        logger.warning(
+            "PRSM_OPERATOR_ADDRESS=%r is not a valid 0x-prefixed "
+            "42-char hex Ethereum address; peer will NOT advertise "
+            "operator_address (stake-eligibility will fail under "
+            "enforced mode).", addr,
+        )
+        return
+    data["operator_address"] = addr
