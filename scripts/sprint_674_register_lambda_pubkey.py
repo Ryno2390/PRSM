@@ -153,7 +153,7 @@ def main() -> int:
     tx = contract.functions.register(pubkey_bytes).build_transaction({
         "from": deployer.address,
         "nonce": nonce,
-        "gas": 80000,
+        "gas": 150000,  # sprint 676 fix — was 80k, OOG'd live 2026-05-21
         "gasPrice": gas_price,
         "chainId": CHAIN_ID,
     })

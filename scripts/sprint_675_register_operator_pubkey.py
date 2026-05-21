@@ -160,7 +160,13 @@ def main() -> int:
     tx = contract.functions.register(pubkey_bytes).build_transaction({
         "from": deployer.address,
         "nonce": nonce,
-        "gas": 80000,
+        # Sprint 676 fix — actual register() execution uses ~85-95k gas
+        # (two cold SSTOREs to publisherKeys + registeredAt, plus event
+        # emission with 1 indexed bytes16 + 1 unindexed bytes + 1
+        # unindexed uint64). Sprint 623's working script used 100k; we
+        # use 150k for safety margin. Out-of-gas revert observed
+        # 2026-05-21 on TX 0x0d2ffd74... with 80k limit.
+        "gas": 150000,
         "gasPrice": gas_price,
         "chainId": CHAIN_ID,
     })
