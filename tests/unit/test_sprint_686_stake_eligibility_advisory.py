@@ -148,6 +148,27 @@ def test_layer_capacity_override_falls_back_on_garbage(monkeypatch):
     assert gpus[0].layer_capacity == 8
 
 
+def test_rebuild_inference_executor_after_loop_assignment_in_source():
+    """Pin against the regression: build_parallax_executor_or_none
+    must run again AFTER node._loop is set in PRSMNode.start. Pre-
+    sprint-686 the inference_executor was built once at __init__
+    time when _loop=None, which forced _build_chain_executor to
+    fall back to the sprint-558 stub. The rebuild happens after
+    `self._loop = ...` in start()."""
+    import inspect
+    from prsm.node.node import PRSMNode
+    src = inspect.getsource(PRSMNode.start)
+    loop_pos = src.find("self._loop = _asyncio.get_running_loop()")
+    rebuild_pos = src.find("build_parallax_executor_or_none")
+    assert loop_pos != -1, "_loop assignment missing in start()"
+    assert rebuild_pos != -1, (
+        "inference_executor rebuild call missing from PRSMNode.start"
+    )
+    assert loop_pos < rebuild_pos, (
+        "rebuild must run AFTER _loop assignment, not before"
+    )
+
+
 def test_snapshot_endpoint_surfaces_eligibility_mode(monkeypatch):
     """Operators must be able to GET the snapshot and see whether
     the daemon is running in advisory or enforced mode — debugging

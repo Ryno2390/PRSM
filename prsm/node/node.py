@@ -4055,6 +4055,38 @@ class PRSMNode:
         # bytes. Sprint-597 wires the message-handler to resolve.
         self._chain_executor_pending = {}
 
+        # Sprint 686 — rebuild inference_executor now that _loop is
+        # set. _build_chain_executor needs node._loop to wire the
+        # async-to-sync bridge (sprint 595+); when build runs at
+        # __init__ time _loop is None → chain_executor falls back to
+        # the sprint-558 stub. Rebuilding here uses the freshly-set
+        # _loop so the real RPC chain executor wires correctly.
+        # Only re-runs when the operator opted into the parallax
+        # kind; mock/None paths keep their __init__-time decision.
+        if (
+            os.environ.get("PRSM_INFERENCE_EXECUTOR", "")
+            .strip().lower() == "parallax"
+        ):
+            try:
+                from prsm.node.inference_wiring import (
+                    build_parallax_executor_or_none,
+                )
+                rebuilt = build_parallax_executor_or_none(self)
+                if rebuilt is not None:
+                    self.inference_executor = rebuilt
+                    logger.info(
+                        "Sprint 686 — inference_executor rebuilt "
+                        "after _loop assignment; real RPC chain "
+                        "executor now wired (was sprint-558 stub "
+                        "at __init__ time)."
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Sprint 686 — inference_executor rebuild after "
+                    "_loop assignment raised: %s. Keeping "
+                    "__init__-time executor.", exc,
+                )
+
         await self.transport.start()
 
         # Sprint 599 (Phase 2D step 5) — register the chain-executor
