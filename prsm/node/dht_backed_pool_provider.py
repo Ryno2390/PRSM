@@ -70,7 +70,28 @@ def _hw_dict_to_parallax_gpu(
     if memory_bandwidth_gbps <= 0:
         memory_bandwidth_gbps = _DEFAULT_MEMORY_BANDWIDTH_GBPS
 
-    layer_capacity = max(1, int(memory_gb / _BYTES_PER_LAYER_GB))
+    # Sprint 686 — operator override for the layer_capacity
+    # heuristic. The default 2GB-per-layer formula targets 7B-class
+    # fp16 models; operators serving smaller models (gpt2, phi-2,
+    # etc.) need a higher cap or Phase-1 allocation can't place
+    # all layers. Set PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=<int>
+    # to pin per-GPU capacity explicitly. Live-attest of sprint
+    # 685's gpt2 (12 layers / ~27MB each) surfaced this.
+    _override_raw = os.environ.get(
+        "PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE", "",
+    ).strip()
+    if _override_raw:
+        try:
+            layer_capacity = max(1, int(_override_raw))
+        except ValueError:
+            logger.debug(
+                "PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=%r not "
+                "integer; falling back to memory heuristic",
+                _override_raw,
+            )
+            layer_capacity = max(1, int(memory_gb / _BYTES_PER_LAYER_GB))
+    else:
+        layer_capacity = max(1, int(memory_gb / _BYTES_PER_LAYER_GB))
 
     gpu_api = hw.get("gpu_api", "") or ""
     device_map = {

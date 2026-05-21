@@ -34,6 +34,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 def test_advisory_mode_permits_zero_stake_nodes(monkeypatch):
@@ -107,21 +109,57 @@ def test_filter_pool_error_message_distinguishes_anchor_vs_stake():
     ), "filter_pool error must mention stake eligibility, not just anchor"
 
 
+def test_layer_capacity_override_pins_explicit_value(monkeypatch):
+    """PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=12 → every ParallaxGPU
+    gets layer_capacity=12 regardless of memory_gb. Live-attest of
+    sprint 685 surfaced this: gpt2 has 12 layers, default formula
+    gave 1 per GPU → 2 < 12 → Phase-1 allocation fails."""
+    monkeypatch.setenv("PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE", "12")
+    from prsm.node.dht_backed_pool_provider import (
+        build_dht_backed_pool_provider,
+    )
+    node = MagicMock()
+    node.identity.node_id = "a" * 32
+    node.discovery._local_hardware_profile = {
+        "tflops_fp16": 4.6, "ram_total_gb": 1.92,  # small RAM
+    }
+    node.discovery.known_peers = {}
+    provider = build_dht_backed_pool_provider(node)
+    gpus = list(provider())
+    assert len(gpus) == 1
+    assert gpus[0].layer_capacity == 12
+
+
+def test_layer_capacity_override_falls_back_on_garbage(monkeypatch):
+    """Non-integer override → falls back to memory heuristic."""
+    monkeypatch.setenv("PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE", "garbage")
+    from prsm.node.dht_backed_pool_provider import (
+        build_dht_backed_pool_provider,
+    )
+    node = MagicMock()
+    node.identity.node_id = "a" * 32
+    node.discovery._local_hardware_profile = {
+        "tflops_fp16": 4.6, "ram_total_gb": 16.0,
+    }
+    node.discovery.known_peers = {}
+    provider = build_dht_backed_pool_provider(node)
+    gpus = list(provider())
+    # 16/2 = 8 layers via fallback
+    assert gpus[0].layer_capacity == 8
+
+
 def test_snapshot_endpoint_surfaces_eligibility_mode(monkeypatch):
     """Operators must be able to GET the snapshot and see whether
     the daemon is running in advisory or enforced mode — debugging
     the live-attest gap shouldn't require reading systemd-show."""
     monkeypatch.setenv("PRSM_PARALLAX_STAKE_ELIGIBILITY", "advisory")
-    # Reuse the same helper sprint 685's tests use to dodge any
-    # MagicMock-as-TestClient confusion when both libraries are
-    # imported in the same module.
-    from tests.unit.test_sprint_685_parallax_pool_snapshot_endpoint import (
-        _build_app_with_node,
-    )
     node = MagicMock()
     node.inference_executor = MagicMock()
     node.inference_executor._pool_provider = lambda: []
-    client = _build_app_with_node(node)
+    from prsm.node.api import register_parallax_pool_snapshot_endpoint
+    app = FastAPI()
+    register_parallax_pool_snapshot_endpoint(app, node)
+    client = TestClient(app)
     resp = client.get("/admin/parallax/pool/snapshot")
     assert resp.status_code == 200
     payload = resp.json()
