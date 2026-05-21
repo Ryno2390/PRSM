@@ -615,9 +615,29 @@ def _build_chain_executor(node: Any) -> Any:
                         "but PRSM_PARALLAX_HF_MODEL_ID unset; "
                         "falling back to default decoder."
                     )
+            # Sprint 687 — operator-tunable timeout. Default 30s
+            # covers a single layer execution + network roundtrip
+            # for remote stages, but local self-dispatch can take
+            # 30+s on cold gpt2 load on small droplets. Env override
+            # lets operators raise it without code change.
+            _timeout_raw = os.environ.get(
+                "PRSM_PARALLAX_SEND_MESSAGE_TIMEOUT_S", "",
+            ).strip()
+            _send_timeout = 30.0
+            if _timeout_raw:
+                try:
+                    _send_timeout = max(1.0, float(_timeout_raw))
+                except ValueError:
+                    logger.debug(
+                        "PRSM_PARALLAX_SEND_MESSAGE_TIMEOUT_S=%r "
+                        "not numeric; using 30.0s default",
+                        _timeout_raw,
+                    )
             executor = make_rpc_chain_executor(
                 settler_identity=node.identity,
-                send_message=build_send_message_adapter(node),
+                send_message=build_send_message_adapter(
+                    node, timeout=_send_timeout,
+                ),
                 anchor=anchor,
                 address_resolver=build_address_resolver(node),
                 **prompt_encoder_kwarg,
