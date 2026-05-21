@@ -647,7 +647,14 @@ class HuggingFaceLayerSliceRunner:
                 f"({start}, {end}) for model with {len(layers)} layers"
             )
         original_ndim = activation.ndim
-        hidden = _torch.from_numpy(activation).to(self.device)
+        # Sprint 687 F36 — match model dtype (float32 per
+        # _ensure_model_loaded). numpy activations default to
+        # float64 on most platforms; passing fp64 into fp32 layers
+        # raises "mixed dtype (CPU)" on torch>=2.x. Cast at the
+        # boundary.
+        hidden = _torch.from_numpy(activation).to(
+            self.device, dtype=_torch.float32,
+        )
         if hidden.dim() == 2:
             hidden = hidden.unsqueeze(0)
         # position_ids = arange(S) broadcast over batch — sufficient
@@ -758,7 +765,14 @@ class HuggingFaceLayerSliceRunner:
                 f"({start}, {end}) for model with {len(layers)} layers"
             )
         original_ndim = activation.ndim
-        hidden = _torch.from_numpy(activation).to(self.device)
+        # Sprint 687 F36 — match model dtype (float32 per
+        # _ensure_model_loaded). numpy activations default to
+        # float64 on most platforms; passing fp64 into fp32 layers
+        # raises "mixed dtype (CPU)" on torch>=2.x. Cast at the
+        # boundary.
+        hidden = _torch.from_numpy(activation).to(
+            self.device, dtype=_torch.float32,
+        )
         if hidden.dim() == 2:
             hidden = hidden.unsqueeze(0)
 
