@@ -63,6 +63,30 @@ def _hw_dict_to_parallax_gpu(
     if memory_gb <= 0:
         return None
 
+    # Sprint 695 — operator override for the advertised memory_gb.
+    # The upstream Parallax allocator uses memory_gb as input to
+    # its water-filling step that decides per-stage layer counts;
+    # large memory → all layers fit on one GPU → 1-stage allocation
+    # (live-attested in sprint 688 for gpt2 on 1.92GB droplets).
+    # Operators wanting to force a multi-stage split for testing
+    # (or to reserve memory for runtime overhead) can pin this to
+    # a smaller value. Pure-additive: env unset → existing
+    # heuristic preserved.
+    _mem_override_raw = os.environ.get(
+        "PRSM_PARALLAX_MEMORY_GB_OVERRIDE", "",
+    ).strip()
+    if _mem_override_raw:
+        try:
+            memory_gb = float(_mem_override_raw)
+            if memory_gb <= 0:
+                return None
+        except ValueError:
+            logger.debug(
+                "PRSM_PARALLAX_MEMORY_GB_OVERRIDE=%r not float; "
+                "falling back to advertised memory_gb=%s",
+                _mem_override_raw, memory_gb,
+            )
+
     memory_bandwidth_gbps = float(
         hw.get("memory_bandwidth_gbps", _DEFAULT_MEMORY_BANDWIDTH_GBPS)
         or _DEFAULT_MEMORY_BANDWIDTH_GBPS
