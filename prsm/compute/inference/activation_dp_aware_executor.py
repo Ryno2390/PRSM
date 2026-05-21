@@ -144,3 +144,42 @@ class ActivationDPAwareChainExecutor:
         )
         trace = injector.trace()
         return replace(result, activation_noise_trace=trace)
+
+    def execute_chain_streaming(
+        self, *, request: Any, chain: Any, **kwargs: Any,
+    ) -> Any:
+        """Sprint 689 — passthrough to inner for SSE streaming.
+
+        For tier NONE the DP injector wouldn't fire even on the
+        unary path (policy.enabled=False), so streaming passes
+        through cleanly. For tier STANDARD/HIGH/MAXIMUM we
+        currently can't combine activation-DP injection with
+        per-token streaming — DP injection runs once-per-stage
+        but streaming yields frames per token; integrating them
+        requires a streaming-aware injector that maintains state
+        across token frames. Raise a structured error pointing
+        at the gap rather than silently dropping DP.
+        """
+        if not hasattr(self._inner, "execute_chain_streaming"):
+            raise AttributeError(
+                "ActivationDPAwareChainExecutor.execute_chain_streaming "
+                "requires the inner executor to support streaming"
+            )
+        stage_count = len(chain.stages)
+        policy = StageNoisePolicy.for_tier(
+            request.privacy_tier,
+            stage_count,
+            clip_norm=self._clip_norm,
+            delta=self._delta,
+        )
+        if policy.enabled:
+            raise RuntimeError(
+                f"ActivationDPAwareChainExecutor: privacy_tier="
+                f"{request.privacy_tier!r} requires DP injection, "
+                f"but DP-aware streaming isn't yet wired. Use "
+                f"unary /compute/inference for non-NONE tiers, "
+                f"or NONE tier for streaming."
+            )
+        return self._inner.execute_chain_streaming(
+            request=request, chain=chain, **kwargs,
+        )

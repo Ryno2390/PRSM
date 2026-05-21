@@ -110,3 +110,26 @@ class TopologyAwareChainExecutor:
         )
 
         return replace(result, topology_assignment=topology)
+
+    def execute_chain_streaming(
+        self, *, request: Any, chain: Any, **kwargs: Any,
+    ) -> Any:
+        """Sprint 689 — pass through to inner for SSE streaming.
+
+        The topology decorator's purpose is to record assignment
+        on the unary ChainExecutionResult; streaming yields
+        per-token StreamToken frames, not a single result. There's
+        no place to attach topology_assignment on individual
+        tokens, so this decorator is a pure passthrough on the
+        streaming path. Operators wanting topology with streaming
+        should call execute_chain (unary) separately if needed.
+        """
+        if not hasattr(self._inner, "execute_chain_streaming"):
+            raise AttributeError(
+                "TopologyAwareChainExecutor.execute_chain_streaming "
+                "requires the inner executor to support streaming "
+                "(RpcChainExecutor does; older inners don't)"
+            )
+        return self._inner.execute_chain_streaming(
+            request=request, chain=chain, **kwargs,
+        )
