@@ -1067,12 +1067,19 @@ def build_layer_stage_server_executor(
                     )
                 from transformers import AutoTokenizer
                 _tok = AutoTokenizer.from_pretrained(_hf_id_raw)
+                # Sprint 694 F43 fix — default to greedy (temperature
+                # 0.0) so streaming output is deterministic and
+                # matches HF reference byte-for-byte. SamplingDefaults's
+                # class-level default is temperature=1.0 (sampling)
+                # which produced non-deterministic divergence at the
+                # 4th-token boundary in sprint 693's live-attest.
+                # Callers can override via request.temperature.
                 streaming_runner = EmbedderBackedStreamingRunner(
                     model=_model,
                     tokenizer=_tok,
                     tee_attestation=b"identity-runner-no-attestation",
                     tee_type=TEEType.SOFTWARE,
-                    sampling_defaults=SamplingDefaults(),
+                    sampling_defaults=SamplingDefaults(temperature=0.0),
                 )
         except Exception as exc:  # noqa: BLE001
             import logging as _l
