@@ -2551,6 +2551,8 @@ _PARALLAX_ENV_REGISTRY = [
      "Per-stage dispatch timeout in seconds (default 30)."),
     ("PRSM_PARALLAX_REGION", False, None,
      "Region tag for ParallaxGPU (default 'default'). Allocator never spans regions."),
+    ("PRSM_INFERENCE_CONCURRENCY_LIMIT", False, None,
+     "Cap on concurrent in-flight inference requests (default unset = no cap). Set to 1 on memory-tight nodes (e.g., 2GB droplets) to prevent OOM under simultaneous cold-load."),
 ]
 
 

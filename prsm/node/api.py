@@ -382,6 +382,47 @@ async def _refund_streaming_escrow(
         )
 
 
+_inference_semaphore: Optional[Any] = None  # asyncio.Semaphore, lazy
+_inference_semaphore_limit: Optional[int] = None
+
+
+def _get_inference_semaphore():
+    """Sprint 704 — global concurrency gate on /compute/inference and
+    /compute/inference/stream. Returns None when PRSM_INFERENCE_
+    CONCURRENCY_LIMIT is unset (default — preserves pre-704 behavior)
+    or an asyncio.Semaphore(N) when set to a positive integer.
+
+    Memory-tight droplets (NYC's 2GB tier) OOM'd under sprint 698's
+    cross-host coordination because a second inference arrived while
+    the first was still loading gpt2 (~500MB) + processing activations.
+    A semaphore=1 serializes inference handling so the peak memory
+    footprint is bounded by a single request's working set.
+
+    Lazy single-process singleton. Re-reads the env on every call so
+    operators can flip the limit at runtime via systemctl edit + reload
+    (the existing systemd unit Reload signal won't recreate the
+    asyncio Semaphore but the env reread + comparison ensures the new
+    daemon process picks up the change on restart).
+    """
+    global _inference_semaphore, _inference_semaphore_limit
+    import asyncio as _asyncio
+    raw = os.environ.get("PRSM_INFERENCE_CONCURRENCY_LIMIT", "").strip()
+    if not raw:
+        _inference_semaphore = None
+        _inference_semaphore_limit = None
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        return None
+    if n <= 0:
+        return None
+    if _inference_semaphore is None or _inference_semaphore_limit != n:
+        _inference_semaphore = _asyncio.Semaphore(n)
+        _inference_semaphore_limit = n
+    return _inference_semaphore
+
+
 def register_parallax_pool_snapshot_endpoint(app: Any, node: Any) -> None:
     """Sprint 685 — /admin/parallax/pool/snapshot.
 
@@ -5983,7 +6024,16 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 )
 
         try:
-            result = await node.inference_executor.execute(request)
+            # Sprint 704 — concurrency gate. When
+            # PRSM_INFERENCE_CONCURRENCY_LIMIT is set, serialize
+            # inference dispatch to prevent OOM under simultaneous
+            # cold-load on tight-RAM operators.
+            _sem = _get_inference_semaphore()
+            if _sem is not None:
+                async with _sem:
+                    result = await node.inference_executor.execute(request)
+            else:
+                result = await node.inference_executor.execute(request)
 
             if not result.success:
                 # Inference rejected the request (unknown model, budget too
@@ -6512,9 +6562,24 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             escrow defensively."""
             tokens_emitted = 0
             try:
-                async for item in node.inference_executor.execute_streaming(
-                    request,
-                ):
+                # Sprint 704 — concurrency gate for streaming path.
+                # Same semaphore as unary so a streaming inference
+                # serializes against unary requests too (the model
+                # cache is shared; both paths peak the same memory).
+                _sem = _get_inference_semaphore()
+                if _sem is not None:
+                    await _sem.acquire()
+                try:
+                    _stream_iter = node.inference_executor.execute_streaming(
+                        request,
+                    )
+                finally:
+                    # Note: semaphore released AFTER the iterator is
+                    # fully consumed below (in the finally of the outer
+                    # try). Acquire-here-release-after-iter ensures
+                    # cold-load + token-generation both hold the slot.
+                    pass
+                async for item in _stream_iter:
                     if isinstance(item, InferenceTokenEvent):
                         tokens_emitted += 1
                         yield _sse_event("token", _token_event_to_dict(item))
@@ -6626,6 +6691,20 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "code": "INTERNAL_ERROR",
                     "job_id": job_id,
                 })
+            finally:
+                # Sprint 704 — release the concurrency-gate semaphore
+                # only AFTER the iterator finishes (success OR
+                # exception). Acquired above before `_stream_iter`
+                # construction; held across cold-load + all token
+                # frames so the slot covers peak memory.
+                if _sem is not None:
+                    try:
+                        _sem.release()
+                    except (RuntimeError, ValueError):
+                        # Defensive — already released by another
+                        # path (shouldn't happen but don't crash
+                        # the generator).
+                        pass
 
         return StreamingResponse(
             _event_generator(),
