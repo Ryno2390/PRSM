@@ -1770,7 +1770,20 @@ def _remote_token_stream_dispatch(
             "dispatch."
         )
 
-    stream_id = hashlib.sha256(request_bytes + b":stream").hexdigest()
+    # Sprint 718 F52 fix: stream_id MUST include per-invocation
+    # entropy. The pre-718 derivation `sha256(request_bytes + ":stream")`
+    # was purely deterministic — concurrent identical requests (e.g.,
+    # an idempotent retry from a coordinator) computed the same
+    # stream_id, the second invocation's `pending[stream_id] = queue`
+    # silently OVERWROTE the first's queue, and the first dispatcher
+    # then got the second's frames (or nothing at all on EOF). 8
+    # bytes of os.urandom is enough to make collision negligible
+    # (~birthday bound at 2^32 in-flight streams) while keeping the
+    # id length identical to the pre-718 sha256 hex output.
+    import os as _os
+    stream_id = hashlib.sha256(
+        request_bytes + b":stream:" + _os.urandom(8),
+    ).hexdigest()
     # Per-stream queue for incoming frames + end-signal.
     pending = getattr(node, "_chain_executor_pending_streams", None)
     if pending is None:

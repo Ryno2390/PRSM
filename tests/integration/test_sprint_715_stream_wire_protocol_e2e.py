@@ -273,6 +273,102 @@ async def test_sprint_717_bounded_queue_no_frame_loss_under_load():
 
 
 @pytest.mark.asyncio
+async def test_sprint_718_concurrent_identical_requests_no_collision():
+    """Sprint 718 F52 — two concurrent invocations of
+    `_remote_token_stream_dispatch` with IDENTICAL request_bytes
+    must NOT collide on stream_id. Each receives its own complete
+    frame sequence (no cross-contamination, no loss).
+
+    Pre-F52: stream_id was `sha256(request_bytes + ':stream')` —
+    purely deterministic. Two concurrent invocations with the
+    same request_bytes computed the same stream_id, the second
+    overwrote the first's queue entry, and the first dispatcher
+    saw the second's frames (or nothing).
+    """
+    from prsm.node.identity import generate_node_identity
+    from prsm.node.transport import WebSocketTransport, MSG_DIRECT
+    from prsm.node.chain_executor_adapters import (
+        _remote_token_stream_dispatch,
+        handle_chain_stream_request,
+        handle_chain_stream_response,
+    )
+
+    loop = asyncio.get_event_loop()
+    server_id = generate_node_identity("sprint718-server")
+    requester_id = generate_node_identity("sprint718-req")
+
+    server_port = _free_port()
+    requester_port = _free_port()
+    server_transport = WebSocketTransport(
+        server_id, host="127.0.0.1", port=server_port,
+    )
+    requester_transport = WebSocketTransport(
+        requester_id, host="127.0.0.1", port=requester_port,
+    )
+    server_node = _MinimalNode(server_id, server_transport, loop)
+    requester_node = _MinimalNode(requester_id, requester_transport, loop)
+
+    # Server yields exactly 3 frames per invocation. Two concurrent
+    # dispatches → each should receive their own 3 frames.
+    frames_per_call = [b"a-0", b"a-1", b"a-2"]
+    class _ConcServer:
+        def handle_token_stream(self, request_bytes):
+            for f in frames_per_call:
+                yield f
+    class _ConcExec:
+        def __init__(self):
+            self._server = _ConcServer()
+    server_node._chain_stage_executor = _ConcExec()
+
+    async def _server_dispatch(msg, peer):
+        await handle_chain_stream_request(server_node, msg)
+    async def _requester_dispatch(msg, peer):
+        handle_chain_stream_response(requester_node, msg)
+    server_transport.on_message(MSG_DIRECT, _server_dispatch)
+    requester_transport.on_message(MSG_DIRECT, _requester_dispatch)
+
+    await server_transport.start()
+    await requester_transport.start()
+    try:
+        await requester_transport.connect_to_peer(
+            f"ws://127.0.0.1:{server_port}",
+        )
+        for _ in range(50):
+            await asyncio.sleep(0.05)
+            if server_id.node_id in requester_transport.peers:
+                break
+        assert server_id.node_id in requester_transport.peers
+
+        # IDENTICAL request_bytes in both calls — pre-F52 this
+        # was the collision trigger.
+        identical_req = b"sprint-718-identical-prompt"
+
+        def _drain_one():
+            return list(_remote_token_stream_dispatch(
+                requester_node, server_id.node_id, identical_req,
+            ))
+
+        # Fire two concurrent dispatches. With F52 fix, each gets
+        # its own stream_id + its own queue + its own complete 3-
+        # frame sequence.
+        results = await asyncio.gather(
+            asyncio.to_thread(_drain_one),
+            asyncio.to_thread(_drain_one),
+        )
+
+        for i, received in enumerate(results):
+            assert received == frames_per_call, (
+                f"dispatch #{i} received {received}, expected "
+                f"{frames_per_call} — F52 collision likely (one "
+                f"dispatch's queue was overwritten by the other)"
+            )
+
+    finally:
+        await server_transport.stop()
+        await requester_transport.stop()
+
+
+@pytest.mark.asyncio
 async def test_sprint_715_server_side_error_terminates_cleanly():
     """If the server-side stream generator raises mid-stream, the
     terminal STREAM_END must carry the error field so the requester
