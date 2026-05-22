@@ -770,6 +770,56 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         )
         return response
 
+    # Sprint 734 F65 — restrict `/admin/*` endpoints to loopback by
+    # default. Pre-734, any HTTP client on the same network as the
+    # daemon could read endpoints like /admin/parallax/streams
+    # (leaking expected_sender peer IDs — the very data sprint
+    # 719/727's sender-binding protects against forging),
+    # /admin/fiat-compliance (KYC/financial audit records),
+    # /admin/content-filter (moderation state), etc. None of these
+    # had auth checks; the `tags=["admin"]` was a swagger grouping
+    # tag with no access-control semantics.
+    #
+    # Default: only allow connections from 127.0.0.1, ::1, and
+    # localhost. Operators who need remote admin access set
+    # PRSM_ADMIN_REMOTE_ALLOWED=1 (and accept the risk — they
+    # should be behind reverse-proxy auth or a VPN). Empty/non-set
+    # = default safe-deny.
+    from starlette.responses import JSONResponse as _AdminJSON
+    @app.middleware("http")
+    async def admin_loopback_middleware(request, call_next):
+        path = request.url.path
+        if not path.startswith("/admin/"):
+            return await call_next(request)
+        import os as _os
+        if _os.environ.get(
+            "PRSM_ADMIN_REMOTE_ALLOWED", ""
+        ).strip().lower() in ("1", "true", "yes"):
+            return await call_next(request)
+        client = getattr(request, "client", None)
+        client_host = getattr(client, "host", "") if client else ""
+        # IPv4 + IPv6 loopback. fastapi/starlette normalises ::1
+        # and 127.0.0.1; "testclient" is starlette TestClient's
+        # synthetic host (let through so test fixtures don't
+        # need PRSM_ADMIN_REMOTE_ALLOWED).
+        if client_host in (
+            "127.0.0.1", "::1", "localhost", "testclient",
+        ):
+            return await call_next(request)
+        return _AdminJSON(
+            status_code=403,
+            content={
+                "detail": (
+                    "admin endpoints restricted to loopback by "
+                    "default (sprint 734 F65). Set "
+                    "PRSM_ADMIN_REMOTE_ALLOWED=1 to allow remote "
+                    "access — only safe behind reverse-proxy auth "
+                    "or VPN."
+                ),
+                "client_host": client_host,
+            },
+        )
+
     # Sprint 187 — HEAD-rewriting middleware. The dashboard sub-app
     # mount at `""` (see ~line 6753) catches HEAD requests before
     # FastAPI's auto-HEAD-for-GET path runs, returning 404 for any

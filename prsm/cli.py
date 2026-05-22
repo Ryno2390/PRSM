@@ -2567,6 +2567,8 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 728 — max wall-clock seconds for executor.execute() on a single unary CHAIN_REQ. Defends against hung executor holding per-peer cap slot indefinitely. Default 60s (covers gpt2/100-token on CPU); <=0 = no timeout; non-float safely defaults to 60s."),
     ("PRSM_CHAIN_STREAM_EXECUTION_TIMEOUT_S", False, None,
      "Sprint 729 — max wall-clock seconds for a server-side streaming response (cumulative across all yielded frames). Defends against slow/malicious StageExecutor holding sprint-723 per-peer cap slot. Default 300s (5 minutes; covers gpt2/200-token CPU streaming); <=0 = no timeout; non-float safely defaults to 300s."),
+    ("PRSM_ADMIN_REMOTE_ALLOWED", False, ["1", "true", "yes", "0", "false", "no", ""],
+     "Sprint 734 — allow remote (non-loopback) access to /admin/* endpoints. Default unset = SAFE DENY (only 127.0.0.1/::1/localhost can hit /admin/*). Set to 1/true/yes only when behind reverse-proxy auth or a VPN; otherwise leaks expected_sender peer IDs + KYC records + moderation state to any peered network client."),
 ]
 
 
