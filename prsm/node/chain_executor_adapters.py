@@ -1780,8 +1780,9 @@ def _remote_token_stream_dispatch(
         except Exception:  # noqa: BLE001 — defensive; some test mocks
             pass
 
+    maxsize = _resolve_stream_queue_maxsize()
     queue: _asyncio.Queue = _asyncio.run_coroutine_threadsafe(
-        _make_async_queue(loop), loop,
+        _make_async_queue(loop, maxsize), loop,
     ).result(timeout=5.0)
     pending[stream_id] = queue
 
@@ -1825,11 +1826,40 @@ def _remote_token_stream_dispatch(
         pending.pop(stream_id, None)
 
 
-async def _make_async_queue(loop):
+def _resolve_stream_queue_maxsize() -> int:
+    """Sprint 713 — bounded receive-queue size for streaming
+    back-pressure. Default 64 frames (chosen as 2× typical inference
+    chunk-count; high enough not to stall fast streams under normal
+    load, low enough to bound memory if the consumer hangs).
+
+    Operators can override via PRSM_CHAIN_STREAM_QUEUE_MAXSIZE.
+    Values <= 0 mean unbounded (pre-713 behavior — disabled gate).
+    Typos / non-int values default to 64 (safe rather than failing
+    streaming setup mysteriously).
+    """
+    import os
+    raw = os.environ.get("PRSM_CHAIN_STREAM_QUEUE_MAXSIZE")
+    if raw is None or raw == "":
+        return 64
+    try:
+        val = int(raw)
+    except ValueError:
+        return 64
+    if val <= 0:
+        return 0  # unbounded
+    return val
+
+
+async def _make_async_queue(loop, maxsize: int = 0):
     """Construct an asyncio.Queue on the given loop. Wrapped because
-    Queue() must be instantiated FROM the loop's thread."""
+    Queue() must be instantiated FROM the loop's thread.
+
+    Sprint 713: `maxsize` param adds bounded back-pressure. 0 =
+    unbounded (pre-713 behavior); >0 = back-pressure kicks in when
+    queue fills, blocking new put_nowait calls with QueueFull.
+    """
     import asyncio as _asyncio
-    return _asyncio.Queue()
+    return _asyncio.Queue(maxsize=maxsize)
 
 
 async def handle_chain_stream_request(node: Any, msg: Any) -> bool:
@@ -1961,6 +1991,11 @@ def handle_chain_stream_response(node: Any, msg: Any) -> bool:
     to the per-stream asyncio.Queue created by
     `_remote_token_stream_dispatch`. Returns True if the message
     was a stream-response (handled), False otherwise.
+
+    Sprint 713: when the receive queue is bounded (default 64;
+    `PRSM_CHAIN_STREAM_QUEUE_MAXSIZE`), this scheduler hands off to
+    an async coroutine that AWAITS `queue.put(...)`. That awaits if
+    the queue is full → producer side blocks → real back-pressure.
     """
     import base64
     payload = getattr(msg, "payload", None) or {}
@@ -1983,28 +2018,50 @@ def handle_chain_stream_response(node: Any, msg: Any) -> bool:
         return False
 
     if payload.get(CHAIN_STREAM_END_KEY):
-        # Terminal entry — pass through end + optional error.
+        # Terminal entry — pass through end + optional error. End
+        # entries bypass back-pressure (use put_nowait) because the
+        # terminal signal must always land for the requester to
+        # close cleanly even if the queue is full.
         end_entry = {
             "end": True,
             "error": payload.get(CHAIN_ERROR_KEY),
         }
-        loop.call_soon_threadsafe(queue.put_nowait, end_entry)
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, end_entry)
+        except Exception:  # noqa: BLE001 — defensive
+            pass
         return True
 
-    # Mid-stream frame — decode + enqueue. We DON'T re-order here;
-    # the wire spec says frames arrive in-order over the same MSG_DIRECT
-    # connection. If transport later allows reordering, this is where
-    # we'd buffer + sort by CHAIN_STREAM_SEQ_KEY.
+    # Mid-stream frame — decode + enqueue (with back-pressure).
+    # The wire spec says frames arrive in-order over the same
+    # MSG_DIRECT connection. If transport later allows reordering,
+    # this is where we'd buffer + sort by CHAIN_STREAM_SEQ_KEY.
     try:
         frame_bytes = base64.b64decode(
             payload.get(CHAIN_PAYLOAD_KEY, ""),
         )
     except Exception:  # noqa: BLE001
         # Malformed frame — treat as terminal error so caller closes.
-        loop.call_soon_threadsafe(queue.put_nowait, {
-            "end": True,
-            "error": "malformed frame payload (base64 decode failed)",
-        })
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, {
+                "end": True,
+                "error": "malformed frame payload (base64 decode failed)",
+            })
+        except Exception:  # noqa: BLE001
+            pass
         return True
-    loop.call_soon_threadsafe(queue.put_nowait, frame_bytes)
+
+    # Sprint 713: bounded-queue back-pressure. Schedule an AWAIT-put
+    # via run_coroutine_threadsafe so we block at the producer side
+    # rather than dropping frames on QueueFull.
+    import asyncio as _asyncio
+    async def _put_with_backpressure():
+        await queue.put(frame_bytes)
+    try:
+        _asyncio.run_coroutine_threadsafe(_put_with_backpressure(), loop)
+    except Exception:  # noqa: BLE001 — defensive fallback
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, frame_bytes)
+        except Exception:  # noqa: BLE001
+            pass
     return True
