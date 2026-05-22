@@ -172,6 +172,107 @@ async def test_sprint_715_two_node_streaming_roundtrip():
 
 
 @pytest.mark.asyncio
+async def test_sprint_717_bounded_queue_no_frame_loss_under_load():
+    """Sprint 717 — exercise sprint-713 bounded receive-queue
+    back-pressure end-to-end. Server yields 20 frames as fast as
+    possible; receiver queue maxsize=2 so producer blocks at puts
+    once the queue fills. Asserts:
+
+      - All 20 frames arrive at the dispatcher in correct order
+      - No frame loss (back-pressure must be non-lossy)
+      - Terminal STREAM_END lands after the last frame (sprint-715
+        + 716 wire-order invariant holds under load)
+    """
+    import os
+    from prsm.node.identity import generate_node_identity
+    from prsm.node.transport import WebSocketTransport, MSG_DIRECT
+    from prsm.node.chain_executor_adapters import (
+        _remote_token_stream_dispatch,
+        handle_chain_stream_request,
+        handle_chain_stream_response,
+    )
+
+    loop = asyncio.get_event_loop()
+    server_id = generate_node_identity("sprint717-server")
+    requester_id = generate_node_identity("sprint717-req")
+
+    server_port = _free_port()
+    requester_port = _free_port()
+    server_transport = WebSocketTransport(
+        server_id, host="127.0.0.1", port=server_port,
+    )
+    requester_transport = WebSocketTransport(
+        requester_id, host="127.0.0.1", port=requester_port,
+    )
+    server_node = _MinimalNode(server_id, server_transport, loop)
+    requester_node = _MinimalNode(requester_id, requester_transport, loop)
+
+    expected_frames = [f"frame-{i:02d}".encode() for i in range(20)]
+    class _LoadServer:
+        def handle_token_stream(self, request_bytes):
+            for f in expected_frames:
+                yield f
+    class _LoadExec:
+        def __init__(self):
+            self._server = _LoadServer()
+    server_node._chain_stage_executor = _LoadExec()
+
+    async def _server_dispatch(msg, peer):
+        await handle_chain_stream_request(server_node, msg)
+    async def _requester_dispatch(msg, peer):
+        handle_chain_stream_response(requester_node, msg)
+    server_transport.on_message(MSG_DIRECT, _server_dispatch)
+    requester_transport.on_message(MSG_DIRECT, _requester_dispatch)
+
+    # Force a tight bound so back-pressure WILL kick in under
+    # the 20-frame load. maxsize=2 means: once 2 frames in queue,
+    # subsequent puts block at the producer side until consumer
+    # drains.
+    old_env = os.environ.get("PRSM_CHAIN_STREAM_QUEUE_MAXSIZE")
+    os.environ["PRSM_CHAIN_STREAM_QUEUE_MAXSIZE"] = "2"
+
+    await server_transport.start()
+    await requester_transport.start()
+    try:
+        await requester_transport.connect_to_peer(
+            f"ws://127.0.0.1:{server_port}",
+        )
+        for _ in range(50):
+            await asyncio.sleep(0.05)
+            if server_id.node_id in requester_transport.peers:
+                break
+        assert server_id.node_id in requester_transport.peers
+
+        def _drain():
+            return list(_remote_token_stream_dispatch(
+                requester_node, server_id.node_id, b"sprint-717-load",
+            ))
+
+        received = await asyncio.wait_for(
+            asyncio.to_thread(_drain), timeout=15.0,
+        )
+
+        # Invariant 1: no frame loss
+        assert len(received) == len(expected_frames), (
+            f"frame count mismatch under back-pressure: expected "
+            f"{len(expected_frames)} got {len(received)}"
+        )
+        # Invariant 2: correct order (no reorder)
+        assert received == expected_frames, (
+            f"frame order mismatch under back-pressure: expected "
+            f"{expected_frames}, got {received}"
+        )
+
+    finally:
+        if old_env is None:
+            os.environ.pop("PRSM_CHAIN_STREAM_QUEUE_MAXSIZE", None)
+        else:
+            os.environ["PRSM_CHAIN_STREAM_QUEUE_MAXSIZE"] = old_env
+        await server_transport.stop()
+        await requester_transport.stop()
+
+
+@pytest.mark.asyncio
 async def test_sprint_715_server_side_error_terminates_cleanly():
     """If the server-side stream generator raises mid-stream, the
     terminal STREAM_END must carry the error field so the requester
