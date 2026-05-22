@@ -544,6 +544,69 @@ models (llama-3.2-1B, 3B, etc.) would exercise:
 Not blocked by any architectural gap — purely a deploy step that
 needs more disk + memory than the current $12/mo droplets have.
 
+### 7.7 Streaming single-yield hang (sprint 729 carveout)
+
+Sprint 729 (F62) bounds the **cumulative wall-time** of a server-
+side streaming response via a `time.monotonic()` check between
+yields. This catches slow / glacial-yield StageExecutors.
+
+**Not caught**: a StageExecutor whose `__next__()` call hangs
+indefinitely on a single iteration. The streaming iteration is
+sync inside the async handler:
+
+```python
+for frame in stream_iter:  # ← __next__() runs synchronously on the loop
+    send_ok = await send_to_peer(...)
+```
+
+If `__next__()` blocks (deadlock in model load, deadlock in CUDA
+sync, blocking network call inside the iterator), the asyncio
+event loop blocks too — the wall-clock check never gets a
+chance to run.
+
+Closing this would require offloading the sync iteration to a
+worker thread (via `asyncio.to_thread` or `run_in_executor`)
+and ferrying frames back through an `asyncio.Queue`. That's a
+substantial refactor with its own race-condition surface (the
+exact pattern this audit arc has been hardening), so it's
+deferred until live-attest data shows it as a real production
+issue. Mitigations available today:
+
+- Sprint-723 per-peer stream cap bounds how many slots a single
+  peer can hold.
+- A separate process-level watchdog (operator-side) can
+  detect a wedged daemon by polling `/health` and restart it
+  via systemd `WatchdogSec=`.
+
+### 7.8 Gossip layer not in this audit arc
+
+The F30-F65 arc audited `MSG_DIRECT` handlers (chain-executor,
+ledger_sync, compute_provider, storage_provider, content_-
+provider, agent_registry). Sprint 731 explicitly excluded
+`MSG_GOSSIP` from the transport-level sender-binding because
+gossip relay legitimately carries the original sender's id,
+distinct from the relaying peer.
+
+What this means honestly: `GossipProtocol._handle_gossip` reads
+`origin = payload.get("origin", msg.sender_id)` and forwards
+that to subscribers as the claimed original sender — with NO
+end-to-end signature verification against the origin's pubkey.
+A relay peer could mint a new gossip message with an arbitrary
+`origin=VICTIM` field and broadcast it; receivers would dispatch
+to subscribers as if VICTIM had sent it.
+
+Concrete impact bounds: most gossip subtypes are heartbeats /
+peer announcements / digest exchange — relatively low stakes.
+The financial transfer path uses `MSG_DIRECT` (now sprint-731
+protected), not gossip. Gossip-origin spoofing would let an
+attacker forge presence claims ("peer X says they saw peer Y")
+which influence peer discovery + reputation — material but not
+funds-at-risk.
+
+Closing this is a separate audit arc — gossip messages need
+end-to-end signing scheme per subtype + receiver verification
+against origin's known pubkey. Tracked for a future session.
+
 ## 8. Sprint changelog summary (sprints 680–698)
 
 | Sprint | Class | One-line summary |
