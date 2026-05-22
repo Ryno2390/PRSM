@@ -24,6 +24,11 @@ from prsm.node.api import create_api_app
 
 
 def _client():
+    # Sprint 744 F72 hides /openapi.json by default. These existing
+    # tests (sprint 189) inspect the spec's properties, so they need
+    # docs explicitly enabled. Set the env BEFORE create_api_app
+    # because docs_url is captured at construction time.
+    os.environ["PRSM_API_DOCS_ENABLED"] = "1"
     node = MagicMock()
     node.identity.node_id = "test-node"
     node.ftns_ledger = None
@@ -51,6 +56,7 @@ def test_openapi_servers_override_via_env(monkeypatch):
     monkeypatch.setenv(
         "PRSM_API_BASE_URL", "https://prsm.example.com",
     )
+    monkeypatch.setenv("PRSM_API_DOCS_ENABLED", "1")  # sprint 744
     node = MagicMock()
     node.identity.node_id = "test-node"
     node.ftns_ledger = None
@@ -63,6 +69,7 @@ def test_openapi_servers_empty_env_falls_back_to_default(monkeypatch):
     """Whitespace-only env value falls back to default — not an
     empty URL that would break clients."""
     monkeypatch.setenv("PRSM_API_BASE_URL", "   ")
+    monkeypatch.setenv("PRSM_API_DOCS_ENABLED", "1")  # sprint 744
     node = MagicMock()
     node.identity.node_id = "test-node"
     node.ftns_ledger = None

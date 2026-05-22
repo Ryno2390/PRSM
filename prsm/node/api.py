@@ -639,13 +639,25 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         "PRSM_API_BASE_URL", "http://127.0.0.1:8000",
     ).strip() or "http://127.0.0.1:8000"
 
+    # Sprint 744 F72 — /openapi.json, /docs, /redoc are hidden by
+    # default. Pre-744, any HTTP client could fetch /openapi.json
+    # and get the complete API surface map — every endpoint URL,
+    # every path parameter, every body schema — including the
+    # /admin/* paths sprints 734-743 worked to defend. An attacker
+    # gets a roadmap of what to probe + the exact body shape to
+    # send. Hide by default; operators who genuinely need the
+    # interactive docs in dev set `PRSM_API_DOCS_ENABLED=1`.
+    _docs_raw = os.environ.get(
+        "PRSM_API_DOCS_ENABLED", "",
+    ).strip().lower()
+    _docs_enabled = _docs_raw in ("1", "true", "yes")
     app = FastAPI(
         title="PRSM Node API",
         description="Management API for a PRSM network node",
         version=_api_version,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url="/docs" if _docs_enabled else None,
+        redoc_url="/redoc" if _docs_enabled else None,
+        openapi_url="/openapi.json" if _docs_enabled else None,
         servers=[{"url": _default_server, "description": "PRSM node"}],
     )
 

@@ -198,10 +198,24 @@ class DashboardServer:
         self.node = node
         self.host = host
         self.port = port
+        # Sprint 744 F72 — dashboard sub-app docs hidden by default.
+        # When the dashboard is mounted as a sub-app of the node API
+        # (typical production), the dashboard's own /openapi.json
+        # was still publicly readable even after the node API's
+        # docs were disabled. Same opt-in env so operators can
+        # enable both with one flag.
+        import os as _os
+        _docs_raw = _os.environ.get(
+            "PRSM_API_DOCS_ENABLED", "",
+        ).strip().lower()
+        _docs_enabled = _docs_raw in ("1", "true", "yes")
         self.app = FastAPI(
             title="PRSM Dashboard",
             description="Web dashboard for PRSM researchers",
             version="1.0.0",
+            docs_url="/docs" if _docs_enabled else None,
+            redoc_url="/redoc" if _docs_enabled else None,
+            openapi_url="/openapi.json" if _docs_enabled else None,
         )
         self.manager = ConnectionManager()
         self.auth_manager: Optional[AuthManager] = None

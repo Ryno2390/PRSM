@@ -2571,6 +2571,8 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 734 — allow remote (non-loopback) access to /admin/* endpoints. Default unset = SAFE DENY (only 127.0.0.1/::1/localhost can hit /admin/*). Set to 1/true/yes only when behind reverse-proxy auth or a VPN; otherwise leaks expected_sender peer IDs + KYC records + moderation state to any peered network client."),
     ("PRSM_HTTP_MAX_BODY_BYTES", False, None,
      "Sprint 742 — max HTTP request body size (memory-DoS defense at the HTTP layer; sibling of F55/F58 on the wire protocol). Default 1 MiB (covers reasonable prompts + metadata); <=0 = disabled; non-int safely defaults to 1 MiB. Returns 413 Payload Too Large when Content-Length exceeds limit BEFORE reading the body."),
+    ("PRSM_API_DOCS_ENABLED", False, ["1", "true", "yes", "0", "false", "no", ""],
+     "Sprint 744 — enable /docs + /redoc + /openapi.json surface. Default unset/0 = HIDDEN (production-safe; attackers don't get a free API-surface map). Set to 1/true/yes for dev so operators can use the interactive Swagger docs in a browser."),
 ]
 
 

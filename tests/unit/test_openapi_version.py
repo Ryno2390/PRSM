@@ -22,6 +22,16 @@ def _node():
 
 
 class TestOpenAPIVersion:
+    def setup_method(self):
+        # Sprint 744 F72 hides /openapi.json by default. Enable for
+        # these spec-inspection tests.
+        import os
+        os.environ["PRSM_API_DOCS_ENABLED"] = "1"
+
+    def teardown_method(self):
+        import os
+        os.environ.pop("PRSM_API_DOCS_ENABLED", None)
+
     def test_version_not_stale_0_24_0(self):
         client = TestClient(create_api_app(_node(), enable_security=False))
         spec = client.get("/openapi.json").json()
