@@ -875,7 +875,18 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     @app.middleware("http")
     async def admin_loopback_middleware(request, call_next):
         path = request.url.path
-        if not path.startswith("/admin/"):
+        # Sprint 745 F73 — /metrics also gated. Prometheus
+        # exposition leaks internal financial state (pending
+        # escrow totals, locked FTNS), counter values, peer
+        # connection counts, and subsystem internals. Same
+        # reconnaissance + financial-intel concern as the F65-F72
+        # arc. Operators with remote Prometheus scrapers behind
+        # reverse-proxy auth set PRSM_ADMIN_REMOTE_ALLOWED=1 (the
+        # same env they already need for any remote admin tooling)
+        # — sprint-740 runbook documents the 3 remediation paths.
+        if not (
+            path.startswith("/admin/") or path == "/metrics"
+        ):
             return await call_next(request)
         import os as _os
         if _os.environ.get(
