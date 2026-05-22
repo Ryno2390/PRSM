@@ -76,17 +76,24 @@ def test_resolve_stream_request_max_bytes_typo_safely_defaults():
         del os.environ["PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES"]
 
 
-def test_handle_request_source_uses_resolved_max_bytes():
-    """Pin: handle_chain_stream_request must call
-    `_resolve_stream_request_max_bytes()` and gate the decode on it."""
+def _server_handler_source() -> str:
+    """Sprint 723 refactored the body of `handle_chain_stream_request`
+    into `_handle_stream_request_body`. Source tests must inspect
+    both for the size-gate invariant to be findable."""
     import inspect
-    from prsm.node.chain_executor_adapters import (
-        handle_chain_stream_request,
+    from prsm.node import chain_executor_adapters as _mod
+    return inspect.getsource(_mod.handle_chain_stream_request) + (
+        inspect.getsource(_mod._handle_stream_request_body)
     )
-    src = inspect.getsource(handle_chain_stream_request)
+
+
+def test_handle_request_source_uses_resolved_max_bytes():
+    """Pin: server-side handler must call
+    `_resolve_stream_request_max_bytes()` and gate the decode on it."""
+    src = _server_handler_source()
     assert "_resolve_stream_request_max_bytes" in src, (
         "F55 fix requires the size gate to be wired into "
-        "handle_chain_stream_request"
+        "the server-side stream request handler"
     )
     # Pre-decode estimate check uses *3//4 trick — pin that shape
     # so future refactors don't lose the cheap-pre-check property.
@@ -100,11 +107,7 @@ def test_handle_request_emits_terminal_end_with_size_error():
     STREAM_END with `CHAIN_ERROR_KEY` containing a clear message
     referencing the env var for tuning. Operators reading logs
     should know how to fix."""
-    import inspect
-    from prsm.node.chain_executor_adapters import (
-        handle_chain_stream_request,
-    )
-    src = inspect.getsource(handle_chain_stream_request)
+    src = _server_handler_source()
     assert "PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES" in src, (
         "size-exceeded error message must reference the env var "
         "so operators know what to tune"

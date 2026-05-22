@@ -1846,6 +1846,32 @@ def _remote_token_stream_dispatch(
         pending.pop(stream_id, None)
 
 
+def _resolve_per_peer_stream_concurrency() -> int:
+    """Sprint 723 F56 — max concurrent streams a single peer can
+    have in-flight against this server. Defends against a malicious
+    or buggy peer opening thousands of CHAIN_STREAM_REQs to exhaust
+    server memory + GPU.
+
+    Default 8 (covers realistic multi-stream workloads — e.g., a
+    coordinator running 4 parallel inferences with 2-stage chain
+    each = 8 concurrent server-side streams per peer). Operators
+    tune via PRSM_CHAIN_STREAM_PER_PEER_CONCURRENCY.
+    Values <=0 mean unbounded (pre-723 behavior — disabled gate).
+    Non-int safely defaults to 8.
+    """
+    import os
+    raw = os.environ.get("PRSM_CHAIN_STREAM_PER_PEER_CONCURRENCY")
+    if raw is None or raw == "":
+        return 8
+    try:
+        val = int(raw)
+    except ValueError:
+        return 8
+    if val <= 0:
+        return 0  # unbounded
+    return val
+
+
 def _resolve_stream_request_max_bytes() -> int:
     """Sprint 721 F55 — max request_bytes accepted by
     handle_chain_stream_request. Defends against a malicious peer
@@ -1932,6 +1958,77 @@ async def handle_chain_stream_request(node: Any, msg: Any) -> bool:
     if not sender_id:
         return False
 
+    from prsm.node.transport import P2PMessage, MSG_DIRECT
+
+    # Sprint 723 F56 fix: per-peer concurrent-stream cap. Pre-723,
+    # one peer could open unlimited CHAIN_STREAM_REQs against this
+    # server, accumulating asyncio.Queues + in-flight generator
+    # state + (for real autoregressive runner) KV cache per stream
+    # → trivial memory-exhaustion DoS. Bookkeeping lives on
+    # `node._chain_executor_serving_streams_by_peer` (peer_id →
+    # active count). Incremented on accepted REQ; decremented in
+    # the finally block below so every code path (clean / error /
+    # peer-disconnect) releases the slot.
+    _per_peer_cap = _resolve_per_peer_stream_concurrency()
+    _serving = getattr(
+        node, "_chain_executor_serving_streams_by_peer", None,
+    )
+    if _serving is None:
+        _serving = {}
+        try:
+            node._chain_executor_serving_streams_by_peer = _serving
+        except Exception:  # noqa: BLE001 — defensive for mock nodes
+            pass
+    if _per_peer_cap > 0:
+        active = _serving.get(sender_id, 0)
+        if active >= _per_peer_cap:
+            end_msg = P2PMessage(
+                msg_type=MSG_DIRECT,
+                sender_id=node.identity.node_id,
+                payload={
+                    "subtype": CHAIN_STREAM_MSG_TYPE,
+                    CHAIN_STREAM_END_KEY: stream_id,
+                    CHAIN_STREAM_SEQ_KEY: 0,
+                    CHAIN_ERROR_KEY: (
+                        f"peer concurrent stream limit exceeded "
+                        f"({active} >= {_per_peer_cap}); tune via "
+                        f"PRSM_CHAIN_STREAM_PER_PEER_CONCURRENCY"
+                    ),
+                },
+            )
+            try:
+                await node.transport.send_to_peer(sender_id, end_msg)
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+    # Accepted — increment the peer's active count. Decremented in
+    # the outer try/finally below (wraps EVERY return-True path so
+    # the counter never leaks even on size-gate / decode-fail /
+    # disconnect / exception).
+    _serving[sender_id] = _serving.get(sender_id, 0) + 1
+    try:
+        return await _handle_stream_request_body(
+            node, msg, stream_id, sender_id, payload,
+        )
+    finally:
+        # Decrement; clean up the key if it goes to zero to avoid
+        # unbounded dict growth from many distinct one-off peers.
+        new_count = _serving.get(sender_id, 0) - 1
+        if new_count <= 0:
+            _serving.pop(sender_id, None)
+        else:
+            _serving[sender_id] = new_count
+
+
+async def _handle_stream_request_body(
+    node: Any, msg: Any, stream_id: Any, sender_id: Any, payload: Any,
+) -> bool:
+    """Sprint 723 — body of `handle_chain_stream_request` extracted
+    so the per-peer concurrency counter can wrap it in a single
+    try/finally without losing readability of the original control
+    flow. Every original return-True path continues to return True
+    here; the wrapper decrements the counter on exit."""
+    import base64
     from prsm.node.transport import P2PMessage, MSG_DIRECT
 
     # Sprint 721 F55 fix: bound request_bytes BEFORE the b64-decode

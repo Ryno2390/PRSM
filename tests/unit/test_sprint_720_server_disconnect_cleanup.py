@@ -25,16 +25,22 @@ from __future__ import annotations
 import inspect
 
 
+def _server_handler_source() -> str:
+    """Sprint 723 refactored the body of `handle_chain_stream_request`
+    into `_handle_stream_request_body` for per-peer-cap wrapping.
+    Source-inspection tests must look at BOTH (wrapper + helper)
+    so the invariant survives that refactor."""
+    from prsm.node import chain_executor_adapters as _mod
+    return inspect.getsource(_mod.handle_chain_stream_request) + (
+        inspect.getsource(_mod._handle_stream_request_body)
+    )
+
+
 def test_handle_request_breaks_on_send_to_peer_false():
     """Pin: server-side iteration loop must check send_to_peer
     return value and exit when it returns False. Pre-720, the
     return value was ignored."""
-    from prsm.node.chain_executor_adapters import (
-        handle_chain_stream_request,
-    )
-    src = inspect.getsource(handle_chain_stream_request)
-    # Find the iteration block and assert send_ok variable is read
-    # and the loop branches on it.
+    src = _server_handler_source()
     assert "send_ok" in src or "send_to_peer" in src
     assert "if not send_ok" in src or "if not " in src, (
         "F54: server-side loop must check send_to_peer return + "
@@ -48,10 +54,7 @@ def test_handle_request_closes_stream_iter_on_disconnect():
     release the underlying generator's resources. For
     AutoregressiveStreamingRunner that releases the KV cache +
     model context promptly rather than waiting for GC."""
-    from prsm.node.chain_executor_adapters import (
-        handle_chain_stream_request,
-    )
-    src = inspect.getsource(handle_chain_stream_request)
+    src = _server_handler_source()
     assert "stream_iter" in src or "_close_fn" in src
     assert ".close" in src, (
         "F54: must call stream_iter.close() to release generator "
