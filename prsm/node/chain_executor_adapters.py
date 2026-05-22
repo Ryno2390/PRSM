@@ -2056,13 +2056,28 @@ def handle_chain_stream_response(node: Any, msg: Any) -> bool:
         )
     except Exception:  # noqa: BLE001
         # Malformed frame — treat as terminal error so caller closes.
+        # Sprint 716 F51 fix: same race as sprint-715 F50. The
+        # put_nowait callback would run before any preceding
+        # queue.put coroutines, so a malformed-frame error could
+        # land in the queue ahead of valid frames that were
+        # awaiting the consumer drain. Use the same scheduling
+        # primitive as good frames so wire order is preserved.
+        err_end_entry = {
+            "end": True,
+            "error": "malformed frame payload (base64 decode failed)",
+        }
+        import asyncio as _asyncio
+        async def _put_malformed_end():
+            await queue.put(err_end_entry)
         try:
-            loop.call_soon_threadsafe(queue.put_nowait, {
-                "end": True,
-                "error": "malformed frame payload (base64 decode failed)",
-            })
-        except Exception:  # noqa: BLE001
-            pass
+            _asyncio.run_coroutine_threadsafe(_put_malformed_end(), loop)
+        except Exception:  # noqa: BLE001 — defensive fallback
+            try:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait, err_end_entry,
+                )
+            except Exception:  # noqa: BLE001
+                pass
         return True
 
     # Sprint 713: bounded-queue back-pressure. Schedule an AWAIT-put
