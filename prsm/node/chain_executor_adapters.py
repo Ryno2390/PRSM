@@ -378,8 +378,15 @@ def build_hf_prompt_encoder(
                 )
                 import torch as _torch
                 tok = AutoTokenizer.from_pretrained(model_id)
+                # Sprint 702 F48 fix — force low_cpu_mem_usage=False
+                # so weights materialize during load instead of staying
+                # on meta-tensor. Without this, newer transformers
+                # versions default to lazy/meta loading and `.to(device)`
+                # raises NotImplementedError: "Cannot copy out of meta
+                # tensor". gpt2 is ~500MB; fits any droplet.
                 model = AutoModelForCausalLM.from_pretrained(
                     model_id, torch_dtype=_torch.float32,
+                    low_cpu_mem_usage=False,
                 )
                 model = model.to(device).eval()
             except Exception as exc:  # noqa: BLE001
