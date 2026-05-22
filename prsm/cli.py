@@ -2569,6 +2569,8 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 729 — max wall-clock seconds for a server-side streaming response (cumulative across all yielded frames). Defends against slow/malicious StageExecutor holding sprint-723 per-peer cap slot. Default 300s (5 minutes; covers gpt2/200-token CPU streaming); <=0 = no timeout; non-float safely defaults to 300s."),
     ("PRSM_ADMIN_REMOTE_ALLOWED", False, ["1", "true", "yes", "0", "false", "no", ""],
      "Sprint 734 — allow remote (non-loopback) access to /admin/* endpoints. Default unset = SAFE DENY (only 127.0.0.1/::1/localhost can hit /admin/*). Set to 1/true/yes only when behind reverse-proxy auth or a VPN; otherwise leaks expected_sender peer IDs + KYC records + moderation state to any peered network client."),
+    ("PRSM_HTTP_MAX_BODY_BYTES", False, None,
+     "Sprint 742 — max HTTP request body size (memory-DoS defense at the HTTP layer; sibling of F55/F58 on the wire protocol). Default 1 MiB (covers reasonable prompts + metadata); <=0 = disabled; non-int safely defaults to 1 MiB. Returns 413 Payload Too Large when Content-Length exceeds limit BEFORE reading the body."),
 ]
 
 

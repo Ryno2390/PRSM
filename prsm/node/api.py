@@ -801,6 +801,49 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         )
         return response
 
+    # Sprint 742 F70 — HTTP body-size limit (memory-DoS defense).
+    # Pre-742, FastAPI accepted arbitrary JSON bodies — a malicious
+    # POST with a 1GB body would allocate all of it before any
+    # size check ran. HTTP-side analog of sprint-721/725's wire-
+    # protocol size limits. Default 1 MiB (covers reasonable
+    # prompts + metadata for /compute/inference + /compute/forge);
+    # operators tune via PRSM_HTTP_MAX_BODY_BYTES. Setting <= 0
+    # disables the gate (pre-742 behavior). Non-int safely
+    # defaults to 1 MiB.
+    from starlette.responses import JSONResponse as _BodyLimitJSON
+    @app.middleware("http")
+    async def http_body_size_limit_middleware(request, call_next):
+        import os as _os
+        raw = _os.environ.get("PRSM_HTTP_MAX_BODY_BYTES", "")
+        if raw.strip():
+            try:
+                _max_bytes = int(raw)
+            except ValueError:
+                _max_bytes = 1024 * 1024  # 1 MiB safe default
+        else:
+            _max_bytes = 1024 * 1024
+        if _max_bytes > 0:
+            cl_header = request.headers.get("content-length", "")
+            if cl_header:
+                try:
+                    cl = int(cl_header)
+                except ValueError:
+                    cl = -1
+                if cl > _max_bytes:
+                    return _BodyLimitJSON(
+                        status_code=413,
+                        content={
+                            "detail": (
+                                f"Request body exceeds max bytes "
+                                f"({cl} > {_max_bytes}); tune via "
+                                f"PRSM_HTTP_MAX_BODY_BYTES."
+                            ),
+                            "content_length": cl,
+                            "limit": _max_bytes,
+                        },
+                    )
+        return await call_next(request)
+
     # Sprint 734 F65 — restrict `/admin/*` endpoints to loopback by
     # default. Pre-734, any HTTP client on the same network as the
     # daemon could read endpoints like /admin/parallax/streams
