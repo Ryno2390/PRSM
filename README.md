@@ -14,6 +14,38 @@ PRSM is a peer-to-peer protocol that unifies three resource markets — data, co
 
 ---
 
+## 🔐 Verify a PRSM inference receipt in 30 seconds
+
+PRSM's §7 verifiable-inference promise — *a third party can verify
+chain-of-custody on any inference receipt without trusting the
+operator* — is operationally provable in one shell session:
+
+```bash
+pip install web3 cryptography
+python3 scripts/verify_prsm_receipt.py docs/sample-receipts/tier-standard-dp-2026-05-22.json
+# → ✓ VALID — receipt verifies cleanly
+```
+
+The verifier is a single ~300-line file with **zero imports from
+the `prsm` package**. It looks up the settler's pubkey on the
+on-chain `PublisherKeyAnchor` (Base mainnet), reconstructs the
+canonical signing bytes, and verifies the Ed25519 signature
+client-side. Tamper any byte → `✗ INVALID — settler_signature
+does NOT verify`.
+
+4 sample receipts cover the full architectural matrix
+(unary, streaming, DP injection, multi-host 2-stage) — see
+[`docs/sample-receipts/`](docs/sample-receipts/README.md).
+
+For the full external-readiness summary (operational claims with
+on-chain TX evidence, architecture flow, cost model, known limits),
+read **[Verifiable Inference — Audit Readiness Summary](docs/2026-05-22-parallax-inference-audit-readiness.md)** (~15 min).
+
+To stand up your own anchor-registered operator node, follow
+**[Parallax Inference Deploy Runbook](docs/operations/parallax-inference-deploy.md)** (8 numbered steps).
+
+---
+
 ## Why PRSM Exists
 
 **The problem:** Frontier AI labs hoard data, compute, and models behind API walls. Every query you send to a centralized API is logged, stored, and potentially trained on. Meanwhile, billions of consumer devices sit idle — gaming PCs, laptops, phones, tablets — each with storage, compute, and sometimes proprietary data that never leave the device.
