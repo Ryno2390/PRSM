@@ -1449,22 +1449,47 @@ async def _handle_chain_executor_request_body(
                 )
 
     # Stage execution (skip if we already have a decode error).
+    # Sprint 728 F61 fix: bound execution wall-clock so a hung
+    # executor doesn't hold the sprint-726 per-peer cap slot
+    # indefinitely. Defaults to 60s; operators tune via
+    # PRSM_CHAIN_UNARY_EXECUTION_TIMEOUT_S. Timeout converts to a
+    # CHAIN_ERROR_KEY response naming the env var so operators
+    # know what to tune.
     response_bytes: bytes = b""
     exec_error: str | None = decode_error
     if exec_error is None:
         executor: StageExecutor = getattr(
             node, "_chain_stage_executor", None,
         ) or _build_stage_executor_from_env(node=node)
+        _exec_timeout = _resolve_unary_execution_timeout()
         try:
-            response_bytes = await executor.execute(payload_bytes)
+            if _exec_timeout > 0:
+                import asyncio as _asyncio
+                response_bytes = await _asyncio.wait_for(
+                    executor.execute(payload_bytes),
+                    timeout=_exec_timeout,
+                )
+            else:
+                response_bytes = await executor.execute(payload_bytes)
         except StageExecutionError as exc:
             exec_error = (
                 f"stage-executor raised StageExecutionError: {exc}"
             )
         except Exception as exc:  # noqa: BLE001
-            exec_error = (
-                f"stage-executor raised {type(exc).__name__}: {exc}"
-            )
+            # asyncio.TimeoutError is a subclass of Exception. Detect
+            # by name so we ship an actionable error that names the
+            # env var (so operators reading logs know to tune).
+            exc_name = type(exc).__name__
+            if exc_name in ("TimeoutError", "CancelledError"):
+                exec_error = (
+                    f"stage-executor exceeded execution timeout of "
+                    f"{_exec_timeout}s; tune via "
+                    f"PRSM_CHAIN_UNARY_EXECUTION_TIMEOUT_S"
+                )
+            else:
+                exec_error = (
+                    f"stage-executor raised {exc_name}: {exc}"
+                )
 
     # Build + ship response.
     try:
@@ -1988,6 +2013,32 @@ def _remote_token_stream_dispatch(
             yield entry
     finally:
         pending.pop(stream_id, None)
+
+
+def _resolve_unary_execution_timeout() -> float:
+    """Sprint 728 F61 — max wall-clock seconds for executor.execute()
+    on a single unary CHAIN_REQ. Defends against an executor that
+    hangs (model load deadlock, infinite loop, blocked network
+    call) holding the per-peer cap slot indefinitely + tying up
+    the requester's pending future.
+
+    Default 60s (covers gpt2 inference on CPU with 100-token
+    prompt; tune up for slower models / larger inputs). Operators
+    tune via PRSM_CHAIN_UNARY_EXECUTION_TIMEOUT_S.
+    Values <=0 mean no timeout (pre-728 behavior).
+    Non-float safely defaults to 60.0.
+    """
+    import os
+    raw = os.environ.get("PRSM_CHAIN_UNARY_EXECUTION_TIMEOUT_S")
+    if raw is None or raw == "":
+        return 60.0
+    try:
+        val = float(raw)
+    except ValueError:
+        return 60.0
+    if val <= 0:
+        return 0.0  # disabled
+    return val
 
 
 def _resolve_unary_request_max_bytes() -> int:
