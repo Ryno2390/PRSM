@@ -504,6 +504,37 @@ def register_parallax_pool_snapshot_endpoint(app: Any, node: Any) -> None:
         }
 
 
+def _resolve_requester_key(request: Any) -> str:
+    """Sprint 741 F69 — resolve a per-requester rate-limit bucket
+    key from an HTTP request. Proxy-aware: prefers X-Forwarded-For
+    last-hop, then X-Real-IP, then `request.client.host`. Mirrors
+    the same precedence sprint 737/738 use for admin-loopback so
+    behavior is consistent across the codebase.
+
+    Returns "anonymous" if no identifiable source can be derived
+    (defensive — shouldn't happen with FastAPI/Starlette but the
+    fallback ensures the rate limiter still works rather than
+    crashing).
+    """
+    headers = getattr(request, "headers", None)
+    if headers is not None:
+        xff = headers.get("x-forwarded-for", "") if hasattr(
+            headers, "get",
+        ) else ""
+        if xff and xff.strip():
+            hops = [h.strip() for h in xff.split(",") if h.strip()]
+            if hops:
+                return hops[-1]
+        x_real = headers.get("x-real-ip", "") if hasattr(
+            headers, "get",
+        ) else ""
+        if x_real and x_real.strip():
+            return x_real.strip()
+    client = getattr(request, "client", None)
+    host = getattr(client, "host", "") if client else ""
+    return host or "anonymous"
+
+
 def register_parallax_streams_endpoint(app: Any, node: Any) -> None:
     """Sprint 722 — /admin/parallax/streams.
 
@@ -4355,6 +4386,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     @app.post("/compute/forge")
     async def compute_forge(
+        request: Request,
         body: Dict[str, Any] = {},
         idempotency_key: Optional[str] = Header(
             default=None, alias="Idempotency-Key",
@@ -4427,17 +4459,19 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     )
                     bucket = get_or_build_bucket(_rps, name="forge")
                     if bucket is not None:
-                        requester = (
-                            node.identity.node_id if node.identity
-                            else "anonymous"
-                        )
+                        # Sprint 741 F69 fix — same bug class as
+                        # /compute/inference + /compute/inference/stream.
+                        # Pre-741 `requester` was node.identity.node_id
+                        # (LOCAL daemon constant) so the bucket was
+                        # effectively global.
+                        requester = _resolve_requester_key(request)
                         if not bucket.try_consume(requester):
                             retry = bucket.retry_after(requester)
                             raise HTTPException(
                                 status_code=429,
                                 detail=(
                                     f"Rate limit exceeded for "
-                                    f"requester {requester[:12]}... "
+                                    f"requester {requester[:24]}... "
                                     f"on /compute/forge "
                                     f"(cap {_rps}/sec). Retry "
                                     f"after {retry:.2f}s."
@@ -5920,6 +5954,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     @app.post("/compute/inference")
     async def compute_inference(
+        request: Request,
         body: Dict[str, Any] = {},
         x_corp_capability: Optional[str] = Header(
             default=None, alias="X-CORP-Capability",
@@ -5963,17 +5998,24 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     )
                     bucket = get_or_build_bucket(_rps, name="inference")
                     if bucket is not None:
-                        requester = (
-                            node.identity.node_id if node.identity
-                            else "anonymous"
-                        )
+                        # Sprint 741 F69 fix: pre-741, `requester`
+                        # was `node.identity.node_id` — the LOCAL
+                        # daemon's own id, a constant. All callers
+                        # shared one bucket → "per requester" was
+                        # effectively GLOBAL. One legit client could
+                        # be starved by another attacker's traffic
+                        # hitting the same bucket. Now keyed by HTTP
+                        # client identity (proxy-aware), so an
+                        # attacker spamming from one IP can't deny
+                        # service to legit callers from other IPs.
+                        requester = _resolve_requester_key(request)
                         if not bucket.try_consume(requester):
                             retry = bucket.retry_after(requester)
                             raise HTTPException(
                                 status_code=429,
                                 detail=(
                                     f"Rate limit exceeded for "
-                                    f"requester {requester[:12]}... "
+                                    f"requester {requester[:24]}... "
                                     f"on /compute/inference "
                                     f"(cap {_rps}/sec). Retry "
                                     f"after {retry:.2f}s."
@@ -6401,6 +6443,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
     @app.post("/compute/inference/stream")
     async def compute_inference_stream(
+        request: Request,
         body: Dict[str, Any] = {},
         x_corp_capability: Optional[str] = Header(
             default=None, alias="X-CORP-Capability",
@@ -6455,17 +6498,19 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     )
                     bucket = get_or_build_bucket(_rps, name="inference")
                     if bucket is not None:
-                        requester = (
-                            node.identity.node_id if node.identity
-                            else "anonymous"
-                        )
+                        # Sprint 741 F69 fix: pre-741, `requester`
+                        # was `node.identity.node_id` — the LOCAL
+                        # daemon's id, a constant. All callers
+                        # shared one bucket → effectively GLOBAL
+                        # rate limit. Same bug as /compute/inference.
+                        requester = _resolve_requester_key(request)
                         if not bucket.try_consume(requester):
                             retry = bucket.retry_after(requester)
                             raise HTTPException(
                                 status_code=429,
                                 detail=(
                                     f"Rate limit exceeded for "
-                                    f"requester {requester[:12]}... "
+                                    f"requester {requester[:24]}... "
                                     f"on /compute/inference/stream "
                                     f"(cap {_rps}/sec, shared with "
                                     f"/compute/inference). Retry "
