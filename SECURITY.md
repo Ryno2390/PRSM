@@ -1,7 +1,7 @@
 # Security Policy
 
-**Last updated:** 2026-05-05
-**Related documents:** [`audits/AUDIT_PLAN.md`](audits/AUDIT_PLAN.md) (master audit plan, §12 disclosure policy) · [`docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md`](docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md) (incident response)
+**Last updated:** 2026-05-22
+**Related documents:** [`audits/AUDIT_PLAN.md`](audits/AUDIT_PLAN.md) (master audit plan, §12 disclosure policy) · [`docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md`](docs/security/EXPLOIT_RESPONSE_PLAYBOOK.md) (incident response) · [`docs/2026-05-22-parallax-inference-audit-readiness.md`](docs/2026-05-22-parallax-inference-audit-readiness.md) (wire-protocol hardening audit, F30-F65)
 
 ## What we protect
 
@@ -161,6 +161,59 @@ Pending external layers (per `audits/AUDIT_PLAN.md` §6 Gate B):
 - **L7** — economic / game-theory audit
 - **L8** — legal / regulatory review
 - **L9** — public bug bounty (post-L4)
+
+## Recent hardening — wire-protocol audit arc (2026-05-22)
+
+Between sprints 711 and 734, an iterative audit of the
+parallax-inference wire protocols (remote token-stream + unary
+chain-executor RPC) closed **35 F-class production-blockers
+(F30 through F65)** across 10 audit dimensions. Detailed
+write-up + per-fix evidence in
+[`docs/2026-05-22-parallax-inference-audit-readiness.md`](docs/2026-05-22-parallax-inference-audit-readiness.md).
+
+Summary of the security-grade fixes:
+
+- **F50 / F51 / F52 / F55 / F56 / F57 / F58 / F59 / F61 / F62**
+  — wire-protocol DoS hardening (back-pressure races, identical-
+  request collisions, payload-size limits, per-peer concurrency
+  caps, hang-defense execution timeouts) on both streaming and
+  unary paths with parity.
+- **F53 / F60** — stream + unary response hijack protection via
+  sender-binding. Pre-fix, a peered third party that learned a
+  victim's stream_id or request_id could forge frames/responses
+  into the victim's pending queue/future. Now `pending[]` stores
+  `(state, expected_sender)` tuples + handlers verify
+  `msg.sender_id` before routing.
+- **F54** — server-side resource leak: server kept iterating
+  inference generator after requester disconnect, burning GPU
+  on tokens nobody would receive. Now reads send_to_peer return
+  value + closes inner generator on disconnect (releases KV
+  cache promptly).
+- **F63 / F64** — *foundation fix.* Transport verified
+  cryptographic signatures only at handshake; subsequent
+  `msg.sender_id` was wire-trusted but not crypto-bound. A peer
+  with valid handshake could spoof sender_id to defeat per-peer
+  caps (F56/F59) AND forge responses (F53/F60) — undermining
+  several preceding fixes. Sprint 730 bound sender_id at the
+  chain-executor dispatch wrappers; sprint 731 generalized at
+  the transport layer (`WebSocketTransport._dispatch`) so EVERY
+  `MSG_DIRECT` handler in the codebase — including
+  `ledger_sync` FTNS transfers, `compute_provider`,
+  `storage_provider`, `content_provider`, `agent_registry` —
+  now sees the handshake-authenticated peer identity.
+- **F65** — `/admin/*` endpoints were unauthenticated
+  (`tags=["admin"]` was a swagger grouping, not access control).
+  Sprint 722's observability endpoint exposed live stream
+  metadata to any network client. Middleware now restricts
+  `/admin/*` to loopback by default; `PRSM_ADMIN_REMOTE_ALLOWED=1`
+  opt-in for remote (must be behind reverse-proxy auth or VPN).
+
+Operator-facing consequences are documented in
+[`docs/operations/parallax-inference-deploy.md`](docs/operations/parallax-inference-deploy.md).
+**Existing operators upgrading past sprint 734 should expect
+`/admin/*` to default-deny non-loopback access** — set
+`PRSM_ADMIN_REMOTE_ALLOWED=1` and add a real auth layer in
+front if remote admin access is required.
 
 ## Supported versions
 
