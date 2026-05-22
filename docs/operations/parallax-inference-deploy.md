@@ -1,10 +1,12 @@
 # Parallax Inference — Operator deployment runbook
 
-Sprint 697 — single consolidated runbook for standing up a PRSM operator
-node that participates in the §7 verifiable-inference pool via the
-`ParallaxScheduledExecutor` path. Reflects the state of sprints 558-696,
-with all 22 PRSM_PARALLAX_* env vars + the on-chain wiring + the
-multi-host architecture closed in sprint 695.
+Sprint 697 (refreshed sprint 709) — single consolidated runbook for
+standing up a PRSM operator node that participates in the §7
+verifiable-inference pool via the `ParallaxScheduledExecutor` path.
+Reflects the state of sprints 558-708, with all 23 PRSM_PARALLAX_* /
+PRSM_INFERENCE_* env vars + the on-chain wiring + the multi-host
+architecture (sprint 695) + the OOM gate (sprint 704) + the
+DP-injection path (sprint 702) + Lambda GPU support (sprint 698).
 
 After completing this runbook, the operator's node:
 
@@ -159,24 +161,48 @@ Environment=PRSM_PARALLAX_KV_CACHE_ENABLED=1
 # Use advisory until the operator has actually staked on-chain (sprint 690).
 Environment=PRSM_PARALLAX_STAKE_ELIGIBILITY=advisory
 # Sprint 686 — small model on small node needs explicit layer cap
-Environment=PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=6
-# Sprint 695 — forces multi-stage allocation; 0.8 is the sweet spot
-# for gpt2 (mid-cap=11 prevents single-stage, with-embed=7 enables 2-stage)
-Environment=PRSM_PARALLAX_MEMORY_GB_OVERRIDE=0.8
-# Sprint 695 — clears Phase-2 router's latency threshold for CPU peers
-Environment=PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE=30.0
+Environment=PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=12
 # Sprint 695 — populates rtt_to_nodes for routing DP (inf without this)
 Environment=PRSM_PARALLAX_DEFAULT_RTT_MS=100
 
+# § Tier gate (sprint 702) — set to advisory ONLY for dev/test
+# exercise of the DP-injection path on software-TEE operators.
+# Production with real hardware-TEE keeps default enforced.
+Environment=PRSM_PARALLAX_TIER_GATE=advisory
+
+# § OOM gate (sprint 704) — REQUIRED on memory-tight nodes
+# (2GB DO droplets). Limits concurrent inference so peak memory
+# is bounded by a single request's working set. Without this,
+# concurrent inferences OOM-kill the daemon under cold-load.
+# Memory-rich nodes (Lambda A10 with 200GB RAM) can omit this
+# OR set to 8+ for throughput.
+Environment=PRSM_INFERENCE_CONCURRENCY_LIMIT=1
+
+# § Stake-pool wiring (sprint 690) — operator's funded EOA. When
+# combined with on-chain StakeBond bond, lets the daemon run
+# PRSM_PARALLAX_STAKE_ELIGIBILITY=enforced for production posture.
+# Until bonded, advisory mode above bypasses the check.
+# Environment=PRSM_OPERATOR_ADDRESS=0x<your-EOA>
+
 # § Timeouts (sprint 687)
 Environment=PRSM_PARALLAX_SEND_MESSAGE_TIMEOUT_S=600
+
+# § Multi-stage allocation overrides (sprint 695) — OPT-IN only
+# for testing the 2-stage chain path on small homogeneous CPU
+# fleets. Defaults work for production heterogeneous deployments
+# after sprint 700's F46 fix (monotonic hardware_profile gossip).
+# Set memory_gb=0.8 + tflops=30 ONLY when you want to force a
+# 2-stage split on tiny droplets running gpt2; otherwise omit.
+# Environment=PRSM_PARALLAX_MEMORY_GB_OVERRIDE=0.8
+# Environment=PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE=30.0
 EOF
 ```
 
 For Lambda GPU operators: change `PRSM_PARALLAX_HF_DEVICE=cpu` to `cuda`,
-remove the `MEMORY_GB_OVERRIDE` / `TFLOPS_FP16_OVERRIDE` / `LAYER_CAPACITY_OVERRIDE`
-trio (real GPU memory + tflops clear the Phase-1/Phase-2 thresholds
-without overrides).
+omit the `INFERENCE_CONCURRENCY_LIMIT` (200GB RAM doesn't need the
+gate), and skip the optional multi-stage-allocation overrides at the
+bottom (real GPU memory + tflops clear the Phase-1/Phase-2 thresholds
+without them).
 
 ## 6. Pre-flight check (sprint 696)
 
@@ -216,20 +242,52 @@ curl -s -m 120 -X POST http://127.0.0.1:8002/compute/inference -H "Content-Type:
 
 Expected: `success: true`, `output: " the"` (matches HF gpt2 greedy reference exactly per sprint 688), and a `receipt` with `settler_signature` + `output_hash`.
 
-## Troubleshooting (F-class bugs surfaced during sprint 685-695 live-attests)
+## Troubleshooting (F-class bugs surfaced during sprint 685-708 live-attests)
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `/compute/inference` returns 503 "Inference executor not initialized" | Missing one of the 4 required env vars (sprint 696 parallax-readiness reports which) | Set `PRSM_INFERENCE_EXECUTOR=parallax` + the 3 _KIND vars + catalog file |
 | `error: "no GPU passed pool gating"` | All peers filtered by AnchorVerifyAdapter (pubkey not on-chain) OR stake-eligibility (advisory mode disabled + no real stake) | Run `scripts/sprint_675_register_operator_pubkey.py` (step 3); use `PRSM_PARALLAX_STAKE_ELIGIBILITY=advisory` for pre-stake live-attest |
-| `error: "insufficient capacity: region 'default': total layer_capacity=X < num_layers=12"` | Per-GPU `layer_capacity` heuristic too conservative for small models | Set `PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=6` (or higher) |
-| `error: "AllocationResult has no pipelines"` | Memory-vs-embedding math fails — gpt2's 154MB embedding cost eats too much per-node capacity | Calibrate `PRSM_PARALLAX_MEMORY_GB_OVERRIDE` (0.8 is the gpt2 sweet spot — see sprint 695 notes) |
+| `error: "tier gate refusal: no GPU in pool has hardware-TEE attestation; required for privacy_level=standard"` | Adapter B rejects software-TEE operators for tier≥standard (correct production behavior) | Set `PRSM_PARALLAX_TIER_GATE=advisory` for dev/test DP exercise on software TEE (sprint 702) |
+| `error: "TIER_GATE — privacy_tier=standard requires hardware TEE; local runtime is software"` | Server-side runtime check separate from Adapter B | Same `PRSM_PARALLAX_TIER_GATE=advisory` covers both checks (sprint 702 F49) |
+| `error: "insufficient capacity: region 'default': total layer_capacity=X < num_layers=12"` | Per-GPU `layer_capacity` heuristic too conservative for small models | Set `PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=12` for gpt2 single-host (default in current runbook) |
+| `error: "AllocationResult has no pipelines"` (multi-host attempts only) | Memory-vs-embedding math fails — gpt2's 154MB embedding cost eats too much per-node capacity | Calibrate `PRSM_PARALLAX_MEMORY_GB_OVERRIDE` (0.8 is the gpt2 sweet spot — see sprint 695 notes); only needed when forcing multi-stage |
 | `error: "no chain in regions ['default'] covers all 12 layers"` | Phase-2 routing DP transition cost is inf because `rtt_to_nodes` is None | Set `PRSM_PARALLAX_DEFAULT_RTT_MS=100` (sprint 695 F44 fix) |
 | `error: "transport.send_to_peer returned False for peer_id='1.2.3.4:9001'"` | Address resolver returning peer.address instead of node_id | Already fixed in sprint 695 F45 — pull main if older |
 | `error: "chain executor does not support streaming: '_StubChainExecutor'"` | Chain executor falling back to stub because `node._loop` was None at construction time | Already fixed in sprint 686 F33 — pull main if older |
-| SSE returns 1 frame per word instead of per token | `PRSM_PARALLAX_STREAMING_RUNNER_KIND=synthetic` (sprint 692) | Switch to `embedder_backed` for real autoregressive (sprint 693) |
+| `error: "Cannot copy out of meta tensor; no data!"` | Newer transformers defaults `low_cpu_mem_usage=True` which leaves weights on meta-tensor | Already fixed in sprint 702 F48 — pull main if older |
+| `error: "Expected all tensors to be on the same device"` (GPU operators only) | Prompt encoder's `token_ids` on CPU, model on GPU | Already fixed in sprint 698 F47 — pull main if older |
+| Heterogeneous CPU+GPU pool: NYC sees Lambda as CPU with low tflops | Gossip propagation overwrote authoritative profile (F46) | Already fixed in sprint 700 — pull main; monotonic-improvement gossip preserves direct-announce data |
+| SSE returns 1 frame per word instead of per token | `PRSM_PARALLAX_STREAMING_RUNNER_KIND=synthetic` (sprint 692) | Switch to `embedder_backed` for real autoregressive (sprint 693, default in current runbook) |
 | SSE output diverges from HF greedy reference | `SamplingDefaults.temperature` defaulting to 1.0 (sampling) | Sprint 694 fix shipped; pull main if older |
 | Daemon hangs on first inference attempt | Sprint 687 F35 deadlock (sync chain executor on event-loop thread) | Already fixed in sprint 687 — pull main if older |
+| Daemon OOM-cycles under concurrent inference load | Concurrent requests each load gpt2 (~500MB); peak exceeds 2GB droplet budget | Set `PRSM_INFERENCE_CONCURRENCY_LIMIT=1` (sprint 704; default in current runbook for ≤2GB nodes) |
+
+## 9. Verify your operator's receipts externally (sprint 706+707+708)
+
+Once the daemon serves requests, capture any signed receipt and verify
+it with the standalone PRSM-import-free verifier from anywhere:
+
+```bash
+# Capture a receipt
+curl -s -m 60 -X POST http://127.0.0.1:8002/compute/inference \
+    -H 'Content-Type: application/json' \
+    -d '{"prompt":"Hello","model_id":"gpt2","budget_ftns":1.0,"privacy_tier":"none","content_tier":"A","max_tokens":1}' \
+    | python3 -c "import sys, json; print(json.dumps(json.load(sys.stdin)['receipt'], indent=2))" \
+    > my-receipt.json
+
+# Verify it (works from any machine with web3 + cryptography installed)
+pip install web3 cryptography
+python3 scripts/verify_prsm_receipt.py my-receipt.json
+# → ✓ VALID — receipt verifies cleanly
+```
+
+The verifier confirms (a) the settler_node_id resolves on the on-chain
+`PublisherKeyAnchor`, (b) the `settler_signature` is a valid Ed25519
+signature of the canonical bytes, (c) the attestation envelope parses
+cleanly, and (d) `activation_noise_trace` (tier ≥ standard) integrity
+holds. See `docs/sample-receipts/README.md` for 4 reference receipts
+covering unary, streaming, DP, and multi-host modes.
 
 ## Related runbooks
 
@@ -258,3 +316,11 @@ Expected: `success: true`, `output: " the"` (matches HF gpt2 greedy reference ex
 | 686-694 | F30→F43 bug cluster (deadlock, dtype, position embeddings, etc.) |
 | 695 | True multi-host 2-stage allocation (F44+F45) |
 | 696 | `prsm node parallax-readiness` CLI |
+| 697 | This runbook (initial 8-step deploy guide) |
+| 698 | Lambda A10 GPU operator + F47 (prompt encoder device fix) |
+| 700 | F46 monotonic hardware_profile gossip propagation |
+| 702 | `PRSM_PARALLAX_TIER_GATE=advisory` env + F48/F49 (DP-injection path closure) |
+| 703 | `scripts/verify_prsm_receipt.py` standalone PRSM-import-free verifier |
+| 704 | `PRSM_INFERENCE_CONCURRENCY_LIMIT` semaphore (NYC OOM gate) |
+| 705 | Sprint 704 live-validated under 4-concurrent load |
+| 706-708 | Sample receipts in `docs/sample-receipts/` covering all 4 inference modes |
