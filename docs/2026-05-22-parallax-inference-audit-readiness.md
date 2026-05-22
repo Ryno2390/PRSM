@@ -574,10 +574,12 @@ needs more disk + memory than the current $12/mo droplets have.
 | 723 | fix | **F56** — per-peer concurrent stream cap. Pre-723 one peer could open unlimited streams → memory DoS. `PRSM_CHAIN_STREAM_PER_PEER_CONCURRENCY` default 8. Refactor extracts `_handle_stream_request_body` so wrapper places try/finally around every return path (counter never leaks) |
 | 724 | fix | **F57** — unary request_id collision (F52 sibling on unary path). Same deterministic sha256(request_bytes) pattern in `build_send_message_adapter` — concurrent identical unary retries collided + first future was overwritten. Fixed with os.urandom + distinct `:unary:` domain separator |
 | 725 | fix | **F58** — unary payload size limit (F55 sibling). `handle_chain_executor_request` lacked pre-decode size gate. `PRSM_CHAIN_UNARY_REQUEST_MAX_BYTES` default 16 MiB; pre + post-decode gates; flows into existing CHAIN_ERROR_KEY response path. Surfaced in `parallax-readiness` (29 vars total) |
+| 726 | fix | **F59** — unary per-peer concurrent-request cap (F56 sibling). `PRSM_CHAIN_UNARY_PER_PEER_CONCURRENCY` default 8. Body extracted into `_handle_chain_executor_request_body` so wrapper places try/finally around every return path. isinstance(dict) check generalizes the lesson from sprint 723. Surfaced in `parallax-readiness` (30 vars total) |
 
-28 F-class production-blockers (F30 → F58) closed across the
-session. ~198 new pin tests + 5 new integration tests, 0 cross-suite
-regressions.
+29 F-class production-blockers (F30 → F59) closed across the
+session. ~205 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **Both wire-protocol paths (streaming + unary) now
+have parity defense surfaces.**
 
 ## 9. What this enables
 
