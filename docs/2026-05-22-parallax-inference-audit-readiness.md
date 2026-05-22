@@ -39,6 +39,25 @@ It is NOT marketing. Every operational claim cites:
   (`prsm node parallax-readiness`) with non-zero exit on missing or
   invalid values, suitable for CI gating. (Sprint 696)
 
+**Wire-protocol hardening (sprints 711-731, 22-sprint arc):** the
+remote token-stream + unary chain-executor RPC have been audited
+end-to-end across 10 dimensions, closing **35 F-class production-
+blockers (F30 through F64)** with corresponding pin tests + 5
+integration tests on real `WebSocketTransport`. Streaming +
+unary paths now have parity defense on collision (F52/F57), payload
+size DoS (F55/F58), per-peer concurrency cap (F56/F59), and
+response hijack via sender binding (F53/F60). Plus streaming-only
+race fixes (F50/F51), disconnect cleanup (F54), back-pressure
+(sprint 713), observability CLI (sprint 722), and hang-defense
+timeouts (F61/F62 unary + streaming). **F63/F64 (sprints 730-731)
+restored the cryptographic foundation under EVERY MSG_DIRECT
+handler in the codebase** — including ledger_sync FTNS transfers,
+compute_provider, storage_provider, content_provider, and
+agent_registry — by binding `msg.sender_id` to the handshake-
+authenticated `peer.peer_id` at the transport dispatch boundary.
+Pre-731, a peered third party could spoof sender_id to bypass
+per-peer caps OR forge responses.
+
 **What is honestly NOT closed yet** (Section 7):
 
 - Stake-eligibility runs in "advisory" mode in the live fleet because
