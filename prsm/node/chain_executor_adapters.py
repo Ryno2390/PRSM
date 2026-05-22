@@ -1569,7 +1569,20 @@ def build_send_message_adapter(
             )
             return future.result(timeout=timeout)
 
-        request_id = hashlib.sha256(request_bytes).hexdigest()
+        # Sprint 724 F57 fix: same fix-class as sprint-718 F52 on
+        # the streaming side. Pre-724 derivation was purely
+        # deterministic — two concurrent identical unary requests
+        # (idempotent retry from coordinator, multi-stage chain
+        # re-dispatch on transient failure) computed the same
+        # request_id; second `pending[request_id] = future`
+        # overwrote the first's future, then the first dispatch
+        # waited 30s for a response that resolved into the wrong
+        # future and timed out. Mix 8 bytes os.urandom to make
+        # collision negligible while preserving wire-id length.
+        import os as _os
+        request_id = hashlib.sha256(
+            request_bytes + b":unary:" + _os.urandom(8),
+        ).hexdigest()
         pending = node._chain_executor_pending
 
         async def _send_and_wait() -> bytes:
