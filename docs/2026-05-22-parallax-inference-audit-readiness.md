@@ -669,12 +669,13 @@ against origin's known pubkey. Tracked for a future session.
 | 741 | fix | **F69** — HTTP rate limiter keyed by local daemon ID, not HTTP requester. `/compute/forge` + `/compute/inference` + `/compute/inference/stream` all used `node.identity.node_id` (a CONSTANT) as the bucket key — "per requester" semantics were effectively GLOBAL. Attacker traffic exhausted bucket → legit clients got 429. Now uses proxy-aware `_resolve_requester_key(request)` matching sprint-737/738 admin precedence |
 | 742 | fix | **F70** — HTTP body-size limit (memory-DoS defense at HTTP layer; sibling of wire F55/F58). FastAPI accepted arbitrary JSON bodies; 1 GB POST would allocate before any size check. Middleware checks Content-Length pre-read; default 1 MiB; PRSM_HTTP_MAX_BODY_BYTES env-tunable. 413 with actionable error |
 | 743 | fix | **F71** — admin DNS-rebinding defense via Origin header check. DNS rebinding lets a malicious webpage in the victim's browser make requests to `http://localhost:8000/admin/*` — daemon sees client=127.0.0.1, F65-F68 gate passes, admin data leaks to attacker JS. Now rejects /admin/* requests carrying an Origin header (browsers always set it; CLI tools don't) |
+| 744 | fix | **F72** — /docs + /openapi.json hidden by default. Pre-744 every HTTP client could fetch /openapi.json and get the complete API surface map — every /admin/* path the F65-F71 fixes worked to defend. Reconnaissance enabled. Now hidden by default; `PRSM_API_DOCS_ENABLED=1` opt-in for dev. Applied to BOTH node API and dashboard sub-app |
 
-41 F-class production-blockers (F30 → F71) closed across the
-session. ~277 new pin tests + 5 new integration tests, 0 cross-suite
-regressions. **F71 closes the canonical DNS-rebinding attack that
-loopback-as-auth services must defend against. 29/29 pin tests
-across the cumulative F65-F71 admin-auth arc.**
+42 F-class production-blockers (F30 → F72) closed across the
+session. ~284 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **F72 closes the reconnaissance vector that mapped the
+API surface for attackers even after the F65-F71 defenses were in
+place.**
 
 ## 9. What this enables
 
