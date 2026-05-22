@@ -260,6 +260,56 @@ content_provider, agent_registry) see authenticated sender_id.
 No operator action required; this is a transport-layer fix that
 takes effect on daemon restart.
 
+### Admin endpoint auth (sprints 734-739, F65-F68)
+
+**BEHAVIOR CHANGE for operators upgrading past sprint 734.**
+Pre-734 every `/admin/*` endpoint was unauthenticated — the
+`tags=["admin"]` decorator was a swagger grouping, not access
+control. Sprint 722's observability endpoint widened the leak
+(expected_sender peer IDs visible to any network client).
+
+Post-734, `/admin/*` endpoints default-deny non-loopback
+connections. Operators with grafana scrapers / external
+monitoring tooling that previously hit `/admin/*` from a
+non-localhost address will see **403 Forbidden** after upgrading.
+
+Symptoms to expect:
+- `prsm node streams` from a remote host → 403
+- Grafana / Prometheus pulling `/admin/parallax/pool/snapshot` from
+  another machine → 403
+- Curl to `/admin/fiat-surface/health` from a remote host → 403
+
+Three remediation paths:
+
+1. **Run monitoring on the same host** (simplest + most secure).
+   Localhost curls + `prsm node streams` from the operator's
+   own daemon host continue to work without any env changes.
+
+2. **Behind a reverse proxy** (nginx, HAProxy on the same host):
+   sprints 737-738 added defense against the reverse-proxy bypass.
+   If your proxy sets `X-Forwarded-For` or `X-Real-IP` to the real
+   upstream client IP, the daemon will correctly reject external
+   traffic forwarded through the proxy. **Add real auth at the
+   proxy layer** (HTTP Basic, OAuth, mTLS) before exposing
+   `/admin/*` publicly — the daemon's loopback gate is your
+   *second* line of defense, not your first.
+
+3. **Opt-out via env** (least secure):
+   ```
+   Environment=PRSM_ADMIN_REMOTE_ALLOWED=1
+   ```
+   This disables ALL daemon-side admin auth. Use ONLY if you've
+   wrapped the daemon in a real auth layer at the proxy or VPN.
+   Setting this without proxy auth re-opens the F65 vulnerability
+   that the audit closed.
+
+Loopback representations accepted (sprint 739):
+- `127.0.0.1`, `::1`, `localhost`, `testclient`
+- IPv4-mapped IPv6 (`::ffff:127.0.0.1`) — common on dual-stack
+  Linux daemons
+- The entire `127.0.0.0/8` block per RFC 1122 (so custom aliases
+  like `127.0.0.5` work)
+
 For Lambda GPU operators: change `PRSM_PARALLAX_HF_DEVICE=cpu` to `cuda`,
 omit the `INFERENCE_CONCURRENCY_LIMIT` (200GB RAM doesn't need the
 gate), and skip the optional multi-stage-allocation overrides at the
@@ -393,3 +443,4 @@ covering unary, streaming, DP, and multi-host modes.
 | 723-727 | Streaming + unary defense parity: F56/F59 per-peer cap, F57/F58 collision+size on unary, F60 unary hijack defense |
 | 728-729 | F61/F62 hang-defense timeouts (unary `executor.execute()` + streaming wall-time) |
 | 730-731 | F63/F64 sender_id bound to authenticated peer_id at transport layer — protects ALL MSG_DIRECT handlers (chain-executor + ledger_sync FTNS transfers + compute/storage/content/agent) |
+| 734-739 | F65/F66/F67/F68 `/admin/*` default-deny non-loopback (incl. reverse-proxy XFF/X-Real-IP defense + IPv4-mapped IPv6 + 127/8 block); BEHAVIOR CHANGE for operators with remote monitoring — see "Admin endpoint auth" section above |
