@@ -4107,10 +4107,32 @@ class PRSMNode:
             )
             _self = self
 
+            # Sprint 730 F63 — bind msg.sender_id to the
+            # handshake-authenticated peer.peer_id before any
+            # handler sees the message. Pre-730, the transport
+            # only verified signatures at handshake time; any
+            # subsequent MSG_DIRECT message arrived with a
+            # `sender_id` field that was wire-trusted but not
+            # cryptographically rebound. A peer that established
+            # a valid handshake could then send messages claiming
+            # to be a DIFFERENT peer — defeating sprint-726/723
+            # per-peer caps (open many under fake ids) and sprint-
+            # 727/719 sender-binding checks (forge responses by
+            # claiming to be the victim's expected peer). Overwriting
+            # sender_id with peer.peer_id at the dispatch boundary
+            # protects ALL chain-executor handlers in one place.
+            def _bind_sender(msg, peer):
+                if peer is not None:
+                    authentic = getattr(peer, "peer_id", None)
+                    if authentic:
+                        msg.sender_id = authentic
+
             async def _chain_executor_response_dispatch(msg, peer):
+                _bind_sender(msg, peer)
                 handle_chain_executor_response(_self, msg)
 
             async def _chain_executor_request_dispatch(msg, peer):
+                _bind_sender(msg, peer)
                 await handle_chain_executor_request(_self, msg)
 
             # Sprint 711 F40 — token-stream wire protocol dispatch.
@@ -4119,9 +4141,11 @@ class PRSMNode:
             # handlers' return-False fall-through lets each handler
             # ignore messages destined for the other.
             async def _chain_stream_request_dispatch(msg, peer):
+                _bind_sender(msg, peer)
                 await handle_chain_stream_request(_self, msg)
 
             async def _chain_stream_response_dispatch(msg, peer):
+                _bind_sender(msg, peer)
                 handle_chain_stream_response(_self, msg)
 
             self.transport.on_message(
