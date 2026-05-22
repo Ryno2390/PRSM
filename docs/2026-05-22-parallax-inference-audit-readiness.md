@@ -568,9 +568,10 @@ needs more disk + memory than the current $12/mo droplets have.
 | 717 | test | E2E back-pressure load test — 20-frame stream + maxsize=2 receive queue. Proves non-lossy back-pressure end-to-end (would have caught F50/F51 pre-fix) |
 | 718 | fix | **F52** — stream_id collision under concurrent identical requests. Pre-718 derivation was `sha256(request_bytes + ':stream')` purely deterministic; idempotent retries collided + overwrote queue. Mixed 8 bytes os.urandom into derivation |
 | 719 | fix | **F53** — stream hijack protection. Sprint 711 routed frames by stream_id alone; any P2P peer that learned the id could forge frames into a victim's queue. Now `pending[]` binds `(queue, expected_sender)`; response handler verifies msg.sender_id before routing |
+| 720 | fix | **F54** — server-side resource leak on requester disconnect. Sprint 711 ignored send_to_peer return value; server kept iterating + burning GPU on tokens nobody received. Now reads return value + closes inner generator on False (releases KV cache + model context) |
 
-23 F-class production-blockers (F30 → F53) closed across the
-session. ~167 new pin tests + 4 new integration tests, 0 cross-suite
+24 F-class production-blockers (F30 → F54) closed across the
+session. ~169 new pin tests + 5 new integration tests, 0 cross-suite
 regressions.
 
 ## 9. What this enables
