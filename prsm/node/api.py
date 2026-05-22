@@ -823,7 +823,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # already significantly bounded. A malicious local process
         # is a different threat model than a peered network
         # client.
+        # Sprint 738 F67 — also inspect X-Real-IP (common in nginx
+        # configurations that don't append to XFF). Proxies vary:
+        # some set XFF, some set X-Real-IP, some set both. We
+        # reject if EITHER indicates external upstream client.
         xff = request.headers.get("x-forwarded-for", "")
+        x_real_ip = request.headers.get("x-real-ip", "")
+        real_client = ""
+        header_used = ""
         if is_loopback_immediate and xff.strip():
             # Take the LAST hop (rightmost) — that's the address
             # the immediate proxy saw as its client. Earlier hops
@@ -831,22 +838,35 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             # set by the original requester).
             hops = [h.strip() for h in xff.split(",") if h.strip()]
             real_client = hops[-1] if hops else ""
-            if real_client and real_client not in _LOOPBACK:
-                return _AdminJSON(
-                    status_code=403,
-                    content={
-                        "detail": (
-                            "admin endpoints reject reverse-proxied "
-                            "remote traffic by default (sprint 737 "
-                            "F66). X-Forwarded-For indicates a non-"
-                            "loopback upstream client. Set "
-                            "PRSM_ADMIN_REMOTE_ALLOWED=1 to allow "
-                            "AND add real auth at your proxy layer."
-                        ),
-                        "client_host": client_host,
-                        "x_forwarded_for_last_hop": real_client,
-                    },
-                )
+            header_used = "x-forwarded-for"
+        if (
+            is_loopback_immediate
+            and not real_client
+            and x_real_ip.strip()
+        ):
+            real_client = x_real_ip.strip()
+            header_used = "x-real-ip"
+        if (
+            is_loopback_immediate
+            and real_client
+            and real_client not in _LOOPBACK
+        ):
+            return _AdminJSON(
+                status_code=403,
+                content={
+                    "detail": (
+                        "admin endpoints reject reverse-proxied "
+                        "remote traffic by default (sprints 737-"
+                        "738 F66/F67). Proxy header indicates a "
+                        "non-loopback upstream client. Set "
+                        "PRSM_ADMIN_REMOTE_ALLOWED=1 to allow "
+                        "AND add real auth at your proxy layer."
+                    ),
+                    "client_host": client_host,
+                    "proxy_header": header_used,
+                    "upstream_client": real_client,
+                },
+            )
         if is_loopback_immediate:
             return await call_next(request)
         return _AdminJSON(
