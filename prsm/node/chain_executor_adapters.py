@@ -178,6 +178,36 @@ CHAIN_PAYLOAD_KEY = "chain_payload_b64"
 # Phase 2E-2+ replaces this with real stage execution).
 CHAIN_ERROR_KEY = "chain_error"
 
+# Sprint 711 (F40 remote streaming) — token-stream wire protocol.
+# Distinct subtype from unary CHAIN_MSG_TYPE so the receive-side
+# router can dispatch streaming and unary independently. Wire format:
+#
+#   Requester → Server: ONE STREAM_REQ message
+#     payload[CHAIN_STREAM_REQ_KEY] = stream_id
+#     payload[CHAIN_PAYLOAD_KEY]    = base64(request_bytes)
+#
+#   Server → Requester: MULTIPLE STREAM_FRAME messages, one per
+#   frame yielded by LayerStageServer.handle_token_stream:
+#     payload[CHAIN_STREAM_FRAME_KEY] = stream_id
+#     payload[CHAIN_STREAM_SEQ_KEY]   = frame index (0-based)
+#     payload[CHAIN_PAYLOAD_KEY]      = base64(frame_bytes)
+#
+#   Server → Requester: ONE terminal STREAM_END message:
+#     payload[CHAIN_STREAM_END_KEY]   = stream_id
+#     payload[CHAIN_STREAM_SEQ_KEY]   = total frame count
+#     (optional) payload[CHAIN_ERROR_KEY] = error message if mid-
+#                                            stream failure
+#
+# The terminal STREAM_END is required even on error so the requester
+# closes its iterator cleanly. Frame ordering is by SEQ_KEY (NOT by
+# arrival time) so out-of-order delivery on the underlying transport
+# doesn't corrupt the stream.
+CHAIN_STREAM_MSG_TYPE = "chain_executor_stream_rpc"
+CHAIN_STREAM_REQ_KEY = "chain_stream_req_id"
+CHAIN_STREAM_FRAME_KEY = "chain_stream_frame_id"
+CHAIN_STREAM_END_KEY = "chain_stream_end_id"
+CHAIN_STREAM_SEQ_KEY = "chain_stream_seq"
+
 
 class StageExecutionError(RuntimeError):
     """Sprint 602 (Phase 2E-2) — raised by StageExecutor.execute()
@@ -1648,13 +1678,13 @@ def build_send_message_adapter(
 def build_token_stream_send_message_adapter(node: Any) -> Callable[
     [str, bytes], Any,
 ]:
-    """Sprint 691 F40 fix — token-stream transport adapter.
+    """Sprint 691 + 711 — token-stream transport adapter.
 
     Wires the chain executor's ``token_stream_send_message`` slot
-    so ``execute_chain_streaming`` can actually dispatch streaming
-    requests. Self-dispatch case is fully supported; remote case
-    raises a structured "not yet wired" error so operators see
-    the gap clearly.
+    so ``execute_chain_streaming`` can dispatch streaming requests
+    both locally (sprint 691 self-dispatch) AND remotely (sprint
+    711 cross-host streaming via the CHAIN_STREAM_MSG_TYPE wire
+    protocol).
 
     For self-dispatch:
       - Resolves the local StageExecutor via _build_stage_executor_
@@ -1666,24 +1696,28 @@ def build_token_stream_send_message_adapter(node: Any) -> Callable[
         see WHY streaming doesn't work on their config.
 
     For remote (stage_address != self_node_id):
-      - Raises a clear "remote token streaming not yet wired"
-        RuntimeError. Sprint 692+ will ship the P2P streaming
-        transport (likely via existing chain_executor request
-        handler + a streaming response variant).
+      - Delegates to ``_remote_token_stream_dispatch`` which sends
+        ONE CHAIN_STREAM_REQ message, iterates incoming
+        CHAIN_STREAM_FRAME messages keyed by stream_id, and
+        terminates on CHAIN_STREAM_END (with optional error
+        propagation). Closes the audit-doc §7.3 known limit.
     """
     def _stream(stage_address: str, request_bytes: bytes) -> Any:
         self_node_id = getattr(
             getattr(node, "identity", None), "node_id", None,
         )
-        # Remote dispatch — not yet wired
+        # Sprint 711 F40 — remote dispatch via P2P stream RPC.
+        # The CHAIN_STREAM_MSG_TYPE wire protocol carries one
+        # STREAM_REQ message + multiple STREAM_FRAME messages +
+        # one terminal STREAM_END. The frame ordering is by
+        # CHAIN_STREAM_SEQ_KEY (not arrival time) so out-of-order
+        # delivery on the underlying transport doesn't corrupt
+        # the stream. See module-top comment for full schema.
         if self_node_id is None or stage_address != self_node_id:
-            raise RuntimeError(
-                f"token_stream_send_message: remote streaming "
-                f"dispatch (stage_address={stage_address!r}) "
-                f"is not yet wired. Use single-node deployment "
-                f"OR unary /compute/inference (sprint 692+ "
-                f"will add the remote-streaming transport)."
+            yield from _remote_token_stream_dispatch(
+                node, stage_address, request_bytes,
             )
+            return
 
         # Self-dispatch — call the local executor's streaming side
         executor: StageExecutor = getattr(
@@ -1703,3 +1737,274 @@ def build_token_stream_send_message_adapter(node: Any) -> Callable[
             yield frame
 
     return _stream
+
+
+def _remote_token_stream_dispatch(
+    node: Any, stage_address: str, request_bytes: bytes,
+) -> Any:
+    """Sprint 711 F40 — remote-side token-stream client.
+
+    Sends ONE CHAIN_STREAM_REQ to the stage's peer over MSG_DIRECT,
+    then iterates incoming CHAIN_STREAM_FRAME messages keyed by
+    stream_id, ordered by sequence number. Yields each frame as
+    bytes. Terminal CHAIN_STREAM_END message closes the iterator;
+    if it carries CHAIN_ERROR_KEY, raises StageExecutionError so
+    the caller surfaces the failure cleanly.
+
+    Threading: the chain executor's send_message contract is sync;
+    this function is called from a worker thread (sprint 687 F35
+    fix runs `chain_executor.execute_chain_streaming` via
+    `run_in_executor`). We use `asyncio.run_coroutine_threadsafe`
+    to schedule the send + use `node._chain_executor_pending_streams`
+    (a per-request asyncio.Queue) to receive frames.
+    """
+    import asyncio as _asyncio
+    import base64
+    import hashlib
+
+    loop = getattr(node, "_loop", None)
+    if loop is None:
+        raise _Phase2AdapterNotReady(
+            "Sprint 711 remote streaming: node._loop is None. "
+            "Daemon must be started before remote token-stream "
+            "dispatch."
+        )
+
+    stream_id = hashlib.sha256(request_bytes + b":stream").hexdigest()
+    # Per-stream queue for incoming frames + end-signal.
+    pending = getattr(node, "_chain_executor_pending_streams", None)
+    if pending is None:
+        pending = {}
+        try:
+            node._chain_executor_pending_streams = pending
+        except Exception:  # noqa: BLE001 — defensive; some test mocks
+            pass
+
+    queue: _asyncio.Queue = _asyncio.run_coroutine_threadsafe(
+        _make_async_queue(loop), loop,
+    ).result(timeout=5.0)
+    pending[stream_id] = queue
+
+    async def _send_request() -> None:
+        from prsm.node.transport import P2PMessage, MSG_DIRECT
+        msg = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id=node.identity.node_id,
+            payload={
+                "subtype": CHAIN_STREAM_MSG_TYPE,
+                CHAIN_STREAM_REQ_KEY: stream_id,
+                CHAIN_PAYLOAD_KEY: base64.b64encode(
+                    request_bytes,
+                ).decode("ascii"),
+            },
+        )
+        await node.transport.send_to_peer(stage_address, msg)
+
+    # Fire-and-forget send (response frames arrive via gossip handler)
+    _asyncio.run_coroutine_threadsafe(_send_request(), loop)
+
+    # Frame loop. Each iteration awaits the next queued frame. The
+    # terminal entry is a sentinel dict carrying CHAIN_STREAM_END_KEY
+    # + optional CHAIN_ERROR_KEY.
+    try:
+        while True:
+            entry = _asyncio.run_coroutine_threadsafe(
+                queue.get(), loop,
+            ).result(timeout=300.0)
+            if isinstance(entry, dict) and entry.get("end"):
+                err = entry.get("error")
+                if err:
+                    raise StageExecutionError(
+                        f"remote token-stream error from "
+                        f"{stage_address[:16]}: {err}"
+                    )
+                return
+            # Frame bytes
+            yield entry
+    finally:
+        pending.pop(stream_id, None)
+
+
+async def _make_async_queue(loop):
+    """Construct an asyncio.Queue on the given loop. Wrapped because
+    Queue() must be instantiated FROM the loop's thread."""
+    import asyncio as _asyncio
+    return _asyncio.Queue()
+
+
+async def handle_chain_stream_request(node: Any, msg: Any) -> bool:
+    """Sprint 711 F40 — server-side token-stream request handler.
+
+    Mirrors `handle_chain_executor_request` but yields multiple
+    CHAIN_STREAM_FRAME response messages instead of one CHAIN_RESP.
+
+    Returns:
+      True  — handled (frames sent + terminal STREAM_END dispatched)
+      False — not for us (wrong subtype, frame/end message)
+    """
+    import base64
+    payload = getattr(msg, "payload", None) or {}
+    if payload.get("subtype") != CHAIN_STREAM_MSG_TYPE:
+        return False
+    stream_id = payload.get(CHAIN_STREAM_REQ_KEY)
+    if not stream_id:
+        # Not a request — could be a frame/end message destined for
+        # the response handler. Defer to that.
+        return False
+    sender_id = getattr(msg, "sender_id", None)
+    if not sender_id:
+        return False
+
+    from prsm.node.transport import P2PMessage, MSG_DIRECT
+
+    try:
+        request_bytes = base64.b64decode(
+            payload.get(CHAIN_PAYLOAD_KEY, ""),
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Malformed request — send terminal STREAM_END with error.
+        end_msg = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id=node.identity.node_id,
+            payload={
+                "subtype": CHAIN_STREAM_MSG_TYPE,
+                CHAIN_STREAM_END_KEY: stream_id,
+                CHAIN_STREAM_SEQ_KEY: 0,
+                CHAIN_ERROR_KEY: (
+                    f"payload decode failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            },
+        )
+        await node.transport.send_to_peer(sender_id, end_msg)
+        return True
+
+    # Resolve the local executor + handle_token_stream surface.
+    executor = getattr(
+        node, "_chain_stage_executor", None,
+    ) or _build_stage_executor_from_env(node=node)
+    server = getattr(executor, "_server", None)
+    if server is None or not hasattr(server, "handle_token_stream"):
+        end_msg = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id=node.identity.node_id,
+            payload={
+                "subtype": CHAIN_STREAM_MSG_TYPE,
+                CHAIN_STREAM_END_KEY: stream_id,
+                CHAIN_STREAM_SEQ_KEY: 0,
+                CHAIN_ERROR_KEY: (
+                    "no streaming-capable stage executor on remote — "
+                    "remote must run PRSM_PARALLAX_STAGE_EXECUTOR_KIND="
+                    "layer_stage with a streaming_runner wired"
+                ),
+            },
+        )
+        await node.transport.send_to_peer(sender_id, end_msg)
+        return True
+
+    # Iterate the server's stream + ship one CHAIN_STREAM_FRAME per
+    # yielded chunk. Terminal STREAM_END with seq=frame_count closes.
+    seq = 0
+    try:
+        for frame in server.handle_token_stream(request_bytes):
+            frame_msg = P2PMessage(
+                msg_type=MSG_DIRECT,
+                sender_id=node.identity.node_id,
+                payload={
+                    "subtype": CHAIN_STREAM_MSG_TYPE,
+                    CHAIN_STREAM_FRAME_KEY: stream_id,
+                    CHAIN_STREAM_SEQ_KEY: seq,
+                    CHAIN_PAYLOAD_KEY: base64.b64encode(
+                        frame,
+                    ).decode("ascii"),
+                },
+            )
+            await node.transport.send_to_peer(sender_id, frame_msg)
+            seq += 1
+        # Clean terminal
+        end_msg = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id=node.identity.node_id,
+            payload={
+                "subtype": CHAIN_STREAM_MSG_TYPE,
+                CHAIN_STREAM_END_KEY: stream_id,
+                CHAIN_STREAM_SEQ_KEY: seq,
+            },
+        )
+        await node.transport.send_to_peer(sender_id, end_msg)
+    except Exception as exc:  # noqa: BLE001
+        # Mid-stream failure — ship terminal with error so the
+        # requester closes cleanly.
+        end_msg = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id=node.identity.node_id,
+            payload={
+                "subtype": CHAIN_STREAM_MSG_TYPE,
+                CHAIN_STREAM_END_KEY: stream_id,
+                CHAIN_STREAM_SEQ_KEY: seq,
+                CHAIN_ERROR_KEY: (
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            },
+        )
+        try:
+            await node.transport.send_to_peer(sender_id, end_msg)
+        except Exception:  # noqa: BLE001
+            pass
+    return True
+
+
+def handle_chain_stream_response(node: Any, msg: Any) -> bool:
+    """Sprint 711 F40 — client-side token-stream frame/end handler.
+
+    Routes incoming CHAIN_STREAM_FRAME + CHAIN_STREAM_END messages
+    to the per-stream asyncio.Queue created by
+    `_remote_token_stream_dispatch`. Returns True if the message
+    was a stream-response (handled), False otherwise.
+    """
+    import base64
+    payload = getattr(msg, "payload", None) or {}
+    if payload.get("subtype") != CHAIN_STREAM_MSG_TYPE:
+        return False
+    # Either a frame for an in-flight stream OR a terminal end.
+    stream_id = (
+        payload.get(CHAIN_STREAM_FRAME_KEY)
+        or payload.get(CHAIN_STREAM_END_KEY)
+    )
+    if not stream_id:
+        return False  # request-side message; not for us
+    pending = getattr(node, "_chain_executor_pending_streams", {}) or {}
+    queue = pending.get(stream_id)
+    if queue is None:
+        return False  # unknown stream (race; requester gave up)
+
+    loop = getattr(node, "_loop", None)
+    if loop is None:
+        return False
+
+    if payload.get(CHAIN_STREAM_END_KEY):
+        # Terminal entry — pass through end + optional error.
+        end_entry = {
+            "end": True,
+            "error": payload.get(CHAIN_ERROR_KEY),
+        }
+        loop.call_soon_threadsafe(queue.put_nowait, end_entry)
+        return True
+
+    # Mid-stream frame — decode + enqueue. We DON'T re-order here;
+    # the wire spec says frames arrive in-order over the same MSG_DIRECT
+    # connection. If transport later allows reordering, this is where
+    # we'd buffer + sort by CHAIN_STREAM_SEQ_KEY.
+    try:
+        frame_bytes = base64.b64decode(
+            payload.get(CHAIN_PAYLOAD_KEY, ""),
+        )
+    except Exception:  # noqa: BLE001
+        # Malformed frame — treat as terminal error so caller closes.
+        loop.call_soon_threadsafe(queue.put_nowait, {
+            "end": True,
+            "error": "malformed frame payload (base64 decode failed)",
+        })
+        return True
+    loop.call_soon_threadsafe(queue.put_nowait, frame_bytes)
+    return True

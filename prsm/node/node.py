@@ -4102,6 +4102,8 @@ class PRSMNode:
             from prsm.node.chain_executor_adapters import (
                 handle_chain_executor_response,
                 handle_chain_executor_request,
+                handle_chain_stream_request,
+                handle_chain_stream_response,
             )
             _self = self
 
@@ -4111,11 +4113,28 @@ class PRSMNode:
             async def _chain_executor_request_dispatch(msg, peer):
                 await handle_chain_executor_request(_self, msg)
 
+            # Sprint 711 F40 — token-stream wire protocol dispatch.
+            # Stream requests + frames + ends all ride MSG_DIRECT
+            # alongside unary chain-exec messages. The two response
+            # handlers' return-False fall-through lets each handler
+            # ignore messages destined for the other.
+            async def _chain_stream_request_dispatch(msg, peer):
+                await handle_chain_stream_request(_self, msg)
+
+            async def _chain_stream_response_dispatch(msg, peer):
+                handle_chain_stream_response(_self, msg)
+
             self.transport.on_message(
                 MSG_DIRECT, _chain_executor_response_dispatch,
             )
             self.transport.on_message(
                 MSG_DIRECT, _chain_executor_request_dispatch,
+            )
+            self.transport.on_message(
+                MSG_DIRECT, _chain_stream_request_dispatch,
+            )
+            self.transport.on_message(
+                MSG_DIRECT, _chain_stream_response_dispatch,
             )
             logger.info(
                 "Sprint 599 chain-executor response dispatch wired "

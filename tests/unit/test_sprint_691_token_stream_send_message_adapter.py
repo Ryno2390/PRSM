@@ -36,16 +36,21 @@ def _make_node(self_node_id: str = "a" * 32):
     return node
 
 
-def test_remote_dispatch_raises_not_yet_wired():
-    """stage_address != self → clear RuntimeError naming the gap."""
+def test_remote_dispatch_delegates_to_p2p_stream_protocol():
+    """Sprint 711 superseded the original sprint-691 'not yet
+    wired' placeholder. Remote dispatch now delegates to
+    `_remote_token_stream_dispatch` which uses the CHAIN_STREAM_*
+    P2P wire protocol. This test pins that the delegation happens
+    (full live-attest is sprint 712's job)."""
+    import inspect
     from prsm.node.chain_executor_adapters import (
         build_token_stream_send_message_adapter,
     )
-    node = _make_node()
-    adapter = build_token_stream_send_message_adapter(node)
-    with pytest.raises(RuntimeError, match="remote streaming"):
-        # Generator only raises on first next() — consume it.
-        list(adapter("b" * 32, b"req"))
+    src = inspect.getsource(build_token_stream_send_message_adapter)
+    assert "_remote_token_stream_dispatch" in src, (
+        "remote-streaming wiring must delegate to "
+        "_remote_token_stream_dispatch (sprint 711 F40 closure)"
+    )
 
 
 def test_self_dispatch_with_streaming_server_yields_frames():
