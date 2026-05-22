@@ -1954,9 +1954,19 @@ async def handle_chain_stream_request(node: Any, msg: Any) -> bool:
 
     # Iterate the server's stream + ship one CHAIN_STREAM_FRAME per
     # yielded chunk. Terminal STREAM_END with seq=frame_count closes.
+    #
+    # Sprint 720 F54 fix: check send_to_peer return value + break on
+    # False (requester disconnected). Pre-720, the loop kept calling
+    # `server.handle_token_stream(...)` after the peer was gone — for
+    # a real autoregressive runner that's burning GPU on tokens that
+    # are discarded. Closing the iterator with `.close()` (if it's a
+    # generator) releases server-side resources (KV cache, model
+    # context). For non-generator iterables, the early break still
+    # bounds wasted work.
     seq = 0
+    stream_iter = server.handle_token_stream(request_bytes)
     try:
-        for frame in server.handle_token_stream(request_bytes):
+        for frame in stream_iter:
             frame_msg = P2PMessage(
                 msg_type=MSG_DIRECT,
                 sender_id=node.identity.node_id,
@@ -1969,7 +1979,21 @@ async def handle_chain_stream_request(node: Any, msg: Any) -> bool:
                     ).decode("ascii"),
                 },
             )
-            await node.transport.send_to_peer(sender_id, frame_msg)
+            send_ok = await node.transport.send_to_peer(
+                sender_id, frame_msg,
+            )
+            if not send_ok:
+                # Requester disconnected mid-stream — stop burning
+                # compute on output nobody will receive. Close the
+                # underlying generator if possible so server-side
+                # state (KV cache, etc.) is released promptly.
+                _close_fn = getattr(stream_iter, "close", None)
+                if callable(_close_fn):
+                    try:
+                        _close_fn()
+                    except Exception:  # noqa: BLE001 — defensive
+                        pass
+                return True
             seq += 1
         # Clean terminal
         end_msg = P2PMessage(

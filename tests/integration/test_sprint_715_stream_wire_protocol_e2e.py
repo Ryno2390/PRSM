@@ -369,6 +369,151 @@ async def test_sprint_718_concurrent_identical_requests_no_collision():
 
 
 @pytest.mark.asyncio
+async def test_sprint_720_server_stops_streaming_on_requester_disconnect():
+    """Sprint 720 F54 — when the requester disconnects mid-stream,
+    server-side iteration must stop within a bounded number of
+    frames. Otherwise: wasted GPU forward passes + held KV cache +
+    memory pressure on the operator.
+
+    Test fixture: server yields an infinite stream of frames (small
+    `time.sleep` between yields so the test loop can advance). The
+    requester drops its transport mid-stream (we stop it). Server
+    should observe send_to_peer returning False on the next frame
+    and exit the loop + close the inner generator within the next
+    few yields.
+
+    We instrument the generator with a counter to assert the server
+    DID stop iterating after the disconnect (not unbounded).
+    """
+    from prsm.node.identity import generate_node_identity
+    from prsm.node.transport import WebSocketTransport, MSG_DIRECT
+    from prsm.node.chain_executor_adapters import (
+        handle_chain_stream_request,
+    )
+
+    loop = asyncio.get_event_loop()
+    server_id = generate_node_identity("sprint720-server")
+    requester_id = generate_node_identity("sprint720-req")
+
+    server_port = _free_port()
+    requester_port = _free_port()
+    server_transport = WebSocketTransport(
+        server_id, host="127.0.0.1", port=server_port,
+    )
+    requester_transport = WebSocketTransport(
+        requester_id, host="127.0.0.1", port=requester_port,
+    )
+    server_node = _MinimalNode(server_id, server_transport, loop)
+
+    # Counter shared with the test scope: how many frames did the
+    # server's inner generator actually yield? Conftest auto-mocks
+    # time.sleep to instant, so we can't rate-limit the generator
+    # that way. Instead: use a high-finite ceiling + assert the
+    # generator was closed BEFORE reaching it (proves F54 fix
+    # engaged) — the websocket send buffer naturally rate-limits
+    # via back-pressure on send_to_peer.
+    TOTAL_AVAILABLE = 10000
+    yields = {"count": 0, "closed": False}
+    class _BoundedServer:
+        def handle_token_stream(self, request_bytes):
+            try:
+                for i in range(TOTAL_AVAILABLE):
+                    yields["count"] += 1
+                    yield f"f{i}".encode()
+            finally:
+                yields["closed"] = True
+    class _BSExec:
+        def __init__(self):
+            self._server = _BoundedServer()
+    server_node._chain_stage_executor = _BSExec()
+
+    async def _server_dispatch(msg, peer):
+        await handle_chain_stream_request(server_node, msg)
+    server_transport.on_message(MSG_DIRECT, _server_dispatch)
+
+    await server_transport.start()
+    await requester_transport.start()
+    try:
+        await requester_transport.connect_to_peer(
+            f"ws://127.0.0.1:{server_port}",
+        )
+        for _ in range(50):
+            await asyncio.sleep(0.05)
+            if server_id.node_id in requester_transport.peers:
+                break
+        assert server_id.node_id in requester_transport.peers
+
+        # Send the stream REQ ourselves (no dispatcher) — we want
+        # the server to start streaming but we'll drop the connection
+        # before it finishes.
+        from prsm.node.transport import P2PMessage, MSG_DIRECT as _D
+        from prsm.node.chain_executor_adapters import (
+            CHAIN_STREAM_MSG_TYPE, CHAIN_STREAM_REQ_KEY, CHAIN_PAYLOAD_KEY,
+        )
+        import base64 as _b64
+        req_msg = P2PMessage(
+            msg_type=_D,
+            sender_id=requester_id.node_id,
+            payload={
+                "subtype": CHAIN_STREAM_MSG_TYPE,
+                CHAIN_STREAM_REQ_KEY: "test-stream-720",
+                CHAIN_PAYLOAD_KEY: _b64.b64encode(b"req").decode(),
+            },
+        )
+        await requester_transport.send_to_peer(server_id.node_id, req_msg)
+
+        # Wait for the server to produce at least a handful of frames.
+        for _ in range(50):
+            await asyncio.sleep(0.05)
+            if yields["count"] >= 5:
+                break
+        frames_at_disconnect = yields["count"]
+        assert frames_at_disconnect >= 1, (
+            "server didn't start streaming — test fixture broken"
+        )
+
+        # Kill the requester's transport mid-stream.
+        await requester_transport.stop()
+
+        # Wait for the server to detect the disconnect + stop the
+        # generator. Bound: 50 ticks × 100ms = 5s. The websockets
+        # library buffers some frames before the close propagates,
+        # so we can't be tighter than a few seconds on localhost.
+        for _ in range(50):
+            await asyncio.sleep(0.1)
+            if yields["closed"]:
+                break
+
+        # F54 invariant: server's generator MUST be closed within
+        # the wait budget after the requester disconnected, AND
+        # must not have iterated through the entire 10000-frame
+        # supply (else the test fixture's "stream is long enough
+        # that disconnect happens mid-stream" assumption broke).
+        final_count = yields["count"]
+        assert yields["closed"], (
+            f"server generator never closed after disconnect — F54 "
+            f"regression. frames_at_disconnect={frames_at_disconnect} "
+            f"final_count={final_count}"
+        )
+        # If F54 is un-fixed, we'd burn through all 10000 frames
+        # (or get very close). With F54 engaged, send_to_peer
+        # returns False once the websocket detects close + we exit
+        # the loop + call .close() on the generator.
+        assert final_count < TOTAL_AVAILABLE, (
+            f"server iterated entire {TOTAL_AVAILABLE}-frame supply "
+            f"despite peer disconnect — F54 fix did NOT engage. "
+            f"frames_at_disconnect={frames_at_disconnect}"
+        )
+
+    finally:
+        await server_transport.stop()
+        try:
+            await requester_transport.stop()
+        except Exception:  # noqa: BLE001 — already stopped
+            pass
+
+
+@pytest.mark.asyncio
 async def test_sprint_715_server_side_error_terminates_cleanly():
     """If the server-side stream generator raises mid-stream, the
     terminal STREAM_END must carry the error field so the requester
