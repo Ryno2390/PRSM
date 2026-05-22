@@ -44,10 +44,11 @@ It is NOT marketing. Every operational claim cites:
 - Stake-eligibility runs in "advisory" mode in the live fleet because
   no operator has bonded FTNS on the `StakeBond` contract yet. The
   production path is wired (sprint 690) but unused.
-- Hardware-profile gossip propagation has a documented inconsistency
-  (F46) where peers occasionally see remote hardware with stale CPU
-  specs instead of the true GPU specs. Architectural workaround is
-  the env-var overrides shipped in sprint 695.
+- ~~Hardware-profile gossip propagation has a documented inconsistency
+  (F46)~~ — **closed in sprint 700**. `_handle_peer_response` now uses
+  monotonic-improvement semantics: gossip can ADD profile data but
+  cannot REMOVE it. Operators no longer need env-var overrides for
+  reliable heterogeneous CPU+GPU pool allocation.
 - Cross-host token streaming (one peer streams from another peer's
   GPU) is not yet wired. Self-dispatch streaming works fully. (F40
   deferred per sprint 691)
@@ -275,27 +276,32 @@ is NOT a security claim that production has stake enforcement —
 production today is "anyone with an anchor-registered pubkey can be a
 stage."
 
-### 7.2 F46: DHT hardware-profile propagation inconsistency
+### 7.2 F46: DHT hardware-profile propagation — **CLOSED in sprint 700**
 
-When the Lambda A10 peer joined the fleet, NYC's pool snapshot
-initially showed Lambda with stale CPU specs (tflops_fp16 ≈ 0.08 vs
-actual 33.9). The snapshot from Lambda's own perspective always
-showed correct A10 specs.
+Originally surfaced during sprint 698: when the Lambda A10 peer joined
+the fleet, NYC's pool snapshot initially showed Lambda with stale CPU
+specs (tflops_fp16 ≈ 0.08 vs actual 33.9). Root-caused to
+`_handle_peer_response` clobbering authoritative profile data: when a
+gossipping peer (Y) sent its peer-list to NYC, each entry carried Y's
+view of peer X. If Y had `known_peers[X].hardware_profile = None`
+(because Y hadn't yet received X's direct DISCOVERY_ANNOUNCE), NYC
+would overwrite its OWN good profile for X with that None.
 
-Possible causes (not yet root-caused):
+Sprint 700 fix: monotonic-improvement gossip. `_handle_peer_response`
+preserves the existing local `hardware_profile` when the incoming
+gossip entry has None and we already have one. Gossip can ADD profile
+data but cannot REMOVE it. `_handle_announce` retains latest-write-
+wins semantics because the announcer IS authoritative for its own
+profile. Tag `sprint-700-f46-monotonic-hardware-profile-merge-ready-
+20260522` commit `466a8ccb`. 5 new pin tests defend the distinction
+between authoritative-announce and non-authoritative-gossip paths.
 
-- Bootstrap-mediated peer-list hydration creates `PeerInfo` without
-  `hardware_profile`, and the subsequent DISCOVERY_ANNOUNCE message
-  carrying the profile may race / be dropped under specific
-  asynchronous-task orderings.
-- Multi-hop gossip via `_handle_peer_response` may carry stale profile
-  values from a peer whose own `known_peers[X].hardware_profile` was
-  not yet populated when the response was constructed.
-
-Workaround in sprint 695: env-var overrides
+After sprint 700, the env-var overrides shipped in sprint 695
 (`PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE`, `PRSM_PARALLAX_MEMORY_GB_OVERRIDE`)
-let operators pin advertised values so the allocator picks the right
-peer for each stage. Real fix is a future sprint.
+remain available for operators who want to pin advertised values
+deliberately (e.g., for testing or for resource budgeting), but they
+are no longer required for reliable heterogeneous CPU+GPU pool
+allocation.
 
 ### 7.3 F40: Remote token-stream transport unwired
 
@@ -369,9 +375,11 @@ needs more disk + memory than the current $12/mo droplets have.
 | 696 | feat | `prsm node parallax-readiness` CLI for 22-env-var preflight |
 | 697 | docs | `parallax-inference-deploy.md` operator runbook |
 | 698 | feat | Lambda A10 GPU operator (F47 closed inline) |
+| 699 | docs | this audit-readiness summary |
+| 700 | fix | F46 monotonic hardware_profile gossip propagation |
 
-15 F-class production-blockers (F30 → F47) closed across the session.
-~100 new pin tests, 0 cross-suite regressions.
+16 F-class production-blockers (F30 → F47) closed across the session.
+~105 new pin tests, 0 cross-suite regressions.
 
 ## 9. What this enables
 
