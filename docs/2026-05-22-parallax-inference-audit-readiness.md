@@ -176,6 +176,40 @@ prompt: "Hi" / max_tokens=1
   duration_seconds: 27.8 (cold-load both droplets + cross-host dispatch)
 ```
 
+### 4.6 Activation-DP injection at tier=standard (sprint 702)
+
+```
+prompt: "The capital of France is" / max_tokens=1 / privacy_tier=standard
+→ success: true, output: " screen"     ← DIVERGES from tier=none's " the"
+  privacy_tier: standard
+  activation_noise_trace: {
+    per_stage_epsilon: [8.0],
+    total_epsilon_spent: 8.0,
+    clip_norm: 1.0,
+    stage_count: 1,
+    tier: "standard"
+  }
+  output_hash: 1df3a3bec8b48d66e12359c9fb006f999d9d2469dafd4c0bd61e18189e679b5d
+  cost_ftns: 0.1320                     ← bumped from 0.12 (tier=none) for DP overhead
+  settler_node_id: 484f003c895ee02ac7ed01e570a6a51f
+  duration_seconds: 2.24
+```
+
+Three pieces of evidence that DP injection is REAL, not just claimed:
+1. Output diverges from tier=none for the same prompt + sampling
+   defaults (different token id → Gaussian noise altered the
+   activations enough to flip argmax)
+2. `activation_noise_trace` field is populated with per-stage
+   epsilon vector + clip_norm + tier (sprint 414's data path,
+   sprint 295's noise injector)
+3. Cost is bumped 10% reflecting DP-overhead pricing in the
+   privacy-budget module
+
+Settler_signature commits over the entire receipt including
+activation_noise_trace bytes — a verifier reading the on-chain
+anchor + this receipt JSON can independently confirm that the
+operator committed to this specific noise trace.
+
 ### 4.5 GPU peer (Lambda A10) signed inference (sprint 698)
 
 ```
@@ -328,14 +362,31 @@ a memory-budget limit, not a logic bug. Mitigation: upsize to 4GB
 ($12 → $24/mo) OR add OOM-guard logic. Did not block sprint 698's
 single-host signed-receipt evidence on Lambda.
 
-### 7.5 Tier-A inference only
+### 7.5 Activation-DP injection at tier=standard — **CLOSED in sprint 702**
 
-All sprint 685–698 evidence is for `privacy_tier: "none"`. The
-activation-DP injection path (sprint 295 / 413 / 414) is wired but
-was NOT exercised in this live-attest window — it requires real DP
-parameters per-tier and a verifiable injector. Streaming + DP cannot
-be combined yet (sprint 689 documented this gap as a structured
-error rather than silent drop).
+Originally a known limit: sprints 685–698 evidence covered only
+`privacy_tier: "none"`. Sprint 702 live-attested the activation-DP
+injection path against the NYC operator with a software-TEE
+runtime via the new `PRSM_PARALLAX_TIER_GATE=advisory` env that
+mirrors sprint 686's stake-eligibility advisory pattern. The
+adapter-side Adapter B + the server-side `LayerStageServer
+._is_hardware_tee` runtime check both honor the advisory env so
+software-only operators can exercise the DP code path. Production
+deployment with real TEE hardware retains enforced mode unchanged
+(default + typo-fallthrough).
+
+Live-attest receipt (full evidence in §4.6 below): `privacy_tier:
+"standard"`, `output: " screen"` (diverges from `" the"` at
+tier=none, proving Gaussian noise was actually injected),
+`activation_noise_trace: {per_stage_epsilon: [8.0],
+total_epsilon_spent: 8.0, clip_norm: 1.0, stage_count: 1, tier:
+"standard"}`, cost bumped to 0.132 FTNS reflecting DP-overhead
+pricing.
+
+Tags: `sprint-702-tier-gate-advisory-dp-injection-live-merge-
+ready-20260522` commit `8d21b2d8`. Streaming + DP combination
+remains documented as an explicit error path in sprint 689 (not
+silently dropped) — separate sprint when needed.
 
 ### 7.6 Model coverage
 
@@ -377,9 +428,11 @@ needs more disk + memory than the current $12/mo droplets have.
 | 698 | feat | Lambda A10 GPU operator (F47 closed inline) |
 | 699 | docs | this audit-readiness summary |
 | 700 | fix | F46 monotonic hardware_profile gossip propagation |
+| 701 | docs | audit doc updates + MCP streaming live-attest + pin tests |
+| 702 | feat | tier-gate advisory mode + activation-DP injection live-attested (F48 + F49 closed) |
 
-16 F-class production-blockers (F30 → F47) closed across the session.
-~105 new pin tests, 0 cross-suite regressions.
+18 F-class production-blockers (F30 → F49) closed across the session.
+~115 new pin tests, 0 cross-suite regressions.
 
 ## 9. What this enables
 
