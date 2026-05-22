@@ -803,7 +803,33 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # synthetic host (let through so test fixtures don't
         # need PRSM_ADMIN_REMOTE_ALLOWED).
         _LOOPBACK = ("127.0.0.1", "::1", "localhost", "testclient")
-        is_loopback_immediate = client_host in _LOOPBACK
+
+        def _is_loopback(host: str) -> bool:
+            """Sprint 739 F68 — accept IPv4-mapped IPv6 loopback
+            (`::ffff:127.0.0.1`) too. Dual-stack daemons on Linux
+            see IPv4 loopback connections in this form by default;
+            sprint-734's literal whitelist would reject them and
+            block all admin CLI calls from operators running
+            dual-stack.
+
+            Also accepts the entire 127.0.0.0/8 IPv4 loopback block
+            (per RFC 1122, all of 127/8 is loopback — though
+            127.0.0.1 is the canonical address)."""
+            if host in _LOOPBACK:
+                return True
+            # IPv4-mapped IPv6 loopback: ::ffff:127.0.0.1
+            if host.lower().startswith("::ffff:127."):
+                return True
+            # Entire 127/8 IPv4 loopback block
+            if host.startswith("127.") and host.count(".") == 3:
+                # Validate the remaining 3 octets are numeric so we
+                # don't accept "127.foo.bar.baz". Cheap split check.
+                parts = host.split(".")
+                if all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+                    return True
+            return False
+
+        is_loopback_immediate = _is_loopback(client_host)
         # Sprint 737 F66 — reverse-proxy bypass defense. If a
         # reverse proxy (nginx, HAProxy) on the same host
         # terminates external connections + forwards to
@@ -849,7 +875,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         if (
             is_loopback_immediate
             and real_client
-            and real_client not in _LOOPBACK
+            and not _is_loopback(real_client)
         ):
             return _AdminJSON(
                 status_code=403,
