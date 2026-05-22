@@ -393,6 +393,14 @@ commit `83b2af46`. 7 pin tests defend the gate (serialization,
 disabled-when-unset, rebuild-on-limit-change, defense against
 typos/zero/negative).
 
+**Live-attested under concurrent load (sprint 705)**: 4 simultaneous
+POSTs to NYC's `/compute/inference` returned 4× signed receipts in
+~40s total wall time with staggered completion times (29s / 33s /
+36s / 39s — each request waited for the prior). Daemon stayed
+`active` throughout with 855 MB free RAM at end (vs. pre-704 the
+2nd concurrent request would OOM-kill the daemon mid-flight).
+The semaphore-gated fix holds under realistic concurrent load.
+
 ### 7.5 Activation-DP injection at tier=standard — **CLOSED in sprint 702**
 
 Originally a known limit: sprints 685–698 evidence covered only
@@ -463,6 +471,7 @@ needs more disk + memory than the current $12/mo droplets have.
 | 702 | feat | tier-gate advisory mode + activation-DP injection live-attested (F48 + F49 closed) |
 | 703 | feat | standalone PRSM-import-free receipt verifier (scripts/verify_prsm_receipt.py) |
 | 704 | feat | PRSM_INFERENCE_CONCURRENCY_LIMIT semaphore gate (closes §7.4 OOM) |
+| 705 | test | sprint 704 live-validated under concurrent load (4 concurrent inferences serialize cleanly) |
 
 18 F-class production-blockers (F30 → F49) closed across the session.
 ~127 new pin tests, 0 cross-suite regressions.
