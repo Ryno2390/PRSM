@@ -2533,6 +2533,8 @@ _PARALLAX_ENV_REGISTRY = [
      "KV cache toggle for streaming. Default off; '1' enables."),
     ("PRSM_PARALLAX_STAKE_ELIGIBILITY", False, ["enforced", "advisory", ""],
      "Stake eligibility mode. 'enforced' = production; 'advisory' = pre-stake-ceremony bypass."),
+    ("PRSM_PARALLAX_TIER_GATE", False, ["enforced", "advisory", ""],
+     "Tier gate mode (Adapter B). 'enforced' = require hardware-TEE for tier>=standard (production); 'advisory' = software-only operators can serve tier=standard for DP-injection live-attest."),
     ("PRSM_STAKE_BOND_ADDRESS", False, None,
      "StakeBond contract address (used by PoolBackedStakeLookup)."),
     ("PRSM_OPERATOR_ADDRESS", False, None,

@@ -174,6 +174,54 @@ class _LoggingChallengeSubmitter:
             )
 
 
+def _wrap_tier_gate_for_advisory(tier_gate: Any) -> Any:
+    """Sprint 702 — PRSM_PARALLAX_TIER_GATE=advisory bypass.
+
+    Live-attest of `privacy_tier=standard` against software-only
+    operators was correctly rejected by Adapter B: "no GPU in pool
+    has hardware-TEE attestation". This is the right production
+    behavior.
+
+    For dev/test environments that need to exercise the activation-DP
+    injection code path (sprints 295/413/414) without real TEE
+    hardware, this advisory mode wraps the TierGateAdapter with a
+    permissive filter that passes ALL GPUs through regardless of
+    tier_attestation. Production posture is UNCHANGED — default is
+    enforced, typos fall through to enforced (no accidental
+    disabling), loud WARNING fires on construction.
+
+    Mirrors sprint 686's `_wrap_stake_lookup_for_eligibility`
+    pattern.
+    """
+    mode = (
+        os.environ.get("PRSM_PARALLAX_TIER_GATE", "")
+        .strip().lower()
+    )
+    if mode != "advisory":
+        return tier_gate
+
+    logger.warning(
+        "Sprint 702: PRSM_PARALLAX_TIER_GATE=advisory — Adapter B "
+        "hardware-TEE attestation requirement DISABLED. Every GPU "
+        "passes through the tier filter regardless of tier_attestation. "
+        "Activation-DP injection still fires for tier ≥ standard "
+        "requests, but the TEE attestation chain is software-only. "
+        "This mode is intended for dev/test exercise of the DP code "
+        "path only. Production deploy MUST flip back to "
+        "PRSM_PARALLAX_TIER_GATE=enforced (or unset) once operators "
+        "have real TEE hardware (SGX/TDX/SEV-SNP/TrustZone/Secure "
+        "Enclave) attestation backends wired."
+    )
+
+    class _PermitAllTierGate:
+        """Sprint 702 advisory wrapper. Returns all gpus regardless
+        of privacy_level / tier_attestation."""
+        def filter(self, gpus, privacy_level):  # noqa: D401
+            return list(gpus)
+
+    return _PermitAllTierGate()
+
+
 def _wrap_stake_lookup_for_eligibility(stake_lookup: Any) -> Any:
     """Sprint 686 — PRSM_PARALLAX_STAKE_ELIGIBILITY=advisory bypass.
 
@@ -494,7 +542,7 @@ def _build_production_trust_stack_or_none(pool_provider=None):
     # behavior; "dht" is the Phase 2 hook).
     return TrustStack(
         anchor_verify=AnchorVerifyAdapter(anchor=anchor),
-        tier_gate=TierGateAdapter(),
+        tier_gate=_wrap_tier_gate_for_advisory(TierGateAdapter()),
         profile_source=StakeWeightedTrustAdapter(
             inner=_build_inner_profile_source(),
             stake_lookup=stake_lookup,
