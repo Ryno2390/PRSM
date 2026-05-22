@@ -1534,10 +1534,30 @@ def handle_chain_executor_response(node: Any, msg: Any) -> bool:
     pending = getattr(node, "_chain_executor_pending", None)
     if pending is None:
         return False
-    future = pending.get(request_id)
-    if future is None or future.done():
-        # No pending request (timed out + cleaned up) OR already
-        # resolved (duplicate response). Silent drop is correct.
+    entry = pending.get(request_id)
+    if entry is None:
+        # No pending request (timed out + cleaned up). Silent drop.
+        return False
+
+    # Sprint 727 F60 fix: bind incoming response's sender to the
+    # expected dispatch peer. Pre-727, pending[request_id] stored
+    # just the future — any peer who learned the request_id could
+    # forge a CHAIN_RESP and resolve the victim's future with
+    # attacker bytes. Same fix-class as sprint-719 F53 on
+    # streaming. Post-727, pending stores (future, expected_sender);
+    # responses from any other sender are silently dropped (return
+    # False so the genuine response can still resolve the future
+    # when it arrives).
+    if isinstance(entry, tuple) and len(entry) == 2:
+        future, expected_sender = entry
+        sender_id = getattr(msg, "sender_id", None)
+        if expected_sender and sender_id and sender_id != expected_sender:
+            return False  # forged response from wrong peer — drop
+    else:  # legacy bare-future shape (defensive — should never hit)
+        future = entry
+
+    if future.done():
+        # Already resolved (duplicate response). Silent drop.
         return False
     # Sprint 630 — CHAIN_ERROR_KEY propagation. The server-side
     # request handler sets this field (with an empty CHAIN_PAYLOAD_KEY)
@@ -1691,7 +1711,17 @@ def build_send_message_adapter(
             # indirectly via __init__
             from prsm.node.transport import P2PMessage, MSG_DIRECT
             future = loop.create_future()
-            pending[request_id] = future
+            # Sprint 727 F60 fix: bind expected_sender (stage_address
+            # = the peer we dispatched to) so handle_chain_executor_
+            # response can verify msg.sender_id matches before
+            # resolving the future. Pre-727, response handler
+            # routed by request_id alone — any peer that learned
+            # the id (network observation, pre-724 deterministic
+            # derivation, etc.) could forge CHAIN_RESP and resolve
+            # the victim's future with attacker bytes BEFORE the
+            # legitimate response arrived. Same fix-class as
+            # sprint 719's F53 on streaming.
+            pending[request_id] = (future, stage_address)
             try:
                 msg = P2PMessage(
                     msg_type=MSG_DIRECT,

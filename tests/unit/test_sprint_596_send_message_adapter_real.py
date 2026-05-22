@@ -63,20 +63,29 @@ def test_adapter_resolves_response_when_future_set():
 
     adapter = build_send_message_adapter(node, timeout=3.0)
     request_bytes = b"sample-request-payload"
-    request_id = hashlib.sha256(request_bytes).hexdigest()
 
     # Resolve the pending Future from a watchdog thread once it
-    # appears in the dict.
+    # appears in the dict. Sprint 724 made request_id non-
+    # derivable from request_bytes (8 bytes os.urandom mixed in)
+    # + sprint 727 changed pending[] to store (future, stage_addr)
+    # tuples — so we iterate keys + unpack tuple shape rather than
+    # looking up a pre-computed id.
     def _watch_and_resolve():
         import time
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
-            future = node._chain_executor_pending.get(request_id)
-            if future is not None and not future.done():
-                loop.call_soon_threadsafe(
-                    future.set_result, b"response-bytes",
+            for _key, entry in list(
+                node._chain_executor_pending.items()
+            ):
+                future = (
+                    entry[0]
+                    if isinstance(entry, tuple) else entry
                 )
-                return
+                if future is not None and not future.done():
+                    loop.call_soon_threadsafe(
+                        future.set_result, b"response-bytes",
+                    )
+                    return
             time.sleep(0.01)
 
     threading.Thread(target=_watch_and_resolve, daemon=True).start()
@@ -93,7 +102,12 @@ def test_adapter_resolves_response_when_future_set():
     assert args[0] == "remote-peer"
     msg = args[1]
     assert msg.payload["subtype"] == "chain_executor_rpc"
-    assert msg.payload["chain_req_id"] == request_id
+    # Sprint 724 made request_id non-derivable from request_bytes
+    # alone (mixed in os.urandom). Pin the SHAPE rather than the
+    # exact bytes: must be a 64-char hex string.
+    chain_req_id = msg.payload["chain_req_id"]
+    assert isinstance(chain_req_id, str) and len(chain_req_id) == 64
+    assert all(c in "0123456789abcdef" for c in chain_req_id)
     assert msg.payload["chain_payload_b64"] == base64.b64encode(
         request_bytes,
     ).decode("ascii")
@@ -164,18 +178,25 @@ def test_adapter_cleans_pending_dict_after_completion():
 
     adapter = build_send_message_adapter(node, timeout=3.0)
     request_bytes = b"clean-req"
-    request_id = hashlib.sha256(request_bytes).hexdigest()
 
     def _watch_and_resolve():
+        # Sprint 724 + 727: iterate keys + unpack tuple shape (see
+        # the other watcher above for context).
         import time
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
-            future = node._chain_executor_pending.get(request_id)
-            if future is not None and not future.done():
-                loop.call_soon_threadsafe(
-                    future.set_result, b"x",
+            for _key, entry in list(
+                node._chain_executor_pending.items()
+            ):
+                future = (
+                    entry[0]
+                    if isinstance(entry, tuple) else entry
                 )
-                return
+                if future is not None and not future.done():
+                    loop.call_soon_threadsafe(
+                        future.set_result, b"x",
+                    )
+                    return
             time.sleep(0.01)
 
     threading.Thread(target=_watch_and_resolve, daemon=True).start()
@@ -184,7 +205,10 @@ def test_adapter_cleans_pending_dict_after_completion():
     finally:
         loop.call_soon_threadsafe(loop.stop)
 
-    assert request_id not in node._chain_executor_pending
+    # Sprint 724: request_id is non-derivable from request_bytes
+    # alone; the cleanup invariant is "dict is empty post-completion"
+    # not "specific key is gone".
+    assert not node._chain_executor_pending
 
 
 def test_wire_protocol_constants_exposed():
