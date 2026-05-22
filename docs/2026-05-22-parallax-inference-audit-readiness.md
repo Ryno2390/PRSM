@@ -575,11 +575,13 @@ needs more disk + memory than the current $12/mo droplets have.
 | 724 | fix | **F57** — unary request_id collision (F52 sibling on unary path). Same deterministic sha256(request_bytes) pattern in `build_send_message_adapter` — concurrent identical unary retries collided + first future was overwritten. Fixed with os.urandom + distinct `:unary:` domain separator |
 | 725 | fix | **F58** — unary payload size limit (F55 sibling). `handle_chain_executor_request` lacked pre-decode size gate. `PRSM_CHAIN_UNARY_REQUEST_MAX_BYTES` default 16 MiB; pre + post-decode gates; flows into existing CHAIN_ERROR_KEY response path. Surfaced in `parallax-readiness` (29 vars total) |
 | 726 | fix | **F59** — unary per-peer concurrent-request cap (F56 sibling). `PRSM_CHAIN_UNARY_PER_PEER_CONCURRENCY` default 8. Body extracted into `_handle_chain_executor_request_body` so wrapper places try/finally around every return path. isinstance(dict) check generalizes the lesson from sprint 723. Surfaced in `parallax-readiness` (30 vars total) |
+| 727 | fix | **F60** — unary response hijack protection (F53 sibling). Response handler routed by request_id alone; any peered third party who learned the id could forge CHAIN_RESP and resolve victim's future with attacker bytes. Now `pending[request_id]` stores `(future, expected_sender)` tuple; response handler verifies msg.sender_id before resolving |
 
-29 F-class production-blockers (F30 → F59) closed across the
-session. ~205 new pin tests + 5 new integration tests, 0 cross-suite
+30 F-class production-blockers (F30 → F60) closed across the
+session. ~210 new pin tests + 5 new integration tests, 0 cross-suite
 regressions. **Both wire-protocol paths (streaming + unary) now
-have parity defense surfaces.**
+have FULL parity defense surfaces — collision (F52/F57), size
+(F55/F58), per-peer cap (F56/F59), hijack (F53/F60).**
 
 ## 9. What this enables
 
