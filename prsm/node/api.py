@@ -504,6 +504,81 @@ def register_parallax_pool_snapshot_endpoint(app: Any, node: Any) -> None:
         }
 
 
+def register_parallax_streams_endpoint(app: Any, node: Any) -> None:
+    """Sprint 722 — /admin/parallax/streams.
+
+    Read-only introspection of in-flight remote token-streams. After
+    the sprint-711 wire protocol shipped + the sprint-713 bounded
+    receive queue + sprint-719 sender-binding + sprint-720 disconnect
+    cleanup, operators have NO direct visibility into what those
+    machines are actually doing. This endpoint exposes:
+
+      - active stream count
+      - per-stream queue depth + maxsize (sprint 713 back-pressure)
+      - expected_sender truncated id (sprint 719 hijack defense)
+      - bounded-queue + max-bytes env values currently in effect
+
+    Status codes:
+      200 — {streams[], queue_maxsize, request_max_bytes, count}
+      503 — node has no _chain_executor_pending_streams attr
+            (daemon not fully started or wrong build).
+    """
+    import os as _os
+    from fastapi import HTTPException
+    from prsm.node.chain_executor_adapters import (
+        _resolve_stream_queue_maxsize,
+        _resolve_stream_request_max_bytes,
+    )
+
+    @app.get("/admin/parallax/streams", tags=["admin"])
+    async def parallax_streams() -> Dict[str, Any]:
+        pending = getattr(
+            node, "_chain_executor_pending_streams", None,
+        )
+        if pending is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Node has no streaming-protocol state — "
+                    "daemon not fully started or this build "
+                    "predates sprint 711."
+                ),
+            )
+        streams = []
+        # Snapshot the dict keys so we iterate over a stable view —
+        # the response handler may register new streams concurrently.
+        for stream_id in list(pending.keys()):
+            entry = pending.get(stream_id)
+            if entry is None:
+                continue
+            # Sprint 719 tuple shape: (queue, expected_sender)
+            if isinstance(entry, tuple) and len(entry) == 2:
+                queue, expected_sender = entry
+            else:  # legacy bare-queue
+                queue, expected_sender = entry, ""
+            try:
+                qsize = queue.qsize()
+                qmax = queue.maxsize
+                qfull = queue.full()
+            except Exception:  # noqa: BLE001 — defensive
+                qsize, qmax, qfull = -1, -1, False
+            streams.append({
+                "stream_id_prefix": str(stream_id)[:16],
+                "expected_sender_prefix": (
+                    str(expected_sender)[:16] if expected_sender else ""
+                ),
+                "queue_depth": qsize,
+                "queue_maxsize": qmax,
+                "queue_full": qfull,
+            })
+        return {
+            "count": len(streams),
+            "queue_maxsize": _resolve_stream_queue_maxsize(),
+            "request_max_bytes": _resolve_stream_request_max_bytes(),
+            "streams": streams,
+        }
+
+
 def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     """
     Create the node management FastAPI app with a reference to the running node.
@@ -15225,6 +15300,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     # but returned 404 because the dashboard mount intercepted
     # /admin/parallax/pool/snapshot first).
     register_parallax_pool_snapshot_endpoint(app, node)
+    # Sprint 722 — also BEFORE the dashboard catch-all mount.
+    register_parallax_streams_endpoint(app, node)
 
     try:
         from prsm.dashboard.app import create_dashboard_app as _create_dash_app

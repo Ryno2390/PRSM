@@ -2646,6 +2646,114 @@ def parallax_readiness_cli(output_format: str):
         raise SystemExit(1)
 
 
+# ── Sprint 722 — stream observability ────────────────────────────
+
+
+@node.command("streams")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL (default: stored credential or 127.0.0.1:8000)",
+)
+def node_streams_cli(output_format: str, api_url_override: Optional[str]):
+    """Sprint 722 — read in-flight remote token-streams.
+
+    After sprints 711 (wire protocol), 713 (bounded receive queue),
+    719 (sender binding), 720 (disconnect cleanup), and 721 (request
+    size limit), operators have NO direct visibility into what those
+    machines are doing in production. This command queries
+    `/admin/parallax/streams` on the running daemon and renders:
+
+      - active stream count
+      - per-stream queue depth + maxsize (sprint 713 back-pressure)
+      - whether each stream's queue is full (back-pressure engaged)
+      - expected_sender prefix (sprint 719 hijack defense)
+      - operator-tunable env values currently in effect
+
+    Read-only — no daemon-state mutation. Safe to run on the live
+    fleet. Empty list when daemon is idle (typical between
+    inferences).
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/admin/parallax/streams"
+    try:
+        resp = _httpx.get(endpoint, timeout=5.0)
+    except Exception as exc:  # noqa: BLE001
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"unreachable: {type(exc).__name__}: {exc}",
+                "url": endpoint,
+            }))
+        else:
+            console.print(
+                f"[red]Cannot reach daemon at {endpoint}[/red] — "
+                f"{type(exc).__name__}: {exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]Daemon responded {resp.status_code}[/red]: "
+                f"{resp.text}"
+            )
+        raise SystemExit(1)
+    data = resp.json()
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+
+    streams = data.get("streams", [])
+    count = data.get("count", 0)
+    qmax = data.get("queue_maxsize", "?")
+    reqmax = data.get("request_max_bytes", "?")
+    console.print(
+        f"\n[bold]In-flight remote token-streams:[/bold] {count}"
+    )
+    console.print(
+        f"PRSM_CHAIN_STREAM_QUEUE_MAXSIZE = [yellow]{qmax}[/yellow]"
+    )
+    console.print(
+        f"PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES = [yellow]{reqmax}[/yellow]"
+    )
+    if not streams:
+        console.print(
+            "[dim]No active streams (daemon idle — typical between"
+            " inferences).[/dim]\n"
+        )
+        return
+    table = Table(title="Active token-streams (sprint 722)")
+    table.add_column("stream_id", style="cyan", no_wrap=True)
+    table.add_column("peer", style="magenta", no_wrap=True)
+    table.add_column("queue", justify="right")
+    table.add_column("max", justify="right")
+    table.add_column("full?", justify="center")
+    for s in streams:
+        full_marker = (
+            "[red]YES[/red]" if s.get("queue_full") else "[green]no[/green]"
+        )
+        table.add_row(
+            s.get("stream_id_prefix", "") + "...",
+            (s.get("expected_sender_prefix", "") or "?") + "...",
+            str(s.get("queue_depth", "?")),
+            str(s.get("queue_maxsize", "?")),
+            full_marker,
+        )
+    console.print(table)
+
+
 # ── Sprint 584 — RPC probe ───────────────────────────────────────
 
 
