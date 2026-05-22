@@ -2216,7 +2216,22 @@ class LayerStageServer:
     def _is_hardware_tee(tee_type: TEEType) -> bool:
         """Same hardware-TEE policy used by Phase 3.x.6 Task 5
         ``TierGateAdapter``: anything in ``HARDWARE_TEE_TYPES`` counts;
-        ``SOFTWARE`` does not."""
+        ``SOFTWARE`` does not.
+
+        Sprint 702 — `PRSM_PARALLAX_TIER_GATE=advisory` extends to the
+        server-side runtime check (in addition to the trust-stack-side
+        Adapter B in `_wrap_tier_gate_for_advisory`). When advisory,
+        software-TEE runtimes accept tier≥standard requests so the
+        activation-DP injection code path can be live-attested without
+        real TEE hardware. Production posture (default + typo
+        fallthrough) is unchanged.
+        """
+        import os as _os
+        if (
+            _os.environ.get("PRSM_PARALLAX_TIER_GATE", "")
+            .strip().lower() == "advisory"
+        ):
+            return True
         return tee_type.value in HARDWARE_TEE_TYPES
 
     def _error(
