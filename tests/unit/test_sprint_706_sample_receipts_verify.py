@@ -141,6 +141,32 @@ def test_sample_receipt_tier_none_unary_bit_identical_hash():
     )
 
 
+def test_sample_receipt_multi_host_has_two_stages():
+    """Sprint 708 — multi-host sample carries 2-stage
+    topology_assignment with NYC + SFO node_ids (matches sprint
+    695's milestone)."""
+    path = SAMPLE_RECEIPTS_DIR / "multi-host-2stage-2026-05-22.json"
+    if not path.exists():
+        pytest.skip("expected multi-host sample receipt not present")
+    with open(path) as f:
+        r = json.load(f)
+    topo = r.get("topology_assignment")
+    assert topo is not None
+    assert topo["stage_count"] == 2, (
+        f"multi-host sample must have stage_count=2; got "
+        f"{topo['stage_count']}"
+    )
+    # Sprint 695 canonical output_hash
+    assert r["output_hash"].startswith("cdb4ee2a"), (
+        f"multi-host sample's output_hash drifted from sprint 695's "
+        f"canonical cdb4ee2a...; got {r['output_hash']}"
+    )
+    # Both NYC + SFO node_ids must appear in positions
+    node_ids = [p[2] for p in topo["positions"]]
+    assert "484f003c895ee02ac7ed01e570a6a51f" in node_ids  # NYC
+    assert "d437aa67d99cff4a6a17179f5c731b77" in node_ids  # SFO
+
+
 def test_sample_receipt_streaming_carries_streamed_output_flag():
     """Sprint 707 — streaming sample must have streamed_output=True
     + the sprint 694 canonical output_hash `1b46bc86...` for the

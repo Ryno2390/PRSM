@@ -17,6 +17,7 @@ re-run, see `✗ INVALID — settler_signature does NOT verify`.
 | `tier-none-unary-2026-05-22.json` | none | Baseline unary inference; output_hash `fe0663fd…` is bit-identical to local HuggingFace `gpt2` greedy decode for the same prompt (sprint 688's semantic-correctness milestone) |
 | `tier-none-streaming-2026-05-22.json` | none | SSE streaming with `streamed_output: true`; output_hash `1b46bc86…` covers 4-token autoregressive decode of "The capital of France is" → " the capital of the" (sprint 694's bit-identical-to-HF streaming) |
 | `tier-standard-dp-2026-05-22.json` | standard (ε=8.0) | Activation-DP injection (`activation_noise_trace` field populated) + per-stage TEE attestation envelope + signed by NYC's mainnet-anchored Ed25519 key |
+| `multi-host-2stage-2026-05-22.json` | none (multi-host) | **True 2-stage cross-WAN allocation** — NYC (`484f003c…`, layers 0-5) + SFO (`d437aa67…`, layers 6-11). `topology_assignment.stage_count=2`, attestation envelope carries per-stage hex for BOTH operators, settler_signature commits over the topology_assignment hash. Output `output_hash: cdb4ee2a…` matches sprint 695's milestone. |
 
 ## Verifying a sample
 

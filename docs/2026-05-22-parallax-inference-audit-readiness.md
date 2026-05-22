@@ -348,12 +348,16 @@ the full live-attested matrix:
   `output_hash: 1b46bc86…` bit-identical to streaming reference
 - `tier-standard-dp-2026-05-22.json` — activation-DP injection
   with `activation_noise_trace` populated (ε=8.0)
+- `multi-host-2stage-2026-05-22.json` — **TRUE 2-stage cross-WAN**
+  inference with `topology_assignment.stage_count=2`, both NYC +
+  SFO operators sign per-stage attestations
 
 Run the verifier against any of them with the same command. Each
 proves a different load-bearing PRSM claim:
   1. **bit-identical CPU inference to local HF reference** (unary)
   2. **per-token autoregressive streaming with deterministic hash**
   3. **DP injection with epsilon accounting in signed receipt**
+  4. **multi-host 2-stage chain with cryptographic per-stage attestations**
 
 ## 7. Known limits + active gaps
 
@@ -529,9 +533,10 @@ needs more disk + memory than the current $12/mo droplets have.
 | 705 | test | sprint 704 live-validated under concurrent load (4 concurrent inferences serialize cleanly) |
 | 706 | docs | sample receipt + "try it yourself" walkthrough — verifies in 30s |
 | 707 | docs | 2 more sample receipts (tier-none unary + tier-none streaming); 3-receipt coverage of all live-attested modes |
+| 708 | docs | multi-host 2-stage sample receipt — verifier demo now covers all 4 architectural modes |
 
 18 F-class production-blockers (F30 → F49) closed across the session.
-~130 new pin tests, 0 cross-suite regressions.
+~131 new pin tests, 0 cross-suite regressions.
 
 ## 9. What this enables
 
