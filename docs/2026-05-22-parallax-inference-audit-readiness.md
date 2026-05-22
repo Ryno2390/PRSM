@@ -666,12 +666,15 @@ against origin's known pubkey. Tracked for a future session.
 | 737 | fix | **F66** — admin loopback gate respects X-Forwarded-For. Sprint-734 checked only `client.host` — bypassed for the common reverse-proxy-on-same-host pattern (nginx forwards to 127.0.0.1 → daemon sees client=127.0.0.1 for any external traffic). Now parses XFF last-hop when immediate client is loopback; external real-client → 403. Local-process spoofing remains possible but bounded vs peered network access |
 | 738 | fix | **F67** — admin loopback gate also inspects X-Real-IP. Some proxies (common nginx config `proxy_set_header X-Real-IP`) set X-Real-IP instead of XFF. Sprint-737's XFF-only inspection would miss those bypasses. Now: XFF takes precedence; X-Real-IP checked when XFF absent. Both default-deny external upstream clients |
 | 739 | fix | **F68** — admin gate accepts IPv4-mapped IPv6 + 127/8 block. Sprint-734's literal whitelist rejected `::ffff:127.0.0.1` (dual-stack daemon form of loopback) and 127.x.x.x addresses other than 127.0.0.1. Operators on dual-stack Linux + with custom loopback aliases hit false 403. Fix applies to both immediate-client check AND XFF/X-Real-IP last-hop check |
+| 741 | fix | **F69** — HTTP rate limiter keyed by local daemon ID, not HTTP requester. `/compute/forge` + `/compute/inference` + `/compute/inference/stream` all used `node.identity.node_id` (a CONSTANT) as the bucket key — "per requester" semantics were effectively GLOBAL. Attacker traffic exhausted bucket → legit clients got 429. Now uses proxy-aware `_resolve_requester_key(request)` matching sprint-737/738 admin precedence |
 
-38 F-class production-blockers (F30 → F68) closed across the
-session. ~253 new pin tests + 5 new integration tests, 0 cross-suite
-regressions. **F65+F66+F67+F68 close admin-surface auth across the
-three most-common deployment patterns × both loopback representations
-(IPv4 + IPv4-mapped IPv6). 23/23 pin tests across this arc.**
+39 F-class production-blockers (F30 → F69) closed across the
+session. ~261 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **F65+F66+F67+F68 close admin-surface auth across three
+deployment patterns × both loopback representations. F69 closes the
+"false confidence" rate-limit bug where env vars named `*_PER_REQUESTER`
+applied effectively-global caps that any attacker IP could exhaust
+to deny legit clients.**
 
 ## 9. What this enables
 
