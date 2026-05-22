@@ -564,9 +564,10 @@ needs more disk + memory than the current $12/mo droplets have.
 | 713 | feat | stream back-pressure (PRSM_CHAIN_STREAM_QUEUE_MAXSIZE bounded receive queue) — closes sprint-711 OOM follow-on (10 pin tests) |
 | 714 | feat | `prsm node parallax-readiness` surfaces sprint-713 env (23rd env var) |
 | 715 | fix | **F50** — STREAM_END race fix; sprint-713 put_nowait-for-END let terminal land before frame puts on the response queue. Plus E2E integration test for sprint-711 wire protocol on real WebSocketTransport (2 pin tests + 8 pre-existing unit tests green) |
+| 716 | fix | **F51** — malformed-frame race (sprint-715 sibling); same put_nowait-vs-coroutine ordering issue at the malformed-frame terminal error path. All 3 queue-write paths now use same scheduler |
 
-20 F-class production-blockers (F30 → F50) closed across the
-session. ~157 new pin tests + 2 new integration tests, 0 cross-suite
+21 F-class production-blockers (F30 → F51) closed across the
+session. ~159 new pin tests + 2 new integration tests, 0 cross-suite
 regressions.
 
 ## 9. What this enables
