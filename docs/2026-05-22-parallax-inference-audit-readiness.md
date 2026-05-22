@@ -667,14 +667,12 @@ against origin's known pubkey. Tracked for a future session.
 | 738 | fix | **F67** — admin loopback gate also inspects X-Real-IP. Some proxies (common nginx config `proxy_set_header X-Real-IP`) set X-Real-IP instead of XFF. Sprint-737's XFF-only inspection would miss those bypasses. Now: XFF takes precedence; X-Real-IP checked when XFF absent. Both default-deny external upstream clients |
 | 739 | fix | **F68** — admin gate accepts IPv4-mapped IPv6 + 127/8 block. Sprint-734's literal whitelist rejected `::ffff:127.0.0.1` (dual-stack daemon form of loopback) and 127.x.x.x addresses other than 127.0.0.1. Operators on dual-stack Linux + with custom loopback aliases hit false 403. Fix applies to both immediate-client check AND XFF/X-Real-IP last-hop check |
 | 741 | fix | **F69** — HTTP rate limiter keyed by local daemon ID, not HTTP requester. `/compute/forge` + `/compute/inference` + `/compute/inference/stream` all used `node.identity.node_id` (a CONSTANT) as the bucket key — "per requester" semantics were effectively GLOBAL. Attacker traffic exhausted bucket → legit clients got 429. Now uses proxy-aware `_resolve_requester_key(request)` matching sprint-737/738 admin precedence |
+| 742 | fix | **F70** — HTTP body-size limit (memory-DoS defense at HTTP layer; sibling of wire F55/F58). FastAPI accepted arbitrary JSON bodies; 1 GB POST would allocate before any size check. Middleware checks Content-Length pre-read; default 1 MiB; PRSM_HTTP_MAX_BODY_BYTES env-tunable. 413 with actionable error |
 
-39 F-class production-blockers (F30 → F69) closed across the
-session. ~261 new pin tests + 5 new integration tests, 0 cross-suite
-regressions. **F65+F66+F67+F68 close admin-surface auth across three
-deployment patterns × both loopback representations. F69 closes the
-"false confidence" rate-limit bug where env vars named `*_PER_REQUESTER`
-applied effectively-global caps that any attacker IP could exhaust
-to deny legit clients.**
+40 F-class production-blockers (F30 → F70) closed across the
+session. ~271 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **F70 ports the wire-protocol's F55/F58 size-DoS defense
+to the HTTP layer where production traffic actually arrives.**
 
 ## 9. What this enables
 
