@@ -875,6 +875,20 @@ class PeerDiscovery:
         for p in peers_data:
             nid = p.get("node_id", "")
             if nid and nid != self.transport.identity.node_id:
+                # Sprint 700 F46 fix — monotonic hardware_profile.
+                # Gossip from a non-authoritative peer can ADD profile
+                # data but must NOT REMOVE it. When the incoming
+                # entry's hardware_profile is None and we already have
+                # one locally (typically from the peer's own
+                # authoritative DISCOVERY_ANNOUNCE), preserve the
+                # existing value. Otherwise replace (latest-write-wins
+                # for non-None updates, accept new for previously-
+                # unknown peers).
+                incoming_hw = p.get("hardware_profile")
+                if incoming_hw is None:
+                    existing = self.known_peers.get(nid)
+                    if existing is not None and existing.hardware_profile is not None:
+                        incoming_hw = existing.hardware_profile
                 self.known_peers[nid] = PeerInfo(
                     node_id=nid,
                     address=p.get("address", ""),
@@ -885,8 +899,7 @@ class PeerDiscovery:
                     gpu_available=p.get("gpu_available", False),
                     last_seen=time.time(),
                     last_capability_update=time.time(),
-                    # Sprint 680 — multi-hop hardware_profile prop
-                    hardware_profile=p.get("hardware_profile"),
+                    hardware_profile=incoming_hw,
                 )
         logger.debug(f"Received {len(peers_data)} peers from {peer.peer_id[:8]}")
 
