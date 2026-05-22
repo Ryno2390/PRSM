@@ -664,13 +664,13 @@ against origin's known pubkey. Tracked for a future session.
 | 731 | fix | **F64** — transport-level sender_id binding (generalizes F63). Sprint-730 only protected chain-executor handlers; other MSG_DIRECT handlers (ledger_sync FTNS transfers, compute_provider, storage_provider, content_provider, agent_registry) still trusted msg.sender_id. Move the bind to WebSocketTransport._dispatch so ALL MSG_DIRECT handlers see authenticated sender. MSG_GOSSIP excluded (relay requires original sender). Sprint-730 wrappers retained as defense-in-depth |
 | 734 | fix | **F65** — /admin/* loopback-only by default. Pre-734 every /admin/* endpoint was unauthenticated — `tags=["admin"]` was just a swagger grouping. Sprint 722's observability endpoint widened the leak (expected_sender peer IDs visible to network). Middleware checks request.client.host against loopback whitelist; non-loopback → 403. `PRSM_ADMIN_REMOTE_ALLOWED=1` opt-in for remote-admin (must be behind reverse-proxy auth or VPN) |
 | 737 | fix | **F66** — admin loopback gate respects X-Forwarded-For. Sprint-734 checked only `client.host` — bypassed for the common reverse-proxy-on-same-host pattern (nginx forwards to 127.0.0.1 → daemon sees client=127.0.0.1 for any external traffic). Now parses XFF last-hop when immediate client is loopback; external real-client → 403. Local-process spoofing remains possible but bounded vs peered network access |
+| 738 | fix | **F67** — admin loopback gate also inspects X-Real-IP. Some proxies (common nginx config `proxy_set_header X-Real-IP`) set X-Real-IP instead of XFF. Sprint-737's XFF-only inspection would miss those bypasses. Now: XFF takes precedence; X-Real-IP checked when XFF absent. Both default-deny external upstream clients |
 
-36 F-class production-blockers (F30 → F66) closed across the
-session. ~242 new pin tests + 5 new integration tests, 0 cross-suite
-regressions. **F63 + F64 together restore the cryptographic foundation
-under EVERY MSG_DIRECT handler in the codebase. F65 + F66 close the
-HTTP admin-surface auth gap for both direct-network AND reverse-proxy
-deployment patterns.**
+37 F-class production-blockers (F30 → F67) closed across the
+session. ~247 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **F65 + F66 + F67 close admin-surface auth across the
+three deployment patterns operators most commonly use: direct-network,
+XFF-forwarding proxy, and X-Real-IP-forwarding proxy.**
 
 ## 9. What this enables
 
