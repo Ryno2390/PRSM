@@ -1846,6 +1846,33 @@ def _remote_token_stream_dispatch(
         pending.pop(stream_id, None)
 
 
+def _resolve_stream_request_max_bytes() -> int:
+    """Sprint 721 F55 — max request_bytes accepted by
+    handle_chain_stream_request. Defends against a malicious peer
+    sending an enormous CHAIN_STREAM_REQ payload to exhaust server
+    memory on the b64-decode step.
+
+    Default 16 MiB (an honest gpt2 activation blob with 100-token
+    prompt is ~4 MB; 16 MB covers larger contexts and metadata
+    overhead). Operators tune via PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES.
+    Values <=0 mean unbounded (pre-721 behavior — disabled gate).
+    Non-int values default to 16 MiB (safe rather than failing
+    streaming setup mysteriously).
+    """
+    import os
+    raw = os.environ.get("PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES")
+    default_bytes = 16 * 1024 * 1024  # 16 MiB
+    if raw is None or raw == "":
+        return default_bytes
+    try:
+        val = int(raw)
+    except ValueError:
+        return default_bytes
+    if val <= 0:
+        return 0  # unbounded
+    return val
+
+
 def _resolve_stream_queue_maxsize() -> int:
     """Sprint 713 — bounded receive-queue size for streaming
     back-pressure. Default 64 frames (chosen as 2× typical inference
@@ -1907,10 +1934,41 @@ async def handle_chain_stream_request(node: Any, msg: Any) -> bool:
 
     from prsm.node.transport import P2PMessage, MSG_DIRECT
 
+    # Sprint 721 F55 fix: bound request_bytes BEFORE the b64-decode
+    # step. A malicious peer sending a 100MB base64 string would
+    # otherwise allocate ~75MB on decode + hand it to
+    # handle_token_stream — easy memory-exhaustion DoS on 2GB
+    # droplets. Check encoded length first (cheap), then decoded
+    # length (defense-in-depth). Both checks fire terminal STREAM_END
+    # with a clear error so the requester closes cleanly.
+    _max_bytes = _resolve_stream_request_max_bytes()
+    payload_b64 = payload.get(CHAIN_PAYLOAD_KEY, "")
+    if _max_bytes > 0:
+        # base64 expands by ~4/3; check len * 3 / 4 against limit.
+        estimated_decoded = (len(payload_b64) * 3) // 4
+        if estimated_decoded > _max_bytes:
+            end_msg = P2PMessage(
+                msg_type=MSG_DIRECT,
+                sender_id=node.identity.node_id,
+                payload={
+                    "subtype": CHAIN_STREAM_MSG_TYPE,
+                    CHAIN_STREAM_END_KEY: stream_id,
+                    CHAIN_STREAM_SEQ_KEY: 0,
+                    CHAIN_ERROR_KEY: (
+                        f"request payload exceeds max bytes "
+                        f"({estimated_decoded} > {_max_bytes}); "
+                        f"tune via PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES"
+                    ),
+                },
+            )
+            try:
+                await node.transport.send_to_peer(sender_id, end_msg)
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+
     try:
-        request_bytes = base64.b64decode(
-            payload.get(CHAIN_PAYLOAD_KEY, ""),
-        )
+        request_bytes = base64.b64decode(payload_b64)
     except Exception as exc:  # noqa: BLE001
         # Malformed request — send terminal STREAM_END with error.
         end_msg = P2PMessage(
@@ -1926,7 +1984,38 @@ async def handle_chain_stream_request(node: Any, msg: Any) -> bool:
                 ),
             },
         )
-        await node.transport.send_to_peer(sender_id, end_msg)
+        try:
+            await node.transport.send_to_peer(sender_id, end_msg)
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+    # Sprint 721 defense-in-depth: post-decode size check. The
+    # pre-decode estimate is over-cautious (base64 expands ~4/3)
+    # but the decoded length is the real memory cost. Pin both.
+    if _max_bytes > 0 and len(request_bytes) > _max_bytes:
+        decoded_len = len(request_bytes)
+        # Free the bytes immediately — we know we won't process
+        # them. Helps the GC reclaim memory before send_to_peer's
+        # await suspension point.
+        del request_bytes
+        end_msg = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id=node.identity.node_id,
+            payload={
+                "subtype": CHAIN_STREAM_MSG_TYPE,
+                CHAIN_STREAM_END_KEY: stream_id,
+                CHAIN_STREAM_SEQ_KEY: 0,
+                CHAIN_ERROR_KEY: (
+                    f"decoded payload exceeds max bytes "
+                    f"({decoded_len} > {_max_bytes}); "
+                    f"tune via PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES"
+                ),
+            },
+        )
+        try:
+            await node.transport.send_to_peer(sender_id, end_msg)
+        except Exception:  # noqa: BLE001
+            pass
         return True
 
     # Resolve the local executor + handle_token_stream surface.

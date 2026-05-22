@@ -48,7 +48,8 @@ def test_parallax_env_registry_total_count_post_sprint_714():
     changes, update the audit doc + parallax-readiness docstring
     so operators know which env vars exist."""
     from prsm.cli import _PARALLAX_ENV_REGISTRY
-    assert len(_PARALLAX_ENV_REGISTRY) == 26, (
-        f"expected 26 vars post-sprint-714, got "
+    # Sprint 721 added PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES → 27.
+    assert len(_PARALLAX_ENV_REGISTRY) == 27, (
+        f"expected 27 vars post-sprint-721, got "
         f"{len(_PARALLAX_ENV_REGISTRY)}"
     )
