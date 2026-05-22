@@ -572,9 +572,10 @@ needs more disk + memory than the current $12/mo droplets have.
 | 721 | fix | **F55** — request_bytes size limit (memory-DoS defense). `PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES` default 16 MiB; pre-decode (b64 length * 3/4) + post-decode (actual bytes) gates. Surfaced in `parallax-readiness` (27 env vars total) |
 | 722 | feat | stream observability — GET /admin/parallax/streams endpoint + `prsm node streams` CLI. Makes sprints 711-721 visible: active stream count + per-stream queue depth/maxsize/full + sender prefix + env values in effect |
 | 723 | fix | **F56** — per-peer concurrent stream cap. Pre-723 one peer could open unlimited streams → memory DoS. `PRSM_CHAIN_STREAM_PER_PEER_CONCURRENCY` default 8. Refactor extracts `_handle_stream_request_body` so wrapper places try/finally around every return path (counter never leaks) |
+| 724 | fix | **F57** — unary request_id collision (F52 sibling on unary path). Same deterministic sha256(request_bytes) pattern in `build_send_message_adapter` — concurrent identical unary retries collided + first future was overwritten. Fixed with os.urandom + distinct `:unary:` domain separator |
 
-26 F-class production-blockers (F30 → F56) closed across the
-session. ~189 new pin tests + 5 new integration tests, 0 cross-suite
+27 F-class production-blockers (F30 → F57) closed across the
+session. ~192 new pin tests + 5 new integration tests, 0 cross-suite
 regressions.
 
 ## 9. What this enables
