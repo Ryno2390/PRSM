@@ -1,0 +1,36 @@
+{
+  "job_id": "infer-dd4e1d3f59df",
+  "request_id": "infer-7d9837fbb6c5",
+  "model_id": "gpt2",
+  "content_tier": "A",
+  "privacy_tier": "standard",
+  "epsilon_spent": 0.0,
+  "tee_type": "software",
+  "tee_attestation": "5052534d2d4d532d4154542d56313a7b22737461676573223a205b7b226174746573746174696f6e5f686578223a2022363836363264373237353665366536353732326437333666363637343737363137323635326436313734373436353733373436313734363936663665222c202273746167655f696e646578223a20302c202273746167655f6e6f64655f6964223a20223438346630303363383935656530326163376564303165353730613661353166222c20227465655f74797065223a2022736f667477617265227d5d2c202276657273696f6e223a20317d",
+  "output_hash": "2126c39b164a06e309214d1c1eb710be856ffdd44d7455d312e84d208c2383e2",
+  "duration_seconds": 0.2783148679882288,
+  "cost_ftns": "0.1320",
+  "settler_signature": "535795845e8145bf3df71ef25d6911cf66cb11b4ddf5355b8adc4691fc4691c0f1498b9542ad7f49e482c980050a5d640a352076fc75b029e66c050bcaa14205",
+  "settler_node_id": "484f003c895ee02ac7ed01e570a6a51f",
+  "streamed_output": false,
+  "activation_noise_trace": {
+    "per_stage_epsilon": [
+      8.0
+    ],
+    "total_epsilon_spent": 8.0,
+    "clip_norm": 1.0,
+    "stage_count": 1,
+    "tier": "standard"
+  },
+  "topology_assignment": {
+    "positions": [
+      [
+        0,
+        0,
+        "484f003c895ee02ac7ed01e570a6a51f"
+      ]
+    ],
+    "stage_count": 1,
+    "slots_per_stage": 1
+  }
+}

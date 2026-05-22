@@ -300,6 +300,47 @@ command-line invocation. 5 pin tests defend the standalone signing-
 bytes implementation against drift from the PRSM-side
 `InferenceReceipt.signing_payload` source.
 
+### 6.1 Try it yourself in 30 seconds (sprint 706)
+
+A real signed receipt is checked into the repo at
+`docs/sample-receipts/tier-standard-dp-2026-05-22.json`. It was
+captured from a live `/compute/inference` POST against NYC at
+`bootstrap-us.prsm-network.com` on 2026-05-22 with
+`privacy_tier=standard` (activation-DP injection wired). Verify it
+yourself:
+
+```bash
+git clone https://github.com/prsm-network/PRSM.git
+cd PRSM
+pip install web3 cryptography
+python3 scripts/verify_prsm_receipt.py docs/sample-receipts/tier-standard-dp-2026-05-22.json
+```
+
+Expected: `✓ VALID — receipt verifies cleanly` with the
+`activation_noise_trace` populated (per_stage_epsilon=[8.0],
+total=8.0, tier=standard).
+
+To prove tamper-detection works, flip one byte of any signed
+field and re-verify:
+
+```bash
+python3 -c "
+import json
+r = json.load(open('docs/sample-receipts/tier-standard-dp-2026-05-22.json'))
+old = r['output_hash']
+r['output_hash'] = old[:-2] + ('00' if old[-2:] != '00' else 'ff')
+json.dump(r, open('/tmp/tampered.json', 'w'))
+"
+python3 scripts/verify_prsm_receipt.py /tmp/tampered.json
+```
+
+Expected: `✗ INVALID — settler_signature does NOT verify against
+the anchor-registered pubkey`. Every byte of the canonical signing
+payload is committed-to by the settler's Ed25519 signature.
+
+See `docs/sample-receipts/README.md` for more receipts as they're
+added + the canonical signing-bytes spec.
+
 ## 7. Known limits + active gaps
 
 This section is honest about what is NOT closed.
@@ -472,6 +513,7 @@ needs more disk + memory than the current $12/mo droplets have.
 | 703 | feat | standalone PRSM-import-free receipt verifier (scripts/verify_prsm_receipt.py) |
 | 704 | feat | PRSM_INFERENCE_CONCURRENCY_LIMIT semaphore gate (closes §7.4 OOM) |
 | 705 | test | sprint 704 live-validated under concurrent load (4 concurrent inferences serialize cleanly) |
+| 706 | docs | sample receipt + "try it yourself" walkthrough — verifies in 30s |
 
 18 F-class production-blockers (F30 → F49) closed across the session.
 ~127 new pin tests, 0 cross-suite regressions.
