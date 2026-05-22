@@ -2145,6 +2145,36 @@ def _resolve_stream_request_max_bytes() -> int:
     return val
 
 
+def _resolve_stream_execution_timeout() -> float:
+    """Sprint 729 F62 — max wall-clock seconds per server-side
+    streaming response. Defends against a slow or malicious
+    StageExecutor that yields frames at a glacial rate (or pauses
+    indefinitely BETWEEN yields), holding the sprint-723 per-peer
+    cap slot longer than any honest stream should need.
+
+    Default 300s (5 minutes — covers gpt2 streaming a 200-token
+    response at CPU rate ~1.5s/token). Operators tune via
+    PRSM_CHAIN_STREAM_EXECUTION_TIMEOUT_S. Values <=0 mean no
+    timeout. Non-float safely defaults to 300s.
+
+    Note: this bounds CUMULATIVE wall-time across the stream. It
+    does NOT protect against a single `__next__()` call that hangs
+    indefinitely (that would block the event loop and require a
+    thread-offload refactor — different attack surface).
+    """
+    import os
+    raw = os.environ.get("PRSM_CHAIN_STREAM_EXECUTION_TIMEOUT_S")
+    if raw is None or raw == "":
+        return 300.0
+    try:
+        val = float(raw)
+    except ValueError:
+        return 300.0
+    if val <= 0:
+        return 0.0
+    return val
+
+
 def _resolve_stream_queue_maxsize() -> int:
     """Sprint 713 — bounded receive-queue size for streaming
     back-pressure. Default 64 frames (chosen as 2× typical inference
@@ -2397,10 +2427,53 @@ async def _handle_stream_request_body(
     # generator) releases server-side resources (KV cache, model
     # context). For non-generator iterables, the early break still
     # bounds wasted work.
+    #
+    # Sprint 729 F62 fix: total-wall-time budget. A slow or
+    # malicious StageExecutor that yields slowly would otherwise
+    # hold the sprint-723 per-peer cap slot beyond any honest use
+    # case. Bound via wall-clock check on each iteration.
+    import time as _time
     seq = 0
     stream_iter = server.handle_token_stream(request_bytes)
+    _stream_timeout = _resolve_stream_execution_timeout()
+    _stream_start = _time.monotonic()
     try:
         for frame in stream_iter:
+            if (
+                _stream_timeout > 0
+                and (_time.monotonic() - _stream_start) > _stream_timeout
+            ):
+                # Time budget exceeded — close iter + ship terminal
+                # STREAM_END with actionable error referencing the
+                # env var.
+                _close_fn = getattr(stream_iter, "close", None)
+                if callable(_close_fn):
+                    try:
+                        _close_fn()
+                    except Exception:  # noqa: BLE001
+                        pass
+                end_msg = P2PMessage(
+                    msg_type=MSG_DIRECT,
+                    sender_id=node.identity.node_id,
+                    payload={
+                        "subtype": CHAIN_STREAM_MSG_TYPE,
+                        CHAIN_STREAM_END_KEY: stream_id,
+                        CHAIN_STREAM_SEQ_KEY: seq,
+                        CHAIN_ERROR_KEY: (
+                            f"stream execution exceeded total "
+                            f"wall-time budget of {_stream_timeout}s; "
+                            f"tune via "
+                            f"PRSM_CHAIN_STREAM_EXECUTION_TIMEOUT_S"
+                        ),
+                    },
+                )
+                try:
+                    await node.transport.send_to_peer(
+                        sender_id, end_msg,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                return True
             frame_msg = P2PMessage(
                 msg_type=MSG_DIRECT,
                 sender_id=node.identity.node_id,

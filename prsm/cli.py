@@ -2565,6 +2565,8 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 726 — max concurrent unary CHAIN_REQs from a single peer (per-peer DoS defense; F56 sibling on unary path). Default 8 (matches streaming cap); <=0 = unbounded; non-int safely defaults to 8."),
     ("PRSM_CHAIN_UNARY_EXECUTION_TIMEOUT_S", False, None,
      "Sprint 728 — max wall-clock seconds for executor.execute() on a single unary CHAIN_REQ. Defends against hung executor holding per-peer cap slot indefinitely. Default 60s (covers gpt2/100-token on CPU); <=0 = no timeout; non-float safely defaults to 60s."),
+    ("PRSM_CHAIN_STREAM_EXECUTION_TIMEOUT_S", False, None,
+     "Sprint 729 — max wall-clock seconds for a server-side streaming response (cumulative across all yielded frames). Defends against slow/malicious StageExecutor holding sprint-723 per-peer cap slot. Default 300s (5 minutes; covers gpt2/200-token CPU streaming); <=0 = no timeout; non-float safely defaults to 300s."),
 ]
 
 
