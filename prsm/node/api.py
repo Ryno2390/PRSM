@@ -876,6 +876,42 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # and 127.0.0.1; "testclient" is starlette TestClient's
         # synthetic host (let through so test fixtures don't
         # need PRSM_ADMIN_REMOTE_ALLOWED).
+        # Sprint 743 F71 — DNS-rebinding defense. A malicious web
+        # page in the victim's browser can make requests to
+        # `http://localhost:8000/admin/*`. The browser connects
+        # from the victim's machine, so the daemon sees
+        # `client.host=127.0.0.1` and the F65-F68 loopback gate
+        # passes. Admin data (sprint-722 expected_sender peer IDs,
+        # KYC records, moderation state) would leak to attacker JS.
+        #
+        # Defense: browsers always set the `Origin` header on
+        # cross-origin requests (HTML form POSTs + fetch + XHR). CLI
+        # tools (curl, prsm node CLI, python httpx) typically don't.
+        # Reject /admin/* requests that carry an Origin header,
+        # regardless of the loopback check result.
+        #
+        # An operator with a web dashboard genuinely needing to hit
+        # admin endpoints can set PRSM_ADMIN_REMOTE_ALLOWED=1 (which
+        # already bypasses the entire check chain — including this
+        # one) AND add real auth at the proxy layer.
+        origin_header = request.headers.get("origin", "")
+        if origin_header.strip():
+            return _AdminJSON(
+                status_code=403,
+                content={
+                    "detail": (
+                        "admin endpoints reject browser-origin "
+                        "requests by default (sprint 743 F71 DNS-"
+                        "rebinding defense). Origin header indicates "
+                        "the request came from a browser, not a CLI. "
+                        "Set PRSM_ADMIN_REMOTE_ALLOWED=1 + add real "
+                        "auth at the proxy layer if you have a "
+                        "legitimate web dashboard hitting /admin/*."
+                    ),
+                    "origin": origin_header,
+                },
+            )
+
         _LOOPBACK = ("127.0.0.1", "::1", "localhost", "testclient")
 
         def _is_loopback(host: str) -> bool:
