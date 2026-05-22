@@ -571,9 +571,10 @@ needs more disk + memory than the current $12/mo droplets have.
 | 720 | fix | **F54** — server-side resource leak on requester disconnect. Sprint 711 ignored send_to_peer return value; server kept iterating + burning GPU on tokens nobody received. Now reads return value + closes inner generator on False (releases KV cache + model context) |
 | 721 | fix | **F55** — request_bytes size limit (memory-DoS defense). `PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES` default 16 MiB; pre-decode (b64 length * 3/4) + post-decode (actual bytes) gates. Surfaced in `parallax-readiness` (27 env vars total) |
 | 722 | feat | stream observability — GET /admin/parallax/streams endpoint + `prsm node streams` CLI. Makes sprints 711-721 visible: active stream count + per-stream queue depth/maxsize/full + sender prefix + env values in effect |
+| 723 | fix | **F56** — per-peer concurrent stream cap. Pre-723 one peer could open unlimited streams → memory DoS. `PRSM_CHAIN_STREAM_PER_PEER_CONCURRENCY` default 8. Refactor extracts `_handle_stream_request_body` so wrapper places try/finally around every return path (counter never leaks) |
 
-25 F-class production-blockers (F30 → F55) closed across the
-session. ~182 new pin tests + 5 new integration tests, 0 cross-suite
+26 F-class production-blockers (F30 → F56) closed across the
+session. ~189 new pin tests + 5 new integration tests, 0 cross-suite
 regressions.
 
 ## 9. What this enables
