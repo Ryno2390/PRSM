@@ -1335,17 +1335,44 @@ async def handle_chain_executor_request(node: Any, msg: Any) -> bool:
         return False
 
     # Decode incoming payload bytes.
+    # Sprint 725 F58 fix: pre-decode size gate (mirror of sprint-721
+    # F55 on the streaming path). A malicious peer sending a 100MB
+    # base64 string would otherwise force ~75MB allocation on the
+    # b64decode step → easy memory-DoS on 2GB-RAM operator droplets.
     decode_error = None
     payload_bytes: bytes = b""
-    try:
-        payload_bytes = base64.b64decode(
-            payload.get(CHAIN_PAYLOAD_KEY, ""),
-        )
-    except Exception as exc:  # noqa: BLE001
-        decode_error = (
-            f"chain-executor request payload base64-decode failed: "
-            f"{type(exc).__name__}: {exc}"
-        )
+    _unary_max_bytes = _resolve_unary_request_max_bytes()
+    payload_b64 = payload.get(CHAIN_PAYLOAD_KEY, "")
+    if _unary_max_bytes > 0:
+        # base64 expands by ~4/3; check len * 3 / 4 against limit.
+        estimated_decoded = (len(payload_b64) * 3) // 4
+        if estimated_decoded > _unary_max_bytes:
+            decode_error = (
+                f"chain-executor request payload exceeds max bytes "
+                f"({estimated_decoded} > {_unary_max_bytes}); tune "
+                f"via PRSM_CHAIN_UNARY_REQUEST_MAX_BYTES"
+            )
+    if decode_error is None:
+        try:
+            payload_bytes = base64.b64decode(payload_b64)
+        except Exception as exc:  # noqa: BLE001
+            decode_error = (
+                f"chain-executor request payload base64-decode "
+                f"failed: {type(exc).__name__}: {exc}"
+            )
+        else:
+            # Sprint 725 defense-in-depth: post-decode size check.
+            if (
+                _unary_max_bytes > 0
+                and len(payload_bytes) > _unary_max_bytes
+            ):
+                decoded_len = len(payload_bytes)
+                payload_bytes = b""  # free immediately
+                decode_error = (
+                    f"chain-executor decoded payload exceeds max "
+                    f"bytes ({decoded_len} > {_unary_max_bytes}); "
+                    f"tune via PRSM_CHAIN_UNARY_REQUEST_MAX_BYTES"
+                )
 
     # Stage execution (skip if we already have a decode error).
     response_bytes: bytes = b""
@@ -1857,6 +1884,32 @@ def _remote_token_stream_dispatch(
             yield entry
     finally:
         pending.pop(stream_id, None)
+
+
+def _resolve_unary_request_max_bytes() -> int:
+    """Sprint 725 F58 — max request_bytes accepted by
+    handle_chain_executor_request. Mirrors sprint-721 F55 on the
+    unary path. Defends against a malicious peer sending an
+    enormous CHAIN_REQ payload to exhaust server memory on the
+    b64-decode step.
+
+    Default 16 MiB (matches the streaming limit; sized for a real
+    gpt2 activation blob with 100-token prompt + metadata).
+    Operators tune via PRSM_CHAIN_UNARY_REQUEST_MAX_BYTES.
+    Values <=0 mean unbounded; non-int safely defaults to 16 MiB.
+    """
+    import os
+    raw = os.environ.get("PRSM_CHAIN_UNARY_REQUEST_MAX_BYTES")
+    default_bytes = 16 * 1024 * 1024  # 16 MiB
+    if raw is None or raw == "":
+        return default_bytes
+    try:
+        val = int(raw)
+    except ValueError:
+        return default_bytes
+    if val <= 0:
+        return 0  # unbounded
+    return val
 
 
 def _resolve_per_peer_stream_concurrency() -> int:

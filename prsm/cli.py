@@ -2559,6 +2559,8 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 721 — max bytes accepted by server-side stream request handler before b64-decode (memory-DoS defense). Default 16 MiB (covers a real gpt2 activation blob with 100-token context); <=0 = unbounded; non-int safely defaults to 16 MiB."),
     ("PRSM_CHAIN_STREAM_PER_PEER_CONCURRENCY", False, None,
      "Sprint 723 — max concurrent CHAIN_STREAM_REQs from a single peer (per-peer DoS defense). Default 8 (covers realistic multi-stream coordinator workloads); <=0 = unbounded; non-int safely defaults to 8."),
+    ("PRSM_CHAIN_UNARY_REQUEST_MAX_BYTES", False, None,
+     "Sprint 725 — max bytes accepted by server-side unary CHAIN_REQ handler before b64-decode (memory-DoS defense; F55 sibling on unary path). Default 16 MiB (matches streaming limit); <=0 = unbounded; non-int safely defaults to 16 MiB."),
 ]
 
 
