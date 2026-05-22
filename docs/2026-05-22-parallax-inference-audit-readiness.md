@@ -338,8 +338,22 @@ Expected: `✗ INVALID — settler_signature does NOT verify against
 the anchor-registered pubkey`. Every byte of the canonical signing
 payload is committed-to by the settler's Ed25519 signature.
 
-See `docs/sample-receipts/README.md` for more receipts as they're
-added + the canonical signing-bytes spec.
+See `docs/sample-receipts/README.md` for more receipts + the
+canonical signing-bytes spec. Three samples now shipped covering
+the full live-attested matrix:
+
+- `tier-none-unary-2026-05-22.json` — baseline unary inference,
+  `output_hash: fe0663fd…` bit-identical to HuggingFace gpt2 greedy
+- `tier-none-streaming-2026-05-22.json` — SSE 4-token streaming,
+  `output_hash: 1b46bc86…` bit-identical to streaming reference
+- `tier-standard-dp-2026-05-22.json` — activation-DP injection
+  with `activation_noise_trace` populated (ε=8.0)
+
+Run the verifier against any of them with the same command. Each
+proves a different load-bearing PRSM claim:
+  1. **bit-identical CPU inference to local HF reference** (unary)
+  2. **per-token autoregressive streaming with deterministic hash**
+  3. **DP injection with epsilon accounting in signed receipt**
 
 ## 7. Known limits + active gaps
 
@@ -514,9 +528,10 @@ needs more disk + memory than the current $12/mo droplets have.
 | 704 | feat | PRSM_INFERENCE_CONCURRENCY_LIMIT semaphore gate (closes §7.4 OOM) |
 | 705 | test | sprint 704 live-validated under concurrent load (4 concurrent inferences serialize cleanly) |
 | 706 | docs | sample receipt + "try it yourself" walkthrough — verifies in 30s |
+| 707 | docs | 2 more sample receipts (tier-none unary + tier-none streaming); 3-receipt coverage of all live-attested modes |
 
 18 F-class production-blockers (F30 → F49) closed across the session.
-~127 new pin tests, 0 cross-suite regressions.
+~130 new pin tests, 0 cross-suite regressions.
 
 ## 9. What this enables
 

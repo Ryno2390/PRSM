@@ -118,3 +118,44 @@ def test_sample_receipt_tier_standard_has_noise_trace():
     assert trace is not None
     assert trace["tier"] == "standard"
     assert trace["total_epsilon_spent"] > 0
+
+
+def test_sample_receipt_tier_none_unary_bit_identical_hash():
+    """Sprint 707 — tier-none unary sample's output_hash must
+    match sprint 688's bit-identical-to-HuggingFace canonical
+    value (`fe0663fd...`) so the sample is recognizable as the
+    canonical gpt2 / "The capital of France is" / max_tokens=1
+    reference. If this hash drifts, either the prompt changed OR
+    the gpt2 reference changed — caller must update the sample
+    deliberately."""
+    path = SAMPLE_RECEIPTS_DIR / "tier-none-unary-2026-05-22.json"
+    if not path.exists():
+        pytest.skip("expected sample receipt not present")
+    with open(path) as f:
+        r = json.load(f)
+    assert r["privacy_tier"] == "none"
+    assert r["streamed_output"] is False
+    assert r["output_hash"].startswith("fe0663fd"), (
+        f"tier-none unary sample's output_hash drifted from sprint "
+        f"688's canonical fe0663fd...; got {r['output_hash']}"
+    )
+
+
+def test_sample_receipt_streaming_carries_streamed_output_flag():
+    """Sprint 707 — streaming sample must have streamed_output=True
+    + the sprint 694 canonical output_hash `1b46bc86...` for the
+    4-token decode of "The capital of France is"."""
+    path = SAMPLE_RECEIPTS_DIR / "tier-none-streaming-2026-05-22.json"
+    if not path.exists():
+        pytest.skip("expected streaming sample receipt not present")
+    with open(path) as f:
+        r = json.load(f)
+    assert r["streamed_output"] is True, (
+        "streaming sample must carry streamed_output=True; without "
+        "it the canonical signing payload omits the field and "
+        "the verifier would interpret as unary"
+    )
+    assert r["output_hash"].startswith("1b46bc86"), (
+        f"streaming sample's output_hash drifted from sprint 694's "
+        f"canonical 1b46bc86...; got {r['output_hash']}"
+    )

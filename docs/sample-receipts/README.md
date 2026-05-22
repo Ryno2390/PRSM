@@ -14,6 +14,8 @@ re-run, see `✗ INVALID — settler_signature does NOT verify`.
 
 | Receipt | Tier | Features exercised |
 | --- | --- | --- |
+| `tier-none-unary-2026-05-22.json` | none | Baseline unary inference; output_hash `fe0663fd…` is bit-identical to local HuggingFace `gpt2` greedy decode for the same prompt (sprint 688's semantic-correctness milestone) |
+| `tier-none-streaming-2026-05-22.json` | none | SSE streaming with `streamed_output: true`; output_hash `1b46bc86…` covers 4-token autoregressive decode of "The capital of France is" → " the capital of the" (sprint 694's bit-identical-to-HF streaming) |
 | `tier-standard-dp-2026-05-22.json` | standard (ε=8.0) | Activation-DP injection (`activation_noise_trace` field populated) + per-stage TEE attestation envelope + signed by NYC's mainnet-anchored Ed25519 key |
 
 ## Verifying a sample
