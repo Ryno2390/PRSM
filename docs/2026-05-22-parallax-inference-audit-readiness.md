@@ -371,14 +371,27 @@ gap is a multi-sprint effort:
 Unary multi-host inference (sprint 695) is fully closed; this is a
 streaming-only limit.
 
-### 7.4 NYC 2GB droplet OOM cycling
+### 7.4 NYC 2GB droplet OOM cycling — **CLOSED in sprint 704**
 
-NYC's 2GB DO droplet OOM-cycled during the sprint 698 cross-host
-coordination cold-load (gpt2 load + cross-host dispatch state).
-Sprint 687 closed several deadlock + threading issues; the OOM is
-a memory-budget limit, not a logic bug. Mitigation: upsize to 4GB
-($12 → $24/mo) OR add OOM-guard logic. Did not block sprint 698's
-single-host signed-receipt evidence on Lambda.
+NYC's 2GB DO droplet OOM-cycled during sprint 698's cross-host
+coordination cold-load when concurrent inference arrived during
+gpt2 model load. Sprint 704 closes this with an env-gated
+asyncio.Semaphore: `PRSM_INFERENCE_CONCURRENCY_LIMIT=1` serializes
+inference handling so peak memory is bounded by a single request's
+working set.
+
+Both unary `/compute/inference` and streaming `/compute/inference/
+stream` paths share the semaphore. Streaming acquires before
+iterator construction + releases in the outer try/finally — the
+slot covers cold-load + all token-frame generation. Default
+unset preserves pre-704 no-cap behavior for memory-rich nodes
+(Lambda A10 with 200GB RAM doesn't need it).
+
+Deployed live on NYC + SFO 2026-05-22 with limit=1. Tag
+`sprint-704-inference-concurrency-limit-merge-ready-20260522`
+commit `83b2af46`. 7 pin tests defend the gate (serialization,
+disabled-when-unset, rebuild-on-limit-change, defense against
+typos/zero/negative).
 
 ### 7.5 Activation-DP injection at tier=standard — **CLOSED in sprint 702**
 
@@ -449,9 +462,10 @@ needs more disk + memory than the current $12/mo droplets have.
 | 701 | docs | audit doc updates + MCP streaming live-attest + pin tests |
 | 702 | feat | tier-gate advisory mode + activation-DP injection live-attested (F48 + F49 closed) |
 | 703 | feat | standalone PRSM-import-free receipt verifier (scripts/verify_prsm_receipt.py) |
+| 704 | feat | PRSM_INFERENCE_CONCURRENCY_LIMIT semaphore gate (closes §7.4 OOM) |
 
 18 F-class production-blockers (F30 → F49) closed across the session.
-~120 new pin tests, 0 cross-suite regressions.
+~127 new pin tests, 0 cross-suite regressions.
 
 ## 9. What this enables
 
