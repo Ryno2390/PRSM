@@ -802,9 +802,52 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # and 127.0.0.1; "testclient" is starlette TestClient's
         # synthetic host (let through so test fixtures don't
         # need PRSM_ADMIN_REMOTE_ALLOWED).
-        if client_host in (
-            "127.0.0.1", "::1", "localhost", "testclient",
-        ):
+        _LOOPBACK = ("127.0.0.1", "::1", "localhost", "testclient")
+        is_loopback_immediate = client_host in _LOOPBACK
+        # Sprint 737 F66 — reverse-proxy bypass defense. If a
+        # reverse proxy (nginx, HAProxy) on the same host
+        # terminates external connections + forwards to
+        # 127.0.0.1:8000, the daemon sees `client.host=127.0.0.1`
+        # for what is in fact arbitrary external traffic. F65's
+        # loopback gate would have passed those through.
+        #
+        # Defense: if the immediate client IS loopback AND an
+        # X-Forwarded-For header is present, the request came
+        # from a proxy. The last hop in X-Forwarded-For is the
+        # real upstream client IP. If THAT is non-loopback, the
+        # admin gate must deny.
+        #
+        # X-Forwarded-For spoofing requires LOCAL-PROCESS access
+        # (the immediate connection has to be loopback for the
+        # header to be examined at all), so attacker access is
+        # already significantly bounded. A malicious local process
+        # is a different threat model than a peered network
+        # client.
+        xff = request.headers.get("x-forwarded-for", "")
+        if is_loopback_immediate and xff.strip():
+            # Take the LAST hop (rightmost) — that's the address
+            # the immediate proxy saw as its client. Earlier hops
+            # in the chain are less trusted (they may have been
+            # set by the original requester).
+            hops = [h.strip() for h in xff.split(",") if h.strip()]
+            real_client = hops[-1] if hops else ""
+            if real_client and real_client not in _LOOPBACK:
+                return _AdminJSON(
+                    status_code=403,
+                    content={
+                        "detail": (
+                            "admin endpoints reject reverse-proxied "
+                            "remote traffic by default (sprint 737 "
+                            "F66). X-Forwarded-For indicates a non-"
+                            "loopback upstream client. Set "
+                            "PRSM_ADMIN_REMOTE_ALLOWED=1 to allow "
+                            "AND add real auth at your proxy layer."
+                        ),
+                        "client_host": client_host,
+                        "x_forwarded_for_last_hop": real_client,
+                    },
+                )
+        if is_loopback_immediate:
             return await call_next(request)
         return _AdminJSON(
             status_code=403,
