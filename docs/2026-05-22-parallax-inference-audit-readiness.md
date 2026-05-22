@@ -579,13 +579,15 @@ needs more disk + memory than the current $12/mo droplets have.
 | 728 | fix | **F61** — unary execution timeout (hang-defense). `executor.execute()` had no timeout; a hung executor held the sprint-726 per-peer cap slot indefinitely. `PRSM_CHAIN_UNARY_EXECUTION_TIMEOUT_S` default 60s wraps via `asyncio.wait_for`; TimeoutError converts to CHAIN_ERROR_KEY response naming the env var |
 | 729 | fix | **F62** — streaming total wall-time bound (sibling of F61 on streaming side). Sync `for`-loop can't use `asyncio.wait_for`; uses `time.monotonic()` check between yields instead. `PRSM_CHAIN_STREAM_EXECUTION_TIMEOUT_S` default 300s; exceedance ships terminal STREAM_END with actionable error |
 | 730 | fix | **F63** — bind msg.sender_id to authenticated peer.peer_id (foundation fix). Transport verified signatures only at handshake; subsequent msg.sender_id was wire-trusted not crypto-bound. A peer with valid handshake could spoof sender_id to bypass per-peer caps (F53/F56/F59) AND forge responses (F53/F60). Dispatch wrappers in PRSMNode.start now overwrite sender_id with peer.peer_id before handlers see the msg |
+| 731 | fix | **F64** — transport-level sender_id binding (generalizes F63). Sprint-730 only protected chain-executor handlers; other MSG_DIRECT handlers (ledger_sync FTNS transfers, compute_provider, storage_provider, content_provider, agent_registry) still trusted msg.sender_id. Move the bind to WebSocketTransport._dispatch so ALL MSG_DIRECT handlers see authenticated sender. MSG_GOSSIP excluded (relay requires original sender). Sprint-730 wrappers retained as defense-in-depth |
 
-33 F-class production-blockers (F30 → F63) closed across the
-session. ~226 new pin tests + 5 new integration tests, 0 cross-suite
-regressions. **F63 is the foundation under F53/F56/F59/F60 — without
-it, those handlers ran sender-based decisions on attacker-controlled
-wire data. With it, the full wire-protocol hardening rests on
-crypto-bound peer identity.**
+34 F-class production-blockers (F30 → F64) closed across the
+session. ~230 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **F63 + F64 together restore the cryptographic foundation
+under EVERY MSG_DIRECT handler in the codebase — chain-executor,
+ledger transfers, compute provisioning, storage, content, and agent
+registry. Wire-protocol hardening from F50→F62 now rests on verified
+peer identity at the transport layer.**
 
 ## 9. What this enables
 
