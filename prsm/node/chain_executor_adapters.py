@@ -395,6 +395,12 @@ def build_hf_prompt_encoder(
             token_ids = _state["tokenizer"].encode(
                 prompt, return_tensors="pt",
             )
+            # Sprint 698 F47 fix — move token_ids to the model's
+            # device before embedding lookup. tokenizer.encode
+            # returns CPU tensor; embed_layer is on the model's
+            # device. Without this, GPU deployments raise
+            # "Expected all tensors to be on the same device".
+            token_ids = token_ids.to(device)
             # Move tokens to device + run embedding lookup under no_grad
             with _torch.no_grad():
                 embeddings = _state["embed_layer"](token_ids)
