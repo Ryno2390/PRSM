@@ -670,12 +670,12 @@ against origin's known pubkey. Tracked for a future session.
 | 742 | fix | **F70** — HTTP body-size limit (memory-DoS defense at HTTP layer; sibling of wire F55/F58). FastAPI accepted arbitrary JSON bodies; 1 GB POST would allocate before any size check. Middleware checks Content-Length pre-read; default 1 MiB; PRSM_HTTP_MAX_BODY_BYTES env-tunable. 413 with actionable error |
 | 743 | fix | **F71** — admin DNS-rebinding defense via Origin header check. DNS rebinding lets a malicious webpage in the victim's browser make requests to `http://localhost:8000/admin/*` — daemon sees client=127.0.0.1, F65-F68 gate passes, admin data leaks to attacker JS. Now rejects /admin/* requests carrying an Origin header (browsers always set it; CLI tools don't) |
 | 744 | fix | **F72** — /docs + /openapi.json hidden by default. Pre-744 every HTTP client could fetch /openapi.json and get the complete API surface map — every /admin/* path the F65-F71 fixes worked to defend. Reconnaissance enabled. Now hidden by default; `PRSM_API_DOCS_ENABLED=1` opt-in for dev. Applied to BOTH node API and dashboard sub-app |
+| 745 | fix | **F73** — /metrics gated by same admin-loopback rules. Prometheus exposition leaked internal financial state (pending escrow, locked FTNS) + connection counts + subsystem counters. Now inherits all F65-F71 defenses (loopback gate + XFF/X-Real-IP awareness + DNS-rebinding via Origin check) |
 
-42 F-class production-blockers (F30 → F72) closed across the
-session. ~284 new pin tests + 5 new integration tests, 0 cross-suite
-regressions. **F72 closes the reconnaissance vector that mapped the
-API surface for attackers even after the F65-F71 defenses were in
-place.**
+43 F-class production-blockers (F30 → F73) closed across the
+session. ~289 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **F73 closes the Prometheus information-leak. Cumulative
+admin-auth + reconnaissance arc (F65-F73): 41/41 pin tests green.**
 
 ## 9. What this enables
 
