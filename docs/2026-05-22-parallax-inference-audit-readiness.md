@@ -565,9 +565,10 @@ needs more disk + memory than the current $12/mo droplets have.
 | 714 | feat | `prsm node parallax-readiness` surfaces sprint-713 env (23rd env var) |
 | 715 | fix | **F50** — STREAM_END race fix; sprint-713 put_nowait-for-END let terminal land before frame puts on the response queue. Plus E2E integration test for sprint-711 wire protocol on real WebSocketTransport (2 pin tests + 8 pre-existing unit tests green) |
 | 716 | fix | **F51** — malformed-frame race (sprint-715 sibling); same put_nowait-vs-coroutine ordering issue at the malformed-frame terminal error path. All 3 queue-write paths now use same scheduler |
+| 717 | test | E2E back-pressure load test — 20-frame stream + maxsize=2 receive queue. Proves non-lossy back-pressure end-to-end (would have caught F50/F51 pre-fix) |
 
 21 F-class production-blockers (F30 → F51) closed across the
-session. ~159 new pin tests + 2 new integration tests, 0 cross-suite
+session. ~159 new pin tests + 3 new integration tests, 0 cross-suite
 regressions.
 
 ## 9. What this enables
