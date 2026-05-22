@@ -1797,7 +1797,14 @@ def _remote_token_stream_dispatch(
     queue: _asyncio.Queue = _asyncio.run_coroutine_threadsafe(
         _make_async_queue(loop, maxsize), loop,
     ).result(timeout=5.0)
-    pending[stream_id] = queue
+    # Sprint 719 F53 fix: bind the registered queue to the
+    # expected sender. handle_chain_stream_response now verifies
+    # msg.sender_id == expected_sender BEFORE routing frames, so a
+    # malicious or buggy third peer that learns the stream_id
+    # cannot forge frames into the victim's queue. Pre-719,
+    # pending[stream_id] was just the queue → any peer with the
+    # stream_id could inject frames.
+    pending[stream_id] = (queue, stage_address)
 
     async def _send_request() -> None:
         from prsm.node.transport import P2PMessage, MSG_DIRECT
@@ -2022,9 +2029,26 @@ def handle_chain_stream_response(node: Any, msg: Any) -> bool:
     if not stream_id:
         return False  # request-side message; not for us
     pending = getattr(node, "_chain_executor_pending_streams", {}) or {}
-    queue = pending.get(stream_id)
-    if queue is None:
+    entry = pending.get(stream_id)
+    if entry is None:
         return False  # unknown stream (race; requester gave up)
+
+    # Sprint 719 F53 fix: bind incoming frame's sender to the
+    # expected dispatch peer. Pre-719, pending[stream_id] stored
+    # just the queue — any peer that learned the stream_id could
+    # forge frames into the victim's pending queue (P2P networks
+    # are open by default, so a peered third party could connect
+    # + inject). Post-719, pending stores (queue, expected_sender);
+    # frames from any other sender are silently dropped (return
+    # False so other dispatchers can claim them if needed; never
+    # let them into the queue).
+    if isinstance(entry, tuple) and len(entry) == 2:
+        queue, expected_sender = entry
+        sender_id = getattr(msg, "sender_id", None)
+        if expected_sender and sender_id and sender_id != expected_sender:
+            return False  # forged frame from wrong peer — drop
+    else:  # legacy shape (defensive — should never hit post-719)
+        queue = entry
 
     loop = getattr(node, "_loop", None)
     if loop is None:
