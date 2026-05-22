@@ -195,8 +195,70 @@ Environment=PRSM_PARALLAX_SEND_MESSAGE_TIMEOUT_S=600
 # 2-stage split on tiny droplets running gpt2; otherwise omit.
 # Environment=PRSM_PARALLAX_MEMORY_GB_OVERRIDE=0.8
 # Environment=PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE=30.0
+
+# § Streaming wire-protocol hardening (sprints 713-731) — all
+# defaults are production-safe; explicit values below show the
+# operator-tunable knobs. Verify with `prsm node parallax-readiness`.
+#
+# Bounded receive-queue back-pressure (sprint 713 F50/F51 race-
+# safe). Default 64 frames covers normal use; reduce for memory-
+# tight nodes if streaming is rarely used.
+# Environment=PRSM_CHAIN_STREAM_QUEUE_MAXSIZE=64
+#
+# Memory-DoS defenses (sprints 721/725 F55/F58). Default 16 MiB
+# matches the real gpt2 activation blob + signing metadata.
+# Raise for larger models that ship bigger activations.
+# Environment=PRSM_CHAIN_STREAM_REQUEST_MAX_BYTES=16777216
+# Environment=PRSM_CHAIN_UNARY_REQUEST_MAX_BYTES=16777216
+#
+# Per-peer concurrency caps (sprints 723/726 F56/F59). Default 8
+# covers realistic multi-stream coordinator workloads. Lower
+# (e.g., 2) on very-memory-tight nodes; raise for high-throughput
+# aggregators.
+# Environment=PRSM_CHAIN_STREAM_PER_PEER_CONCURRENCY=8
+# Environment=PRSM_CHAIN_UNARY_PER_PEER_CONCURRENCY=8
+#
+# Hang-defense timeouts (sprints 728/729 F61/F62). Defaults
+# cover gpt2 CPU inference. Raise for larger / slower models;
+# DON'T set to 0 in production (a hung executor would hold a
+# per-peer slot indefinitely).
+# Environment=PRSM_CHAIN_UNARY_EXECUTION_TIMEOUT_S=60
+# Environment=PRSM_CHAIN_STREAM_EXECUTION_TIMEOUT_S=300
 EOF
 ```
+
+### Stream observability
+
+After sprints 711-731, the wire protocol is heavily hardened with
+bounded queues, back-pressure, sender binding, size limits, per-
+peer caps, hang defenses, and disconnect cleanup. To see this
+working in production:
+
+```bash
+# Active in-flight streams + per-stream queue depth + back-pressure
+# state + env values in effect.
+prsm node streams
+```
+
+Empty list when daemon is idle (typical between inferences). Active
+streams show stream_id prefix, expected_sender (sprint 719/727
+hijack defense), queue depth, and whether the queue is full
+(back-pressure engaged). Operators use this during incident
+response to see whether a peer is hammering the daemon or
+back-pressure is engaged (legit slowness vs attack).
+
+### Security model upgrade (sprints 730-731)
+
+The transport now binds `msg.sender_id` to the handshake-
+authenticated `peer.peer_id` at dispatch boundary
+(`WebSocketTransport._dispatch`). Pre-sprint-731, msg.sender_id
+was wire-trusted but not crypto-bound — a peer with valid
+handshake could spoof sender_id to bypass per-peer caps OR forge
+responses. Post-731, ALL MSG_DIRECT handlers (chain-executor,
+ledger_sync FTNS transfers, compute_provider, storage_provider,
+content_provider, agent_registry) see authenticated sender_id.
+No operator action required; this is a transport-layer fix that
+takes effect on daemon restart.
 
 For Lambda GPU operators: change `PRSM_PARALLAX_HF_DEVICE=cpu` to `cuda`,
 omit the `INFERENCE_CONCURRENCY_LIMIT` (200GB RAM doesn't need the
@@ -324,3 +386,10 @@ covering unary, streaming, DP, and multi-host modes.
 | 704 | `PRSM_INFERENCE_CONCURRENCY_LIMIT` semaphore (NYC OOM gate) |
 | 705 | Sprint 704 live-validated under 4-concurrent load |
 | 706-708 | Sample receipts in `docs/sample-receipts/` covering all 4 inference modes |
+| 711-712 | F40 remote token-stream wire protocol + integration test |
+| 713-717 | Bounded receive queue + back-pressure (F50/F51/F52 wire-order + collision fixes) |
+| 718-720 | F52 collision (urandom entropy), F53 hijack (sender binding), F54 disconnect cleanup |
+| 721-722 | F55 request size limit + `/admin/parallax/streams` endpoint + `prsm node streams` CLI |
+| 723-727 | Streaming + unary defense parity: F56/F59 per-peer cap, F57/F58 collision+size on unary, F60 unary hijack defense |
+| 728-729 | F61/F62 hang-defense timeouts (unary `executor.execute()` + streaming wall-time) |
+| 730-731 | F63/F64 sender_id bound to authenticated peer_id at transport layer — protects ALL MSG_DIRECT handlers (chain-executor + ledger_sync FTNS transfers + compute/storage/content/agent) |
