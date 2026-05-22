@@ -303,7 +303,34 @@ class WebSocketTransport:
         self._handlers.setdefault(msg_type, []).append(handler)
 
     async def _dispatch(self, msg: P2PMessage, peer: PeerConnection) -> None:
-        """Route a message to all registered handlers for its type."""
+        """Route a message to all registered handlers for its type.
+
+        Sprint 731 F64 — bind `msg.sender_id` to the handshake-
+        authenticated `peer.peer_id` for direct point-to-point
+        messages (MSG_DIRECT, MSG_PEER_CONNECTED,
+        MSG_PEER_DISCONNECTED). Generalizes sprint-730's per-
+        chain-executor-handler bind to ALL MSG_DIRECT handlers
+        (ledger_sync / compute_provider / storage_provider /
+        content_provider / agent_registry — each registered its
+        own MSG_DIRECT handler and each read msg.sender_id
+        without crypto rebinding).
+
+        MSG_GOSSIP is excluded: gossip relay legitimately carries
+        the original sender's id, which differs from the
+        relaying peer's id by design. The gossip protocol does
+        its own provenance verification (per-message signature
+        check against the original sender's known pubkey).
+        Internal pseudo-messages (peer_connected /
+        peer_disconnected) are constructed with peer.peer_id as
+        sender_id already, so the bind is a no-op for them.
+        """
+        if (
+            peer is not None
+            and msg.msg_type != MSG_GOSSIP
+        ):
+            authentic = getattr(peer, "peer_id", None)
+            if authentic:
+                msg.sender_id = authentic
         handlers = self._handlers.get(msg.msg_type, [])
         for handler in handlers:
             try:
