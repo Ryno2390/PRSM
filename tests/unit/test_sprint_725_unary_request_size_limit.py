@@ -71,28 +71,32 @@ def test_resolve_unary_request_max_bytes_typo_safely_defaults():
         del os.environ["PRSM_CHAIN_UNARY_REQUEST_MAX_BYTES"]
 
 
-def test_unary_handler_source_uses_resolved_max_bytes():
-    """Pin: handle_chain_executor_request calls
-    `_resolve_unary_request_max_bytes()` and gates decode on it."""
+def _unary_handler_source() -> str:
+    """Sprint 726 refactored the body of `handle_chain_executor_request`
+    into `_handle_chain_executor_request_body` for per-peer-cap
+    wrapping. Source-inspection tests must look at BOTH so the
+    invariant survives that refactor."""
     import inspect
-    from prsm.node.chain_executor_adapters import (
-        handle_chain_executor_request,
+    from prsm.node import chain_executor_adapters as _mod
+    return inspect.getsource(_mod.handle_chain_executor_request) + (
+        inspect.getsource(_mod._handle_chain_executor_request_body)
     )
-    src = inspect.getsource(handle_chain_executor_request)
+
+
+def test_unary_handler_source_uses_resolved_max_bytes():
+    """Pin: unary handler calls `_resolve_unary_request_max_bytes()`
+    and gates decode on it."""
+    src = _unary_handler_source()
     assert "_resolve_unary_request_max_bytes" in src, (
         "F58 fix requires the unary size gate to be wired into "
-        "handle_chain_executor_request"
+        "the unary handler"
     )
 
 
 def test_unary_handler_emits_error_referencing_env_var():
     """When payload exceeds limit, error message references the
     env var so operators reading logs know what to tune."""
-    import inspect
-    from prsm.node.chain_executor_adapters import (
-        handle_chain_executor_request,
-    )
-    src = inspect.getsource(handle_chain_executor_request)
+    src = _unary_handler_source()
     assert "PRSM_CHAIN_UNARY_REQUEST_MAX_BYTES" in src, (
         "size-exceeded error must reference the env var so "
         "operators know what to tune"

@@ -1334,6 +1334,80 @@ async def handle_chain_executor_request(node: Any, msg: Any) -> bool:
     if not sender_id:
         return False
 
+    # Sprint 726 F59 fix: per-peer concurrent unary-request cap
+    # (mirror of sprint-723 F56 on the streaming path). Pre-726,
+    # one peer could open unlimited concurrent CHAIN_REQs against
+    # this server → each held an in-flight executor.execute()
+    # coroutine + (for real autoregressive runner) KV cache →
+    # trivial memory-DoS. Bookkeeping lives on
+    # `node._chain_executor_serving_unary_by_peer` (peer_id →
+    # active count). Incremented on accepted REQ; decremented in
+    # finally so every code path (decode-fail / exec-fail / send-
+    # fail / clean) releases the slot.
+    _unary_per_peer_cap = _resolve_per_peer_unary_concurrency()
+    _serving_unary = getattr(
+        node, "_chain_executor_serving_unary_by_peer", None,
+    )
+    # MagicMock test fixtures auto-create attributes that aren't
+    # dicts — narrow the type check to isinstance(dict) so we
+    # always end up with a real dict for arithmetic.
+    if not isinstance(_serving_unary, dict):
+        _serving_unary = {}
+        try:
+            node._chain_executor_serving_unary_by_peer = _serving_unary
+        except Exception:  # noqa: BLE001 — defensive
+            pass
+    if _unary_per_peer_cap > 0:
+        active = _serving_unary.get(sender_id, 0)
+        if active >= _unary_per_peer_cap:
+            from prsm.node.transport import P2PMessage, MSG_DIRECT
+            resp = P2PMessage(
+                msg_type=MSG_DIRECT,
+                sender_id=getattr(
+                    getattr(node, "identity", None), "node_id", "",
+                ),
+                payload={
+                    "subtype": CHAIN_MSG_TYPE,
+                    CHAIN_REQ_KEY: request_id,
+                    CHAIN_RESP_KEY: request_id,
+                    CHAIN_ERROR_KEY: (
+                        f"peer concurrent unary-request limit "
+                        f"exceeded ({active} >= "
+                        f"{_unary_per_peer_cap}); tune via "
+                        f"PRSM_CHAIN_UNARY_PER_PEER_CONCURRENCY"
+                    ),
+                    CHAIN_PAYLOAD_KEY: "",
+                },
+            )
+            try:
+                await node.transport.send_to_peer(sender_id, resp)
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+    _serving_unary[sender_id] = _serving_unary.get(sender_id, 0) + 1
+    try:
+        return await _handle_chain_executor_request_body(
+            node, msg, request_id, sender_id, payload,
+        )
+    finally:
+        new_count = _serving_unary.get(sender_id, 0) - 1
+        if new_count <= 0:
+            _serving_unary.pop(sender_id, None)
+        else:
+            _serving_unary[sender_id] = new_count
+
+
+async def _handle_chain_executor_request_body(
+    node: Any, msg: Any, request_id: Any, sender_id: Any, payload: Any,
+) -> bool:
+    """Sprint 726 — body of `handle_chain_executor_request` extracted
+    so the per-peer concurrency counter can wrap it in a single
+    try/finally without losing readability. Every original return
+    path returns here; the wrapper decrements the counter on exit.
+    Same refactor pattern as sprint-723 on the streaming side.
+    """
+    import base64
+
     # Decode incoming payload bytes.
     # Sprint 725 F58 fix: pre-decode size gate (mirror of sprint-721
     # F55 on the streaming path). A malicious peer sending a 100MB
@@ -1912,6 +1986,31 @@ def _resolve_unary_request_max_bytes() -> int:
     return val
 
 
+def _resolve_per_peer_unary_concurrency() -> int:
+    """Sprint 726 F59 — max concurrent unary CHAIN_REQs a single
+    peer can have in-flight against this server. Mirrors sprint-
+    723 F56 on the unary path. Defends against a peer opening
+    thousands of CHAIN_REQs to exhaust server memory + execution
+    slots.
+
+    Default 8 (same as streaming cap; covers realistic multi-
+    request coordinator workloads). Operators tune via
+    PRSM_CHAIN_UNARY_PER_PEER_CONCURRENCY. Values <=0 mean
+    unbounded; non-int safely defaults to 8.
+    """
+    import os
+    raw = os.environ.get("PRSM_CHAIN_UNARY_PER_PEER_CONCURRENCY")
+    if raw is None or raw == "":
+        return 8
+    try:
+        val = int(raw)
+    except ValueError:
+        return 8
+    if val <= 0:
+        return 0
+    return val
+
+
 def _resolve_per_peer_stream_concurrency() -> int:
     """Sprint 723 F56 — max concurrent streams a single peer can
     have in-flight against this server. Defends against a malicious
@@ -2039,11 +2138,13 @@ async def handle_chain_stream_request(node: Any, msg: Any) -> bool:
     _serving = getattr(
         node, "_chain_executor_serving_streams_by_peer", None,
     )
-    if _serving is None:
+    # isinstance(dict) check — see sprint 726 lesson: MagicMock
+    # auto-children pass `is None` checks but aren't dicts.
+    if not isinstance(_serving, dict):
         _serving = {}
         try:
             node._chain_executor_serving_streams_by_peer = _serving
-        except Exception:  # noqa: BLE001 — defensive for mock nodes
+        except Exception:  # noqa: BLE001 — defensive
             pass
     if _per_peer_cap > 0:
         active = _serving.get(sender_id, 0)
