@@ -282,6 +282,24 @@ A receipt is verifiable using ONLY (a) the receipt JSON, (b) the Base
 mainnet anchor address, (c) any Base RPC URL. No PRSM-team server-side
 component is in the trust path.
 
+**Sprint 703 ships `scripts/verify_prsm_receipt.py`** — a standalone
+~300-line Python script that performs the full verification with
+ZERO imports from the `prsm` package. An external party with only
+this file, a receipt JSON, and `pip install web3 cryptography` can
+verify any PRSM receipt in under 30 seconds:
+
+```bash
+python3 verify_prsm_receipt.py receipt.json
+# → valid: true, anchor_lookup: ..., signature_valid: true,
+#   attestation_envelope: {...}, noise_trace: {...}
+```
+
+The script does not assume the PRSM repo exists. The "no PRSM-team in
+the trust path" claim is now operationally provable in a single
+command-line invocation. 5 pin tests defend the standalone signing-
+bytes implementation against drift from the PRSM-side
+`InferenceReceipt.signing_payload` source.
+
 ## 7. Known limits + active gaps
 
 This section is honest about what is NOT closed.
@@ -430,9 +448,10 @@ needs more disk + memory than the current $12/mo droplets have.
 | 700 | fix | F46 monotonic hardware_profile gossip propagation |
 | 701 | docs | audit doc updates + MCP streaming live-attest + pin tests |
 | 702 | feat | tier-gate advisory mode + activation-DP injection live-attested (F48 + F49 closed) |
+| 703 | feat | standalone PRSM-import-free receipt verifier (scripts/verify_prsm_receipt.py) |
 
 18 F-class production-blockers (F30 → F49) closed across the session.
-~115 new pin tests, 0 cross-suite regressions.
+~120 new pin tests, 0 cross-suite regressions.
 
 ## 9. What this enables
 
