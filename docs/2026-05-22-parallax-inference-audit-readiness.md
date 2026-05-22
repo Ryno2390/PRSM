@@ -50,7 +50,9 @@ It is NOT marketing. Every operational claim cites:
   cannot REMOVE it. Operators no longer need env-var overrides for
   reliable heterogeneous CPU+GPU pool allocation.
 - Cross-host token streaming (one peer streams from another peer's
-  GPU) is not yet wired. Self-dispatch streaming works fully. (F40
+  GPU) **CLOSED in sprint 711** — wire protocol shipped + pin-tested;
+  live cross-host attest is sprint 712. Self-dispatch streaming works
+  fully. (F40
   deferred per sprint 691)
 
 ## 2. Operational claims with on-chain evidence
@@ -414,21 +416,43 @@ deliberately (e.g., for testing or for resource budgeting), but they
 are no longer required for reliable heterogeneous CPU+GPU pool
 allocation.
 
-### 7.3 F40: Remote token-stream transport unwired
+### 7.3 F40: Remote token-stream transport — **CLOSED in sprint 711**
 
 `/compute/inference/stream` works for **self-dispatch** streaming (the
 operator handles all stages locally). For **multi-host** streaming,
 where one peer streams from another peer's GPU, the cross-host
-token-stream transport is not yet wired. Sprint 691 ships a clear
-"remote streaming not yet wired" error at dispatch time. Closing this
-gap is a multi-sprint effort:
+token-stream transport was the last non-user-gated audit-doc gap.
+**Sprint 711 ships the wire protocol** (`CHAIN_STREAM_MSG_TYPE` with
+`CHAIN_STREAM_REQ_KEY` / `CHAIN_STREAM_FRAME_KEY` / `CHAIN_STREAM_END_KEY`
+/ `CHAIN_STREAM_SEQ_KEY`):
 
-- Streaming-aware `StageExecutor` Protocol variant
-- Streaming transport adapter on the chain executor request handler
-- Per-token frame buffering + back-pressure handling
+- Requester → server: ONE `CHAIN_STREAM_REQ` over `MSG_DIRECT`
+- Server → requester: MULTIPLE `CHAIN_STREAM_FRAME` (one per chunk,
+  sequenced for reorder-safety)
+- Server → requester: ONE terminal `CHAIN_STREAM_END` (optional error
+  field for mid-stream failures → cleanly closes requester iterator)
 
-Unary multi-host inference (sprint 695) is fully closed; this is a
-streaming-only limit.
+Client-side `_remote_token_stream_dispatch` uses a per-stream
+`asyncio.Queue` stored on `node._chain_executor_pending_streams`;
+`handle_chain_stream_response` routes incoming frames threadsafe via
+`loop.call_soon_threadsafe`. Server-side `handle_chain_stream_request`
+calls `LayerStageServer.handle_token_stream(request_bytes)` and ships
+frames as they arrive. `build_token_stream_send_message_adapter`'s
+remote branch now delegates to the new dispatcher (replaces sprint 691's
+placeholder `RuntimeError("remote streaming not yet wired")`).
+
+8 pin tests defend the wire protocol (constant-distinctness, ignore-non-
+stream messages, ignore-wrong-direction messages, ignore-unknown-stream
+late frames, adapter-delegates-to-dispatch, node.py registers both
+handlers). 530 cross-suite green. Tag
+`sprint-711-remote-token-stream-wire-protocol-merge-ready-20260522`
+commit `2a54b97c`.
+
+Live-attest of cross-host streaming end-to-end across NYC+SFO is
+sprint 712's scope. Streaming back-pressure + integration with the
+sprint-704 OOM semaphore for streaming inference is sprint 713's scope.
+Both are follow-ons, not new gaps — the wire protocol itself is
+complete and pin-tested.
 
 ### 7.4 NYC 2GB droplet OOM cycling — **CLOSED in sprint 704**
 
@@ -534,9 +558,12 @@ needs more disk + memory than the current $12/mo droplets have.
 | 706 | docs | sample receipt + "try it yourself" walkthrough — verifies in 30s |
 | 707 | docs | 2 more sample receipts (tier-none unary + tier-none streaming); 3-receipt coverage of all live-attested modes |
 | 708 | docs | multi-host 2-stage sample receipt — verifier demo now covers all 4 architectural modes |
+| 709 | docs | operator runbook refresh for sprints 700-708 |
+| 710 | docs | README 30-second verifier callout (6 pin tests) |
+| 711 | feat | **F40 remote token-stream wire protocol — closes §7.3** (8 pin tests) |
 
-18 F-class production-blockers (F30 → F49) closed across the session.
-~131 new pin tests, 0 cross-suite regressions.
+19 F-class production-blockers (F30 → F49 + F40) closed across the
+session. ~145 new pin tests, 0 cross-suite regressions.
 
 ## 9. What this enables
 
