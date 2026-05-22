@@ -39,24 +39,38 @@ It is NOT marketing. Every operational claim cites:
   (`prsm node parallax-readiness`) with non-zero exit on missing or
   invalid values, suitable for CI gating. (Sprint 696)
 
-**Wire-protocol hardening (sprints 711-731, 22-sprint arc):** the
-remote token-stream + unary chain-executor RPC have been audited
-end-to-end across 10 dimensions, closing **35 F-class production-
-blockers (F30 through F64)** with corresponding pin tests + 5
-integration tests on real `WebSocketTransport`. Streaming +
-unary paths now have parity defense on collision (F52/F57), payload
-size DoS (F55/F58), per-peer concurrency cap (F56/F59), and
-response hijack via sender binding (F53/F60). Plus streaming-only
-race fixes (F50/F51), disconnect cleanup (F54), back-pressure
-(sprint 713), observability CLI (sprint 722), and hang-defense
-timeouts (F61/F62 unary + streaming). **F63/F64 (sprints 730-731)
-restored the cryptographic foundation under EVERY MSG_DIRECT
-handler in the codebase** — including ledger_sync FTNS transfers,
-compute_provider, storage_provider, content_provider, and
-agent_registry — by binding `msg.sender_id` to the handshake-
-authenticated `peer.peer_id` at the transport dispatch boundary.
-Pre-731, a peered third party could spoof sender_id to bypass
-per-peer caps OR forge responses.
+**Wire-protocol + admin-auth hardening (sprints 711-745, 35-
+sprint arc):** the remote token-stream + unary chain-executor RPC +
+HTTP admin surface have been audited end-to-end, closing **43
+F-class production-blockers (F30 through F73)** with corresponding
+pin tests + 5 integration tests on real `WebSocketTransport`.
+
+Streaming + unary wire paths have parity defense on collision
+(F52/F57), payload size DoS (F55/F58), per-peer concurrency cap
+(F56/F59), and response hijack via sender binding (F53/F60).
+Plus streaming-only race fixes (F50/F51), disconnect cleanup
+(F54), back-pressure (sprint 713), observability CLI (sprint
+722), and hang-defense timeouts (F61/F62).
+
+**F63/F64 (sprints 730-731)** restored the cryptographic
+foundation under EVERY MSG_DIRECT handler in the codebase —
+including ledger_sync FTNS transfers, compute_provider,
+storage_provider, content_provider, and agent_registry — by
+binding `msg.sender_id` to the handshake-authenticated
+`peer.peer_id` at the transport dispatch boundary. Pre-731,
+a peered third party could spoof sender_id to bypass per-peer
+caps OR forge responses.
+
+**F65-F73 (sprints 734-745)** close the HTTP admin surface +
+reconnaissance vectors: pre-fix every `/admin/*` endpoint was
+unauthenticated (tags=["admin"] was a swagger grouping, not
+access control). Now defended across 5 deployment patterns ×
+multiple loopback representations + DNS-rebinding via Origin
+check (F71) + per-requester rate limit correctness (F69) + HTTP
+body-size DoS (F70) + /docs+/openapi.json hidden by default
+(F72 closes the reconnaissance vector) + /metrics gated (F73
+closes the financial-intel + connection-state leak). 41/41 pin
+tests across the F65-F73 arc.
 
 **What is honestly NOT closed yet** (Section 7):
 

@@ -91,8 +91,9 @@ def test_security_md_names_f_class_arc_range():
     """Pin: the F30-F65 range gives auditors a concrete window
     to look at in commit history."""
     text = _text()
+    # Sprint 746 widened to F73 (admin-auth + recon arc).
     assert (
-        "F30 through F65" in text
-        or "F30-F65" in text
-        or "F30 → F65" in text
+        "F30 through F73" in text
+        or "F30-F73" in text
+        or "F30 → F73" in text
     )

@@ -164,14 +164,14 @@ Pending external layers (per `audits/AUDIT_PLAN.md` §6 Gate B):
 
 ## Recent hardening — wire-protocol audit arc (2026-05-22)
 
-Between sprints 711 and 734, an iterative audit of the
-parallax-inference wire protocols (remote token-stream + unary
-chain-executor RPC) closed **35 F-class production-blockers
-(F30 through F65)** across 10 audit dimensions. Detailed
-write-up + per-fix evidence in
+Between sprints 711 and 745, an iterative audit closed **43
+F-class production-blockers (F30 through F73)** across multiple
+audit dimensions. Detailed write-up + per-fix evidence in
 [`docs/2026-05-22-parallax-inference-audit-readiness.md`](docs/2026-05-22-parallax-inference-audit-readiness.md).
 
 Summary of the security-grade fixes:
+
+### Wire protocol (F40, F50-F62) — 13 fixes
 
 - **F50 / F51 / F52 / F55 / F56 / F57 / F58 / F59 / F61 / F62**
   — wire-protocol DoS hardening (back-pressure races, identical-
@@ -186,34 +186,65 @@ Summary of the security-grade fixes:
   `msg.sender_id` before routing.
 - **F54** — server-side resource leak: server kept iterating
   inference generator after requester disconnect, burning GPU
-  on tokens nobody would receive. Now reads send_to_peer return
-  value + closes inner generator on disconnect (releases KV
-  cache promptly).
-- **F63 / F64** — *foundation fix.* Transport verified
-  cryptographic signatures only at handshake; subsequent
-  `msg.sender_id` was wire-trusted but not crypto-bound. A peer
-  with valid handshake could spoof sender_id to defeat per-peer
-  caps (F56/F59) AND forge responses (F53/F60) — undermining
-  several preceding fixes. Sprint 730 bound sender_id at the
-  chain-executor dispatch wrappers; sprint 731 generalized at
-  the transport layer (`WebSocketTransport._dispatch`) so EVERY
-  `MSG_DIRECT` handler in the codebase — including
-  `ledger_sync` FTNS transfers, `compute_provider`,
-  `storage_provider`, `content_provider`, `agent_registry` —
-  now sees the handshake-authenticated peer identity.
-- **F65** — `/admin/*` endpoints were unauthenticated
-  (`tags=["admin"]` was a swagger grouping, not access control).
-  Sprint 722's observability endpoint exposed live stream
-  metadata to any network client. Middleware now restricts
-  `/admin/*` to loopback by default; `PRSM_ADMIN_REMOTE_ALLOWED=1`
-  opt-in for remote (must be behind reverse-proxy auth or VPN).
+  on tokens nobody would receive.
 
-Operator-facing consequences are documented in
+### Transport foundation (F63 / F64) — 2 fixes
+
+Transport verified cryptographic signatures only at handshake;
+subsequent `msg.sender_id` was wire-trusted but not crypto-bound.
+A peer with valid handshake could spoof sender_id to defeat
+per-peer caps (F56/F59) AND forge responses (F53/F60) —
+undermining several preceding fixes. Sprint 730 bound sender_id
+at chain-executor dispatch wrappers; sprint 731 generalized at
+the transport layer (`WebSocketTransport._dispatch`) so EVERY
+`MSG_DIRECT` handler in the codebase — including `ledger_sync`
+FTNS transfers, `compute_provider`, `storage_provider`,
+`content_provider`, `agent_registry` — now sees the handshake-
+authenticated peer identity.
+
+### Admin auth + reconnaissance defense (F65-F73) — 9 fixes
+
+- **F65** — `/admin/*` was unauthenticated (`tags=["admin"]` was
+  a swagger grouping, not access control). Middleware now
+  restricts to loopback by default.
+- **F66 / F67** — reverse-proxy bypass defense. `X-Forwarded-For`
+  + `X-Real-IP` are inspected when immediate client is loopback;
+  external upstream → 403. Closes the nginx/HAProxy-on-same-host
+  pattern where daemon would have seen `client.host=127.0.0.1`
+  for all proxied external traffic.
+- **F68** — loopback representations widened to include IPv4-
+  mapped IPv6 (`::ffff:127.0.0.1`, dual-stack Linux default) and
+  the entire 127.0.0.0/8 block per RFC 1122.
+- **F69** — HTTP rate limiter ("`*_PER_REQUESTER`" envs) was
+  keyed by `node.identity.node_id` (a constant) — effectively
+  global, not per-requester. Now keyed by HTTP-client IP via
+  proxy-aware helper. False-confidence bug class.
+- **F70** — HTTP body-size limit (HTTP-side analog of F55/F58).
+  `PRSM_HTTP_MAX_BODY_BYTES` default 1 MiB.
+- **F71** — DNS-rebinding defense. Browsers always set the
+  `Origin` header on cross-origin requests; CLI tools don't.
+  Middleware rejects `/admin/*` requests with `Origin` set,
+  blocking the canonical loopback-as-auth attack against
+  locally-bound services.
+- **F72** — `/docs` + `/openapi.json` hidden by default. Pre-fix
+  any HTTP client could fetch the complete API surface map,
+  giving attackers a roadmap. `PRSM_API_DOCS_ENABLED=1` opt-in.
+- **F73** — `/metrics` (Prometheus exposition) now gated by the
+  same loopback rules. Pre-fix it leaked `prsm_total_locked_ftns`
+  (financial intelligence), peer connection counts, subsystem
+  counters — all reconnaissance-grade.
+
+**Operator-facing consequences** are documented in
 [`docs/operations/parallax-inference-deploy.md`](docs/operations/parallax-inference-deploy.md).
 **Existing operators upgrading past sprint 734 should expect
-`/admin/*` to default-deny non-loopback access** — set
-`PRSM_ADMIN_REMOTE_ALLOWED=1` and add a real auth layer in
-front if remote admin access is required.
+`/admin/*` AND `/metrics` to default-deny non-loopback access** —
+set `PRSM_ADMIN_REMOTE_ALLOWED=1` AND add a real auth layer
+(reverse-proxy auth, VPN) if remote access is required.
+
+41/41 pin tests across the F65-F73 admin-auth + reconnaissance
+arc. Per-deployment-pattern coverage: direct-network, XFF-
+forwarding proxy, X-Real-IP-forwarding proxy, IPv4-mapped IPv6
++ 127/8, DNS rebinding via Origin.
 
 ## Supported versions
 

@@ -40,13 +40,16 @@ def test_exec_summary_names_f_class_arc_range():
     """The summary must name the F-class arc range so an auditor
     skimming sees the depth (35 blockers closed)."""
     summary = _exec_summary_text()
+    # Sprint 746 widened from F64 → F73 (admin-auth + recon arc).
+    # Accept any current range that includes the cumulative endpoint.
     assert (
-        "F30 through F64" in summary
-        or "F30 → F64" in summary
-        or "F30-F64" in summary
+        "F30 through F73" in summary
+        or "F30 → F73" in summary
+        or "F30-F73" in summary
     ), (
         "exec summary must name the F-class arc range so external "
-        "auditors see the breadth of hardening"
+        "auditors see the breadth of hardening (cumulative F30-F73 "
+        "as of sprint 745)"
     )
 
 
