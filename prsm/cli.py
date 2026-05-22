@@ -2553,6 +2553,8 @@ _PARALLAX_ENV_REGISTRY = [
      "Region tag for ParallaxGPU (default 'default'). Allocator never spans regions."),
     ("PRSM_INFERENCE_CONCURRENCY_LIMIT", False, None,
      "Cap on concurrent in-flight inference requests (default unset = no cap). Set to 1 on memory-tight nodes (e.g., 2GB droplets) to prevent OOM under simultaneous cold-load."),
+    ("PRSM_CHAIN_STREAM_QUEUE_MAXSIZE", False, None,
+     "Sprint 713 — bounded receive queue for remote token-stream back-pressure. Default 64 frames; <=0 = unbounded (pre-713 behavior); non-int safely defaults to 64. Producer blocks at queue.put when full → real back-pressure (not lossy drop)."),
 ]
 
 

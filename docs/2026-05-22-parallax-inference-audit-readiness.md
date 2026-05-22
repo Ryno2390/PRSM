@@ -561,9 +561,11 @@ needs more disk + memory than the current $12/mo droplets have.
 | 709 | docs | operator runbook refresh for sprints 700-708 |
 | 710 | docs | README 30-second verifier callout (6 pin tests) |
 | 711 | feat | **F40 remote token-stream wire protocol — closes §7.3** (8 pin tests) |
+| 713 | feat | stream back-pressure (PRSM_CHAIN_STREAM_QUEUE_MAXSIZE bounded receive queue) — closes sprint-711 OOM follow-on (10 pin tests) |
+| 714 | feat | `prsm node parallax-readiness` surfaces sprint-713 env (23rd env var) |
 
 19 F-class production-blockers (F30 → F49 + F40) closed across the
-session. ~145 new pin tests, 0 cross-suite regressions.
+session. ~155 new pin tests, 0 cross-suite regressions.
 
 ## 9. What this enables
 
