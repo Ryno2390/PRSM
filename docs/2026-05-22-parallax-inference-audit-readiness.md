@@ -663,13 +663,14 @@ against origin's known pubkey. Tracked for a future session.
 | 730 | fix | **F63** — bind msg.sender_id to authenticated peer.peer_id (foundation fix). Transport verified signatures only at handshake; subsequent msg.sender_id was wire-trusted not crypto-bound. A peer with valid handshake could spoof sender_id to bypass per-peer caps (F53/F56/F59) AND forge responses (F53/F60). Dispatch wrappers in PRSMNode.start now overwrite sender_id with peer.peer_id before handlers see the msg |
 | 731 | fix | **F64** — transport-level sender_id binding (generalizes F63). Sprint-730 only protected chain-executor handlers; other MSG_DIRECT handlers (ledger_sync FTNS transfers, compute_provider, storage_provider, content_provider, agent_registry) still trusted msg.sender_id. Move the bind to WebSocketTransport._dispatch so ALL MSG_DIRECT handlers see authenticated sender. MSG_GOSSIP excluded (relay requires original sender). Sprint-730 wrappers retained as defense-in-depth |
 | 734 | fix | **F65** — /admin/* loopback-only by default. Pre-734 every /admin/* endpoint was unauthenticated — `tags=["admin"]` was just a swagger grouping. Sprint 722's observability endpoint widened the leak (expected_sender peer IDs visible to network). Middleware checks request.client.host against loopback whitelist; non-loopback → 403. `PRSM_ADMIN_REMOTE_ALLOWED=1` opt-in for remote-admin (must be behind reverse-proxy auth or VPN) |
+| 737 | fix | **F66** — admin loopback gate respects X-Forwarded-For. Sprint-734 checked only `client.host` — bypassed for the common reverse-proxy-on-same-host pattern (nginx forwards to 127.0.0.1 → daemon sees client=127.0.0.1 for any external traffic). Now parses XFF last-hop when immediate client is loopback; external real-client → 403. Local-process spoofing remains possible but bounded vs peered network access |
 
-35 F-class production-blockers (F30 → F65) closed across the
-session. ~236 new pin tests + 5 new integration tests, 0 cross-suite
+36 F-class production-blockers (F30 → F66) closed across the
+session. ~242 new pin tests + 5 new integration tests, 0 cross-suite
 regressions. **F63 + F64 together restore the cryptographic foundation
-under EVERY MSG_DIRECT handler in the codebase. F65 closes the HTTP
-admin-surface auth gap that sprint 722's observability endpoint
-would otherwise have widened.**
+under EVERY MSG_DIRECT handler in the codebase. F65 + F66 close the
+HTTP admin-surface auth gap for both direct-network AND reverse-proxy
+deployment patterns.**
 
 ## 9. What this enables
 
