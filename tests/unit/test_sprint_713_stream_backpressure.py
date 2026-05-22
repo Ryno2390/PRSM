@@ -144,18 +144,21 @@ def test_response_handler_uses_run_coroutine_threadsafe_for_frames():
     )
 
 
-def test_response_handler_end_entry_still_bypasses_backpressure():
-    """Pin: terminal STREAM_END must keep using put_nowait (NOT
-    awaited) so the requester always sees the close signal — even
-    when the queue is saturated. Otherwise a saturated queue would
-    deadlock the requester waiting for end."""
+def test_response_handler_end_entry_uses_same_primitive_as_frames():
+    """SUPERSEDED by sprint 715 F50 fix. Original sprint 713 pinned
+    END to put_nowait so it would 'bypass back-pressure'. Sprint 715
+    discovered that creates a wire-order race: put_nowait callbacks
+    run before deferred queue.put tasks, so a quick END could land
+    in the queue ahead of the frame puts that preceded it on the
+    wire. Dispatcher saw END first → yielded zero frames.
+
+    Fix: END uses the SAME `run_coroutine_threadsafe(queue.put(...))`
+    primitive as frames so wire order is preserved. Pin that now."""
     import inspect
     from prsm.node.chain_executor_adapters import (
         handle_chain_stream_response,
     )
     src = inspect.getsource(handle_chain_stream_response)
-    # Find the END branch (between "STREAM_END_KEY" check and the
-    # frame-decode branch) and assert put_nowait is the path.
     end_branch_marker = "CHAIN_STREAM_END_KEY"
     frame_marker = "Mid-stream frame"
     assert end_branch_marker in src and frame_marker in src
@@ -163,7 +166,7 @@ def test_response_handler_end_entry_still_bypasses_backpressure():
     frame_idx = src.find(frame_marker)
     assert 0 < end_idx < frame_idx
     end_branch_src = src[end_idx:frame_idx]
-    assert "put_nowait" in end_branch_src, (
-        "terminal STREAM_END must use put_nowait so requester always"
-        " sees close — never blocked by full queue"
+    assert "run_coroutine_threadsafe" in end_branch_src, (
+        "END must use run_coroutine_threadsafe(queue.put(...)) so it"
+        " preserves wire order with frame puts (sprint 715 F50 fix)"
     )

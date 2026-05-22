@@ -2018,18 +2018,32 @@ def handle_chain_stream_response(node: Any, msg: Any) -> bool:
         return False
 
     if payload.get(CHAIN_STREAM_END_KEY):
-        # Terminal entry — pass through end + optional error. End
-        # entries bypass back-pressure (use put_nowait) because the
-        # terminal signal must always land for the requester to
-        # close cleanly even if the queue is full.
+        # Terminal entry — pass through end + optional error.
+        # Sprint 715 F50 fix: END must use the SAME scheduling
+        # primitive as frames (queue.put coroutine via
+        # run_coroutine_threadsafe) so wire order is preserved.
+        # The original sprint-713 put_nowait-for-END created a race:
+        # call_soon callbacks run before deferred tasks, so a quick
+        # END could land in the queue ahead of the frame puts that
+        # preceded it on the wire → dispatcher saw END first, yielded
+        # zero frames. END no longer "bypasses" back-pressure — it
+        # waits with the frames. Cannot deadlock because if the queue
+        # is full the producer side is also blocked at its puts (so
+        # neither side advances), and the consumer eventually drains.
         end_entry = {
             "end": True,
             "error": payload.get(CHAIN_ERROR_KEY),
         }
+        import asyncio as _asyncio
+        async def _put_end():
+            await queue.put(end_entry)
         try:
-            loop.call_soon_threadsafe(queue.put_nowait, end_entry)
-        except Exception:  # noqa: BLE001 — defensive
-            pass
+            _asyncio.run_coroutine_threadsafe(_put_end(), loop)
+        except Exception:  # noqa: BLE001 — defensive fallback
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, end_entry)
+            except Exception:  # noqa: BLE001
+                pass
         return True
 
     # Mid-stream frame — decode + enqueue (with back-pressure).
