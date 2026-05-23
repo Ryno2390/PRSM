@@ -591,6 +591,13 @@ class PeerDiscovery:
         from prsm.node.schedule import is_currently_active
         if not is_currently_active():
             return 0
+        # Sprint 773 — preemption gate. AWS/GCP spot operators that
+        # have been signaled for preemption stop announcing so peers
+        # evict from the routing pool inside the ~2min warning
+        # window. AND semantics with the active-window gate above.
+        from prsm.node.preemption import is_currently_preempted
+        if is_currently_preempted():
+            return 0
         # Sprint 570 F28: only include `address` when we have a real
         # externally-reachable value. transport.host is typically
         # "0.0.0.0" (bind-to-all) which is unreachable when gossiped;
@@ -1026,6 +1033,11 @@ class PeerDiscovery:
         # detection latency; operators with short intervals see
         # no behavior change.
         from prsm.node.schedule import is_currently_active
+        # Sprint 773 — preemption flag also short-circuits the loop.
+        # Imported here (same lazy-import pattern as is_currently_active)
+        # so test-time monkeypatches of the module-level helper land
+        # in this scope on each iteration.
+        from prsm.node.preemption import is_currently_preempted  # noqa: F401
         was_active = is_currently_active()
         poll_interval = min(self.announce_interval, 10.0)
         elapsed_since_announce = 0.0
