@@ -154,6 +154,12 @@ class InferenceReceipt:
     # either field flips the signing bytes → signature fails.
     activation_noise_trace: Optional[Any] = None
     topology_assignment: Optional[Any] = None
+    # Sprint 777 — partial-completion marker (Vision §4.5).
+    # Attached when an inference completes only some requested
+    # tokens (preemption / timeout / error). Optional + default
+    # None preserves byte-equivalence with pre-777 signed
+    # receipts via conditional encoding in signing_payload.
+    partial_completion: Optional[Any] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -181,6 +187,11 @@ class InferenceReceipt:
         if self.topology_assignment is not None:
             d["topology_assignment"] = (
                 self.topology_assignment.to_dict()
+            )
+        # Sprint 777 — omit when None for pre-777 byte-equivalence.
+        if self.partial_completion is not None:
+            d["partial_completion"] = (
+                self.partial_completion.to_dict()
             )
         return d
 
@@ -246,6 +257,18 @@ class InferenceReceipt:
                     d["topology_assignment"],
                 )
             )
+        # Sprint 777 — parse partial_completion when present.
+        if d.get("partial_completion") is not None and isinstance(
+            d["partial_completion"], dict,
+        ):
+            from prsm.compute.inference.partial_completion import (
+                PartialCompletionInfo,
+            )
+            d["partial_completion"] = (
+                PartialCompletionInfo.from_dict(
+                    d["partial_completion"],
+                )
+            )
         accepted = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in d.items() if k in accepted})
 
@@ -303,6 +326,14 @@ class InferenceReceipt:
             parts.append(
                 f"topology_assignment:"
                 f"{self.topology_assignment.stable_hash()}"
+            )
+        # Sprint 777 — conditional append for partial_completion.
+        # stable_hash() = sha256 of canonical JSON. Tampering any
+        # field flips the hash → signature fails.
+        if self.partial_completion is not None:
+            parts.append(
+                f"partial_completion:"
+                f"{self.partial_completion.stable_hash()}"
             )
         return "\n".join(parts).encode("utf-8")
 
