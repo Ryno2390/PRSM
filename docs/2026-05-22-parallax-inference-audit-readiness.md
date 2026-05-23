@@ -686,12 +686,13 @@ against origin's known pubkey. Tracked for a future session.
 | 744 | fix | **F72** — /docs + /openapi.json hidden by default. Pre-744 every HTTP client could fetch /openapi.json and get the complete API surface map — every /admin/* path the F65-F71 fixes worked to defend. Reconnaissance enabled. Now hidden by default; `PRSM_API_DOCS_ENABLED=1` opt-in for dev. Applied to BOTH node API and dashboard sub-app |
 | 745 | fix | **F73** — /metrics gated by same admin-loopback rules. Prometheus exposition leaked internal financial state (pending escrow, locked FTNS) + connection counts + subsystem counters. Now inherits all F65-F71 defenses (loopback gate + XFF/X-Real-IP awareness + DNS-rebinding via Origin check) |
 | 747 | fix | **F74** — /info + /health/detailed gated. Both leaked reconnaissance data: operator on-chain EOA, node_id, wired contract addresses, api_version (CVE-matching surface), per-subsystem state. Sibling of F73; same gate. Minimal `/health` (no /detailed suffix) intentionally preserved as public for load-balancer probes |
+| 748 | fix | **F75** — /status + /rings/status gated. The largest single recon leak in the codebase: `/status` exposed the operator's literal `ftns_balance` (financial), node_id, p2p_address, api_address, peer counts, bootstrap telemetry, and 13+ subsystem provider stats. Now in `_GATED_PATHS`; inherits all F65-F71 defenses |
 
-44 F-class production-blockers (F30 → F74) closed across the
-session. ~295 new pin tests + 5 new integration tests, 0 cross-suite
-regressions. **F74 closes the last common HTTP recon surface.
-Cumulative admin-auth + reconnaissance arc (F65-F74): 48/48 pin
-tests green across 8 sprints.**
+45 F-class production-blockers (F30 → F75) closed across the
+session. ~300 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **F75 closes the operator-FTNS-balance leak that
+attackers reading /status could exploit. Cumulative admin-auth +
+reconnaissance arc (F65-F75): 53/53 pin tests green across 9 sprints.**
 
 ## 9. What this enables
 
