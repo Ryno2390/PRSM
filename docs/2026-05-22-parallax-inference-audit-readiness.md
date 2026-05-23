@@ -685,11 +685,13 @@ against origin's known pubkey. Tracked for a future session.
 | 743 | fix | **F71** — admin DNS-rebinding defense via Origin header check. DNS rebinding lets a malicious webpage in the victim's browser make requests to `http://localhost:8000/admin/*` — daemon sees client=127.0.0.1, F65-F68 gate passes, admin data leaks to attacker JS. Now rejects /admin/* requests carrying an Origin header (browsers always set it; CLI tools don't) |
 | 744 | fix | **F72** — /docs + /openapi.json hidden by default. Pre-744 every HTTP client could fetch /openapi.json and get the complete API surface map — every /admin/* path the F65-F71 fixes worked to defend. Reconnaissance enabled. Now hidden by default; `PRSM_API_DOCS_ENABLED=1` opt-in for dev. Applied to BOTH node API and dashboard sub-app |
 | 745 | fix | **F73** — /metrics gated by same admin-loopback rules. Prometheus exposition leaked internal financial state (pending escrow, locked FTNS) + connection counts + subsystem counters. Now inherits all F65-F71 defenses (loopback gate + XFF/X-Real-IP awareness + DNS-rebinding via Origin check) |
+| 747 | fix | **F74** — /info + /health/detailed gated. Both leaked reconnaissance data: operator on-chain EOA, node_id, wired contract addresses, api_version (CVE-matching surface), per-subsystem state. Sibling of F73; same gate. Minimal `/health` (no /detailed suffix) intentionally preserved as public for load-balancer probes |
 
-43 F-class production-blockers (F30 → F73) closed across the
-session. ~289 new pin tests + 5 new integration tests, 0 cross-suite
-regressions. **F73 closes the Prometheus information-leak. Cumulative
-admin-auth + reconnaissance arc (F65-F73): 41/41 pin tests green.**
+44 F-class production-blockers (F30 → F74) closed across the
+session. ~295 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **F74 closes the last common HTTP recon surface.
+Cumulative admin-auth + reconnaissance arc (F65-F74): 48/48 pin
+tests green across 8 sprints.**
 
 ## 9. What this enables
 
