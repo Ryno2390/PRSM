@@ -9127,7 +9127,22 @@ def wallet_devices() -> None:
     help="Output format. json prints just the delegation blob; "
     "text adds operator-facing deployment guidance.",
 )
-def wallet_devices_add(node_id: str, output_format: str) -> None:
+@click.option(
+    "--register", "do_register", is_flag=True, default=False,
+    help="Sprint 796 — after minting, POST the delegation to "
+    "/api/v1/auth/wallet/bind so the daemon's binding store "
+    "records it. Closes the round-trip so the device shows up in "
+    "`prsm wallet devices list`. Without this flag, the operator "
+    "must manually POST to /bind themselves.",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL (only used with --register).",
+)
+def wallet_devices_add(
+    node_id: str, output_format: str,
+    do_register: bool, api_url_override: Optional[str],
+) -> None:
     """Mint an EIP-191 delegation authorizing a new device under
     this wallet.
 
@@ -9181,8 +9196,69 @@ def wallet_devices_add(node_id: str, output_format: str) -> None:
         "signature": signed.signature.to_0x_hex(),
     }
 
+    # Sprint 796 — optional round-trip register against the
+    # daemon's /api/v1/auth/wallet/bind so the binding shows up
+    # in `wallet devices list`. Without this flag, the operator
+    # has to manually POST the JSON themselves.
+    registration_resp: Optional[Dict[str, Any]] = None
+    if do_register:
+        import httpx as _httpx
+        url = _api_url_from_creds(api_url_override)
+        endpoint = f"{url}/api/v1/auth/wallet/bind"
+        bind_body = {
+            "wallet_address": acct.address,
+            "node_id_hex": node_id,
+            "signature": blob["signature"],
+            "issued_at": issued_at_iso,
+        }
+        try:
+            resp = _httpx.post(
+                endpoint, json=bind_body, timeout=10.0,
+            )
+        except Exception as exc:
+            # Daemon unreachable — exit 2 BUT still print the
+            # delegation so the operator can save it locally +
+            # retry the register without re-signing.
+            if output_format == "json":
+                click.echo(_json.dumps({
+                    "delegation": blob,
+                    "registration": None,
+                    "error": f"daemon unreachable: {exc}",
+                }, indent=2))
+            else:
+                console.print(_json.dumps(blob, indent=2))
+                console.print(
+                    f"[red]Daemon unreachable at {endpoint}[/red] — "
+                    f"{exc}. Delegation above is still valid — save "
+                    "it locally and retry with --register once the "
+                    "daemon is reachable."
+                )
+            raise SystemExit(2)
+        if resp.status_code != 200:
+            if output_format == "json":
+                click.echo(_json.dumps({
+                    "delegation": blob,
+                    "registration": None,
+                    "status": resp.status_code,
+                    "detail": resp.text,
+                }, indent=2))
+            else:
+                console.print(_json.dumps(blob, indent=2))
+                console.print(
+                    f"[red]Daemon registration failed "
+                    f"({resp.status_code}):[/red] {resp.text}"
+                )
+            raise SystemExit(1)
+        registration_resp = resp.json()
+
     if output_format == "json":
-        click.echo(_json.dumps(blob, indent=2))
+        if do_register:
+            click.echo(_json.dumps({
+                "delegation": blob,
+                "registration": registration_resp,
+            }, indent=2))
+        else:
+            click.echo(_json.dumps(blob, indent=2))
         return
 
     console.print(
@@ -9191,15 +9267,25 @@ def wallet_devices_add(node_id: str, output_format: str) -> None:
         f"[/cyan]:"
     )
     console.print(_json.dumps(blob, indent=2))
-    console.print(
-        "\n[dim]Deploy to the new device:[/dim]\n"
-        "  1. Save the JSON above as e.g. "
-        "[bold]~/.prsm/operator_delegation.json[/bold]\n"
-        "  2. Export [bold]PRSM_OPERATOR_DELEGATION="
-        "$(cat ~/.prsm/operator_delegation.json)[/bold]\n"
-        "  3. Restart the daemon. operator_address will now be "
-        "trusted across the network."
-    )
+    if do_register and registration_resp is not None:
+        console.print(
+            f"\n[bold green]Registered with daemon[/bold green] — "
+            f"bound at unix={registration_resp.get('bound_at_unix')}. "
+            "Run [bold]prsm wallet devices list[/bold] to confirm."
+        )
+    else:
+        console.print(
+            "\n[dim]Deploy to the new device:[/dim]\n"
+            "  1. Save the JSON above as e.g. "
+            "[bold]~/.prsm/operator_delegation.json[/bold]\n"
+            "  2. Export [bold]PRSM_OPERATOR_DELEGATION="
+            "$(cat ~/.prsm/operator_delegation.json)[/bold]\n"
+            "  3. Restart the daemon. operator_address will now be "
+            "trusted across the network.\n"
+            "  [dim]Tip:[/dim] add [bold]--register[/bold] to "
+            "auto-record this binding with the daemon so it shows "
+            "in [bold]wallet devices list[/bold]."
+        )
 
 
 @wallet_devices.command("list")
