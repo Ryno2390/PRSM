@@ -9148,6 +9148,96 @@ def wallet_devices_list(
         )
 
 
+@wallet_devices.command("earnings")
+@click.option(
+    "--wallet", "wallet_address", required=True,
+    help="Wallet address (0x-prefixed 42-char hex) to query.",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+def wallet_devices_earnings(
+    wallet_address: str, output_format: str,
+    api_url_override: Optional[str],
+) -> None:
+    """Sprint 792 — per-device FTNS earnings for this wallet.
+
+    Queries GET /api/v1/auth/wallet/devices/earnings; renders a
+    table of per-node-id credit + the roster total. Useful for
+    spotting underperforming devices.
+
+    Exit 0 on success, 1 on daemon error, 2 on unreachable.
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/api/v1/auth/wallet/devices/earnings"
+    try:
+        resp = _httpx.get(
+            endpoint,
+            params={"wallet_address": wallet_address},
+            timeout=10.0,
+        )
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False, "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]earnings query failed "
+                f"({resp.status_code}):[/red] {resp.text}"
+            )
+        raise SystemExit(1)
+    data = resp.json()
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+
+    earnings = data.get("earnings_by_node_id", {})
+    total = data.get("total_ftns", "0")
+    if not earnings:
+        console.print(
+            f"[dim]No earnings recorded for any device bound to "
+            f"{wallet_address}.[/dim]\nEither no devices are "
+            "bound (use [bold]prsm wallet devices list[/bold] to "
+            "check) or no settled receipts have been produced "
+            "yet."
+        )
+        return
+    console.print(
+        f"[bold]Per-device earnings for "
+        f"[cyan]{wallet_address}[/cyan]:[/bold]"
+    )
+    for node_id, amount in earnings.items():
+        console.print(
+            f"  • [cyan]{node_id}[/cyan]  "
+            f"[green]{amount}[/green] FTNS"
+        )
+    console.print(
+        f"[bold]Total:[/bold] [green]{total}[/green] FTNS"
+    )
+
+
 @wallet_devices.command("verify")
 @click.option(
     "--node-id", "node_id", required=True,

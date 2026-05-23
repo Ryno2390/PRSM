@@ -39,10 +39,10 @@ on top of these endpoints.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional, Protocol
+from typing import Any, Dict, Iterable, List, Optional, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -117,6 +117,33 @@ class _ZeroBalanceLookup:
         return Decimal("0")
 
 
+class ReceiptLookup(Protocol):
+    """Sprint 792 — abstract surface for "give me receipts for
+    these node_ids".
+
+    Implementations:
+      - Production: PRSMNode injects a thin adapter over
+        ``node._receipt_store`` at daemon startup.
+      - Tests: stubs return canned receipts.
+      - Default-for-dev: a no-op lookup that always returns
+        an empty list (multi-device earnings endpoint then
+        returns 0s — safe degradation when not wired).
+    """
+
+    def list_receipts_for_node_ids(
+        self, node_ids: Iterable[str],
+    ) -> List[Dict[str, Any]]: ...
+
+
+class _NoOpReceiptLookup:
+    """Default-for-dev fallback — always empty."""
+
+    def list_receipts_for_node_ids(
+        self, node_ids: Iterable[str],
+    ) -> List[Dict[str, Any]]:
+        return []
+
+
 @dataclass
 class WalletApiServices:
     """Injectable services for wallet_api routes.
@@ -130,6 +157,13 @@ class WalletApiServices:
     binding_service: WalletBindingService
     price_source: UsdPriceSource
     balance_lookup: BalanceLookup
+    # Sprint 792 — optional roster-earnings dependency. Defaults
+    # to a no-op so existing test fixtures + default_for_dev keep
+    # working; daemon production wire-up injects a real adapter
+    # backed by node._receipt_store.
+    receipt_lookup: ReceiptLookup = field(
+        default_factory=_NoOpReceiptLookup,
+    )
 
     @classmethod
     def default_for_dev(
@@ -514,6 +548,59 @@ def get_bindings(
         )
         for b in bindings
     ]
+
+
+@router.get("/devices/earnings")
+def get_devices_earnings(
+    wallet_address: str,
+    services: WalletApiServices = Depends(get_services),
+) -> Dict[str, Any]:
+    """Sprint 792 — per-device earnings for the wallet's roster.
+
+    Composes:
+      1. binding_service.get_all_by_wallet (sprint 790)
+      2. receipt_lookup.list_receipts_for_node_ids (sprint 792)
+      3. aggregate_earnings_by_node_id (sprint 791)
+
+    Returns:
+      {
+        "earnings_by_node_id": {<node_id>: "<decimal>", ...},
+        "total_ftns": "<decimal>"
+      }
+
+    Empty roster or no receipts → empty map + total="0".
+    Receipts from non-bound node_ids are filtered out (the
+    `list_receipts_for_node_ids` contract is "give me receipts
+    for THESE node_ids only" — defense in depth).
+    """
+    from prsm.economy.credit_policy import (
+        aggregate_earnings_by_node_id,
+    )
+
+    bindings = services.binding_service.get_all_by_wallet(
+        wallet_address,
+    )
+    node_ids = [b.node_id_hex for b in bindings]
+    receipts = services.receipt_lookup.list_receipts_for_node_ids(
+        node_ids,
+    )
+    # Belt-and-suspenders filter: in case the lookup returns
+    # receipts for nodes outside the roster (test stubs, buggy
+    # impls), exclude them before aggregating.
+    allowed = set(node_ids)
+    in_scope = [
+        r for r in receipts
+        if isinstance(r, dict)
+        and r.get("settler_node_id") in allowed
+    ]
+    totals = aggregate_earnings_by_node_id(in_scope)
+    total_ftns = sum(totals.values(), Decimal("0"))
+    return {
+        "earnings_by_node_id": {
+            k: str(v) for k, v in totals.items()
+        },
+        "total_ftns": str(total_ftns),
+    }
 
 
 @router.get("/balance", response_model=BalanceResponse)
