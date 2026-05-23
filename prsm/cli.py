@@ -2872,6 +2872,170 @@ def node_claim_rewards_cli(
         )
 
 
+@node.command("smoke-test")
+@click.option(
+    "--no-pool", "skip_pool", is_flag=True, default=False,
+    help="Skip the /admin/parallax/pool/snapshot probe. Useful on "
+    "single-node dev where the DHT pool is empty by design.",
+)
+@click.option(
+    "--prompt", "prompt_override", default=None,
+    help="Inference prompt override. Default: 'The capital of France is'",
+)
+@click.option(
+    "--model", "model_id", default="gpt2",
+    help="model_id for the inference call (default: gpt2)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+def node_smoke_test_cli(
+    skip_pool: bool, prompt_override: Optional[str],
+    model_id: str, output_format: str,
+    api_url_override: Optional[str],
+):
+    """Sprint 771 — automated smoke test from runbook §8.
+
+    Probes two surfaces:
+      1. GET /admin/parallax/pool/snapshot — DHT-backed pool has
+         peers (skipped with --no-pool for single-node dev).
+      2. POST /compute/inference — full signed-receipt roundtrip.
+
+    Exit codes:
+      0 — both checks passed
+      1 — daemon answered but a check failed (no peers, inference
+          error, missing settler_signature, etc.)
+      2 — daemon unreachable
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    result: Dict[str, Any] = {
+        "ok": False,
+        "pool": {"ok": None, "skipped": skip_pool},
+        "inference": {"ok": None, "signed": None},
+    }
+
+    pool_gpu_count = None
+    if not skip_pool:
+        pool_endpoint = f"{url}/admin/parallax/pool/snapshot"
+        try:
+            pr = _httpx.get(pool_endpoint, timeout=10.0)
+        except Exception as exc:
+            if output_format == "json":
+                result["pool"]["ok"] = False
+                result["pool"]["error"] = (
+                    f"daemon unreachable: {exc}"
+                )
+                click.echo(_json.dumps(result, indent=2))
+            else:
+                console.print(
+                    f"[red]Daemon unreachable at {pool_endpoint}"
+                    f"[/red] — {exc}"
+                )
+            raise SystemExit(2)
+        if pr.status_code != 200:
+            result["pool"]["ok"] = False
+            result["pool"]["status"] = pr.status_code
+            result["pool"]["detail"] = pr.text
+            if output_format == "json":
+                click.echo(_json.dumps(result, indent=2))
+            else:
+                console.print(
+                    f"[red]FAIL[/red] pool snapshot "
+                    f"({pr.status_code}): {pr.text}"
+                )
+            raise SystemExit(1)
+        pdata = pr.json()
+        pool_gpu_count = pdata.get("gpu_count", 0)
+        result["pool"]["ok"] = pool_gpu_count > 0
+        result["pool"]["gpu_count"] = pool_gpu_count
+        result["pool"]["pool_kind"] = pdata.get("pool_kind")
+        if pool_gpu_count == 0:
+            if output_format == "json":
+                click.echo(_json.dumps(result, indent=2))
+            else:
+                console.print(
+                    "[red]FAIL[/red] pool snapshot: gpu_count=0 "
+                    "(no peers in DHT pool)"
+                )
+            raise SystemExit(1)
+        if output_format == "text":
+            console.print(
+                f"[green]PASS[/green] pool snapshot: "
+                f"gpu_count={pool_gpu_count}, "
+                f"pool_kind={pdata.get('pool_kind')}"
+            )
+
+    inf_endpoint = f"{url}/compute/inference"
+    body = {
+        "prompt": prompt_override or "The capital of France is",
+        "model_id": model_id,
+        "budget_ftns": 1.0,
+        "privacy_tier": "none",
+        "content_tier": "A",
+        "max_tokens": 1,
+    }
+    try:
+        ir = _httpx.post(inf_endpoint, json=body, timeout=120.0)
+    except Exception as exc:
+        result["inference"]["ok"] = False
+        result["inference"]["error"] = (
+            f"daemon unreachable: {exc}"
+        )
+        if output_format == "json":
+            click.echo(_json.dumps(result, indent=2))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {inf_endpoint}[/red]"
+                f" — {exc}"
+            )
+        raise SystemExit(2)
+    if ir.status_code != 200:
+        result["inference"]["ok"] = False
+        result["inference"]["status"] = ir.status_code
+        result["inference"]["detail"] = ir.text
+        if output_format == "json":
+            click.echo(_json.dumps(result, indent=2))
+        else:
+            console.print(
+                f"[red]FAIL[/red] inference ({ir.status_code}): "
+                f"{ir.text}"
+            )
+        raise SystemExit(1)
+    idata = ir.json()
+    receipt = idata.get("receipt") or {}
+    sig = receipt.get("settler_signature")
+    result["inference"]["ok"] = bool(idata.get("success"))
+    result["inference"]["signed"] = bool(sig)
+    result["inference"]["output"] = idata.get("output")
+    if not sig:
+        if output_format == "json":
+            click.echo(_json.dumps(result, indent=2))
+        else:
+            console.print(
+                "[red]FAIL[/red] inference: receipt missing "
+                "settler_signature (§7 verifiable-inference "
+                "invariant violated)"
+            )
+        raise SystemExit(1)
+
+    result["ok"] = True
+    if output_format == "json":
+        click.echo(_json.dumps(result, indent=2))
+        return
+    console.print(
+        f"[green]PASS[/green] inference: signed receipt "
+        f"(settler_signature present, output={idata.get('output')!r})"
+    )
+
+
 @node.command("auto-claim")
 @click.option(
     "--format", "output_format",

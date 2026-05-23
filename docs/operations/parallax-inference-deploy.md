@@ -534,6 +534,41 @@ curl -s -m 120 -X POST http://127.0.0.1:8002/compute/inference -H "Content-Type:
 
 Expected: `success: true`, `output: " the"` (matches HF gpt2 greedy reference exactly per sprint 688), and a `receipt` with `settler_signature` + `output_hash`.
 
+### One-command smoke test (sprint 771)
+
+The two curls above are bundled into a single CLI for post-deploy
+attestation:
+
+```bash
+prsm node smoke-test
+```
+
+Output (on a healthy fleet):
+
+```
+PASS pool snapshot: gpu_count=2, pool_kind=dht-backed
+PASS inference: signed receipt (settler_signature present, output=' the')
+```
+
+Exit codes:
+- `0` — both checks passed
+- `1` — daemon answered but a check failed (no peers in DHT pool,
+  inference error, or receipt missing `settler_signature`)
+- `2` — daemon unreachable
+
+Flags:
+- `--no-pool` — skip the DHT pool snapshot probe. Use on
+  single-node dev where the pool is empty by design.
+- `--prompt "..."` — override the inference prompt (default:
+  `"The capital of France is"`)
+- `--model gpt2` — override `model_id` (default: gpt2)
+- `--format json` — emit a structured `{ok, pool, inference}`
+  payload (CI-friendly)
+
+This is the CI hook to gate a new operator into the pool: green
+exit on a fresh deploy = §7 verifiable-inference roundtrip works
+end-to-end (pool reachable + inference returns + receipt signed).
+
 ## Troubleshooting (F-class bugs surfaced during sprint 685-708 live-attests)
 
 | Symptom | Cause | Fix |
