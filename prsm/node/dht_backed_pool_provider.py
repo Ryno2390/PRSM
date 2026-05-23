@@ -146,8 +146,30 @@ def _hw_dict_to_parallax_gpu(
     device = device_map.get(gpu_api, "cpu")
 
     # Sprint 683 — optionally resolve stake via on-chain reader
+    # Sprint 788 — REQUIRE a valid operator_delegation before
+    # trusting the claimed operator_address. Pre-788 trusted the
+    # bare claim, allowing peer A to ride peer B's stake by
+    # announcing operator_address=B. Missing or invalid
+    # delegation → operator_address treated as unset → stake=0.
     stake_amount = 0
     operator_address = hw.get("operator_address", "") or ""
+    if operator_address:
+        from prsm.node.operator_delegation import (
+            verify_operator_delegation_blob,
+        )
+        delegation = hw.get("operator_delegation")
+        if not verify_operator_delegation_blob(
+            node_id=node_id,
+            operator_address=operator_address,
+            delegation=delegation,
+        ):
+            logger.debug(
+                "operator_address=%s on node %s rejected — "
+                "missing or invalid operator_delegation (sprint "
+                "788). Treating as unstaked.",
+                operator_address[:10], node_id[:8],
+            )
+            operator_address = ""
     if stake_reader is not None and operator_address:
         try:
             stake_amount = int(

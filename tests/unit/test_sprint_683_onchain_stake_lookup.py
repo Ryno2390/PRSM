@@ -137,7 +137,20 @@ def test_stake_lookup_returns_zero_on_rpc_exception(monkeypatch):
 
 def test_pool_provider_populates_stake_from_operator_address(monkeypatch):
     """End-to-end: hardware_profile carrying operator_address →
-    ParallaxGPU.stake_amount populated via stake reader."""
+    ParallaxGPU.stake_amount populated via stake reader.
+
+    Sprint 788 — the hardware_profile must ALSO include a valid
+    `operator_delegation` (EIP-191 signed by the operator's ETH
+    key) attesting that the operator authorized this node_id.
+    Without it, sprint 788 treats operator_address as untrusted.
+    """
+    from datetime import datetime, timezone
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+    from prsm.interface.onboarding.wallet_binding import (
+        build_binding_message,
+    )
+
     monkeypatch.setenv(
         "PRSM_STAKE_BOND_ADDRESS",
         "0xD4C6584BB69d1cc46B32502c57124Df12D8979Ed",
@@ -152,6 +165,23 @@ def test_pool_provider_populates_stake_from_operator_address(monkeypatch):
         def stake_amount_for(self, addr):
             return 7777 if addr else 0
 
+    # Sprint 788 — operator signs a delegation for peerA's node_id.
+    op_acct = Account.create()
+    node_id = "peerA"
+    issued_at_iso = datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ",
+    )
+    msg = build_binding_message(
+        op_acct.address, node_id, issued_at_iso,
+    )
+    signed = op_acct.sign_message(encode_defunct(text=msg))
+    delegation = {
+        "wallet_address": op_acct.address,
+        "node_id_hex": node_id,
+        "issued_at_iso": issued_at_iso,
+        "signature": signed.signature.to_0x_hex(),
+    }
+
     node = MagicMock()
     node.identity.node_id = "a" * 32
     node.discovery._local_hardware_profile = None
@@ -162,7 +192,8 @@ def test_pool_provider_populates_stake_from_operator_address(monkeypatch):
             hardware_profile={
                 "tflops_fp16": 4.6,
                 "ram_total_gb": 16.0,
-                "operator_address": "0xF7d88c943B048dAd2e5178E40DaaD545dB3311c2",
+                "operator_address": op_acct.address,
+                "operator_delegation": delegation,
             },
         ),
     }
