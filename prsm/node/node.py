@@ -4536,6 +4536,38 @@ class PRSMNode:
                     "claim disabled this session): %s", exc,
                 )
 
+        # Sprint 775 — wire PreemptionDetector into the daemon
+        # lifecycle. resolve_detector_from_env() returns None when
+        # PRSM_PREEMPTION_DETECTOR is unset (safe default for non-
+        # cloud nodes — no metadata polling, no behavior change).
+        # When set, the detector is started + globally registered
+        # so sprint-773's announce gate + sprint-774's dispatch
+        # gate read a live flag. MUST happen BEFORE _started=True
+        # so an inbound request at the boundary sees a queryable
+        # flag (not a None-detector race).
+        self._preemption_detector = None
+        try:
+            from prsm.node.preemption import (
+                resolve_detector_from_env,
+                register_detector,
+            )
+            det = resolve_detector_from_env()
+            if det is not None:
+                det.start()
+                register_detector(det)
+                self._preemption_detector = det
+                logger.info(
+                    "Sprint 775 — PreemptionDetector started "
+                    "(backend=%s, interval=%ss)",
+                    det.backend.__class__.__name__,
+                    det.poll_interval_s,
+                )
+        except Exception as exc:
+            logger.warning(
+                "PreemptionDetector wire-up failed (preemption "
+                "awareness disabled this session): %s", exc,
+            )
+
         self._started = True
         self._start_time = time.time()
         bootstrap_status = self.discovery.get_bootstrap_status() if self.discovery else {}
@@ -4923,6 +4955,25 @@ class PRSMNode:
                 logger.warning(
                     "AutoClaimWorker stop raised: %s", exc,
                 )
+
+        # Sprint 775 — stop the PreemptionDetector polling loop +
+        # clear the global registration so a process-recycle test
+        # or daemon restart doesn't see stale state. Happens BEFORE
+        # api_task cancel so a final in-flight dispatch gate
+        # decision sees a stable flag.
+        if getattr(self, "_preemption_detector", None) is not None:
+            try:
+                await self._preemption_detector.stop()
+            except Exception as exc:
+                logger.warning(
+                    "PreemptionDetector stop raised: %s", exc,
+                )
+            try:
+                from prsm.node.preemption import reset_for_testing
+                reset_for_testing()
+            except Exception:
+                pass
+            self._preemption_detector = None
 
         if self._api_task:
             self._api_task.cancel()
