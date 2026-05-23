@@ -65,6 +65,7 @@ def load_local_hardware_profile(
             )
             return None
         _merge_operator_address(data)
+        _merge_operator_delegation(data)
         return data
 
     # 2) on-disk cache
@@ -74,6 +75,7 @@ def load_local_hardware_profile(
             data = json.loads(cache_file.read_text())
             if isinstance(data, dict):
                 _merge_operator_address(data)
+                _merge_operator_delegation(data)
                 return data
             logger.warning(
                 "hardware_profile cache %s top-level is not a dict; "
@@ -108,6 +110,7 @@ def load_local_hardware_profile(
         )
 
     _merge_operator_address(data)
+    _merge_operator_delegation(data)
     return data
 
 
@@ -139,3 +142,82 @@ def _merge_operator_address(data: Dict[str, Any]) -> None:
         )
         return
     data["operator_address"] = addr
+
+
+def _merge_operator_delegation(data: Dict[str, Any]) -> None:
+    """Sprint 797 — merge the operator's EIP-191 delegation into
+    the loaded hardware_profile so peers can verify
+    operator_address (sprint 788) instead of trusting the bare
+    claim.
+
+    Resolution order (first wins):
+      1. PRSM_OPERATOR_DELEGATION env (raw JSON string)
+      2. PRSM_OPERATOR_DELEGATION_FILE env (path to JSON)
+      3. ~/.prsm/operator_delegation.json (default location;
+         matches the `wallet devices add --write` default).
+
+    Malformed JSON / missing file / read failure → skip silently
+    (warn at debug level). The peer-verify side (sprint 788)
+    then treats this node as effectively unstaked, which is the
+    fail-safe behavior — no peer is BROKEN by a missing
+    delegation, they just lose stake-tier privilege.
+    """
+    blob: Optional[Dict[str, Any]] = None
+
+    # 1) Env raw JSON
+    raw = os.environ.get("PRSM_OPERATOR_DELEGATION") or ""
+    raw = raw.strip()
+    if raw:
+        try:
+            blob = json.loads(raw)
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning(
+                "PRSM_OPERATOR_DELEGATION env is not valid JSON; "
+                "peer will not advertise operator_delegation (peers "
+                "will reject operator_address claim): %s", exc,
+            )
+            return
+
+    # 2) Env file path
+    if blob is None:
+        file_path = (os.environ.get(
+            "PRSM_OPERATOR_DELEGATION_FILE",
+        ) or "").strip()
+        if file_path:
+            try:
+                from pathlib import Path
+                blob = json.loads(Path(file_path).read_text())
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.debug(
+                    "PRSM_OPERATOR_DELEGATION_FILE=%s unreadable "
+                    "(%s); skipping.", file_path, exc,
+                )
+                return
+
+    # 3) Default path ~/.prsm/operator_delegation.json
+    if blob is None:
+        try:
+            from pathlib import Path
+            default_path = (
+                Path.home() / ".prsm" / "operator_delegation.json"
+            )
+            if default_path.exists():
+                blob = json.loads(default_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.debug(
+                "default operator_delegation.json read failed "
+                "(%s); skipping.", exc,
+            )
+            return
+
+    if blob is None:
+        return
+
+    if not isinstance(blob, dict):
+        logger.warning(
+            "operator_delegation source did not yield a JSON "
+            "object; skipping."
+        )
+        return
+
+    data["operator_delegation"] = blob

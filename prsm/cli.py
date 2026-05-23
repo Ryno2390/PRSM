@@ -9136,12 +9136,26 @@ def wallet_devices() -> None:
     "must manually POST to /bind themselves.",
 )
 @click.option(
+    "--write", "do_write", is_flag=True, default=False,
+    help="Sprint 797 — write the delegation JSON to "
+    "~/.prsm/operator_delegation.json (the daemon's default "
+    "lookup path). chmod 600 since the file is a signing "
+    "artifact. Use --write-path to override the destination.",
+)
+@click.option(
+    "--write-path", "write_path", default=None,
+    help="Override the destination for --write (otherwise "
+    "~/.prsm/operator_delegation.json).",
+)
+@click.option(
     "--api-url", "api_url_override", default=None,
     help="Override daemon URL (only used with --register).",
 )
 def wallet_devices_add(
     node_id: str, output_format: str,
-    do_register: bool, api_url_override: Optional[str],
+    do_register: bool, do_write: bool,
+    write_path: Optional[str],
+    api_url_override: Optional[str],
 ) -> None:
     """Mint an EIP-191 delegation authorizing a new device under
     this wallet.
@@ -9195,6 +9209,40 @@ def wallet_devices_add(
         "issued_at_iso": issued_at_iso,
         "signature": signed.signature.to_0x_hex(),
     }
+
+    # Sprint 797 — optionally persist the blob to a file so the
+    # daemon's _merge_operator_delegation picks it up
+    # automatically on next start. --write uses
+    # ~/.prsm/operator_delegation.json (the daemon's default);
+    # --write-path overrides.
+    written_path: Optional[str] = None
+    if do_write or write_path is not None:
+        from pathlib import Path as _Path
+        if write_path is not None:
+            resolved = _Path(write_path)
+        else:
+            resolved = (
+                _Path.home() / ".prsm" / "operator_delegation.json"
+            )
+        try:
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            resolved.write_text(_json.dumps(blob, indent=2))
+            # chmod 600 — this is a signing artifact, even though
+            # the message has already been signed (a leaked file
+            # could be replayed by a future-dated reader, and
+            # leaks reveal the operator's node_id ↔ wallet binding
+            # to anyone reading the disk).
+            try:
+                resolved.chmod(0o600)
+            except OSError:
+                pass  # Windows / non-posix: skip
+            written_path = str(resolved)
+        except OSError as exc:
+            console.print(
+                f"[red]Failed to write delegation to "
+                f"{resolved}:[/red] {exc}"
+            )
+            raise SystemExit(2)
 
     # Sprint 796 — optional round-trip register against the
     # daemon's /api/v1/auth/wallet/bind so the binding shows up
