@@ -1012,12 +1012,50 @@ class PeerDiscovery:
     # ── Background loops ─────────────────────────────────────────
 
     async def _announce_loop(self) -> None:
+        # Sprint 758 — graceful state-transition handling. Without
+        # this, when an operator's active-window resumes at 22:00,
+        # the node would wait up to `announce_interval` (default
+        # 60s) before broadcasting again. Operators see "I set
+        # my schedule to start at 22:00 but the node didn't appear
+        # in the pool until 22:00:45". Fix: poll on a tighter
+        # cadence + detect inactive→active transition + force an
+        # immediate announce.
+        #
+        # Poll interval: min(announce_interval, 10s). Operators
+        # with very long announce_interval still get a 10s-ish
+        # detection latency; operators with short intervals see
+        # no behavior change.
+        from prsm.node.schedule import is_currently_active
+        was_active = is_currently_active()
+        poll_interval = min(self.announce_interval, 10.0)
+        elapsed_since_announce = 0.0
         while self._running:
-            await asyncio.sleep(self.announce_interval)
+            await asyncio.sleep(poll_interval)
+            elapsed_since_announce += poll_interval
+            now_active = is_currently_active()
+            transition_to_active = now_active and not was_active
+            was_active = now_active
+            # Three triggers for announce: (1) regular interval
+            # elapsed, (2) transition from inactive → active
+            # (immediate re-announce so peers re-add us), (3) we
+            # ARE active (announce_self() skips internally if
+            # somehow inactive — defensive idempotency).
+            should_announce = (
+                elapsed_since_announce >= self.announce_interval
+                or transition_to_active
+            )
+            if not should_announce:
+                continue
+            if transition_to_active:
+                logger.info(
+                    "Sprint 758 — active window resumed; "
+                    "forcing immediate announce."
+                )
             try:
                 await self.announce_self()
             except Exception as e:
                 logger.error(f"Announce error: {e}")
+            elapsed_since_announce = 0.0
 
     async def _maintenance_loop(self) -> None:
         while self._running:
