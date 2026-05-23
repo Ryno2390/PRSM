@@ -724,6 +724,55 @@ def register_auto_claim_status_endpoint(app: Any, node: Any) -> None:
         }
 
 
+def register_preemption_status_endpoint(app: Any, node: Any) -> None:
+    """Sprint 776 — /admin/preemption/status.
+
+    Surfaces sprint-775's PreemptionDetector state for operator
+    observability:
+      - enabled: detector wired
+      - backend: aws | gcp (which metadata endpoint we're polling)
+      - preempted: flag state (True = cloud signaled termination)
+      - poll_interval_seconds: cadence configured
+
+    Status codes:
+      200 — detector wired; payload returned
+      503 — no detector on this daemon (PRSM_PREEMPTION_DETECTOR
+            unset OR construction failed at start)
+
+    Loopback-gated by the sprint-734 admin middleware
+    (`/admin/*` path prefix). Inherits F65-F73 defenses.
+    """
+    from fastapi import HTTPException
+
+    @app.get("/admin/preemption/status", tags=["admin"])
+    async def preemption_status() -> Dict[str, Any]:
+        det = getattr(node, "_preemption_detector", None)
+        if det is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "PreemptionDetector not wired on this daemon. "
+                    "Set PRSM_PREEMPTION_DETECTOR=aws|gcp in the "
+                    "systemd unit (or env) + restart. Safe default "
+                    "for non-cloud nodes is unset."
+                ),
+            )
+        backend_cls = det.backend.__class__.__name__
+        # Map class name → short backend tag ("AWSPreemptionBackend" → "aws")
+        if "AWS" in backend_cls:
+            backend = "aws"
+        elif "GCP" in backend_cls:
+            backend = "gcp"
+        else:
+            backend = backend_cls.lower()
+        return {
+            "enabled": True,
+            "backend": backend,
+            "preempted": bool(det.is_preempted()),
+            "poll_interval_seconds": float(det.poll_interval_s),
+        }
+
+
 def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     """
     Create the node management FastAPI app with a reference to the running node.
@@ -15809,6 +15858,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     # (F30 lesson from sprint 685 — catch-all mount swallows any
     # admin endpoint registered after it).
     register_auto_claim_status_endpoint(app, node)
+    register_preemption_status_endpoint(app, node)
 
     try:
         from prsm.dashboard.app import create_dashboard_app as _create_dash_app

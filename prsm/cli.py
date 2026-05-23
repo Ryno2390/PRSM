@@ -2876,6 +2876,87 @@ def node_claim_rewards_cli(
         )
 
 
+@node.command("preemption-status")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+def node_preemption_status_cli(
+    output_format: str,
+    api_url_override: Optional[str],
+):
+    """Sprint 776 — show cloud-spot preemption detector status.
+
+    Reports whether the daemon's PreemptionDetector is wired,
+    what backend (aws/gcp), and whether a preemption signal has
+    been received.
+
+    Returns 503 when the detector is not configured (env unset
+    or construction failed at startup).
+
+    Exit codes:
+      0 — detector wired; status returned
+      1 — daemon answered but detector not configured (503)
+      2 — daemon unreachable
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/admin/preemption/status"
+    try:
+        resp = _httpx.get(endpoint, timeout=10.0)
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[yellow]PreemptionDetector not configured "
+                f"({resp.status_code}).[/yellow] "
+                f"Set [bold]PRSM_PREEMPTION_DETECTOR=aws|gcp[/bold] "
+                f"in your systemd unit and restart to enable. "
+                f"Detail: {resp.text}"
+            )
+        raise SystemExit(1)
+    data = resp.json()
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+    preempted = data.get("preempted", False)
+    backend = data.get("backend", "?")
+    interval = data.get("poll_interval_seconds", "?")
+    flag_render = (
+        "[red]SIGNALED — node is draining[/red]"
+        if preempted
+        else "[green]clear (no preemption)[/green]"
+    )
+    console.print(
+        f"[bold]Preemption detector:[/bold] backend=[cyan]{backend}"
+        f"[/cyan], poll_interval={interval}s"
+    )
+    console.print(f"  Status: {flag_render}")
+
+
 @node.command("smoke-test")
 @click.option(
     "--no-pool", "skip_pool", is_flag=True, default=False,
