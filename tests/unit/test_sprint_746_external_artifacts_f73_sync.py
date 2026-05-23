@@ -76,23 +76,22 @@ def test_security_md_documents_http_body_size_f70():
 
 
 def test_audit_doc_exec_summary_mentions_admin_auth_arc():
-    """Audit-doc exec summary names the F65-F73 admin-auth arc
-    so an external auditor sees both the wire-protocol hardening
-    AND the HTTP-surface hardening from a 30-second skim."""
+    """Audit-doc exec summary names the F65-F80 admin-auth arc
+    (widened from F73 → F80 in sprint 754)."""
     summary_start = _audit_text().find("## 1. Executive summary")
     summary_end = _audit_text().find("## 2.")
     summary = _audit_text()[summary_start:summary_end]
-    assert "F65-F73" in summary or (
-        "F65" in summary and "F73" in summary
+    assert "F65-F80" in summary or (
+        "F65" in summary and "F80" in summary
     )
 
 
-def test_audit_doc_exec_summary_cites_sprint_745_endpoint():
-    """The 35-sprint arc range (711-745) should be visible in
+def test_audit_doc_exec_summary_cites_sprint_753_endpoint():
+    """The 43-sprint arc range (711-753) should be visible in
     the exec summary so the breadth is concrete."""
     summary_start = _audit_text().find("## 1. Executive summary")
     summary_end = _audit_text().find("## 2.")
     summary = _audit_text()[summary_start:summary_end]
-    assert "711-745" in summary or (
-        "711" in summary and "745" in summary
+    assert "711-753" in summary or (
+        "711" in summary and "753" in summary
     )

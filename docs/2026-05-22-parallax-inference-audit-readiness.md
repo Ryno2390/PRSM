@@ -39,11 +39,12 @@ It is NOT marketing. Every operational claim cites:
   (`prsm node parallax-readiness`) with non-zero exit on missing or
   invalid values, suitable for CI gating. (Sprint 696)
 
-**Wire-protocol + admin-auth hardening (sprints 711-745, 35-
+**Wire-protocol + admin-auth hardening (sprints 711-753, 43-
 sprint arc):** the remote token-stream + unary chain-executor RPC +
-HTTP admin surface have been audited end-to-end, closing **43
-F-class production-blockers (F30 through F73)** with corresponding
-pin tests + 5 integration tests on real `WebSocketTransport`.
+HTTP admin + HTTP reconnaissance surfaces have been audited end-
+to-end, closing **50 F-class production-blockers (F30 through F80)**
+with corresponding pin tests + 5 integration tests on real
+`WebSocketTransport`.
 
 Streaming + unary wire paths have parity defense on collision
 (F52/F57), payload size DoS (F55/F58), per-peer concurrency cap
@@ -61,16 +62,29 @@ binding `msg.sender_id` to the handshake-authenticated
 a peered third party could spoof sender_id to bypass per-peer
 caps OR forge responses.
 
-**F65-F73 (sprints 734-745)** close the HTTP admin surface +
-reconnaissance vectors: pre-fix every `/admin/*` endpoint was
+**F65-F80 (sprints 734-753)** close the HTTP admin surface +
+reconnaissance vectors. Pre-fix every `/admin/*` endpoint was
 unauthenticated (tags=["admin"] was a swagger grouping, not
-access control). Now defended across 5 deployment patterns ×
-multiple loopback representations + DNS-rebinding via Origin
-check (F71) + per-requester rate limit correctness (F69) + HTTP
-body-size DoS (F70) + /docs+/openapi.json hidden by default
-(F72 closes the reconnaissance vector) + /metrics gated (F73
-closes the financial-intel + connection-state leak). 41/41 pin
-tests across the F65-F73 arc.
+access control), and an additional **17 endpoint groups** —
+`/metrics`, `/info`, `/health/detailed`, `/status`,
+`/rings/status`, `/peers`, `/balance`, `/bootstrap/status`,
+`/transactions`, `/staking/status`, `/settlement/{stats,pending,
+history}`, `/balance/onchain`, `/audit/{summary,recent}`,
+`/ledger/sync/stats`, `/agents/spending`, `/privacy/budget` —
+were leaking financial, network-topology, software-version, and
+operational-intel reconnaissance data to any HTTP client.
+
+Now defended across 5 deployment patterns × multiple loopback
+representations + DNS-rebinding via Origin check (F71) + per-
+requester rate limit correctness (F69) + HTTP body-size DoS
+(F70). Per-recon-endpoint coverage in F72-F80. The single most-
+sensitive value in the daemon — the operator's literal FTNS
+balance + transaction history with counterparties — was
+publicly readable pre-F77.
+
+`/health` (minimal) and `/agents` (bare list) intentionally
+preserved as public (load-balancer probes + marketplace
+service-discovery). 82/82 pin tests across the F65-F80 arc.
 
 **What is honestly NOT closed yet** (Section 7):
 

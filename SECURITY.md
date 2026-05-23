@@ -162,10 +162,10 @@ Pending external layers (per `audits/AUDIT_PLAN.md` §6 Gate B):
 - **L8** — legal / regulatory review
 - **L9** — public bug bounty (post-L4)
 
-## Recent hardening — wire-protocol audit arc (2026-05-22)
+## Recent hardening — wire-protocol audit arc (2026-05-22 to 2026-05-23)
 
-Between sprints 711 and 745, an iterative audit closed **43
-F-class production-blockers (F30 through F73)** across multiple
+Between sprints 711 and 753, an iterative audit closed **50
+F-class production-blockers (F30 through F80)** across multiple
 audit dimensions. Detailed write-up + per-fix evidence in
 [`docs/2026-05-22-parallax-inference-audit-readiness.md`](docs/2026-05-22-parallax-inference-audit-readiness.md).
 
@@ -202,7 +202,9 @@ FTNS transfers, `compute_provider`, `storage_provider`,
 `content_provider`, `agent_registry` — now sees the handshake-
 authenticated peer identity.
 
-### Admin auth + reconnaissance defense (F65-F73) — 9 fixes
+### Admin auth + reconnaissance defense (F65-F80) — 16 fixes
+
+**Deployment-pattern defenses (F65-F71)**:
 
 - **F65** — `/admin/*` was unauthenticated (`tags=["admin"]` was
   a swagger grouping, not access control). Middleware now
@@ -223,28 +225,54 @@ authenticated peer identity.
   `PRSM_HTTP_MAX_BODY_BYTES` default 1 MiB.
 - **F71** — DNS-rebinding defense. Browsers always set the
   `Origin` header on cross-origin requests; CLI tools don't.
-  Middleware rejects `/admin/*` requests with `Origin` set,
-  blocking the canonical loopback-as-auth attack against
-  locally-bound services.
-- **F72** — `/docs` + `/openapi.json` hidden by default. Pre-fix
-  any HTTP client could fetch the complete API surface map,
-  giving attackers a roadmap. `PRSM_API_DOCS_ENABLED=1` opt-in.
-- **F73** — `/metrics` (Prometheus exposition) now gated by the
-  same loopback rules. Pre-fix it leaked `prsm_total_locked_ftns`
-  (financial intelligence), peer connection counts, subsystem
-  counters — all reconnaissance-grade.
+  Middleware rejects gated requests with `Origin` set, blocking
+  the canonical loopback-as-auth attack against locally-bound
+  services.
+
+**Reconnaissance-endpoint defenses (F72-F80)** — 17 endpoint
+groups now loopback-gated:
+
+- **F72** — `/docs` + `/openapi.json` hidden by default. Complete
+  API surface map. `PRSM_API_DOCS_ENABLED=1` opt-in.
+- **F73** — `/metrics` (Prometheus). Leaked `prsm_total_locked_ftns`
+  (financial), peer counts, subsystem counters.
+- **F74** — `/info` + `/health/detailed`. Leaked operator's
+  on-chain EOA, node_id, wired contract addresses, software
+  version (CVE-matching surface), per-subsystem state.
+- **F75** — `/status` + `/rings/status`. The largest single leak:
+  operator's literal `ftns_balance` + 13+ subsystem provider
+  stats + bootstrap telemetry.
+- **F76** — `/peers`. Complete network topology: peer_ids +
+  IP:port + connected_at + last_seen.
+- **F77** — `/balance` + `/bootstrap/status`. The worst recon
+  leak: operator's balance PLUS last 20 transactions with
+  counterparty wallet_ids + amounts + timestamps. Complete
+  financial profile.
+- **F78** — `/transactions` (200-tx history) + `/staking/status`
+  (stake position + unstake-unlock timing) + `/settlement/*`
+  (counts + amounts + schedules).
+- **F79** — `/balance/onchain` + `/audit/summary` + `/audit/recent`
+  + `/ledger/sync/stats`. Access-log + sync-state recon vectors.
+- **F80** — `/agents/spending` + `/privacy/budget`. Per-agent
+  FTNS spend + DP epsilon usage patterns. `/agents` (bare list)
+  intentionally preserved as marketplace service-discovery.
 
 **Operator-facing consequences** are documented in
 [`docs/operations/parallax-inference-deploy.md`](docs/operations/parallax-inference-deploy.md).
-**Existing operators upgrading past sprint 734 should expect
-`/admin/*` AND `/metrics` to default-deny non-loopback access** —
-set `PRSM_ADMIN_REMOTE_ALLOWED=1` AND add a real auth layer
-(reverse-proxy auth, VPN) if remote access is required.
+**Existing operators upgrading past sprint 734 should expect ALL
+of `/admin/*`, `/metrics`, `/info`, `/status`, `/peers`,
+`/balance`, `/transactions`, `/staking/status`, `/settlement/*`,
+`/audit/*`, `/ledger/sync/stats`, and others to default-deny
+non-loopback access** — set `PRSM_ADMIN_REMOTE_ALLOWED=1` AND
+add a real auth layer (reverse-proxy auth, VPN) if remote
+access is required.
 
-41/41 pin tests across the F65-F73 admin-auth + reconnaissance
+82/82 pin tests across the F65-F80 admin-auth + reconnaissance
 arc. Per-deployment-pattern coverage: direct-network, XFF-
 forwarding proxy, X-Real-IP-forwarding proxy, IPv4-mapped IPv6
-+ 127/8, DNS rebinding via Origin.
++ 127/8, DNS rebinding via Origin. Minimal `/health` and
+`/agents` intentionally preserved as public (LB probe + service
+discovery).
 
 ## Supported versions
 
