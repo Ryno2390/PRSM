@@ -937,7 +937,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # - /settlement/stats + /pending + /history: settlement
         #   counts/amounts/schedules. Same financial-intel class.
         #
-        # Sprint 752 F79 — final recon-class endpoints:
+        # Sprint 752 F79 — more recon-class endpoints:
         # - /balance/onchain (no address arg): operator's on-chain
         #   FTNS balance. Same financial-value concern as F77.
         # - /audit/summary + /audit/recent: HTTP access log
@@ -945,6 +945,20 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         #   patterns, error rates, load intel — DoS reconnaissance.
         # - /ledger/sync/stats: ledger sync state with peer
         #   counts + last_sync timestamps. Network intel.
+        #
+        # Sprint 753 F80 — financial + privacy recon endpoints:
+        # - /agents/spending: per-agent FTNS spend totals. Financial.
+        # - /privacy/budget: differential-privacy budget audit
+        #   report. Reveals usage patterns + remaining privacy
+        #   budget (attacker can time queries to exhaust budget,
+        #   or learn which queries the operator has run by inferring
+        #   from epsilon spend trajectory).
+        #
+        # NOTE: /agents (bare list of services this node offers) is
+        # INTENTIONALLY NOT gated — PRSM's marketplace model treats
+        # agent listings as service-discovery surface. Operators
+        # publishing services WANT them discoverable. Same posture
+        # as /health (minimal) — public by design.
         _GATED_PATHS = (
             "/metrics", "/info", "/health/detailed",
             "/status", "/rings/status", "/peers",
@@ -954,6 +968,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "/settlement/history",
             "/balance/onchain", "/audit/summary",
             "/audit/recent", "/ledger/sync/stats",
+            "/agents/spending", "/privacy/budget",
         )
         if not (
             path.startswith("/admin/") or path in _GATED_PATHS
