@@ -130,6 +130,12 @@ class ChainExecutionResult:
     epsilon_spent: float
     activation_noise_trace: Optional[Any] = None
     topology_assignment: Optional[Any] = None
+    # Sprint 778 — partial-completion marker (Vision §4.5). Set by
+    # preemption-aware chain executors when the inference runner
+    # stops mid-stream (sprint-772 detector flag flipped, timeout,
+    # or runtime error). None by default; pre-778 executors that
+    # don't populate it produce byte-identical signed receipts.
+    partial_completion: Optional[Any] = None
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -978,6 +984,15 @@ class ParallaxScheduledExecutor(InferenceExecutor):
             ),
             topology_assignment=getattr(
                 outcome, "topology_assignment", None,
+            ),
+            # Sprint 778 — thread partial-completion marker into
+            # the signed receipt. Same defensive-getattr pattern
+            # as sprint 413 for activation_noise_trace +
+            # topology_assignment: legacy ChainExecutor implementers
+            # without the field get None → byte-identical pre-778
+            # signing payload.
+            partial_completion=getattr(
+                outcome, "partial_completion", None,
             ),
         )
         return sign_receipt(unsigned, self._identity)
