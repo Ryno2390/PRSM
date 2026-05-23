@@ -2669,6 +2669,115 @@ def parallax_readiness_cli(output_format: str):
 # ── Sprint 722 — stream observability ────────────────────────────
 
 
+@node.command("schedule")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_schedule_cli(output_format: str):
+    """Sprint 755-756 — show the operator's active-window schedule.
+
+    The daemon reads `PRSM_ACTIVE_HOURS` (e.g., '22:00-08:00') +
+    optional `PRSM_ACTIVE_TIMEZONE` (default UTC). Outside the
+    window, the daemon refuses inference dispatch (503) AND skips
+    discovery announces (peers evict from routing pool).
+
+    This CLI reads the same env and reports:
+      - The configured window (or "always-active" if env unset)
+      - Whether we're currently inside the window
+      - The current time in the schedule's timezone (for sanity)
+
+    Read-only. To change the schedule, edit your systemd unit's
+    `Environment=PRSM_ACTIVE_HOURS=...` line and restart the
+    daemon. File-based config can be added in a follow-up sprint
+    if operators ask for an interactive set/clear CLI.
+    """
+    import json as _json
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from prsm.node.schedule import (
+        resolve_active_window_from_env,
+    )
+
+    try:
+        window = resolve_active_window_from_env()
+    except ValueError as exc:
+        # Malformed env at startup-equivalent — surface the same
+        # error the daemon would crash with.
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "configured": False,
+                "error": str(exc),
+            }))
+            raise SystemExit(1)
+        console.print(f"[red]Schedule config error:[/red] {exc}")
+        console.print(
+            "[yellow]Fix PRSM_ACTIVE_HOURS in your systemd unit, "
+            "then restart the daemon.[/yellow]"
+        )
+        raise SystemExit(1)
+
+    if window is None:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "configured": False,
+                "mode": "always-active",
+                "is_currently_active": True,
+            }))
+            return
+        console.print("[bold]Schedule:[/bold] [green]always-active[/green]")
+        console.print(
+            "[dim]PRSM_ACTIVE_HOURS not set. Daemon serves the "
+            "network 24/7. To opt-out during specific hours, set "
+            "PRSM_ACTIVE_HOURS in your systemd unit (e.g., "
+            "'22:00-08:00' for overnight only).[/dim]"
+        )
+        return
+
+    tz = ZoneInfo(window.tz_name)
+    now = datetime.now(tz)
+    is_active = window.is_active(now)
+
+    if output_format == "json":
+        click.echo(_json.dumps({
+            "configured": True,
+            "window": window.render(),
+            "start": window.start.strftime("%H:%M"),
+            "end": window.end.strftime("%H:%M"),
+            "timezone": window.tz_name,
+            "now_local": now.strftime("%H:%M:%S %Z"),
+            "is_currently_active": is_active,
+        }, indent=2))
+        return
+
+    # Rich text output
+    color = "green" if is_active else "yellow"
+    status_label = "ACTIVE" if is_active else "INACTIVE"
+    console.print(
+        f"[bold]Schedule:[/bold] [{color}]{window.render()}[/{color}]"
+    )
+    console.print(
+        f"[bold]Now ({window.tz_name}):[/bold] "
+        f"{now.strftime('%H:%M:%S')}"
+    )
+    console.print(
+        f"[bold]Status:[/bold] [{color}]{status_label}[/{color}]"
+    )
+    if is_active:
+        console.print(
+            "[dim]Daemon is serving the network. Inference "
+            "dispatch + discovery announces are active.[/dim]"
+        )
+    else:
+        console.print(
+            "[dim]Daemon is OUTSIDE its active window. Inference "
+            "requests return 503 with Retry-After: 60. Discovery "
+            "announces are skipped — peers will evict this node "
+            "from their routing pool within ~60s.[/dim]"
+        )
+
+
 @node.command("streams")
 @click.option(
     "--format", "output_format",
