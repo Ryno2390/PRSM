@@ -9063,6 +9063,91 @@ def wallet_devices_add(node_id: str, output_format: str) -> None:
     )
 
 
+@wallet_devices.command("list")
+@click.option(
+    "--wallet", "wallet_address", required=True,
+    help="Wallet address (0x-prefixed 42-char hex) to list devices for.",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL (default: localhost:8000)",
+)
+def wallet_devices_list(
+    wallet_address: str, output_format: str,
+    api_url_override: Optional[str],
+) -> None:
+    """List all node_ids bound to this wallet (multi-device roster).
+
+    Sprint 790 — queries the daemon's
+    GET /api/v1/auth/wallet/bindings endpoint and renders one
+    row per binding. Exit 0 on success, 2 on daemon-unreachable.
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/api/v1/auth/wallet/bindings"
+    try:
+        resp = _httpx.get(
+            endpoint,
+            params={"wallet_address": wallet_address},
+            timeout=10.0,
+        )
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]bindings query failed "
+                f"({resp.status_code}):[/red] {resp.text}"
+            )
+        raise SystemExit(1)
+    bindings = resp.json()
+
+    if output_format == "json":
+        click.echo(_json.dumps(bindings, indent=2))
+        return
+
+    if not bindings:
+        console.print(
+            f"[dim]No devices bound to wallet {wallet_address}.[/dim]\n"
+            "Use [bold]prsm wallet devices add --node-id <hex>[/bold] "
+            "to mint a delegation for a device, then POST it to the "
+            "daemon's /api/v1/auth/wallet/bind endpoint."
+        )
+        return
+
+    console.print(
+        f"[bold]{len(bindings)} device(s) bound to "
+        f"[cyan]{wallet_address}[/cyan]:[/bold]"
+    )
+    for b in bindings:
+        console.print(
+            f"  • [cyan]{b['node_id_hex']}[/cyan]  "
+            f"[dim](bound at unix={b['bound_at_unix']})[/dim]"
+        )
+
+
 @wallet_devices.command("verify")
 @click.option(
     "--node-id", "node_id", required=True,

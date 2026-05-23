@@ -471,7 +471,13 @@ def get_binding(
     """Look up an existing binding by wallet address. Returns null if
     no binding exists. Used for returning-user re-login flows where
     the frontend wants to skip /siwe/verify if the wallet is already
-    known."""
+    known.
+
+    Sprint 786 — wallet→node is now 1:N. This endpoint returns the
+    FIRST (oldest) binding for back-compat. Multi-device operators
+    should use ``/bindings`` (sprint 790) which returns the full
+    list.
+    """
     binding = services.binding_service.get_by_wallet(wallet_address)
     if binding is None:
         return None
@@ -481,6 +487,33 @@ def get_binding(
         bound_at_unix=binding.bound_at_unix,
         signing_message_hash=binding.signing_message_hash,
     )
+
+
+@router.get("/bindings", response_model=list[WalletBindResponse])
+def get_bindings(
+    wallet_address: str,
+    services: WalletApiServices = Depends(get_services),
+) -> list[WalletBindResponse]:
+    """Sprint 790 — list ALL bindings for a wallet (multi-device).
+
+    Returns the bindings in oldest-first order by bound_at_unix.
+    Empty list when the wallet has no bindings.
+
+    Consumed by `prsm wallet devices list` so operators can audit
+    their device roster from the command line.
+    """
+    bindings = services.binding_service.get_all_by_wallet(
+        wallet_address,
+    )
+    return [
+        WalletBindResponse(
+            wallet_address=b.wallet_address,
+            node_id_hex=b.node_id_hex,
+            bound_at_unix=b.bound_at_unix,
+            signing_message_hash=b.signing_message_hash,
+        )
+        for b in bindings
+    ]
 
 
 @router.get("/balance", response_model=BalanceResponse)
