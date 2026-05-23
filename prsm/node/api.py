@@ -539,6 +539,37 @@ def _check_active_window_or_503() -> None:
     )
 
 
+def _check_not_preempted_or_503() -> None:
+    """Sprint 774 — gate inference dispatch on the cloud-spot
+    preemption flag. If sprint-772's PreemptionDetector has been
+    signaled, raise 503 so peers stop routing new work here while
+    in-flight requests drain inside the ~2min preemption warning
+    window.
+
+    Backward-compat: detector unset → always returns (no behavior
+    change for non-cloud nodes).
+
+    Returns None on accept. Raises HTTPException(503) on reject.
+    """
+    from prsm.node.preemption import is_currently_preempted
+    if not is_currently_preempted():
+        return
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "Node has received a cloud-spot preemption notice "
+            "and is draining in-flight work. New requests will "
+            "succeed once this node exits and a sibling daemon "
+            "picks up the route."
+        ),
+        # Cloud-spot preemption notices give ~2min warning. By the
+        # time the client retries in 120s, this node is gone +
+        # peers have routed past it. Retry-After is the operator-
+        # facing hint.
+        headers={"Retry-After": "120"},
+    )
+
+
 def _resolve_requester_key(request: Any) -> str:
     """Sprint 741 F69 — resolve a per-requester rate-limit bucket
     key from an HTTP request. Proxy-aware: prefers X-Forwarded-For
@@ -4716,6 +4747,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         # Sprint 756 — active-window gate (same as /compute/inference).
         _check_active_window_or_503()
+        # Sprint 774 — preemption gate (same as /compute/inference).
+        _check_not_preempted_or_503()
         # PRSM_FORGE_MAX_RPS_PER_REQUESTER rate limiting (DoS
         # protection). Default unset → no limiting. Per-requester
         # token bucket. Named "forge" so /compute/inference's bucket
@@ -6260,6 +6293,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # check so we don't even count the request against the
         # operator's bucket if the daemon shouldn't be serving.
         _check_active_window_or_503()
+        # Sprint 774 — preemption gate: refuse new work when this
+        # cloud-spot node has been signaled for termination so peers
+        # route past us during the ~2min warning window.
+        _check_not_preempted_or_503()
         # PRSM_INFERENCE_MAX_RPS_PER_REQUESTER rate limiting (DoS
         # protection). Independent bucket from /compute/forge so
         # operators can tune the two endpoints separately.
@@ -6761,6 +6798,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """
         # Sprint 756 — active-window gate (same as /compute/inference).
         _check_active_window_or_503()
+        # Sprint 774 — preemption gate (same as /compute/inference).
+        _check_not_preempted_or_503()
         # PRSM_INFERENCE_MAX_RPS_PER_REQUESTER rate limiting (DoS).
         # SHARES the "inference" bucket with /compute/inference so a
         # requester's combined RPS across both endpoints is capped
