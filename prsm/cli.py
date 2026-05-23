@@ -8955,6 +8955,175 @@ def wallet_claim(network_name: str):
 
 
 # ---------------------------------------------------------------------------
+# Sprint 789 — `prsm wallet devices` subgroup (multi-device arc).
+#
+# Manages the operator's device roster from the command line.
+# `add` mints an EIP-191 delegation; `verify` checks one. The
+# `list` command will land once the daemon exposes a binding-list
+# HTTP endpoint (sprint 790+).
+# ---------------------------------------------------------------------------
+
+
+@wallet.group("devices")
+def wallet_devices() -> None:
+    """Manage your operator-account device roster (sprint 789).
+
+    Multi-device operators run multiple daemons under one ETH
+    wallet. Each device needs an EIP-191 delegation signed by the
+    operator's ETH key — the delegation goes into the new device's
+    `PRSM_OPERATOR_DELEGATION` env / file and proves to the network
+    that this node_id is authorized under the wallet.
+    """
+
+
+@wallet_devices.command("add")
+@click.option(
+    "--node-id", "node_id", required=True,
+    help="Ed25519 node_id (32-char hex) of the new device. Get this "
+    "from the device's identity.json or `prsm node info`.",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format. json prints just the delegation blob; "
+    "text adds operator-facing deployment guidance.",
+)
+def wallet_devices_add(node_id: str, output_format: str) -> None:
+    """Mint an EIP-191 delegation authorizing a new device under
+    this wallet.
+
+    Reads PRIVATE_KEY from env. Builds the canonical sprint-786
+    binding message for (wallet, node_id, now-ISO), EIP-191-signs
+    it, and emits the delegation blob.
+
+    Copy the JSON output to the new device's
+    `PRSM_OPERATOR_DELEGATION` env or file. Sprint 788's
+    verify_operator_delegation_blob will then accept the device's
+    operator_address claim across the network.
+    """
+    import os as _os
+    import json as _json
+    from datetime import datetime as _dt, timezone as _tz
+
+    pk = (_os.environ.get("PRIVATE_KEY") or "").strip()
+    if not pk:
+        console.print(
+            "[red]PRIVATE_KEY env unset.[/red] Export your "
+            "operator wallet's private key + retry:\n"
+            "  [bold]export PRIVATE_KEY=0x...[/bold]"
+        )
+        raise SystemExit(2)
+
+    try:
+        from eth_account import Account
+        from eth_account.messages import encode_defunct
+        from prsm.interface.onboarding.wallet_binding import (
+            build_binding_message,
+        )
+    except ImportError as exc:
+        console.print(f"[red]eth_account import failed:[/red] {exc}")
+        raise SystemExit(2)
+
+    try:
+        acct = Account.from_key(pk)
+    except Exception as exc:
+        console.print(
+            f"[red]PRIVATE_KEY invalid:[/red] {exc}"
+        )
+        raise SystemExit(2)
+
+    issued_at_iso = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    msg = build_binding_message(acct.address, node_id, issued_at_iso)
+    signed = acct.sign_message(encode_defunct(text=msg))
+    blob = {
+        "wallet_address": acct.address,
+        "node_id_hex": node_id,
+        "issued_at_iso": issued_at_iso,
+        "signature": signed.signature.to_0x_hex(),
+    }
+
+    if output_format == "json":
+        click.echo(_json.dumps(blob, indent=2))
+        return
+
+    console.print(
+        f"[bold green]Delegation minted[/bold green] for node "
+        f"[cyan]{node_id}[/cyan] under wallet [cyan]{acct.address}"
+        f"[/cyan]:"
+    )
+    console.print(_json.dumps(blob, indent=2))
+    console.print(
+        "\n[dim]Deploy to the new device:[/dim]\n"
+        "  1. Save the JSON above as e.g. "
+        "[bold]~/.prsm/operator_delegation.json[/bold]\n"
+        "  2. Export [bold]PRSM_OPERATOR_DELEGATION="
+        "$(cat ~/.prsm/operator_delegation.json)[/bold]\n"
+        "  3. Restart the daemon. operator_address will now be "
+        "trusted across the network."
+    )
+
+
+@wallet_devices.command("verify")
+@click.option(
+    "--node-id", "node_id", required=True,
+    help="Claimed node_id (32-char hex)",
+)
+@click.option(
+    "--operator", "operator_address", required=True,
+    help="Claimed operator_address (0x-prefixed 42-char hex)",
+)
+@click.option(
+    "--delegation-file", "delegation_file",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to the delegation JSON blob to verify.",
+)
+def wallet_devices_verify(
+    node_id: str, operator_address: str, delegation_file: str,
+) -> None:
+    """Verify a delegation JSON without requiring a key.
+
+    Exits 0 on PASS, 1 on FAIL. Use this in CI / pre-deploy
+    checks to confirm a device's delegation is well-formed
+    before shipping the config.
+    """
+    import json as _json
+    from pathlib import Path as _P
+    try:
+        text = _P(delegation_file).read_text()
+        blob = _json.loads(text)
+    except Exception as exc:
+        console.print(
+            f"[red]FAIL[/red] — cannot parse delegation JSON: {exc}"
+        )
+        raise SystemExit(1)
+
+    from prsm.node.operator_delegation import (
+        verify_operator_delegation_blob,
+    )
+    ok = verify_operator_delegation_blob(
+        node_id=node_id,
+        operator_address=operator_address,
+        delegation=blob,
+    )
+    if ok:
+        console.print(
+            f"[green]PASS[/green] — delegation for node "
+            f"[cyan]{node_id[:16]}…[/cyan] under operator "
+            f"[cyan]{operator_address}[/cyan] verifies cleanly."
+        )
+        return
+
+    console.print(
+        f"[red]FAIL[/red] — delegation does NOT verify for "
+        f"(node={node_id[:16]}…, operator={operator_address}). "
+        f"Check the signing key, node_id, and operator address "
+        f"all match what was originally signed."
+    )
+    raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
 # join-testnet command (T5)
 #
 # One-command onboarding for new testnet users. Generates a fresh burner
