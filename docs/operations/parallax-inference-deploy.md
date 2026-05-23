@@ -383,6 +383,36 @@ env-var wiring per traffic class.
 Non-float values + negative values safely default to 0 (unlimited)
 with a warning log — daemon-start doesn't crash on a typo.
 
+### Battery-aware activation (sprint 763)
+
+Laptop operators want PRSM to refuse work while running on
+battery (so the daemon doesn't drain their charge while
+they're away from a charger):
+
+```ini
+Environment=PRSM_ACTIVE_ONLY_ON_AC=1
+```
+
+Behavior:
+- On AC (plugged in) → daemon serves normally.
+- On battery → daemon refuses inference (503) + skips announces
+  (same gate mechanism as the active-window schedule). Peers
+  evict from routing pool within ~60s; daemon comes back when
+  the operator plugs in again (sprint-758 fast re-announce
+  kicks in for the AC-resume transition too — peers re-add
+  within ~10s).
+- Composes with `PRSM_ACTIVE_HOURS` (AND semantics): both gates
+  must pass for the daemon to serve. Either can refuse.
+- Fail-safe semantics:
+  - Desktop / server (psutil reports no battery): treated as
+    "on AC" → active. Enabling this env on a server doesn't
+    accidentally shut it down.
+  - psutil sensor error (permissions, OS quirks): fail-safe
+    to active. The daemon should NOT refuse work because it
+    can't read its own power state.
+
+Default unset = feature off (backward-compat).
+
 ### CPU politeness (sprint 762)
 
 Consumer-device operators (MacBook, gaming PC) want the daemon
@@ -549,3 +579,4 @@ covering unary, streaming, DP, and multi-host modes.
 | 755-758 | Operator-controlled active-window scheduling — PRSM_ACTIVE_HOURS + PRSM_ACTIVE_TIMEZONE; inference → 503/Retry-After outside window; announce skipped → peers evict; fast re-announce on resume (~10s vs 60s); `prsm node schedule` CLI |
 | 761 | Operator-facing bandwidth caps — PRSM_STORAGE_UPLOAD_MBPS + PRSM_STORAGE_DOWNLOAD_MBPS; wires existing BandwidthLimiter to env vars for the content-serving + shard-transfer paths |
 | 762 | Operator-facing CPU politeness — PRSM_NODE_NICE adjusts process priority via os.nice() at daemon-start. Daemon yields CPU to operator's interactive workloads. Safe-fail on Windows + non-root negative-nice rejection |
+| 763 | Battery-aware activation — PRSM_ACTIVE_ONLY_ON_AC=1 refuses work while on battery. Composes with active-window schedule (AND semantics). Fail-safe on desktop / sensor error |

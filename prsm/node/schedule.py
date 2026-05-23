@@ -199,14 +199,51 @@ def get_active_window() -> Optional[ActiveWindow]:
 def is_currently_active() -> bool:
     """Return True iff the daemon should accept work at this moment.
 
-    Backward-compat: env unset → always True. Operators who
-    haven't set PRSM_ACTIVE_HOURS see the pre-755 always-on
-    behavior — no behavior change for them.
+    Composes two gates (AND semantics):
+    1. Active-window gate (sprint 755-758): inside the time
+       window OR no window configured.
+    2. Power-source gate (sprint 763): on AC OR feature
+       disabled OR no battery sensor available.
+
+    Both must pass for the daemon to serve. Backward-compat:
+    both envs unset → always True (existing operator fleet
+    sees no behavior change).
     """
     w = get_active_window()
-    if w is None:
+    window_ok = True if w is None else w.is_active()
+    if not window_ok:
+        return False
+    return is_currently_on_acceptable_power()
+
+
+def is_currently_on_acceptable_power() -> bool:
+    """Sprint 763 — power-source gate. Returns True iff:
+
+    - PRSM_ACTIVE_ONLY_ON_AC is unset/false (feature disabled,
+      backward-compat), OR
+    - psutil reports the system is plugged in (on AC), OR
+    - psutil reports no battery sensor (desktop / server — no
+      battery to drain).
+
+    Returns False only when feature is ON, sensor exists, AND
+    system is on battery.
+    """
+    raw = os.environ.get("PRSM_ACTIVE_ONLY_ON_AC", "").strip().lower()
+    if raw not in ("1", "true", "yes"):
+        return True  # Feature disabled (default) — pass.
+    # Feature enabled — check sensor.
+    try:
+        import psutil
+        battery = psutil.sensors_battery()
+    except Exception:
+        # Sensor unavailable / psutil missing — fail-safe to
+        # ACTIVE (don't accidentally shut down daemons that
+        # can't introspect their power).
         return True
-    return w.is_active()
+    if battery is None:
+        # No battery (desktop) — always treat as "on AC".
+        return True
+    return bool(battery.power_plugged)
 
 
 def reset_cache_for_testing() -> None:

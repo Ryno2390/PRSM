@@ -2583,6 +2583,8 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 761 — operator-facing download bandwidth cap for the storage provider. Float Mbps; default 0 = unlimited."),
     ("PRSM_NODE_NICE", False, None,
      "Sprint 762 — process-priority increment via os.nice(). Positive int (1-19); higher = lower CPU priority. Daemon yields CPU to operator's interactive workloads (browser, editor, game). Default unset = 0 (no change). Non-root processes can only INCREASE nice (lower priority); negative values are silently rejected by the OS with a warning log. Not available on Windows (os.nice not provided)."),
+    ("PRSM_ACTIVE_ONLY_ON_AC", False, ["1", "true", "yes", "0", "false", "no", ""],
+     "Sprint 763 — on laptops, only activate when plugged in (AC power). Set to 1/true/yes → daemon refuses inference + skips announces while on battery. Combines with PRSM_ACTIVE_HOURS (sprint 755) — both gates must pass. Fail-safe: when psutil sensor is unavailable OR no battery (desktop), treats as 'on AC' → active. Default unset = always-active regardless of power source."),
 ]
 
 
