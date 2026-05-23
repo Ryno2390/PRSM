@@ -39,7 +39,9 @@ and-suspenders.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
+from typing import Optional
 
 from prsm.compute.inference.models import InferenceReceipt
 
@@ -103,3 +105,61 @@ def should_slash_for_receipt(receipt: InferenceReceipt) -> bool:
         return False
     reason = getattr(info, "reason", "")
     return reason not in _NO_SLASH_REASONS
+
+
+@dataclass(frozen=True)
+class SettlementDecision:
+    """Sprint 782 — composite policy output.
+
+    Combines the proportional credit + slash flag into a single
+    value that downstream escrow-flow code can act on with one
+    call to compute_settlement_for_receipt(). The invariant
+    `release_to_operator + refund_to_payer == escrow_amount`
+    holds in all cases (no FTNS is created or destroyed by this
+    decision — only routed)."""
+
+    release_to_operator: Decimal
+    refund_to_payer: Decimal
+    should_slash: bool
+
+
+def compute_settlement_for_receipt(
+    receipt: InferenceReceipt,
+    escrow_amount: Optional[Decimal] = None,
+) -> SettlementDecision:
+    """Sprint 782 — produce the full settlement decision for a
+    receipt.
+
+    Composes sprint-780 effective_cost_for_receipt +
+    should_slash_for_receipt with the implied refund-remainder
+    math.
+
+    Parameters:
+      receipt        — signed receipt with optional partial_completion
+      escrow_amount  — the amount locked in escrow for this job.
+                       Defaults to receipt.cost_ftns (the common
+                       "user paid exactly the priced cost" case).
+                       Pass explicitly when escrow > cost (over-
+                       funded, dynamic-pricing differential, etc.)
+                       so the refund math accounts for the excess.
+
+    Returns SettlementDecision with the invariant:
+        release_to_operator + refund_to_payer == escrow_amount
+
+    Pure function — no I/O. Callers invoke PaymentEscrow APIs
+    based on the decision."""
+    if escrow_amount is None:
+        escrow_amount = receipt.cost_ftns
+
+    release = effective_cost_for_receipt(receipt)
+    # Clamp release to escrow_amount (over-priced receipts can't
+    # release more than was locked).
+    if release > escrow_amount:
+        release = escrow_amount
+
+    refund = escrow_amount - release
+    return SettlementDecision(
+        release_to_operator=release,
+        refund_to_payer=refund,
+        should_slash=should_slash_for_receipt(receipt),
+    )
