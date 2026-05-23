@@ -579,6 +579,18 @@ class PeerDiscovery:
 
     async def announce_self(self) -> int:
         """Broadcast our presence to the network."""
+        # Sprint 756 — operator-controlled active-window scheduling.
+        # If PRSM_ACTIVE_HOURS is set and we're currently OUTSIDE the
+        # window, skip the announce. Existing peers' known-peer
+        # caches will expire this node after peer_stale_timeout
+        # (default 60s), cleanly removing us from the routing pool
+        # for the duration. When the active window resumes, normal
+        # announces re-add us to peers' caches. Daemon stays running
+        # — operators can still query /status (loopback-only post-
+        # sprint 748), claim earnings, etc.
+        from prsm.node.schedule import is_currently_active
+        if not is_currently_active():
+            return 0
         # Sprint 570 F28: only include `address` when we have a real
         # externally-reachable value. transport.host is typically
         # "0.0.0.0" (bind-to-all) which is unreachable when gossiped;

@@ -2573,6 +2573,10 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 742 — max HTTP request body size (memory-DoS defense at the HTTP layer; sibling of F55/F58 on the wire protocol). Default 1 MiB (covers reasonable prompts + metadata); <=0 = disabled; non-int safely defaults to 1 MiB. Returns 413 Payload Too Large when Content-Length exceeds limit BEFORE reading the body."),
     ("PRSM_API_DOCS_ENABLED", False, ["1", "true", "yes", "0", "false", "no", ""],
      "Sprint 744 — enable /docs + /redoc + /openapi.json surface. Default unset/0 = HIDDEN (production-safe; attackers don't get a free API-surface map). Set to 1/true/yes for dev so operators can use the interactive Swagger docs in a browser."),
+    ("PRSM_ACTIVE_HOURS", False, None,
+     "Sprint 755-756 — operator-controlled active window as 'HH:MM-HH:MM' (e.g., '22:00-08:00' for overnight only). Outside the window the daemon refuses inference dispatch (503 with Retry-After) AND skips discovery announces (peers evict from routing pool). Default unset = always-active (backward-compat). Cross-midnight ranges OK."),
+    ("PRSM_ACTIVE_TIMEZONE", False, None,
+     "Sprint 755-756 — IANA timezone name for PRSM_ACTIVE_HOURS (e.g., 'America/New_York', 'Europe/London'). Default 'UTC'. Operator's wall-clock time is what matters — pick a tz that matches their schedule."),
 ]
 
 

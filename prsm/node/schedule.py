@@ -167,3 +167,51 @@ def resolve_active_window_from_env() -> Optional[ActiveWindow]:
         or "UTC"
     )
     return parse_active_window(spec, tz_name)
+
+
+# ── Module-level cache for daemon use ──────────────────────────────
+#
+# Sprint 756 — cache the parsed ActiveWindow so the api.py +
+# discovery.py call sites don't re-parse env on every request /
+# announce interval. Parse-once-at-first-call semantics; the
+# `reset_cache_for_testing` helper is for unit tests that mutate
+# the env in fixtures.
+
+_cached_window: Optional[ActiveWindow] = None
+_cache_initialized: bool = False
+
+
+def get_active_window() -> Optional[ActiveWindow]:
+    """Return the cached ActiveWindow, parsing env on first call.
+
+    Subsequent calls return the same object without re-reading env.
+    Operators changing schedule at runtime would need to restart
+    the daemon — that's the sprint-757 CLI's job. For now,
+    parse-at-startup is the contract.
+    """
+    global _cached_window, _cache_initialized
+    if not _cache_initialized:
+        _cached_window = resolve_active_window_from_env()
+        _cache_initialized = True
+    return _cached_window
+
+
+def is_currently_active() -> bool:
+    """Return True iff the daemon should accept work at this moment.
+
+    Backward-compat: env unset → always True. Operators who
+    haven't set PRSM_ACTIVE_HOURS see the pre-755 always-on
+    behavior — no behavior change for them.
+    """
+    w = get_active_window()
+    if w is None:
+        return True
+    return w.is_active()
+
+
+def reset_cache_for_testing() -> None:
+    """Reset the module-level cache. Test fixtures use this to
+    observe fresh env reads. NOT for production use."""
+    global _cached_window, _cache_initialized
+    _cached_window = None
+    _cache_initialized = False

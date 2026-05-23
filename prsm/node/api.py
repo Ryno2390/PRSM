@@ -504,6 +504,41 @@ def register_parallax_pool_snapshot_endpoint(app: Any, node: Any) -> None:
         }
 
 
+def _check_active_window_or_503() -> None:
+    """Sprint 756 — gate inference dispatch on the operator's
+    active-window schedule. If PRSM_ACTIVE_HOURS is set and we're
+    currently OUTSIDE the window, raise 503 with an actionable
+    error pointing the caller at the schedule.
+
+    Backward-compat: env unset → always returns (no behavior
+    change for operators who haven't set a schedule).
+
+    Returns None on accept. Raises HTTPException(503) on reject.
+    """
+    from prsm.node.schedule import (
+        is_currently_active, get_active_window,
+    )
+    if is_currently_active():
+        return
+    w = get_active_window()
+    # Render only when we know we have a non-None schedule (the
+    # is_currently_active guard above ensures this).
+    window_desc = w.render() if w else "operator-configured schedule"
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            f"Node is outside its active window ({window_desc}). "
+            f"Try again during scheduled hours, or contact the "
+            f"operator to adjust PRSM_ACTIVE_HOURS."
+        ),
+        # Retry-After is a rough hint; the real next-active time
+        # would require computing the next window-start which is
+        # tz-aware + DST-aware. 60s is a reasonable polling cadence
+        # — clients can re-probe each minute.
+        headers={"Retry-After": "60"},
+    )
+
+
 def _resolve_requester_key(request: Any) -> str:
     """Sprint 741 F69 — resolve a per-requester rate-limit bucket
     key from an HTTP request. Proxy-aware: prefers X-Forwarded-For
@@ -4631,6 +4666,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "fresh forge: %s", exc,
                 )
 
+        # Sprint 756 — active-window gate (same as /compute/inference).
+        _check_active_window_or_503()
         # PRSM_FORGE_MAX_RPS_PER_REQUESTER rate limiting (DoS
         # protection). Default unset → no limiting. Per-requester
         # token bucket. Named "forge" so /compute/inference's bucket
@@ -6171,6 +6208,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "temperature": 0.7,                // optional
         }
         """
+        # Sprint 756 — active-window gate. Fire BEFORE rate-limit
+        # check so we don't even count the request against the
+        # operator's bucket if the daemon shouldn't be serving.
+        _check_active_window_or_503()
         # PRSM_INFERENCE_MAX_RPS_PER_REQUESTER rate limiting (DoS
         # protection). Independent bucket from /compute/forge so
         # operators can tune the two endpoints separately.
@@ -6670,6 +6711,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         closes the connection after them. ``event: token`` events
         are NEVER terminal.
         """
+        # Sprint 756 — active-window gate (same as /compute/inference).
+        _check_active_window_or_503()
         # PRSM_INFERENCE_MAX_RPS_PER_REQUESTER rate limiting (DoS).
         # SHARES the "inference" bucket with /compute/inference so a
         # requester's combined RPS across both endpoints is capped
