@@ -936,6 +936,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         #   timing (when stake unlocks).
         # - /settlement/stats + /pending + /history: settlement
         #   counts/amounts/schedules. Same financial-intel class.
+        #
+        # Sprint 752 F79 — final recon-class endpoints:
+        # - /balance/onchain (no address arg): operator's on-chain
+        #   FTNS balance. Same financial-value concern as F77.
+        # - /audit/summary + /audit/recent: HTTP access log
+        #   aggregates + recent entries. Leaks endpoint-usage
+        #   patterns, error rates, load intel — DoS reconnaissance.
+        # - /ledger/sync/stats: ledger sync state with peer
+        #   counts + last_sync timestamps. Network intel.
         _GATED_PATHS = (
             "/metrics", "/info", "/health/detailed",
             "/status", "/rings/status", "/peers",
@@ -943,6 +952,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "/transactions", "/staking/status",
             "/settlement/stats", "/settlement/pending",
             "/settlement/history",
+            "/balance/onchain", "/audit/summary",
+            "/audit/recent", "/ledger/sync/stats",
         )
         if not (
             path.startswith("/admin/") or path in _GATED_PATHS
