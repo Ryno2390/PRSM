@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Dict, Iterable, Optional, Union
 
 from prsm.compute.inference.models import InferenceReceipt
 
@@ -217,3 +217,64 @@ async def settle_inference_receipt(
         )
 
     return decision
+
+
+def aggregate_earnings_by_node_id(
+    receipts: Iterable[Union[Dict[str, Any], InferenceReceipt]],
+) -> Dict[str, Decimal]:
+    """Sprint 791 — sum effective_cost_for_receipt per settler_node_id.
+
+    Multi-device operators want per-device earnings breakdowns —
+    "device A earned X, device B earned Y" — so they can spot
+    underperforming devices in their roster. This is the pure
+    aggregator that any caller (CLI, dashboard, daemon endpoint)
+    can drop in.
+
+    Inputs:
+      - Iterable of receipts. Accepts both persisted-shape dicts
+        (`InferenceReceipt.to_dict()` output) and dataclass
+        instances directly.
+
+    Output:
+      - Dict mapping settler_node_id → total credited Decimal.
+        Uses sprint-780 effective_cost_for_receipt so
+        partial_completion is honored (preempted partials credit
+        proportionally; full successes credit full).
+
+    Defensive:
+      - Malformed receipts (missing settler_node_id, missing
+        cost_ftns, empty node_id) are SKIPPED — don't crash an
+        earnings summary on one bad row.
+      - Never raises on per-row failures; per-row errors are
+        silent (caller's earnings summary stays well-formed even
+        with hostile/corrupt ReceiptStore rows).
+    """
+    totals: Dict[str, Decimal] = {}
+    for r in receipts:
+        try:
+            if isinstance(r, InferenceReceipt):
+                receipt = r
+            elif isinstance(r, dict):
+                # Skip dicts missing the load-bearing fields rather
+                # than letting from_dict raise mid-aggregation.
+                if not r.get("settler_node_id"):
+                    continue
+                if "cost_ftns" not in r:
+                    continue
+                receipt = InferenceReceipt.from_dict(r)
+            else:
+                continue
+        except Exception:
+            continue
+
+        node_id = receipt.settler_node_id
+        if not node_id:
+            continue
+
+        try:
+            credit = effective_cost_for_receipt(receipt)
+        except Exception:
+            continue
+
+        totals[node_id] = totals.get(node_id, Decimal("0")) + credit
+    return totals
