@@ -908,9 +908,17 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # - Map their peer topology (network attack surface)
         # - Learn batch-settlement schedules (timing attack)
         # /rings/status is the same recon-class as /health/detailed.
+        #
+        # Sprint 749 F76 — /peers also gated. It returns the
+        # COMPLETE network topology: every peer_id this daemon
+        # knows about + every IP:port address + connected_at +
+        # last_seen timestamps. An attacker reading /peers gets
+        # the entire P2P attack-surface map (which nodes to
+        # target, when they connected, when they were last
+        # active). Pure reconnaissance vector.
         _GATED_PATHS = (
             "/metrics", "/info", "/health/detailed",
-            "/status", "/rings/status",
+            "/status", "/rings/status", "/peers",
         )
         if not (
             path.startswith("/admin/") or path in _GATED_PATHS
