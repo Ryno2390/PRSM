@@ -4505,6 +4505,37 @@ class PRSMNode:
         # Start management API in background
         self._api_task = asyncio.create_task(self._run_api())
 
+        # Sprint 766 — wire AutoClaimWorker into the daemon
+        # lifecycle. Only constructed when staking_manager +
+        # identity are both present (defensive — staking is
+        # optional in some test configs). Worker reads env at
+        # construction; .start() short-circuits when disabled
+        # (threshold = 0), so it's safe to always invoke.
+        self._auto_claim_worker = None
+        if (
+            self.staking_manager is not None
+            and self.identity is not None
+        ):
+            try:
+                from prsm.node.auto_claim import AutoClaimWorker
+                self._auto_claim_worker = AutoClaimWorker(
+                    staking_manager=self.staking_manager,
+                    user_id=self.identity.node_id,
+                )
+                await self._auto_claim_worker.start()
+                if self._auto_claim_worker.config.enabled:
+                    logger.info(
+                        "Sprint 766 — AutoClaimWorker started: "
+                        "threshold=%s FTNS, interval=%ss",
+                        self._auto_claim_worker.config.threshold_ftns,
+                        self._auto_claim_worker.config.interval_seconds,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "AutoClaimWorker construction failed (auto-"
+                    "claim disabled this session): %s", exc,
+                )
+
         self._started = True
         self._start_time = time.time()
         bootstrap_status = self.discovery.get_bootstrap_status() if self.discovery else {}
@@ -4881,6 +4912,17 @@ class PRSMNode:
             return
 
         logger.info("Shutting down PRSM node...")
+
+        # Sprint 766 — stop AutoClaimWorker before tearing down the
+        # staking_manager it depends on. Safe to call .stop() even
+        # when worker is None or was never started.
+        if getattr(self, "_auto_claim_worker", None) is not None:
+            try:
+                await self._auto_claim_worker.stop()
+            except Exception as exc:
+                logger.warning(
+                    "AutoClaimWorker stop raised: %s", exc,
+                )
 
         if self._api_task:
             self._api_task.cancel()
