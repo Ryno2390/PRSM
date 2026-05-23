@@ -690,12 +690,13 @@ against origin's known pubkey. Tracked for a future session.
 | 749 | fix | **F76** — /peers gated. Complete network topology was public: every peer_id + IP:port + connected_at + last_seen. Attacker reading /peers got the full P2P attack-surface map (which nodes to target, when they're online). Sibling of F75; same gate |
 | 750 | fix | **F77** — /balance + /bootstrap/status gated. **The worst recon leak found**: /balance returned operator's exact FTNS balance PLUS last 20 transactions (tx_id + counterparty wallet_ids + amounts + descriptions + timestamps). Complete financial profile. /bootstrap/status leaked bootstrap-fleet topology. Sibling of F75-F76; same gate |
 | 751 | fix | **F78** — /transactions + /staking/status + /settlement/* gated. /transactions returned 200-tx history (worse than F77's 20). /staking/status leaked stake position + unstake-unlock timing. /settlement/{stats,pending,history} leaked settlement schedules. All recon-class financial endpoints |
+| 752 | fix | **F79** — /balance/onchain + /audit/summary + /audit/recent + /ledger/sync/stats gated. /balance/onchain leaked operator's on-chain FTNS balance. /audit/* leaked access-log aggregates (endpoint usage, error rates, top paths, total volume = DoS-targeting intel). /ledger/sync/stats leaked sync state + peer counts + last_sync timestamps |
 
-48 F-class production-blockers (F30 → F78) closed across the
-session. ~318 new pin tests + 5 new integration tests, 0 cross-suite
-regressions. **F78 closes the 200-tx history + staking-position +
-settlement-schedule recon vectors. Cumulative admin-auth +
-reconnaissance arc (F65-F78): 71/71 pin tests green across 12 sprints.**
+49 F-class production-blockers (F30 → F79) closed across the
+session. ~324 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **F79 closes the on-chain-balance + access-log + sync-
+state recon vectors. Cumulative admin-auth + reconnaissance arc
+(F65-F79): 77/77 pin tests green across 13 sprints.**
 
 ## 9. What this enables
 
