@@ -33,10 +33,30 @@ Honest scope:
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Any, Iterable, List, Dict, Optional
 
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_wallet_bindings_db_path() -> Optional[Path]:
+    """Sprint 794 — resolve the daemon-local SQLite path for the
+    binding store.
+
+    Order:
+      1. PRSM_WALLET_BINDINGS_DB env (operator-set absolute path)
+      2. ~/.prsm/wallet_bindings.db (default, matches existing
+         daemon-local convention used by credentials + config)
+
+    Returns a Path. Caller validates writability before using it
+    + falls back to InMemoryWalletBindingStore on any IO failure.
+    """
+    env_path = (os.environ.get("PRSM_WALLET_BINDINGS_DB") or "").strip()
+    if env_path:
+        return Path(env_path)
+    return Path.home() / ".prsm" / "wallet_bindings.db"
 
 
 # Cap the in-memory scan window. ReceiptStore.list enforces an
@@ -101,10 +121,35 @@ def wire_wallet_api_services(node: Any) -> None:
         from prsm.interface.api import wallet_api
         from prsm.interface.onboarding.wallet_binding import (
             InMemoryWalletBindingStore,
+            SqliteWalletBindingStore,
             WalletBindingService,
         )
         receipt_store = getattr(node, "_receipt_store", None)
         adapter = _ReceiptStoreAdapter(receipt_store=receipt_store)
+
+        # Sprint 794 — prefer SQLite for the binding store so
+        # bindings survive daemon restart. Fail-soft fallback to
+        # in-memory on ANY init error (permission denied, parent
+        # dir not creatable, schema incompatibility on an old
+        # pre-786 DB, etc.).
+        db_path = _resolve_wallet_bindings_db_path()
+        binding_store: Any
+        try:
+            if db_path is None:
+                raise RuntimeError("no DB path resolved")
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            binding_store = SqliteWalletBindingStore(db_path)
+            logger.info(
+                "Sprint 794 — using SqliteWalletBindingStore at "
+                "%s", db_path,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Sprint 794 — SqliteWalletBindingStore init failed "
+                "(%s); falling back to InMemoryWalletBindingStore "
+                "(bindings will NOT survive daemon restart).", exc,
+            )
+            binding_store = InMemoryWalletBindingStore()
 
         wallet_api.reset_services_for_tests()
         services = wallet_api.WalletApiServices(
@@ -113,9 +158,7 @@ def wire_wallet_api_services(node: Any) -> None:
                 expected_chain_id=8453,
             ),
             nonce_store=wallet_api.InMemoryNonceStore(),
-            binding_service=WalletBindingService(
-                InMemoryWalletBindingStore(),
-            ),
+            binding_service=WalletBindingService(binding_store),
             price_source=wallet_api.StaticPriceSource(
                 price_usd=0,  # type: ignore[arg-type]
             ),
