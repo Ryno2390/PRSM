@@ -137,17 +137,27 @@ def test_bind_rejects_node_already_bound_to_other_wallet(service):
         service.bind(acct_b.address, node_id, sig_b, ISSUED_AT)
 
 
-def test_bind_rejects_wallet_rebinding_different_node(service):
+def test_bind_allows_multi_device_per_wallet(service):
+    """Sprint 786 — multi-device: one wallet can bind multiple
+    node_ids (laptop + desktop + cloud spot under one operator).
+    Previously this raised BindingConflictError; sprint 786
+    lifts that invariant. Node-side uniqueness is preserved
+    (covered by test_bind_rejects_node_already_bound_to_other_wallet)."""
     acct = _account("a")
     node_id_1, _ = service.sign_in(acct.address)
     sig_1 = _sign_binding(acct, acct.address, node_id_1)
-    service.bind(acct.address, node_id_1, sig_1, ISSUED_AT)
+    b1 = service.bind(acct.address, node_id_1, sig_1, ISSUED_AT)
 
-    # Same wallet attempts to bind to a new node — conflict (wallet already bound).
+    # Same wallet binds a second device — succeeds (multi-device).
     node_id_2 = "f" * 32
     sig_2 = _sign_binding(acct, acct.address, node_id_2)
-    with pytest.raises(BindingConflictError):
-        service.bind(acct.address, node_id_2, sig_2, ISSUED_AT)
+    b2 = service.bind(acct.address, node_id_2, sig_2, ISSUED_AT)
+
+    assert b1.node_id_hex == node_id_1
+    assert b2.node_id_hex == node_id_2
+    # Both bindings retrievable via the new get_all_by_wallet API.
+    all_bindings = service.get_all_by_wallet(acct.address)
+    assert {b.node_id_hex for b in all_bindings} == {node_id_1, node_id_2}
 
 
 # --- queries -----------------------------------------------------------------

@@ -25,7 +25,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Optional, Protocol
+from typing import Callable, Dict, List, Optional, Protocol
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
@@ -87,38 +87,85 @@ def build_binding_message(wallet_address: str, node_id_hex: str, issued_at_iso: 
 
 class WalletBindingStore(Protocol):
     def get_by_wallet(self, wallet_address: str) -> Optional[IdentityBinding]: ...
+    def get_all_by_wallet(self, wallet_address: str) -> List[IdentityBinding]: ...
     def get_by_node_id(self, node_id_hex: str) -> Optional[IdentityBinding]: ...
     def insert(self, binding: IdentityBinding) -> None: ...
 
 
 class InMemoryWalletBindingStore:
-    """Process-local store keyed by EIP-55 wallet address and node_id."""
+    """Process-local store keyed by EIP-55 wallet address and node_id.
+
+    Sprint 786 — multi-device: one wallet → many node_ids. The
+    `_by_wallet` index now maps to a LIST of bindings (oldest
+    first by bound_at_unix). `_by_node` stays 1:1 (a node_id
+    can only belong to one wallet — sprint 786 invariant)."""
 
     def __init__(self) -> None:
-        self._by_wallet: Dict[str, IdentityBinding] = {}
+        self._by_wallet: Dict[str, List[IdentityBinding]] = {}
         self._by_node: Dict[str, IdentityBinding] = {}
 
     def get_by_wallet(self, wallet_address: str) -> Optional[IdentityBinding]:
-        return self._by_wallet.get(to_checksum_address(wallet_address))
+        """Back-compat: returns the FIRST binding (oldest by
+        bound_at_unix) for the wallet. New callers should use
+        `get_all_by_wallet`."""
+        bindings = self._by_wallet.get(to_checksum_address(wallet_address))
+        return bindings[0] if bindings else None
+
+    def get_all_by_wallet(
+        self, wallet_address: str,
+    ) -> List[IdentityBinding]:
+        """Sprint 786 — all bindings for the wallet, ordered
+        oldest-first by bound_at_unix."""
+        bindings = self._by_wallet.get(
+            to_checksum_address(wallet_address), [],
+        )
+        return list(bindings)  # defensive copy
 
     def get_by_node_id(self, node_id_hex: str) -> Optional[IdentityBinding]:
         return self._by_node.get(node_id_hex)
 
     def insert(self, binding: IdentityBinding) -> None:
-        self._by_wallet[binding.wallet_address] = binding
+        # node_id-side: 1:1 (load-bearing invariant — prevents
+        # operator-collision attacks). Idempotent on same node_id.
+        if binding.node_id_hex in self._by_node:
+            existing = self._by_node[binding.node_id_hex]
+            if existing.wallet_address == binding.wallet_address:
+                # Same (wallet, node) — idempotent no-op
+                return
+            # Different wallet for same node_id is a conflict; the
+            # Service layer's pre-insert check should have caught
+            # this. Defensive: keep the existing binding.
+            return
+
         self._by_node[binding.node_id_hex] = binding
 
+        # wallet-side: 1:N (sprint 786)
+        bindings = self._by_wallet.setdefault(binding.wallet_address, [])
+        bindings.append(binding)
+        # Maintain oldest-first ordering
+        bindings.sort(key=lambda b: b.bound_at_unix)
 
+
+# Sprint 786 — multi-device: composite (wallet, node) primary key
+# so one wallet can bind multiple node_ids. node_id_hex retains
+# UNIQUE constraint (a node_id can only belong to one wallet —
+# prevents operator-collision attacks). Pre-786 schema (wallet
+# as PRIMARY KEY) is incompatible; sprint 787 will ship the
+# data-migration helper for existing deployments. Greenfield
+# deployments get the new schema directly.
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS identity_bindings (
-    wallet_address        TEXT PRIMARY KEY,
+    wallet_address        TEXT NOT NULL,
     node_id_hex           TEXT NOT NULL UNIQUE,
     bound_at_unix         INTEGER NOT NULL,
     wallet_signature      TEXT NOT NULL,
-    signing_message_hash  TEXT NOT NULL
+    signing_message_hash  TEXT NOT NULL,
+    PRIMARY KEY (wallet_address, node_id_hex)
 );
 CREATE INDEX IF NOT EXISTS idx_identity_bindings_node_id
     ON identity_bindings(node_id_hex);
+CREATE INDEX IF NOT EXISTS idx_identity_bindings_wallet
+    ON identity_bindings(wallet_address);
 """
 
 
@@ -141,12 +188,29 @@ class SqliteWalletBindingStore:
         return conn
 
     def get_by_wallet(self, wallet_address: str) -> Optional[IdentityBinding]:
+        """Back-compat: returns the FIRST (oldest) binding for
+        the wallet. Sprint 786 — new callers use get_all_by_wallet."""
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT * FROM identity_bindings WHERE wallet_address = ?",
+                "SELECT * FROM identity_bindings "
+                "WHERE wallet_address = ? "
+                "ORDER BY bound_at_unix ASC LIMIT 1",
                 (to_checksum_address(wallet_address),),
             ).fetchone()
         return _row_to_binding(row) if row else None
+
+    def get_all_by_wallet(
+        self, wallet_address: str,
+    ) -> List[IdentityBinding]:
+        """Sprint 786 — all bindings for the wallet, oldest-first."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM identity_bindings "
+                "WHERE wallet_address = ? "
+                "ORDER BY bound_at_unix ASC",
+                (to_checksum_address(wallet_address),),
+            ).fetchall()
+        return [_row_to_binding(r) for r in rows]
 
     def get_by_node_id(self, node_id_hex: str) -> Optional[IdentityBinding]:
         with self._conn() as conn:
@@ -225,19 +289,17 @@ class WalletBindingService:
     ) -> IdentityBinding:
         checksum = to_checksum_address(wallet_address)
 
-        # Idempotency + conflict checks before crypto verification — a stored
-        # record with a different node_id is a permanent conflict, so we
-        # refuse cheaply rather than verify a signature we're going to
-        # discard.
-        existing_by_wallet = self._store.get_by_wallet(checksum)
-        if existing_by_wallet is not None:
-            if existing_by_wallet.node_id_hex != node_id_hex:
-                raise BindingConflictError(
-                    f"wallet {checksum} already bound to node "
-                    f"{existing_by_wallet.node_id_hex}"
-                )
-            return existing_by_wallet
+        # Sprint 786 — multi-device: wallet-side 1:N lifted.
+        # Idempotency check: if THIS specific (wallet, node_id)
+        # pair is already bound, short-circuit (no re-verify).
+        for b in self._store.get_all_by_wallet(checksum):
+            if b.node_id_hex == node_id_hex:
+                return b
 
+        # Node-side uniqueness is STILL load-bearing — without it,
+        # operator A could "steal" operator B's node_id by binding
+        # it to A's wallet. Reject before doing the (expensive)
+        # signature verification.
         existing_by_node = self._store.get_by_node_id(node_id_hex)
         if existing_by_node is not None and existing_by_node.wallet_address != checksum:
             raise BindingConflictError(
@@ -270,6 +332,12 @@ class WalletBindingService:
 
     def get_by_wallet(self, wallet_address: str) -> Optional[IdentityBinding]:
         return self._store.get_by_wallet(wallet_address)
+
+    def get_all_by_wallet(
+        self, wallet_address: str,
+    ) -> List[IdentityBinding]:
+        """Sprint 786 — all bindings for the wallet (multi-device)."""
+        return self._store.get_all_by_wallet(wallet_address)
 
     def get_by_node_id(self, node_id_hex: str) -> Optional[IdentityBinding]:
         return self._store.get_by_node_id(node_id_hex)
