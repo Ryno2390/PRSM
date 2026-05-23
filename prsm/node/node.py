@@ -4568,6 +4568,24 @@ class PRSMNode:
                 "awareness disabled this session): %s", exc,
             )
 
+        # Sprint 793 — register WalletApiServices with a
+        # production ReceiptStore adapter so the
+        # /devices/earnings endpoint (sprint 792) actually
+        # returns per-device earnings instead of falling back
+        # to the no-op default. Idempotent + fail-soft inside
+        # the helper.
+        try:
+            from prsm.node.wallet_api_wiring import (
+                wire_wallet_api_services,
+            )
+            wire_wallet_api_services(self)
+        except Exception as exc:
+            logger.warning(
+                "wallet_api production wire-up failed "
+                "(devices/earnings endpoint will return empty): "
+                "%s", exc,
+            )
+
         self._started = True
         self._start_time = time.time()
         bootstrap_status = self.discovery.get_bootstrap_status() if self.discovery else {}
