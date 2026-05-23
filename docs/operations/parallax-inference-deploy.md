@@ -310,6 +310,51 @@ Loopback representations accepted (sprint 739):
 - The entire `127.0.0.0/8` block per RFC 1122 (so custom aliases
   like `127.0.0.5` work)
 
+### Active-window scheduling (sprints 755-758)
+
+Operators on consumer devices (MacBook, gaming PC) often want
+the daemon serving the network ONLY during off-hours. Pre-755
+this required manual systemctl start/stop. Post-758 it's an env
+var:
+
+```ini
+# Active during off-work hours only
+Environment=PRSM_ACTIVE_HOURS=22:00-08:00
+Environment=PRSM_ACTIVE_TIMEZONE=America/New_York
+```
+
+Format: `HH:MM-HH:MM`, 24-hour clock, half-open interval.
+Cross-midnight ranges (`22:00-08:00`) are supported. Timezone is
+any IANA name (default `UTC`).
+
+Behavior outside the window:
+- `/compute/inference`, `/compute/inference/stream`, `/compute/forge`
+  return **503 with `Retry-After: 60`** + the configured window
+  named in the error message
+- `DiscoveryProtocol.announce_self()` skips the broadcast →
+  peers evict this node from their routing pool within ~60s
+  (`peer_stale_timeout`)
+- Daemon stays running — operators can still query `/status`
+  (loopback only post-sprint 748), claim earnings, check logs
+
+Behavior at the window-resume boundary:
+- `_announce_loop` polls every `min(announce_interval, 10s)`
+- Detects inactive→active transition + forces an **immediate
+  re-announce** (instead of waiting up to a full
+  announce_interval). Operators see their node back in the pool
+  within ~10s of window start.
+- Operator log line at INFO level: `Sprint 758 — active window
+  resumed; forcing immediate announce.`
+
+Operator UX:
+```
+prsm node schedule         # show configured window + ACTIVE/INACTIVE
+prsm node schedule --format json   # for grafana / scripts
+```
+
+Empty / unset env → "always-active" (backward-compat — operators
+who don't set the env see no behavior change).
+
 For Lambda GPU operators: change `PRSM_PARALLAX_HF_DEVICE=cpu` to `cuda`,
 omit the `INFERENCE_CONCURRENCY_LIMIT` (200GB RAM doesn't need the
 gate), and skip the optional multi-stage-allocation overrides at the
@@ -444,3 +489,5 @@ covering unary, streaming, DP, and multi-host modes.
 | 728-729 | F61/F62 hang-defense timeouts (unary `executor.execute()` + streaming wall-time) |
 | 730-731 | F63/F64 sender_id bound to authenticated peer_id at transport layer — protects ALL MSG_DIRECT handlers (chain-executor + ledger_sync FTNS transfers + compute/storage/content/agent) |
 | 734-739 | F65/F66/F67/F68 `/admin/*` default-deny non-loopback (incl. reverse-proxy XFF/X-Real-IP defense + IPv4-mapped IPv6 + 127/8 block); BEHAVIOR CHANGE for operators with remote monitoring — see "Admin endpoint auth" section above |
+| 740-754 | F65-F80 admin-auth + reconnaissance arc — 17 endpoint groups now loopback-gated incl. /metrics, /status, /balance (worst leak: operator FTNS balance + 20-tx history with counterparties), /peers (network topology), /transactions (200-tx history). 82/82 pin tests |
+| 755-758 | Operator-controlled active-window scheduling — PRSM_ACTIVE_HOURS + PRSM_ACTIVE_TIMEZONE; inference → 503/Retry-After outside window; announce skipped → peers evict; fast re-announce on resume (~10s vs 60s); `prsm node schedule` CLI |
