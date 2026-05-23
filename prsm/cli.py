@@ -2790,6 +2790,88 @@ def node_schedule_cli(output_format: str):
         )
 
 
+@node.command("claim-rewards")
+@click.option(
+    "--stake-id", "stake_id", default=None,
+    help="Specific stake to claim from. Omit to claim ALL stakes.",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+def node_claim_rewards_cli(
+    stake_id: Optional[str], output_format: str,
+    api_url_override: Optional[str],
+):
+    """Sprint 770 — manually claim accumulated staking rewards.
+
+    Triggers an immediate claim_rewards via the daemon's
+    /staking/claim-rewards endpoint. Useful when:
+    - Operator wants to claim before the auto-claim threshold
+      (sprint 765's PRSM_AUTO_CLAIM_THRESHOLD_FTNS) is reached
+    - Operator wants to test the claim path
+    - Auto-claim is disabled and the operator needs a one-shot
+
+    Returns the total amount claimed + per-stake breakdown.
+    Exits non-zero on failure.
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/staking/claim-rewards"
+    params = {"stake_id": stake_id} if stake_id else None
+    try:
+        resp = _httpx.post(endpoint, params=params, timeout=30.0)
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]Claim failed ({resp.status_code}):[/red] "
+                f"{resp.text}"
+            )
+        raise SystemExit(1)
+    data = resp.json()
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+    total = data.get("total_rewards_claimed", "0")
+    stakes = data.get("stakes_processed", [])
+    console.print(
+        f"[bold]Claimed:[/bold] [green]{total}[/green] FTNS"
+    )
+    if stakes:
+        console.print(
+            f"[dim]From {len(stakes)} stake(s).[/dim]"
+        )
+    else:
+        console.print(
+            "[dim]No stakes had accumulated rewards above the "
+            "minimum claim threshold.[/dim]"
+        )
+
+
 @node.command("auto-claim")
 @click.option(
     "--format", "output_format",
