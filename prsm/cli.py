@@ -2786,6 +2786,145 @@ def node_schedule_cli(output_format: str):
         )
 
 
+@node.command("device-profile")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+@click.option(
+    "--suggest", "suggest_preset", is_flag=True, default=False,
+    help="Print a 'polite-neighbor' systemd Environment= block for "
+    "consumer-device operators (MacBook, gaming PC).",
+)
+def node_device_profile_cli(output_format: str, suggest_preset: bool):
+    """Sprint 764 — show the 4-knob consumer-device UX stack.
+
+    Surfaces all consumer-device controls at a glance:
+
+      1. PRSM_ACTIVE_HOURS (sprint 755-758) — time-of-day window
+      2. PRSM_STORAGE_UPLOAD_MBPS + DOWNLOAD_MBPS (sprint 761) —
+         bandwidth caps
+      3. PRSM_NODE_NICE (sprint 762) — CPU priority
+      4. PRSM_ACTIVE_ONLY_ON_AC (sprint 763) — battery awareness
+
+    Each knob composes with the others. Operators on personal
+    devices (MacBook, gaming PC) typically want all 4 set;
+    operators on dedicated servers leave them unset.
+
+    `--suggest` prints a sane "polite-neighbor" preset they can
+    paste into their systemd unit.
+    """
+    import json as _json
+    import os as _os
+    from prsm.node.schedule import resolve_active_window_from_env
+
+    if suggest_preset:
+        preset = """# Sprint 764 — polite-neighbor preset for consumer-device
+# operators (MacBook, gaming PC). Copy-paste into your
+# systemd unit's [Service] section. Adjust the timezone +
+# hours to match your work schedule.
+
+Environment=PRSM_ACTIVE_HOURS=22:00-08:00
+Environment=PRSM_ACTIVE_TIMEZONE=America/New_York
+Environment=PRSM_ACTIVE_ONLY_ON_AC=1
+Environment=PRSM_NODE_NICE=10
+Environment=PRSM_STORAGE_UPLOAD_MBPS=10
+Environment=PRSM_STORAGE_DOWNLOAD_MBPS=100
+"""
+        click.echo(preset)
+        return
+
+    # Read current state of all 4 knobs.
+    try:
+        window = resolve_active_window_from_env()
+        window_repr = window.render() if window else None
+        window_error = None
+    except ValueError as exc:
+        window = None
+        window_repr = None
+        window_error = str(exc)
+
+    upload_mbps = _os.environ.get("PRSM_STORAGE_UPLOAD_MBPS", "").strip()
+    download_mbps = _os.environ.get(
+        "PRSM_STORAGE_DOWNLOAD_MBPS", "",
+    ).strip()
+    node_nice = _os.environ.get("PRSM_NODE_NICE", "").strip()
+    only_ac = _os.environ.get(
+        "PRSM_ACTIVE_ONLY_ON_AC", "",
+    ).strip().lower() in ("1", "true", "yes")
+
+    if output_format == "json":
+        click.echo(_json.dumps({
+            "active_hours": window_repr,
+            "active_hours_error": window_error,
+            "active_only_on_ac": only_ac,
+            "node_nice": node_nice or "0 (default)",
+            "storage_upload_mbps": upload_mbps or "0 (unlimited)",
+            "storage_download_mbps": download_mbps or "0 (unlimited)",
+        }, indent=2))
+        return
+
+    # Rich text output.
+    console.print("[bold]PRSM consumer-device profile:[/bold]\n")
+
+    # Scheduling
+    if window_error:
+        console.print(
+            f"[red]✗[/red] Active hours: [red]config error: {window_error}[/red]"
+        )
+    elif window_repr:
+        console.print(
+            f"[green]✓[/green] Active hours: [cyan]{window_repr}[/cyan]"
+        )
+    else:
+        console.print(
+            "[dim]–[/dim] Active hours: [dim]unset (always-active)[/dim]"
+        )
+
+    # Battery
+    if only_ac:
+        console.print(
+            "[green]✓[/green] Battery awareness: "
+            "[cyan]only-on-AC[/cyan]"
+        )
+    else:
+        console.print(
+            "[dim]–[/dim] Battery awareness: "
+            "[dim]unset (active regardless of power)[/dim]"
+        )
+
+    # CPU priority
+    if node_nice and node_nice not in ("0", "+0"):
+        console.print(
+            f"[green]✓[/green] CPU politeness: "
+            f"[cyan]nice +{node_nice}[/cyan]"
+        )
+    else:
+        console.print(
+            "[dim]–[/dim] CPU politeness: "
+            "[dim]unset (default priority)[/dim]"
+        )
+
+    # Bandwidth
+    if upload_mbps or download_mbps:
+        up = upload_mbps or "unlimited"
+        down = download_mbps or "unlimited"
+        console.print(
+            f"[green]✓[/green] Bandwidth caps: "
+            f"[cyan]up={up} Mbps, down={down} Mbps[/cyan]"
+        )
+    else:
+        console.print(
+            "[dim]–[/dim] Bandwidth caps: [dim]unset (unlimited)[/dim]"
+        )
+
+    console.print(
+        "\n[dim]Run `prsm node device-profile --suggest` for a "
+        "polite-neighbor preset.[/dim]"
+    )
+
+
 @node.command("streams")
 @click.option(
     "--format", "output_format",
