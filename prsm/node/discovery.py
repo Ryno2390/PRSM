@@ -109,6 +109,49 @@ def validate_bootstrap_address(address: str) -> Tuple[bool, str]:
     return True, ""
 
 
+def _rewrite_co_located_address(
+    peer_address: str,
+    own_advertise: "str | None",
+) -> str:
+    """Sprint 781 — F14 fix: auto-loopback-rewrite for co-located peers.
+
+    When a peer announces an address whose host portion matches our
+    own announced address, we MUST be co-located (two daemons on the
+    same host both reaching the world through the same external IP).
+    The OS typically can't loopback to its own external IP through
+    NAT (no NAT hairpin pinning), so direct dial fails.
+
+    Fix: rewrite the dial target's host portion to ``127.0.0.1`` while
+    preserving the port. The OS routes the localhost dial directly
+    to the other daemon listening on that port.
+
+    Returns the address unchanged when:
+    - ``own_advertise`` is None (we don't know our own announced IP
+      yet — can't detect co-location)
+    - peer's host portion differs from ours (multi-host case)
+    - peer_address is empty or starts with 0.0.0.0 (caller filtered
+      it already)
+    - peer_address has no port (no information to dial via loopback)
+    """
+    if not peer_address or peer_address.startswith("0.0.0.0"):
+        return peer_address
+    if own_advertise is None:
+        return peer_address
+
+    # Strip optional port suffix on own_advertise (legacy callers
+    # may pass "ip:port"). We compare hosts only.
+    own_host = own_advertise.split(":", 1)[0]
+
+    if ":" not in peer_address:
+        return peer_address
+
+    peer_host, peer_port = peer_address.rsplit(":", 1)
+    if peer_host != own_host:
+        return peer_address
+
+    return f"127.0.0.1:{peer_port}"
+
+
 class PeerDiscovery:
     """Discovers and maintains connections to network peers.
 
@@ -671,18 +714,27 @@ class PeerDiscovery:
                     info.node_id[:8], addr,
                 )
                 continue
+            # Sprint 781 — F14 fix: rewrite to loopback when the
+            # peer's announced host matches our own (co-located
+            # daemons can't NAT-hairpin to their shared external IP).
+            from prsm.node.libp2p_discovery import (
+                _resolve_advertise_address,
+            )
+            dial_addr = _rewrite_co_located_address(
+                addr, _resolve_advertise_address(),
+            )
             try:
-                peer = await self.transport.connect_to_peer(addr)
+                peer = await self.transport.connect_to_peer(dial_addr)
                 if peer is None:
                     logger.debug(
                         "auto-dial sweep: connect_to_peer returned "
                         "None for %s (%s)",
-                        info.node_id[:8], addr,
+                        info.node_id[:8], dial_addr,
                     )
                 else:
                     logger.info(
                         "auto-dial sweep: connected to %s (%s)",
-                        info.node_id[:8], addr,
+                        info.node_id[:8], dial_addr,
                     )
             except Exception as exc:  # noqa: BLE001
                 logger.debug(
@@ -706,8 +758,18 @@ class PeerDiscovery:
         random.shuffle(candidates)
 
         needed = self.target_peers - current
+        # Sprint 781 — F14 fix: same loopback-rewrite as
+        # _auto_dial_sweep so periodic maintain doesn't keep
+        # failing on co-located peers.
+        from prsm.node.libp2p_discovery import (
+            _resolve_advertise_address,
+        )
+        own_advertise = _resolve_advertise_address()
         for info in candidates[:needed]:
-            peer = await self.transport.connect_to_peer(info.address)
+            dial_addr = _rewrite_co_located_address(
+                info.address, own_advertise,
+            )
+            peer = await self.transport.connect_to_peer(dial_addr)
             if peer:
                 logger.debug(f"Reconnected to known peer {info.node_id[:8]}...")
 
