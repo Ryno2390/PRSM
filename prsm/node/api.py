@@ -884,8 +884,22 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # reverse-proxy auth set PRSM_ADMIN_REMOTE_ALLOWED=1 (the
         # same env they already need for any remote admin tooling)
         # — sprint-740 runbook documents the 3 remediation paths.
+        #
+        # Sprint 747 F74 — /health/detailed and /info also gated.
+        # Both leak reconnaissance-grade data:
+        # - /info: operator_address (on-chain EOA), node_id, wired
+        #   contract addresses, agent_forge wired status, software
+        #   version (CVE-matching surface)
+        # - /health/detailed: per-subsystem status including
+        #   ftns_ledger.connected_address + wired token address +
+        #   canonical-match boolean for 14+ subsystems
+        # Minimal `/health` (load-balancer probe) is INTENTIONALLY
+        # NOT gated — load balancers need it to stay reachable.
+        _GATED_PATHS = (
+            "/metrics", "/info", "/health/detailed",
+        )
         if not (
-            path.startswith("/admin/") or path == "/metrics"
+            path.startswith("/admin/") or path in _GATED_PATHS
         ):
             return await call_next(request)
         import os as _os
