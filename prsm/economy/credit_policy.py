@@ -163,3 +163,57 @@ def compute_settlement_for_receipt(
         refund_to_payer=refund,
         should_slash=should_slash_for_receipt(receipt),
     )
+
+
+async def settle_inference_receipt(
+    *,
+    payment_escrow: "object",
+    receipt: InferenceReceipt,
+    operator_id: str,
+    job_id: str,
+    escrow_amount: Optional[Decimal] = None,
+) -> SettlementDecision:
+    """Sprint 783 — settle a job's escrow per the receipt's
+    partial-completion marker.
+
+    Branches:
+      release > 0 + refund > 0  → release_escrow_split (operator
+        gets proportional; payer auto-refunded the remainder by
+        PaymentEscrow's existing split-API behavior)
+      release > 0 + refund == 0 → release_escrow (full payout)
+      release == 0 + refund > 0 → refund_escrow (no work credited)
+
+    Returns the SettlementDecision so the caller can dispatch
+    slash-emission based on decision.should_slash (slash hook
+    itself is out of scope here — separate sprint).
+
+    escrow_amount defaults to receipt.cost_ftns. Callers pass
+    the actual locked escrow amount when it differs (over-funded
+    escrow, dynamic-pricing differential)."""
+    decision = compute_settlement_for_receipt(
+        receipt, escrow_amount,
+    )
+
+    release = decision.release_to_operator
+    refund = decision.refund_to_payer
+
+    if release > 0 and refund > 0:
+        # Partial: split-API handles remainder refund automatically.
+        await payment_escrow.release_escrow_split(
+            job_id,
+            [(operator_id, float(release))],
+        )
+    elif release > 0:
+        # Full payout — existing escrow-flow path.
+        await payment_escrow.release_escrow(job_id, operator_id)
+    elif refund > 0:
+        # No work credited.
+        await payment_escrow.refund_escrow(
+            job_id,
+            reason=(
+                f"settle_inference_receipt: zero release per "
+                f"partial_completion marker"
+            ),
+        )
+
+    return decision
