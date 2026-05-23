@@ -6741,16 +6741,56 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 except Exception as e:
                     logger.warning(f"Privacy budget tracking failed: {e}")
 
-            # Release escrow to the serving node identity (us, in the
-            # local-execution case).
+            # Sprint 785 — release escrow to the serving node, routing
+            # through settle_inference_receipt when we have a receipt
+            # so partial_completion (sprint 777) drives proportional
+            # credit + refund + slash signal. Mirrors sprint 784's
+            # streaming-path integration. Fall back to release_escrow
+            # when no receipt (legacy mid-fail path; no regression).
             if escrow_entry and node._payment_escrow:
-                try:
-                    await node._payment_escrow.release_escrow(
-                        job_id=job_id,
-                        provider_id=node.identity.node_id if node.identity else "self",
-                    )
-                except Exception as e:
-                    logger.warning(f"Inference escrow release failed: {e}")
+                operator_id = (
+                    node.identity.node_id if node.identity else "self"
+                )
+                if receipt is not None and hasattr(receipt, "cost_ftns"):
+                    try:
+                        from decimal import Decimal as _D
+                        from prsm.economy.credit_policy import (
+                            settle_inference_receipt,
+                        )
+                        escrow_amount = _D(str(
+                            getattr(escrow_entry, "amount", 0),
+                        ))
+                        decision = await settle_inference_receipt(
+                            payment_escrow=node._payment_escrow,
+                            receipt=receipt,
+                            operator_id=operator_id,
+                            job_id=job_id,
+                            escrow_amount=escrow_amount,
+                        )
+                        if decision.should_slash:
+                            logger.warning(
+                                "Sprint 785 — slash signal for "
+                                "job_id=%s: partial_completion."
+                                "reason=error (operator-attributable). "
+                                "On-chain slash emission deferred to "
+                                "a later sprint.",
+                                job_id,
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"Inference receipt-aware settle failed "
+                            f"for {job_id}: {e}"
+                        )
+                else:
+                    try:
+                        await node._payment_escrow.release_escrow(
+                            job_id=job_id,
+                            provider_id=operator_id,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Inference escrow release failed: {e}"
+                        )
 
             # Sprint 251 — record COMPLETED in JobHistoryStore.
             # Inference jobs now appear in prsm_jobs_list +
