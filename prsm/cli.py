@@ -2577,6 +2577,10 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 755-756 — operator-controlled active window as 'HH:MM-HH:MM' (e.g., '22:00-08:00' for overnight only). Outside the window the daemon refuses inference dispatch (503 with Retry-After) AND skips discovery announces (peers evict from routing pool). Default unset = always-active (backward-compat). Cross-midnight ranges OK."),
     ("PRSM_ACTIVE_TIMEZONE", False, None,
      "Sprint 755-756 — IANA timezone name for PRSM_ACTIVE_HOURS (e.g., 'America/New_York', 'Europe/London'). Default 'UTC'. Operator's wall-clock time is what matters — pick a tz that matches their schedule."),
+    ("PRSM_STORAGE_UPLOAD_MBPS", False, None,
+     "Sprint 761 — operator-facing upload bandwidth cap for the storage provider (content serving + shard transfer). Float Mbps; default 0 = unlimited (pre-761 behavior). Useful on metered/capped consumer ISPs and gaming PCs where the daemon shouldn't saturate upload during peak hours."),
+    ("PRSM_STORAGE_DOWNLOAD_MBPS", False, None,
+     "Sprint 761 — operator-facing download bandwidth cap for the storage provider. Float Mbps; default 0 = unlimited."),
 ]
 
 

@@ -355,6 +355,34 @@ prsm node schedule --format json   # for grafana / scripts
 Empty / unset env → "always-active" (backward-compat — operators
 who don't set the env see no behavior change).
 
+### Bandwidth caps (sprint 761)
+
+Consumer ISPs often have metered/capped upload (cable, DSL,
+satellite) — and gaming-PC operators don't want the daemon
+saturating their upload during peak hours. Sprint 761 exposes
+the existing `BandwidthLimiter` mechanism via env vars:
+
+```ini
+# Cap storage upload + download separately (asymmetric ISPs are
+# common). Float Mbps. 0 = unlimited (default).
+Environment=PRSM_STORAGE_UPLOAD_MBPS=10
+Environment=PRSM_STORAGE_DOWNLOAD_MBPS=100
+```
+
+What's throttled: content serving (sharded download to peers)
++ shard transfer. The daemon's small-message paths (announce,
+discovery, P2P signaling) are NOT counted against this cap —
+they're tiny enough that capping them would do more harm than
+good (announces failing → peer evictions → routing problems).
+
+Operators wanting to limit OTHER traffic types (compute dispatch,
+streaming inference responses) — file a request; the
+BandwidthLimiter mechanism extends to those paths, just needs
+env-var wiring per traffic class.
+
+Non-float values + negative values safely default to 0 (unlimited)
+with a warning log — daemon-start doesn't crash on a typo.
+
 For Lambda GPU operators: change `PRSM_PARALLAX_HF_DEVICE=cpu` to `cuda`,
 omit the `INFERENCE_CONCURRENCY_LIMIT` (200GB RAM doesn't need the
 gate), and skip the optional multi-stage-allocation overrides at the
@@ -491,3 +519,4 @@ covering unary, streaming, DP, and multi-host modes.
 | 734-739 | F65/F66/F67/F68 `/admin/*` default-deny non-loopback (incl. reverse-proxy XFF/X-Real-IP defense + IPv4-mapped IPv6 + 127/8 block); BEHAVIOR CHANGE for operators with remote monitoring — see "Admin endpoint auth" section above |
 | 740-754 | F65-F80 admin-auth + reconnaissance arc — 17 endpoint groups now loopback-gated incl. /metrics, /status, /balance (worst leak: operator FTNS balance + 20-tx history with counterparties), /peers (network topology), /transactions (200-tx history). 82/82 pin tests |
 | 755-758 | Operator-controlled active-window scheduling — PRSM_ACTIVE_HOURS + PRSM_ACTIVE_TIMEZONE; inference → 503/Retry-After outside window; announce skipped → peers evict; fast re-announce on resume (~10s vs 60s); `prsm node schedule` CLI |
+| 761 | Operator-facing bandwidth caps — PRSM_STORAGE_UPLOAD_MBPS + PRSM_STORAGE_DOWNLOAD_MBPS; wires existing BandwidthLimiter to env vars for the content-serving + shard-transfer paths |

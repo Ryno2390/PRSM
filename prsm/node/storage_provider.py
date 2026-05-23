@@ -128,9 +128,45 @@ class StorageProvider:
         self._content_provider = content_provider
         
         # Bandwidth limits (0 = unlimited)
-        self.upload_mbps_limit: float = 0.0
-        self.download_mbps_limit: float = 0.0
-        
+        # Sprint 761 — operator-facing env vars exposing the
+        # existing BandwidthLimiter mechanism. Pre-761 the limits
+        # were hardcoded to 0 (unlimited); operators wanting to
+        # cap their daemon's network usage (consumer ISPs with
+        # metered/capped plans, gaming PC that shouldn't saturate
+        # upload during the workday, etc.) had no knob. Now:
+        # `PRSM_STORAGE_UPLOAD_MBPS=10` caps upload to 10 Mbps;
+        # similarly for download. Default 0 = unlimited preserves
+        # the pre-761 behavior for the existing operator fleet.
+        # Non-float values safely default to 0 (rather than
+        # failing daemon-start mysteriously).
+        import os as _os
+        def _resolve_mbps(env_name: str) -> float:
+            raw = _os.environ.get(env_name, "").strip()
+            if not raw:
+                return 0.0
+            try:
+                val = float(raw)
+            except ValueError:
+                logger.warning(
+                    f"{env_name}={raw!r} not a valid float; "
+                    f"defaulting to 0 (unlimited)"
+                )
+                return 0.0
+            if val < 0:
+                logger.warning(
+                    f"{env_name}={val} is negative; "
+                    f"defaulting to 0 (unlimited)"
+                )
+                return 0.0
+            return val
+
+        self.upload_mbps_limit: float = _resolve_mbps(
+            "PRSM_STORAGE_UPLOAD_MBPS"
+        )
+        self.download_mbps_limit: float = _resolve_mbps(
+            "PRSM_STORAGE_DOWNLOAD_MBPS"
+        )
+
         # Bandwidth limiter for throttling content serving
         self.bandwidth_limiter = BandwidthLimiter(
             upload_mbps=self.upload_mbps_limit,
