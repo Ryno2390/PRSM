@@ -688,12 +688,13 @@ against origin's known pubkey. Tracked for a future session.
 | 747 | fix | **F74** — /info + /health/detailed gated. Both leaked reconnaissance data: operator on-chain EOA, node_id, wired contract addresses, api_version (CVE-matching surface), per-subsystem state. Sibling of F73; same gate. Minimal `/health` (no /detailed suffix) intentionally preserved as public for load-balancer probes |
 | 748 | fix | **F75** — /status + /rings/status gated. The largest single recon leak in the codebase: `/status` exposed the operator's literal `ftns_balance` (financial), node_id, p2p_address, api_address, peer counts, bootstrap telemetry, and 13+ subsystem provider stats. Now in `_GATED_PATHS`; inherits all F65-F71 defenses |
 | 749 | fix | **F76** — /peers gated. Complete network topology was public: every peer_id + IP:port + connected_at + last_seen. Attacker reading /peers got the full P2P attack-surface map (which nodes to target, when they're online). Sibling of F75; same gate |
+| 750 | fix | **F77** — /balance + /bootstrap/status gated. **The worst recon leak found**: /balance returned operator's exact FTNS balance PLUS last 20 transactions (tx_id + counterparty wallet_ids + amounts + descriptions + timestamps). Complete financial profile. /bootstrap/status leaked bootstrap-fleet topology. Sibling of F75-F76; same gate |
 
-46 F-class production-blockers (F30 → F76) closed across the
-session. ~305 new pin tests + 5 new integration tests, 0 cross-suite
-regressions. **F76 closes the network-topology recon leak complementing
-F75's financial leak. Cumulative admin-auth + reconnaissance arc
-(F65-F76): 58/58 pin tests green across 10 sprints.**
+47 F-class production-blockers (F30 → F77) closed across the
+session. ~311 new pin tests + 5 new integration tests, 0 cross-suite
+regressions. **F77 closes the transaction-history leak complementing
+F75's balance-only leak. Cumulative admin-auth + reconnaissance arc
+(F65-F77): 64/64 pin tests green across 11 sprints.**
 
 ## 9. What this enables
 
