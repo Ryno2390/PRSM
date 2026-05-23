@@ -645,6 +645,54 @@ def register_parallax_streams_endpoint(app: Any, node: Any) -> None:
         }
 
 
+def register_auto_claim_status_endpoint(app: Any, node: Any) -> None:
+    """Sprint 769 — /admin/auto-claim/status.
+
+    Surfaces the runtime AutoClaimWorker counters that the
+    sprint-767 CLI couldn't see (it only inspects env config).
+    Closes the carveout sprint 768's runbook flagged.
+
+    Reported fields:
+      - enabled: bool (worker constructed + config.enabled)
+      - threshold_ftns / interval_seconds: from config
+      - total_claimed_ftns: cumulative Decimal claimed this session
+      - claim_attempts: number of times above-threshold check fired
+      - claim_failures: number of those that raised
+
+    Status codes:
+      200 — worker exists; counters returned
+      503 — no worker on this daemon (staking_manager + identity
+            weren't both present at start)
+
+    Loopback-gated by the sprint-734 admin middleware
+    (`/admin/*` path prefix). Inherits F65-F73 defenses.
+    """
+    from fastapi import HTTPException
+
+    @app.get("/admin/auto-claim/status", tags=["admin"])
+    async def auto_claim_status() -> Dict[str, Any]:
+        worker = getattr(node, "_auto_claim_worker", None)
+        if worker is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "AutoClaimWorker not constructed on this "
+                    "daemon. Requires staking_manager + identity. "
+                    "If both should be present, check daemon "
+                    "startup logs for a construction warning."
+                ),
+            )
+        cfg = worker.config
+        return {
+            "enabled": cfg.enabled,
+            "threshold_ftns": str(cfg.threshold_ftns),
+            "interval_seconds": cfg.interval_seconds,
+            "total_claimed_ftns": str(worker.total_claimed_ftns),
+            "claim_attempts": worker.claim_attempts,
+            "claim_failures": worker.claim_failures,
+        }
+
+
 def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     """
     Create the node management FastAPI app with a reference to the running node.
@@ -15717,6 +15765,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     register_parallax_pool_snapshot_endpoint(app, node)
     # Sprint 722 — also BEFORE the dashboard catch-all mount.
     register_parallax_streams_endpoint(app, node)
+    # Sprint 769 — auto-claim worker status endpoint. Register
+    # BEFORE the dashboard catch-all mount, same as sprint 722
+    # (F30 lesson from sprint 685 — catch-all mount swallows any
+    # admin endpoint registered after it).
+    register_auto_claim_status_endpoint(app, node)
 
     try:
         from prsm.dashboard.app import create_dashboard_app as _create_dash_app

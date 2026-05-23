@@ -2796,8 +2796,22 @@ def node_schedule_cli(output_format: str):
     type=click.Choice(["text", "json"]), default="text",
     help="Output format",
 )
-def node_auto_claim_cli(output_format: str):
-    """Sprint 765-767 — show the auto-claim worker config.
+@click.option(
+    "--runtime", "fetch_runtime", is_flag=True, default=False,
+    help="Also fetch runtime counters from the running daemon "
+    "via /admin/auto-claim/status (sprint 769). Requires daemon "
+    "reachable on the loopback URL (or PRSM_ADMIN_REMOTE_ALLOWED=1 "
+    "behind a proxy with auth).",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL (default: stored credential or 127.0.0.1:8000)",
+)
+def node_auto_claim_cli(
+    output_format: str, fetch_runtime: bool,
+    api_url_override: Optional[str],
+):
+    """Sprint 765-769 — show the auto-claim worker config + runtime.
 
     Reads `PRSM_AUTO_CLAIM_THRESHOLD_FTNS` + `PRSM_AUTO_CLAIM_INTERVAL_S`
     and reports whether auto-claim is enabled.
@@ -2808,9 +2822,10 @@ def node_auto_claim_cli(output_format: str):
     mutable. To change cadence/threshold, edit your systemd unit's
     Environment= lines and restart.
 
-    Read-only. Runtime claim counters (total claimed, attempts,
-    failures) live on the running worker and aren't exposed yet —
-    file a request for an admin endpoint surfacing them if needed.
+    Use `--runtime` to additionally fetch the running daemon's
+    worker counters (total claimed this session, attempts,
+    failures) via /admin/auto-claim/status. Requires the daemon
+    to be reachable on the loopback URL.
     """
     import json as _json
     from prsm.node.auto_claim import resolve_auto_claim_config_from_env
@@ -2827,12 +2842,44 @@ def node_auto_claim_cli(output_format: str):
         console.print(f"[red]Auto-claim config error:[/red] {exc}")
         raise SystemExit(1)
 
+    # Optionally fetch runtime counters from the live daemon.
+    runtime_payload: Optional[Dict[str, Any]] = None
+    if fetch_runtime:
+        import httpx as _httpx
+        url = _api_url_from_creds(api_url_override)
+        endpoint = f"{url}/admin/auto-claim/status"
+        try:
+            resp = _httpx.get(endpoint, timeout=5.0)
+            if resp.status_code == 200:
+                runtime_payload = resp.json()
+            elif resp.status_code == 503:
+                runtime_payload = {
+                    "available": False,
+                    "reason": resp.json().get("detail", "no worker"),
+                }
+            else:
+                runtime_payload = {
+                    "available": False,
+                    "reason": (
+                        f"daemon responded {resp.status_code}: "
+                        f"{resp.text[:200]}"
+                    ),
+                }
+        except Exception as exc:
+            runtime_payload = {
+                "available": False,
+                "reason": f"daemon unreachable: {exc}",
+            }
+
     if output_format == "json":
-        click.echo(_json.dumps({
+        payload = {
             "enabled": cfg.enabled,
             "threshold_ftns": str(cfg.threshold_ftns),
             "interval_seconds": cfg.interval_seconds,
-        }, indent=2))
+        }
+        if runtime_payload is not None:
+            payload["runtime"] = runtime_payload
+        click.echo(_json.dumps(payload, indent=2))
         return
 
     if not cfg.enabled:
@@ -2863,6 +2910,30 @@ def node_auto_claim_cli(output_format: str):
         f"{cfg.interval_seconds:.0f}s; claims when total reaches "
         f"{cfg.threshold_ftns} FTNS.[/dim]"
     )
+
+    if runtime_payload is not None:
+        if runtime_payload.get("available") is False:
+            console.print(
+                f"\n[yellow]Runtime counters unavailable:[/yellow] "
+                f"{runtime_payload.get('reason', 'unknown')}"
+            )
+        else:
+            console.print(
+                f"\n[bold]Runtime (this session):[/bold]"
+            )
+            console.print(
+                f"  Cumulative claimed: "
+                f"[cyan]{runtime_payload.get('total_claimed_ftns', '0')}[/cyan] FTNS"
+            )
+            console.print(
+                f"  Claim attempts: "
+                f"[cyan]{runtime_payload.get('claim_attempts', 0)}[/cyan]"
+            )
+            failures = runtime_payload.get('claim_failures', 0)
+            color = "red" if failures > 0 else "green"
+            console.print(
+                f"  Claim failures: [{color}]{failures}[/{color}]"
+            )
 
 
 @node.command("device-profile")
