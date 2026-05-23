@@ -926,10 +926,23 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # pays, how much, when). /bootstrap/status leaks which
         # bootstrap servers this daemon is using — useful for an
         # attacker planning to attack the bootstrap fleet.
+        #
+        # Sprint 751 F78 — more financial recon endpoints:
+        # - /transactions: returns up to 200 transactions (worse
+        #   than /balance's 20). Same financial-profile concern.
+        # - /staking/status: returns the node's active stakes,
+        #   pending unstake requests, reward totals. Reveals the
+        #   operator's staking position — useful for adversarial
+        #   timing (when stake unlocks).
+        # - /settlement/stats + /pending + /history: settlement
+        #   counts/amounts/schedules. Same financial-intel class.
         _GATED_PATHS = (
             "/metrics", "/info", "/health/detailed",
             "/status", "/rings/status", "/peers",
             "/balance", "/bootstrap/status",
+            "/transactions", "/staking/status",
+            "/settlement/stats", "/settlement/pending",
+            "/settlement/history",
         )
         if not (
             path.startswith("/admin/") or path in _GATED_PATHS
