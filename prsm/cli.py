@@ -2957,6 +2957,145 @@ def node_preemption_status_cli(
     console.print(f"  Status: {flag_render}")
 
 
+@node.command("stake-info")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+@click.option(
+    "--identity-file", "identity_file",
+    default=None,
+    help="Path to identity.json (default: ~/.prsm/identity.json). "
+    "Required only when validating an operator_delegation against "
+    "this daemon's node_id.",
+)
+def node_stake_info_cli(
+    output_format: str, identity_file: Optional[str],
+) -> None:
+    """Sprint 795 — show operator's on-chain stake + delegation snapshot.
+
+    Reports operator address, delegation validity, on-chain
+    stake amount (wei + FTNS), and the contract being read.
+    Always exits 0 — informational. Operators see config gaps
+    in the output rather than as command failures.
+    """
+    import json as _json
+    import os as _os
+    from decimal import Decimal
+    op_addr = (_os.environ.get("PRSM_OPERATOR_ADDRESS") or "").strip()
+
+    payload: Dict[str, Any] = {
+        "operator_address": op_addr or None,
+        "delegation_status": "absent",
+        "delegation_node_id": None,
+        "stake_bond_address": (
+            _os.environ.get("PRSM_STAKE_BOND_ADDRESS") or None
+        ),
+        "rpc_url": (
+            _os.environ.get("PRSM_BASE_RPC_URL")
+            or "https://mainnet.base.org"
+        ),
+        "on_chain_stake_wei": 0,
+        "on_chain_stake_ftns": "0",
+        "reader_error": None,
+    }
+
+    # No operator address → just emit + bail with a hint.
+    if not op_addr:
+        if output_format == "json":
+            click.echo(_json.dumps(payload, indent=2))
+            return
+        console.print(
+            "[yellow]PRSM_OPERATOR_ADDRESS is unset.[/yellow] "
+            "Set it in your systemd unit or shell env to enable "
+            "stake-tier eligibility:\n"
+            "  [bold]export PRSM_OPERATOR_ADDRESS=0x...[/bold]"
+        )
+        return
+
+    # Delegation status
+    deleg_raw = _os.environ.get("PRSM_OPERATOR_DELEGATION") or ""
+    deleg_raw = deleg_raw.strip()
+    if deleg_raw:
+        try:
+            from prsm.node.identity import load_node_identity
+            from pathlib import Path as _Path
+
+            blob = _json.loads(deleg_raw)
+            ident_path = _Path(
+                identity_file
+                or (_Path.home() / ".prsm" / "identity.json")
+            )
+            identity = load_node_identity(ident_path)
+            if identity is None:
+                payload["delegation_status"] = "identity-missing"
+            else:
+                from prsm.node.operator_delegation import (
+                    verify_operator_delegation_blob,
+                )
+                ok = verify_operator_delegation_blob(
+                    node_id=identity.node_id,
+                    operator_address=op_addr,
+                    delegation=blob,
+                )
+                payload["delegation_status"] = (
+                    "valid" if ok else "invalid"
+                )
+                payload["delegation_node_id"] = identity.node_id
+        except Exception as exc:
+            payload["delegation_status"] = f"parse-error: {exc}"
+
+    # Stake amount via OnChainStakeReader
+    try:
+        from prsm.node.onchain_stake_reader import OnChainStakeReader
+        reader = OnChainStakeReader()
+        wei = int(reader.stake_amount_for(op_addr) or 0)
+        payload["on_chain_stake_wei"] = wei
+        payload["on_chain_stake_ftns"] = str(
+            Decimal(wei) / Decimal(10**18),
+        )
+    except Exception as exc:
+        payload["reader_error"] = str(exc)
+
+    if output_format == "json":
+        click.echo(_json.dumps(payload, indent=2))
+        return
+
+    # Text mode
+    console.print(
+        f"[bold]Stake snapshot for [cyan]{op_addr}[/cyan]:[/bold]"
+    )
+    deleg = payload["delegation_status"]
+    deleg_color = (
+        "green" if deleg == "valid"
+        else "red" if deleg == "invalid"
+        else "yellow"
+    )
+    console.print(
+        f"  Delegation:  [{deleg_color}]{deleg}[/{deleg_color}]"
+    )
+    if payload["delegation_node_id"]:
+        console.print(
+            f"  Node ID:     [dim]{payload['delegation_node_id']}[/dim]"
+        )
+    console.print(
+        f"  Stake:       [green]{payload['on_chain_stake_ftns']}[/green]"
+        f" FTNS ([dim]{payload['on_chain_stake_wei']} wei[/dim])"
+    )
+    console.print(
+        f"  Contract:    [dim]"
+        f"{payload['stake_bond_address'] or '<PRSM_STAKE_BOND_ADDRESS unset>'}"
+        f"[/dim]"
+    )
+    console.print(f"  RPC:         [dim]{payload['rpc_url']}[/dim]")
+    if payload["reader_error"]:
+        console.print(
+            f"[yellow]Unable to read on-chain stake:[/yellow] "
+            f"{payload['reader_error']}"
+        )
+
+
 @node.command("smoke-test")
 @click.option(
     "--no-pool", "skip_pool", is_flag=True, default=False,
