@@ -2790,6 +2790,81 @@ def node_schedule_cli(output_format: str):
         )
 
 
+@node.command("auto-claim")
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_auto_claim_cli(output_format: str):
+    """Sprint 765-767 — show the auto-claim worker config.
+
+    Reads `PRSM_AUTO_CLAIM_THRESHOLD_FTNS` + `PRSM_AUTO_CLAIM_INTERVAL_S`
+    and reports whether auto-claim is enabled.
+
+    When enabled, the daemon periodically checks accumulated FTNS
+    rewards and calls claim_rewards once they cross the threshold.
+    Operators set + restart the daemon — env-driven, not runtime-
+    mutable. To change cadence/threshold, edit your systemd unit's
+    Environment= lines and restart.
+
+    Read-only. Runtime claim counters (total claimed, attempts,
+    failures) live on the running worker and aren't exposed yet —
+    file a request for an admin endpoint surfacing them if needed.
+    """
+    import json as _json
+    from prsm.node.auto_claim import resolve_auto_claim_config_from_env
+
+    try:
+        cfg = resolve_auto_claim_config_from_env()
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "enabled": False,
+                "error": str(exc),
+            }))
+            raise SystemExit(1)
+        console.print(f"[red]Auto-claim config error:[/red] {exc}")
+        raise SystemExit(1)
+
+    if output_format == "json":
+        click.echo(_json.dumps({
+            "enabled": cfg.enabled,
+            "threshold_ftns": str(cfg.threshold_ftns),
+            "interval_seconds": cfg.interval_seconds,
+        }, indent=2))
+        return
+
+    if not cfg.enabled:
+        console.print(
+            "[bold]Auto-claim:[/bold] [dim]disabled[/dim]"
+        )
+        console.print(
+            "[dim]PRSM_AUTO_CLAIM_THRESHOLD_FTNS not set (or 0). "
+            "Daemon does not auto-claim. To opt in, set "
+            "PRSM_AUTO_CLAIM_THRESHOLD_FTNS=100 (or similar) in "
+            "your systemd unit + restart.[/dim]"
+        )
+        return
+
+    console.print(
+        f"[bold]Auto-claim:[/bold] [green]enabled[/green]"
+    )
+    console.print(
+        f"[bold]Threshold:[/bold] "
+        f"[cyan]{cfg.threshold_ftns}[/cyan] FTNS"
+    )
+    console.print(
+        f"[bold]Interval:[/bold] "
+        f"[cyan]{cfg.interval_seconds}[/cyan] seconds"
+    )
+    console.print(
+        "[dim]Daemon checks accumulated rewards every "
+        f"{cfg.interval_seconds:.0f}s; claims when total reaches "
+        f"{cfg.threshold_ftns} FTNS.[/dim]"
+    )
+
+
 @node.command("device-profile")
 @click.option(
     "--format", "output_format",

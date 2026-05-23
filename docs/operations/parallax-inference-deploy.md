@@ -413,6 +413,55 @@ Behavior:
 
 Default unset = feature off (backward-compat).
 
+### Auto-claim FTNS rewards (sprints 765-767)
+
+Long-running operators (especially consumer-device operators in
+the pool overnight every night) accumulate FTNS rewards that
+require periodic manual claim calls. Sprint 765-767 ships an
+opt-in `AutoClaimWorker` that does this automatically:
+
+```ini
+# Claim accumulated rewards once they reach 100 FTNS, checked
+# every hour. Default unset = disabled (manual claim only,
+# pre-765 behavior).
+Environment=PRSM_AUTO_CLAIM_THRESHOLD_FTNS=100
+Environment=PRSM_AUTO_CLAIM_INTERVAL_S=3600
+```
+
+Behavior:
+- Daemon-start spawns a background task that polls every
+  `INTERVAL_S` seconds (clamped to >= 60s to avoid gas waste).
+- Each iteration: calculates total accumulated rewards via the
+  staking_manager. If >= threshold, calls claim_rewards.
+- Iteration failures (transient RPC issues, gas estimation
+  problems) increment a failure counter and log — they DON'T
+  crash the worker. Next iteration tries again.
+- INFO log on each successful claim with the amount + cumulative
+  total.
+
+Inspection:
+```
+prsm node auto-claim         # show enabled/threshold/interval
+prsm node auto-claim --format json   # for grafana / scripts
+```
+
+Read-only CLI — operators change cadence/threshold by editing
+the systemd Environment= line + restarting.
+
+Honest scope:
+- Worker runtime counters (total claimed this session, attempts,
+  failures) live on the in-memory worker. An admin endpoint
+  surfacing them is a future-sprint follow-on if operators
+  request it.
+- Auto-claim only handles STAKING rewards. Content royalties +
+  other payout paths are separate code paths; if operators want
+  unified auto-claim across all sources, file a request.
+- The on-chain cost of each claim (~$0.01 gas on Base) is paid
+  from the claimed amount itself — operators should set a
+  threshold high enough that gas is a tolerable fraction.
+  Recommended floor: 10× expected gas cost (e.g., $0.10 of FTNS
+  = ~100 FTNS at current rates).
+
 ### CPU politeness (sprint 762)
 
 Consumer-device operators (MacBook, gaming PC) want the daemon
@@ -580,3 +629,4 @@ covering unary, streaming, DP, and multi-host modes.
 | 761 | Operator-facing bandwidth caps — PRSM_STORAGE_UPLOAD_MBPS + PRSM_STORAGE_DOWNLOAD_MBPS; wires existing BandwidthLimiter to env vars for the content-serving + shard-transfer paths |
 | 762 | Operator-facing CPU politeness — PRSM_NODE_NICE adjusts process priority via os.nice() at daemon-start. Daemon yields CPU to operator's interactive workloads. Safe-fail on Windows + non-root negative-nice rejection |
 | 763 | Battery-aware activation — PRSM_ACTIVE_ONLY_ON_AC=1 refuses work while on battery. Composes with active-window schedule (AND semantics). Fail-safe on desktop / sensor error |
+| 765-767 | Opt-in auto-claim — PRSM_AUTO_CLAIM_THRESHOLD_FTNS + INTERVAL_S; daemon background task claims accumulated rewards above threshold. `prsm node auto-claim` for inspection |
