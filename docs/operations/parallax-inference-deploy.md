@@ -490,6 +490,55 @@ For a MacBook operator running `PRSM_ACTIVE_HOURS=22:00-08:00`
 - Comes back IN at 22:00 with reduced priority — so if the
   operator is browsing late, the daemon yields
 
+### Cloud-spot preemption detection (sprint 772)
+
+Operators on AWS EC2 spot or GCP preemptible VMs get cheaper
+compute (60-90% discount) but the cloud provider can kill the
+instance with ~2min warning. The daemon polls the cloud metadata
+service to detect that signal:
+
+```ini
+# AWS EC2 spot:
+Environment=PRSM_PREEMPTION_DETECTOR=aws
+
+# GCP preemptible:
+Environment=PRSM_PREEMPTION_DETECTOR=gcp
+
+# Optional: poll cadence (default 10s)
+Environment=PRSM_PREEMPTION_POLL_INTERVAL_S=10
+```
+
+Behavior:
+- AWS backend polls `http://169.254.169.254/latest/meta-data/spot/instance-action`.
+  Steady state = 404; preemption pending = 200 + JSON with
+  `action` + `time` fields.
+- GCP backend polls
+  `http://metadata.google.internal/computeMetadata/v1/instance/preempted`
+  with required `Metadata-Flavor: Google` header. Text "FALSE"
+  → no notice; "TRUE" → preempted.
+- Detector flag is **monotonic** — once set, it stays set.
+  Preemption is a death sentence; the metadata endpoint can flake
+  but the daemon is still going down.
+- **Fail-safe**: metadata endpoint unreachable (e.g. running on
+  bare metal with the env set anyway) → flag stays clear. We'd
+  rather miss a preemption than mark a healthy node preempted.
+
+Default unset = detector disabled (safe for non-cloud nodes).
+
+Sprint 772 ships the detection foundation. Future sprints (773+)
+will wire the flag into:
+- Discovery announce loop → stop announcing when preempted (peers
+  evict from routing pool inside the ~2min warning window).
+- Inference dispatch → refuse new work; finish in-flight or
+  refund escrow.
+- Receipt protocol → emit a partial-completion / abandonment
+  marker per Vision §4.5.
+
+This is the smallest viable preemption awareness. The detector
+runs as a 10s-cadence background asyncio task with effectively
+zero overhead (link-local HTTP GET to a metadata endpoint that
+returns ~10 bytes).
+
 For Lambda GPU operators: change `PRSM_PARALLAX_HF_DEVICE=cpu` to `cuda`,
 omit the `INFERENCE_CONCURRENCY_LIMIT` (200GB RAM doesn't need the
 gate), and skip the optional multi-stage-allocation overrides at the

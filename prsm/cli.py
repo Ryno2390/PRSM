@@ -2589,6 +2589,10 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 765 — auto-claim accumulated FTNS rewards when total reaches this threshold. Decimal value (e.g., '100' = claim at 100 FTNS). Default unset/0 = disabled. Operator opts in for set-and-forget earnings claiming. Combined with PRSM_AUTO_CLAIM_INTERVAL_S to control claim cadence."),
     ("PRSM_AUTO_CLAIM_INTERVAL_S", False, None,
      "Sprint 765 — seconds between auto-claim checks. Default 3600 (1 hour). Clamped to >= 60s. Only effective when PRSM_AUTO_CLAIM_THRESHOLD_FTNS is set."),
+    ("PRSM_PREEMPTION_DETECTOR", False, ["", "aws", "gcp"],
+     "Sprint 772 — cloud-spot preemption detector backend. 'aws' polls EC2 instance-action metadata (169.254.169.254). 'gcp' polls GCE preemptible-metadata. Unset/'' = disabled (safe default for non-cloud nodes). Future sprints wire the flag into discovery + dispatch gates. Fail-safe: metadata endpoint unreachable → flag stays clear."),
+    ("PRSM_PREEMPTION_POLL_INTERVAL_S", False, None,
+     "Sprint 772 — seconds between preemption-metadata polls. Default 10s. Lower = faster detection but more metadata-endpoint traffic. AWS/GCP preemption notices give ~2min warning so 10s is plenty."),
 ]
 
 
