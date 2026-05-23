@@ -306,15 +306,55 @@ async def _settle_streaming_escrow(
                 f"Streaming privacy budget tracking failed for job_id={job_id}: {e}"
             )
 
-    try:
-        await node._payment_escrow.release_escrow(
-            job_id=job_id,
-            provider_id=node.identity.node_id if node.identity else "self",
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning(
-            f"Streaming escrow release failed for job_id={job_id}: {e}"
-        )
+    operator_id = (
+        node.identity.node_id if node.identity else "self"
+    )
+    # Sprint 784 — route through settle_inference_receipt when we
+    # have an InferenceReceipt in scope so partial_completion
+    # (sprint 777) drives proportional credit + refund + slash
+    # signal. Fall back to release_escrow when no receipt is
+    # present (legacy path / mid-stream failure that produced no
+    # receipt — preserves pre-784 behavior).
+    if (
+        getattr(result, "receipt", None) is not None
+        and hasattr(result.receipt, "cost_ftns")
+    ):
+        try:
+            from decimal import Decimal as _D
+            from prsm.economy.credit_policy import (
+                settle_inference_receipt,
+            )
+            escrow_amount = _D(str(getattr(escrow_entry, "amount", 0)))
+            decision = await settle_inference_receipt(
+                payment_escrow=node._payment_escrow,
+                receipt=result.receipt,
+                operator_id=operator_id,
+                job_id=job_id,
+                escrow_amount=escrow_amount,
+            )
+            if decision.should_slash:
+                logger.warning(
+                    "Sprint 784 — slash signal for job_id=%s: "
+                    "partial_completion.reason=error (operator-"
+                    "attributable). On-chain slash emission "
+                    "deferred to a later sprint.",
+                    job_id,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Streaming receipt-aware settle failed for "
+                f"job_id={job_id}: {e}"
+            )
+    else:
+        try:
+            await node._payment_escrow.release_escrow(
+                job_id=job_id,
+                provider_id=operator_id,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Streaming escrow release failed for job_id={job_id}: {e}"
+            )
 
 
 async def _resolve_post_token_billing(
