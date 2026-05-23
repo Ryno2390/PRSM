@@ -2585,6 +2585,10 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 762 — process-priority increment via os.nice(). Positive int (1-19); higher = lower CPU priority. Daemon yields CPU to operator's interactive workloads (browser, editor, game). Default unset = 0 (no change). Non-root processes can only INCREASE nice (lower priority); negative values are silently rejected by the OS with a warning log. Not available on Windows (os.nice not provided)."),
     ("PRSM_ACTIVE_ONLY_ON_AC", False, ["1", "true", "yes", "0", "false", "no", ""],
      "Sprint 763 — on laptops, only activate when plugged in (AC power). Set to 1/true/yes → daemon refuses inference + skips announces while on battery. Combines with PRSM_ACTIVE_HOURS (sprint 755) — both gates must pass. Fail-safe: when psutil sensor is unavailable OR no battery (desktop), treats as 'on AC' → active. Default unset = always-active regardless of power source."),
+    ("PRSM_AUTO_CLAIM_THRESHOLD_FTNS", False, None,
+     "Sprint 765 — auto-claim accumulated FTNS rewards when total reaches this threshold. Decimal value (e.g., '100' = claim at 100 FTNS). Default unset/0 = disabled. Operator opts in for set-and-forget earnings claiming. Combined with PRSM_AUTO_CLAIM_INTERVAL_S to control claim cadence."),
+    ("PRSM_AUTO_CLAIM_INTERVAL_S", False, None,
+     "Sprint 765 — seconds between auto-claim checks. Default 3600 (1 hour). Clamped to >= 60s. Only effective when PRSM_AUTO_CLAIM_THRESHOLD_FTNS is set."),
 ]
 
 
