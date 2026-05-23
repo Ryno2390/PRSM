@@ -383,6 +383,34 @@ env-var wiring per traffic class.
 Non-float values + negative values safely default to 0 (unlimited)
 with a warning log — daemon-start doesn't crash on a typo.
 
+### CPU politeness (sprint 762)
+
+Consumer-device operators (MacBook, gaming PC) want the daemon
+to yield CPU to their interactive workloads:
+
+```ini
+# Daemon at lower priority than interactive work (browser, editor,
+# game). 10 is a reasonable default; range 1-19. Linux/macOS only.
+Environment=PRSM_NODE_NICE=10
+```
+
+Behavior:
+- Linux/macOS: `os.nice(N)` adds N to the process's priority
+  value. Higher nice = lower scheduling priority.
+- Non-root processes can only INCREASE nice (lower their own
+  priority). Negative values are rejected by the OS — the
+  daemon logs the rejection + continues at default priority.
+- Windows: `os.nice` not available — daemon logs a warning
+  + continues at default priority (no crash).
+- Non-int values: warning + default priority.
+- Unset env: backward-compat (default 0 = no change).
+
+For a MacBook operator running `PRSM_ACTIVE_HOURS=22:00-08:00`
+(sprint 755-758) + `PRSM_NODE_NICE=10`, the daemon:
+- Is OUT of the pool during work hours (no contention at all)
+- Comes back IN at 22:00 with reduced priority — so if the
+  operator is browsing late, the daemon yields
+
 For Lambda GPU operators: change `PRSM_PARALLAX_HF_DEVICE=cpu` to `cuda`,
 omit the `INFERENCE_CONCURRENCY_LIMIT` (200GB RAM doesn't need the
 gate), and skip the optional multi-stage-allocation overrides at the
@@ -520,3 +548,4 @@ covering unary, streaming, DP, and multi-host modes.
 | 740-754 | F65-F80 admin-auth + reconnaissance arc — 17 endpoint groups now loopback-gated incl. /metrics, /status, /balance (worst leak: operator FTNS balance + 20-tx history with counterparties), /peers (network topology), /transactions (200-tx history). 82/82 pin tests |
 | 755-758 | Operator-controlled active-window scheduling — PRSM_ACTIVE_HOURS + PRSM_ACTIVE_TIMEZONE; inference → 503/Retry-After outside window; announce skipped → peers evict; fast re-announce on resume (~10s vs 60s); `prsm node schedule` CLI |
 | 761 | Operator-facing bandwidth caps — PRSM_STORAGE_UPLOAD_MBPS + PRSM_STORAGE_DOWNLOAD_MBPS; wires existing BandwidthLimiter to env vars for the content-serving + shard-transfer paths |
+| 762 | Operator-facing CPU politeness — PRSM_NODE_NICE adjusts process priority via os.nice() at daemon-start. Daemon yields CPU to operator's interactive workloads. Safe-fail on Windows + non-root negative-nice rejection |

@@ -4040,6 +4040,58 @@ class PRSMNode:
         if self._started:
             return
 
+        # Sprint 762 — operator-facing CPU politeness via os.nice().
+        # Consumer-device operators (MacBook, gaming PC) often want
+        # the daemon to YIELD CPU to their interactive workloads
+        # (browser, editor, game) so PRSM doesn't compete with their
+        # primary use. Linux/macOS `nice(N)` adds N to the process's
+        # priority value — HIGHER nice value = LOWER scheduling
+        # priority. Non-root processes can only increase (lower
+        # their own priority); reasonable values are 1-19. Set via
+        # `PRSM_NODE_NICE=10` in systemd unit. Default unset = 0 =
+        # no change (backward-compat).
+        #
+        # Set BEFORE event-loop capture so the priority change
+        # applies to every coroutine the loop schedules. Safe-fail
+        # on platforms without os.nice (Windows): log + continue
+        # with default priority.
+        import os as _os_nice
+        _nice_raw = _os_nice.environ.get(
+            "PRSM_NODE_NICE", "",
+        ).strip()
+        if _nice_raw:
+            try:
+                _nice_increment = int(_nice_raw)
+            except ValueError:
+                logger.warning(
+                    "PRSM_NODE_NICE=%r is not an int; ignoring "
+                    "(daemon stays at default priority).",
+                    _nice_raw,
+                )
+            else:
+                try:
+                    actual = _os_nice.nice(_nice_increment)
+                    logger.info(
+                        "Sprint 762 — daemon process priority "
+                        "adjusted: PRSM_NODE_NICE=%d → effective "
+                        "nice=%d", _nice_increment, actual,
+                    )
+                except AttributeError:
+                    # Windows: os.nice not available.
+                    logger.warning(
+                        "PRSM_NODE_NICE set but os.nice() not "
+                        "available on this platform; daemon stays "
+                        "at default priority.",
+                    )
+                except OSError as exc:
+                    logger.warning(
+                        "PRSM_NODE_NICE=%d rejected by OS "
+                        "(non-root processes can only INCREASE "
+                        "nice, i.e., LOWER priority — positive "
+                        "values only): %s",
+                        _nice_increment, exc,
+                    )
+
         # Sprint 595 (Phase 2D) — capture the running event loop +
         # initialize the chain-executor pending-requests dict. Used
         # by sprint-594's run_async_on_loop primitive to bridge the
