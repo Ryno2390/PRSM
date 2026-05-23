@@ -895,8 +895,22 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         #   canonical-match boolean for 14+ subsystems
         # Minimal `/health` (load-balancer probe) is INTENTIONALLY
         # NOT gated — load balancers need it to stay reachable.
+        #
+        # Sprint 748 F75 — /status and /rings/status also gated.
+        # /status is the heaviest leak yet: it returns the
+        # operator's literal `ftns_balance` (financial value) plus
+        # full subsystem stats, peer counts, bootstrap telemetry,
+        # node_id, p2p_address, api_address, escrow stats,
+        # consensus stats, batch_settlement stats, ftns_onchain
+        # summary, and per-subsystem provider stats. A network
+        # attacker can:
+        # - Read operator's exact FTNS balance (financial intel)
+        # - Map their peer topology (network attack surface)
+        # - Learn batch-settlement schedules (timing attack)
+        # /rings/status is the same recon-class as /health/detailed.
         _GATED_PATHS = (
             "/metrics", "/info", "/health/detailed",
+            "/status", "/rings/status",
         )
         if not (
             path.startswith("/admin/") or path in _GATED_PATHS
