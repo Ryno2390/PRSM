@@ -916,9 +916,20 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # the entire P2P attack-surface map (which nodes to
         # target, when they connected, when they were last
         # active). Pure reconnaissance vector.
+        #
+        # Sprint 750 F77 — /balance + /bootstrap/status gated.
+        # /balance is the WORST leak found yet: it returns the
+        # operator's literal `balance` (FTNS value) PLUS the last
+        # 20 transactions including counterparty wallet_ids +
+        # amounts + descriptions + timestamps. Lets an attacker
+        # build a complete financial profile (who the operator
+        # pays, how much, when). /bootstrap/status leaks which
+        # bootstrap servers this daemon is using — useful for an
+        # attacker planning to attack the bootstrap fleet.
         _GATED_PATHS = (
             "/metrics", "/info", "/health/detailed",
             "/status", "/rings/status", "/peers",
+            "/balance", "/bootstrap/status",
         )
         if not (
             path.startswith("/admin/") or path in _GATED_PATHS
