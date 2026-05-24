@@ -787,6 +787,52 @@ def register_auto_claim_status_endpoint(app: Any, node: Any) -> None:
         }
 
 
+def register_output_cache_stats_endpoint(
+    app: Any, node: Any,
+) -> None:
+    """Sprint 815 — GET /admin/output-cache-stats.
+
+    Returns the sprint-814 stats() snapshot from the executor's
+    output cache. Lets operators audit hit-rate + eviction
+    behavior without a full Prometheus stack.
+
+    Status codes:
+      200 — cache wired; stats returned
+      503 — executor missing or no _output_cache wired
+            (PRSM_INFERENCE_OUTPUT_CACHE_ENABLED unset or
+             daemon-startup factory hit a fail-soft branch)
+
+    Loopback-gated by sprint-734 admin middleware
+    (`/admin/*` path prefix). Inherits F65-F73 defenses.
+    """
+    from fastapi import HTTPException
+
+    @app.get(
+        "/admin/output-cache-stats", tags=["admin"],
+    )
+    async def output_cache_stats() -> Dict[str, Any]:
+        executor = getattr(node, "inference_executor", None)
+        if executor is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Inference executor not initialized. "
+                    "Output cache stats unavailable."
+                ),
+            )
+        cache = getattr(executor, "_output_cache", None)
+        if cache is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Output cache not configured. Set "
+                    "PRSM_INFERENCE_OUTPUT_CACHE_ENABLED=1 + "
+                    "restart daemon to enable."
+                ),
+            )
+        return cache.stats()
+
+
 def register_partial_completion_events_endpoint(
     app: Any, node: Any,
 ) -> None:
@@ -16060,6 +16106,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     register_auto_claim_status_endpoint(app, node)
     register_preemption_status_endpoint(app, node)
     register_partial_completion_events_endpoint(app, node)
+    register_output_cache_stats_endpoint(app, node)
 
     try:
         from prsm.dashboard.app import create_dashboard_app as _create_dash_app

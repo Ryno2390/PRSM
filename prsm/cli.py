@@ -1758,6 +1758,94 @@ def node_slash_history(api_port, output_format, limit):
     )
 
 
+@node.command("output-cache-stats")
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_output_cache_stats_cli(
+    api_url_override: Optional[str], output_format: str,
+) -> None:
+    """Sprint 815 — show the output cache hit/miss/evict snapshot.
+
+    Wraps GET /admin/output-cache-stats. Useful for tuning
+    PRSM_INFERENCE_OUTPUT_CACHE_TTL_S + _MAX_ENTRIES against
+    actual workload.
+
+    Exit 0 success, 1 cache unconfigured (503), 2 unreachable.
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/admin/output-cache-stats"
+    try:
+        resp = _httpx.get(endpoint, timeout=10.0)
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False, "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]cache-stats query failed "
+                f"({resp.status_code}):[/red] {resp.text}"
+            )
+            if resp.status_code == 503:
+                console.print(
+                    "[dim]Hint: set [bold]PRSM_INFERENCE_OUTPUT_CACHE_ENABLED"
+                    "=1[/bold] in your env + restart the "
+                    "daemon to enable cache.[/dim]"
+                )
+        raise SystemExit(1)
+    data = resp.json()
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+
+    hits = int(data.get("hits", 0))
+    misses = int(data.get("misses", 0))
+    total = hits + misses
+    hit_rate_pct = (
+        round((hits / total) * 100, 1) if total > 0 else 0.0
+    )
+    console.print(
+        f"[bold]Output cache stats:[/bold]"
+    )
+    console.print(
+        f"  hits=[green]{hits}[/green]  "
+        f"misses=[yellow]{misses}[/yellow]  "
+        f"hit_rate=[cyan]{hit_rate_pct}%[/cyan]"
+    )
+    console.print(
+        f"  puts={data.get('puts', 0)}  "
+        f"evictions={data.get('evictions', 0)}  "
+        f"ttl_evictions={data.get('ttl_evictions', 0)}"
+    )
+    console.print(
+        f"  size=[bold]{data.get('size', 0)}[/bold] / "
+        f"max_entries={data.get('max_entries', '?')}  "
+        f"ttl_seconds={data.get('ttl_seconds', '?')}"
+    )
+
+
 @node.command("partial-completion-history")
 @click.option(
     "--limit", "limit", default=50, type=int,
