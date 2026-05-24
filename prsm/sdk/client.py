@@ -169,6 +169,70 @@ class PRSMClient:
                 result["receipt_verified"] = False
         return result
 
+    # ── Sprint 821 — Content publish + fetch ────────────────────
+
+    async def publish_content(
+        self,
+        text: str,
+        *,
+        filename: str = "document.txt",
+        replicas: int = 3,
+        royalty_rate: Optional[float] = None,
+        parent_cids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Sprint 821 — POST /content/upload. Returns server
+        payload with the assigned CID + filename + size.
+
+        Mirror of `prsm content publish` CLI (sprint 806).
+        Defaults match the CLI + server-side defaults.
+
+        For binary content or text > 100MB, use the shard
+        endpoint instead (no SDK wrapper yet; see sprint 817's
+        CLI for the canonical body shape).
+        """
+        body: Dict[str, Any] = {
+            "text": text,
+            "filename": filename,
+            "replicas": replicas,
+            "parent_cids": list(parent_cids) if parent_cids else [],
+        }
+        if royalty_rate is not None:
+            body["royalty_rate"] = royalty_rate
+        return await self._post("/content/upload", body)
+
+    async def fetch_content(
+        self,
+        cid: str,
+        *,
+        timeout: float = 30.0,
+        verify_hash: bool = True,
+    ) -> Dict[str, Any]:
+        """Sprint 821 — GET /content/retrieve/{cid}. Returns
+        the server payload with `data` as base64-encoded bytes
+        (caller decodes for binary content).
+
+        Mirror of `prsm content fetch` CLI (sprint 805).
+
+        Threads ``timeout`` + ``verify_hash`` as query params;
+        the server-side timeout cap (PRSM_MAX_RETRIEVE_TIMEOUT_SEC,
+        default 300) applies.
+        """
+        await self._ensure_session()
+        import aiohttp as _aiohttp
+
+        params: Dict[str, Any] = {"timeout": timeout}
+        # The fastapi server reads bool from "false" / "true"
+        # lowercased strings — serialize accordingly.
+        params["verify_hash"] = "true" if verify_hash else "false"
+
+        async with self._session.get(
+            f"{self.base_url}/content/retrieve/{cid}",
+            headers=self._headers(),
+            timeout=_aiohttp.ClientTimeout(total=timeout + 5.0),
+            params=params,
+        ) as resp:
+            return await resp.json()
+
     # ── Sprint 820 — Streaming verifiable inference ─────────────
 
     async def infer_stream(
