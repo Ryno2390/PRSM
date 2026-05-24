@@ -5129,6 +5129,87 @@ def compute_infer_cli(
             raise SystemExit(1)
 
 
+@compute.command("models")
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def compute_models_cli(
+    api_url_override: Optional[str], output_format: str,
+) -> None:
+    """Sprint 807 — list available inference model_ids.
+
+    Wraps GET /compute/models. Users discover what models the
+    daemon's executor accepts so they can pass --model to
+    `prsm compute infer`.
+
+    Exit codes:
+      0 — listed (even when empty — operator may have started
+          the daemon without wiring any models)
+      1 — 503 (executor not initialized) + actionable hint
+      2 — daemon unreachable
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/compute/models"
+    try:
+        resp = _httpx.get(endpoint, timeout=10.0)
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False, "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]models query failed ({resp.status_code}):"
+                f"[/red] {resp.text}"
+            )
+            if resp.status_code == 503:
+                console.print(
+                    "[dim]Hint: set [bold]PRSM_INFERENCE_EXECUTOR="
+                    "parallax[/bold] (or =mock for local testing) "
+                    "and restart the daemon.[/dim]"
+                )
+        raise SystemExit(1)
+    data = resp.json()
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+
+    models = data.get("models", [])
+    count = data.get("count", len(models))
+    if not models:
+        console.print(
+            "[dim]0 models available.[/dim] The daemon's "
+            "inference executor is wired but reports no "
+            "supported models — operator likely hasn't loaded "
+            "any HF checkpoints (`PRSM_PARALLAX_HF_MODEL_ID=...`)."
+        )
+        return
+    console.print(f"[bold]{count} model(s) available:[/bold]")
+    for m in models:
+        console.print(f"  • [cyan]{m}[/cyan]")
+
+
 @compute.command("verify-receipt")
 @click.option(
     "--file", "receipt_file",
