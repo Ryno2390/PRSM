@@ -5353,16 +5353,32 @@ def compute_infer_cli(
                 json=body, timeout=120.0,
             ) as resp:
                 if resp.status_code != 200:
+                    # Sprint 825 — httpx streaming responses
+                    # require .read() before .text is accessed.
+                    # Without this, the error path raises
+                    # "Attempted to access streaming response
+                    # content, without having called read()" +
+                    # the operator sees a confusing "unreachable"
+                    # message instead of the actual server
+                    # status detail.
+                    try:
+                        resp.read()
+                        detail_text = resp.text
+                    except Exception:
+                        detail_text = (
+                            f"<unable to read response body for "
+                            f"status {resp.status_code}>"
+                        )
                     if output_format == "json":
                         click.echo(_json.dumps({
                             "ok": False,
                             "status": resp.status_code,
-                            "detail": resp.text,
+                            "detail": detail_text,
                         }))
                     else:
                         console.print(
                             f"[red]Inference stream failed "
-                            f"({resp.status_code}):[/red] {resp.text}"
+                            f"({resp.status_code}):[/red] {detail_text}"
                         )
                     raise SystemExit(1)
                 # Parse SSE event/data lines
@@ -5505,10 +5521,20 @@ def compute_infer_cli(
 
     # Text mode
     out = data.get("output", "")
-    cost = data.get("ftns_charged", data.get("cost_ftns", "?"))
+    # Sprint 825 — cost lives at receipt.cost_ftns for parallax
+    # responses. Sprint 802's original lookup only checked top-
+    # level keys + rendered "?" against real daemons. Now fall
+    # through receipt.cost_ftns before giving up.
+    receipt = data.get("receipt") or {}
+    cost = data.get(
+        "ftns_charged",
+        data.get(
+            "cost_ftns",
+            receipt.get("cost_ftns", "?"),
+        ),
+    )
     console.print(f"[bold]Output:[/bold] {out}")
     console.print(f"[dim]Cost: {cost} FTNS[/dim]")
-    receipt = data.get("receipt") or {}
     if receipt:
         sig = receipt.get("settler_signature", "")
         if sig:
