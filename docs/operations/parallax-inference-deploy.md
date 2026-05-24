@@ -187,6 +187,24 @@ Environment=PRSM_INFERENCE_CONCURRENCY_LIMIT=1
 # § Timeouts (sprint 687)
 Environment=PRSM_PARALLAX_SEND_MESSAGE_TIMEOUT_S=600
 
+# § Multi-host gossip + RPC resilience (sprints 836-838)
+# OPT-IN. Default unset = strict (legacy behavior). Set to 1
+# when running multi-host fleets where some peers may not yet
+# have advertised hardware_profile via the bootstrap relay
+# (e.g., NAT'd cold-start joiners; sprint 838 closes this for
+# fleets where bootstrap-server-v2 has been redeployed). When
+# set, the DHT-backed pool admits hw=None peers under
+# conservative synthetic defaults (1vCPU/1GB-RAM tier-none).
+# Environment=PRSM_PARALLAX_ADMIT_UNKNOWN_HARDWARE=1
+
+# Sprint 837 — Base mainnet RPC resilience for the anchor
+# pubkey lookup. Default 3 attempts with exp backoff (0.5s,
+# 1.0s, 2.0s). Bump ATTEMPTS=5 + BACKOFF_S=1.0 when running
+# on the free mainnet.base.org endpoint under sustained
+# throttle; consider paid RPC for high-throughput operators.
+# Environment=PRSM_ANCHOR_LOOKUP_RETRY_ATTEMPTS=3
+# Environment=PRSM_ANCHOR_LOOKUP_RETRY_BACKOFF_S=0.5
+
 # § Multi-stage allocation overrides (sprint 695) — OPT-IN only
 # for testing the 2-stage chain path on small homogeneous CPU
 # fleets. Defaults work for production heterogeneous deployments
@@ -638,6 +656,9 @@ end-to-end (pool reachable + inference returns + receipt signed).
 | SSE output diverges from HF greedy reference | `SamplingDefaults.temperature` defaulting to 1.0 (sampling) | Sprint 694 fix shipped; pull main if older |
 | Daemon hangs on first inference attempt | Sprint 687 F35 deadlock (sync chain executor on event-loop thread) | Already fixed in sprint 687 — pull main if older |
 | Daemon OOM-cycles under concurrent inference load | Concurrent requests each load gpt2 (~500MB); peak exceeds 2GB droplet budget | Set `PRSM_INFERENCE_CONCURRENCY_LIMIT=1` (sprint 704; default in current runbook for ≤2GB nodes) |
+| `/admin/parallax/pool/snapshot` shows `gpu_count=0` despite `/peers` showing known peers | F31: pool reads via deprecated `discovery.known_peers` attribute; libp2p transport doesn't expose it | Already fixed in sprint 836 — pull main if older. For cold-start joiners on fleets pre-sp838 bootstrap relay, set `PRSM_PARALLAX_ADMIT_UNKNOWN_HARDWARE=1` as a temporary safety net |
+| `error: "lookup(<peer>) RPC failed: Could not transact with/call contract function..."` | Transient Base mainnet RPC blip (free `mainnet.base.org` rate-limit) | Already fixed in sprint 837 — pull main if older. Bump `PRSM_ANCHOR_LOOKUP_RETRY_ATTEMPTS=5` + `PRSM_ANCHOR_LOOKUP_RETRY_BACKOFF_S=1.0` if you hit sustained throttle; consider paid RPC endpoint |
+| Cold-start joiner sees peers but pool capacity insufficient for real models (`total layer_capacity=2 < num_layers=12`) | Bootstrap pre-sp838 didn't relay `hardware_profile`; sp836 synthesis under-promises by design | Sprint 838 closes architecturally — bootstrap-server-v2 now caches + re-broadcasts hw. Redeploy bootstrap-server-v2 to your fleet's 3 droplets to activate live |
 
 ## 9. Verify your operator's receipts externally (sprint 706+707+708)
 
@@ -714,3 +735,6 @@ covering unary, streaming, DP, and multi-host modes.
 | 762 | Operator-facing CPU politeness — PRSM_NODE_NICE adjusts process priority via os.nice() at daemon-start. Daemon yields CPU to operator's interactive workloads. Safe-fail on Windows + non-root negative-nice rejection |
 | 763 | Battery-aware activation — PRSM_ACTIVE_ONLY_ON_AC=1 refuses work while on battery. Composes with active-window schedule (AND semantics). Fail-safe on desktop / sensor error |
 | 765-767 | Opt-in auto-claim — PRSM_AUTO_CLAIM_THRESHOLD_FTNS + INTERVAL_S; daemon background task claims accumulated rewards above threshold. `prsm node auto-claim` for inspection |
+| 836 | F31 — `dht_backed_pool_provider` switched from `discovery.known_peers` attribute (Libp2pDiscovery-incompatible) to `get_known_peers()` method (works on both backends). Also adds env-gated PRSM_PARALLAX_ADMIT_UNKNOWN_HARDWARE for cold-start safety net. Surfaced + closed during multi-host re-attest 2026-05-24 |
+| 837 | PublisherKeyAnchor.lookup() retry with exp backoff — closes "single Base RPC blip bricks chain dispatch" mode. Env-tunable PRSM_ANCHOR_LOOKUP_RETRY_ATTEMPTS (default 3) + PRSM_ANCHOR_LOOKUP_RETRY_BACKOFF_S (default 0.5s) |
+| 838 | Bootstrap-server relays hardware_profile to cold-start joiners. Caches each operator's hw at register + re-broadcasts in peer-list responses. Closes the cold-start gossip gap architecturally (no more sp836 synthesis needed for fleets where bootstrap-server-v2 has been redeployed). Wire-format compatibility: hw key omitted when None on every path |
