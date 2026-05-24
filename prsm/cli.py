@@ -3831,6 +3831,31 @@ def node_smoke_test_cli(
     result["inference"]["ok"] = bool(idata.get("success"))
     result["inference"]["signed"] = bool(sig)
     result["inference"]["output"] = idata.get("output")
+    # Sprint 824 — server returns 200 with success=false + an
+    # "error" field for application-level failures (e.g. unknown
+    # model_id). Surface those distinctly from the "missing
+    # signature" path so operators see the actionable message
+    # instead of a §7-invariant-violation false alarm.
+    if not idata.get("success"):
+        err = idata.get("error") or "inference failed"
+        result["inference"]["error"] = err
+        if output_format == "json":
+            click.echo(_json.dumps(result, indent=2))
+        else:
+            console.print(
+                f"[red]FAIL[/red] inference: {err}"
+            )
+            # When the error is unknown-model, suggest the
+            # --model flag so operators can re-run against the
+            # actual catalog.
+            if "Unknown model_id" in err:
+                console.print(
+                    "[dim]Hint: pass [bold]--model <id>[/bold] "
+                    "matching your daemon's catalog "
+                    "(run [bold]prsm compute models[/bold] to "
+                    "list).[/dim]"
+                )
+        raise SystemExit(1)
     if not sig:
         if output_format == "json":
             click.echo(_json.dumps(result, indent=2))
