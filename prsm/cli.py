@@ -6014,25 +6014,36 @@ def ftns():
 @ftns.command()
 @click.option("--api-url", default=None, help="PRSM API URL (default: from stored credentials)")
 def balance(api_url: str) -> None:
-    """Show your FTNS token balance."""
+    """Show your FTNS token balance.
+
+    Sprint 831 — F29 fix: pre-831 this command targeted
+    /api/v1/ftns/balance (legacy ftns_api router) which is NOT
+    mounted on the production daemon (see sprint 830's deferred-
+    router allow-list). Every operator running `prsm ftns
+    balance` got a 404 with no actionable message.
+
+    Sprint 831 switches to the working inline /balance endpoint
+    (defined at node/api.py:2266) which returns the operator's
+    on-ledger FTNS balance + recent transactions in one shot.
+    The response shape differs from FTNSBalanceResponse — the
+    inline endpoint reports {wallet_id, balance,
+    recent_transactions:[]} (no available/locked split because
+    the ledger doesn't track lock state at this layer).
+    """
     import httpx
 
-    headers = _auth_headers()
-    if not headers:
-        console.print("❌ Not logged in. Run: prsm login", style="red")
-        raise SystemExit(1)
-
     url = _api_url_from_creds(api_url)
+    headers = _auth_headers() or {}
 
     try:
         response = httpx.get(
-            f"{url}/api/v1/ftns/balance",
+            f"{url}/balance",
             headers=headers,
             timeout=10.0,
         )
     except httpx.ConnectError:
         console.print(f"❌ Cannot connect to {url}", style="red")
-        console.print("💡 Start the server: prsm serve", style="yellow")
+        console.print("💡 Start the server: prsm node start", style="yellow")
         raise SystemExit(1)
 
     if response.status_code == 200:
@@ -6040,16 +6051,32 @@ def balance(api_url: str) -> None:
         table = Table(title="FTNS Balance")
         table.add_column("Type", style="cyan")
         table.add_column("Amount (FTNS)", style="green", justify="right")
-        table.add_row("Total",     f"{data.get('balance', 0):.6f}")
-        table.add_row("Available", f"{data.get('available_balance', 0):.6f}")
-        table.add_row("Locked",    f"{data.get('locked_balance', 0):.6f}")
+        table.add_row("Balance", f"{data.get('balance', 0):.6f}")
         console.print(table)
-        console.print(f"\n[dim]User ID: {data.get('user_id', '?')}[/dim]")
+        wallet_id = data.get("wallet_id") or "?"
+        console.print(f"\n[dim]Wallet (node_id): {wallet_id}[/dim]")
+        recent = data.get("recent_transactions") or []
+        if recent:
+            console.print(
+                f"[dim]Recent transactions: "
+                f"{len(recent)} (newest first)[/dim]"
+            )
+    elif response.status_code == 503:
+        console.print(
+            "[red]FAIL[/red] /balance returned 503 — daemon "
+            "ledger not initialized. Run [bold]prsm node "
+            "start[/bold] to bring the daemon up.",
+        )
+        raise SystemExit(1)
     elif response.status_code == 401:
         console.print("❌ Session expired. Run: prsm login", style="red")
         raise SystemExit(1)
     else:
-        console.print(f"❌ Failed: HTTP {response.status_code}", style="red")
+        console.print(
+            f"❌ Failed: HTTP {response.status_code} "
+            f"{response.text[:120]}",
+            style="red",
+        )
         raise SystemExit(1)
 
 
