@@ -95,42 +95,81 @@ class OutputCache:
         self.ttl_seconds = float(ttl_seconds)
         self._clock = clock
         self._entries: "OrderedDict[str, Tuple[Any, float]]" = OrderedDict()
+        # Sprint 814 — observability counters. Operators tuning
+        # TTL + MAX_ENTRIES need hit rate + eviction visibility.
+        self.hits: int = 0
+        self.misses: int = 0
+        self.puts: int = 0
+        self.evictions: int = 0
+        self.ttl_evictions: int = 0
 
     def get(self, key: str) -> Optional[Tuple[Any, float]]:
         """Return (value, age_seconds) when fresh, else None.
 
         Empty-key sentinel returns None always (privacy invariant
-        defense-in-depth)."""
+        defense-in-depth) and does NOT count against miss
+        counter — empty-key isn't a real lookup."""
         if not key:
             return None
         entry = self._entries.get(key)
         if entry is None:
+            self.misses += 1
             return None
         value, ts = entry
         age = self._clock() - ts
         if age > self.ttl_seconds:
-            # Lazy eviction on read
+            # Lazy eviction on read; counts as both miss + ttl_eviction
             self._entries.pop(key, None)
+            self.misses += 1
+            self.ttl_evictions += 1
             return None
         # LRU bump
         self._entries.move_to_end(key)
+        self.hits += 1
         return value, age
 
     def put(self, key: str, value: Any) -> None:
         if not key:
-            # Defense-in-depth: empty-key puts are dropped.
+            # Defense-in-depth: empty-key puts are dropped + don't
+            # count.
             return
         self._entries[key] = (value, self._clock())
         self._entries.move_to_end(key)
+        self.puts += 1
         # Eviction
         while len(self._entries) > self.max_entries:
             self._entries.popitem(last=False)
+            self.evictions += 1
 
     def count(self) -> int:
         return len(self._entries)
 
+    def stats(self) -> dict:
+        """Sprint 814 — snapshot of all counters + capacity.
+
+        Returns a plain dict suitable for JSON serialization
+        (/admin endpoint exposition + Prometheus scrape)."""
+        return {
+            "hits": self.hits,
+            "misses": self.misses,
+            "puts": self.puts,
+            "evictions": self.evictions,
+            "ttl_evictions": self.ttl_evictions,
+            "size": len(self._entries),
+            "max_entries": self.max_entries,
+            "ttl_seconds": self.ttl_seconds,
+        }
+
     def clear(self) -> None:
         self._entries.clear()
+        # Sprint 814 — zero counters on clear so operator-
+        # driven cache invalidation gives a fresh observability
+        # window.
+        self.hits = 0
+        self.misses = 0
+        self.puts = 0
+        self.evictions = 0
+        self.ttl_evictions = 0
 
 
 def resolve_output_cache_from_env() -> Optional[OutputCache]:
