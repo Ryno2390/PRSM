@@ -7032,11 +7032,13 @@ def upload(
     """
     import httpx
 
-    headers = _auth_headers()
-    if not headers:
-        console.print("❌ Not logged in. Run: prsm login", style="red")
-        raise SystemExit(1)
-
+    # Sprint 832 — F29 fix: the inline /content/upload endpoint
+    # doesn't require auth headers (see `prsm content publish`
+    # + `prsm node share` which work without login). Pre-832
+    # this command hard-failed on missing login because the
+    # legacy /api/v1/content/upload required it. Pass whatever
+    # headers we have (possibly empty) and let the server decide.
+    headers = _auth_headers() or {}
     url = _api_url_from_creds(api_url)
     file_path_obj = Path(file_path)
     file_size = file_path_obj.stat().st_size
@@ -7092,26 +7094,61 @@ def upload(
     if parent_cids:
         console.print(f"   Derivative of: {parent_cids}", style="dim")
 
+    # Sprint 832 — F29 fix: pre-832 this command POSTed multipart
+    # to /api/v1/content/upload (legacy content_api router,
+    # unmounted on production daemon per sprint 830). Every
+    # operator running `prsm storage upload` got a 404.
+    # Sprint 832 switches to the inline /content/upload endpoint
+    # (node/api.py:7654) which accepts JSON ContentUploadRequest
+    # {text, filename, royalty_rate, parent_cids, replicas} —
+    # the same wire format `prsm content publish` (sprint 806)
+    # and `prsm node share` (sprint 574) use successfully.
+    #
+    # Binary content: inline endpoint takes a `text` field (UTF-8
+    # str). If the file isn't UTF-8-decodable, redirect operators
+    # at sprint-817's `prsm content publish-shard` which accepts
+    # base64 binary via /content/upload/shard.
     try:
-        with open(file_path, "rb") as fh:
-            files = {"file": (file_path_obj.name, fh, "application/octet-stream")}
-            data = {
-                "description": description,
-                "royalty_rate": str(royalty_rate),
-                "parent_cids": parent_cids,
-                "replicas": str(replicas),
-            }
-            with console.status("[bold green]Uploading to ContentStore..."):
-                response = httpx.post(
-                    f"{url}/api/v1/content/upload",
-                    files=files,
-                    data=data,
-                    headers=headers,
-                    timeout=120.0,
-                )
+        with open(file_path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except UnicodeDecodeError:
+        console.print(
+            f"[red]Binary file detected — inline /content/"
+            f"upload accepts UTF-8 text only.[/red]"
+        )
+        console.print(
+            "[yellow]Use [bold]prsm content publish-shard[/bold] "
+            "for binary uploads (base64 path).[/yellow]"
+        )
+        raise SystemExit(1)
+
+    body: Dict[str, Any] = {
+        "text": text,
+        "filename": file_path_obj.name,
+        "royalty_rate": float(royalty_rate),
+        "replicas": int(replicas),
+    }
+    if parent_cids:
+        # Inline endpoint expects parent_cids as a list (sprint
+        # 821); CLI accepts a comma-separated string.
+        body["parent_cids"] = [
+            c.strip() for c in parent_cids.split(",") if c.strip()
+        ]
+
+    try:
+        with console.status("[bold green]Uploading to ContentStore..."):
+            response = httpx.post(
+                f"{url}/content/upload",
+                json=body,
+                headers=headers or {},
+                timeout=120.0,
+            )
     except httpx.ConnectError:
         console.print(f"❌ Cannot connect to {url}", style="red")
-        console.print("💡 Start the server: prsm serve", style="yellow")
+        console.print(
+            "💡 Start the server: prsm node start",
+            style="yellow",
+        )
         raise SystemExit(1)
 
     if response.status_code == 200:
@@ -7124,11 +7161,6 @@ def upload(
         table.add_row("Filename",     result.get("filename", "?"))
         table.add_row("Size",         f"{result.get('size_bytes', 0):,} bytes")
         table.add_row("Royalty Rate", f"{result.get('royalty_rate', 0):.4f} FTNS/access")
-        table.add_row(
-            "Provenance",
-            "✅ Registered" if result.get("provenance_registered") else "⚠️  Not persisted"
-        )
-        table.add_row("Access URL",   result.get("access_url", "?"))
         console.print(table)
 
         if result.get("parent_cids"):
@@ -7136,19 +7168,35 @@ def upload(
                 f"\n[dim]Derivative of: {', '.join(result['parent_cids'])}[/dim]"
             )
 
-        # Emit CID on its own line — easy to capture in scripts
+        # Emit CID on its own line — easy to capture in scripts.
         console.print(f"\n[bold]CID: {result.get('cid')}[/bold]")
 
     elif response.status_code == 401:
         console.print("❌ Session expired. Run: prsm login", style="red")
         raise SystemExit(1)
     elif response.status_code == 503:
-        console.print("❌ Storage service unavailable", style="red")
-        console.print("💡 Ensure ContentStore is initialized (prsm serve will initialize it)",
-                      style="yellow")
+        console.print(
+            "[red]FAIL[/red] /content/upload returned 503 — "
+            "Content uploader not initialized. Run [bold]prsm "
+            "node start[/bold] to bring the daemon up.",
+        )
+        raise SystemExit(1)
+    elif response.status_code == 413:
+        # Sprint 333 — inline endpoint enforces
+        # PRSM_MAX_UPLOAD_BYTES; >100MB MUST use publish-shard.
+        console.print(
+            "[red]FAIL[/red] file exceeds upload size cap. Set "
+            "[bold]PRSM_MAX_UPLOAD_BYTES[/bold] in your daemon "
+            "env to raise the cap (up to 100MB), or use "
+            "[bold]prsm content publish-shard[/bold] for "
+            "larger content.",
+        )
         raise SystemExit(1)
     else:
-        console.print(f"❌ Upload failed: HTTP {response.status_code}", style="red")
+        console.print(
+            f"❌ Upload failed: HTTP {response.status_code}",
+            style="red",
+        )
         console.print(f"   {response.text[:200]}")
         raise SystemExit(1)
 
