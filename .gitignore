@@ -340,3 +340,4 @@ sdks/javascript/package-lock.json
 # Editor / IDE state
 .obsidian/
 .gstack/
+secrets/
