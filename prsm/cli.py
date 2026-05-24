@@ -4853,6 +4853,174 @@ def list_compute_jobs(limit: int):
     console.print(table)
 
 
+@compute.command("infer")
+@click.option(
+    "--prompt", "prompt", required=True,
+    help="Prompt text to send to the inference path.",
+)
+@click.option(
+    "--model", "model_id", default="gpt2",
+    help="model_id (default: gpt2)",
+)
+@click.option(
+    "--max-tokens", "max_tokens", default=8, type=int,
+    help="Max output tokens (default: 8)",
+)
+@click.option(
+    "--budget", "budget_ftns", default=1.0, type=float,
+    help="Max FTNS to spend (default: 1.0)",
+)
+@click.option(
+    "--privacy-tier", "privacy_tier",
+    type=click.Choice(["none", "standard", "high", "maximum"]),
+    default="none",
+    help="Privacy tier (default: none)",
+)
+@click.option(
+    "--content-tier", "content_tier",
+    type=click.Choice(["A", "B", "C"]), default="A",
+    help="Content tier (default: A)",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+@click.option(
+    "--verify-receipt", "verify_receipt", is_flag=True, default=False,
+    help="Locally verify the receipt signature against "
+    "--verify-pubkey-b64. Exits 1 on verify failure.",
+)
+@click.option(
+    "--verify-pubkey-b64", "verify_pubkey_b64", default=None,
+    help="Base64 public key for --verify-receipt. Use the "
+    "operator's published pubkey (e.g., from "
+    "/admin/parallax/pool/snapshot or /info).",
+)
+def compute_infer_cli(
+    prompt: str, model_id: str, max_tokens: int,
+    budget_ftns: float, privacy_tier: str, content_tier: str,
+    api_url_override: Optional[str], output_format: str,
+    verify_receipt: bool, verify_pubkey_b64: Optional[str],
+) -> None:
+    """Sprint 802 — user-facing verifiable-inference CLI.
+
+    POSTs to /compute/inference with the canonical body shape
+    (prompt + model_id + budget_ftns + privacy_tier +
+    content_tier + max_tokens) and displays the output + cost +
+    signed-receipt summary.
+
+    Pair with --verify-receipt + --verify-pubkey-b64 to locally
+    re-run the canonical signing-payload check via sprint
+    706/707's standalone verifier. Useful in CI / scripted
+    flows that pin an operator's published pubkey.
+
+    Exit 0 success, 1 daemon error OR verify failed, 2 unreachable.
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/compute/inference"
+    body = {
+        "prompt": prompt,
+        "model_id": model_id,
+        "budget_ftns": budget_ftns,
+        "privacy_tier": privacy_tier,
+        "content_tier": content_tier,
+        "max_tokens": max_tokens,
+    }
+    try:
+        resp = _httpx.post(endpoint, json=body, timeout=120.0)
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False, "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]Inference failed ({resp.status_code}):"
+                f"[/red] {resp.text}"
+            )
+        raise SystemExit(1)
+    data = resp.json()
+
+    # Optional receipt verification
+    verify_msg = None
+    if verify_receipt:
+        if not verify_pubkey_b64:
+            console.print(
+                "[yellow]--verify-receipt set but "
+                "--verify-pubkey-b64 missing.[/yellow] "
+                "Pass the operator's published pubkey to enable "
+                "local verification."
+            )
+            raise SystemExit(1)
+        try:
+            from prsm.compute.inference.models import (
+                InferenceReceipt,
+            )
+            from prsm.compute.inference.receipt import verify_receipt as _verify
+            receipt = InferenceReceipt.from_dict(
+                data.get("receipt") or {},
+            )
+            verify_msg = bool(_verify(receipt, public_key_b64=verify_pubkey_b64))
+        except Exception as exc:
+            verify_msg = False
+            data["verify_error"] = str(exc)
+
+    if output_format == "json":
+        if verify_receipt:
+            data["receipt_verified"] = bool(verify_msg)
+        click.echo(_json.dumps(data, indent=2))
+        if verify_receipt and not verify_msg:
+            raise SystemExit(1)
+        return
+
+    # Text mode
+    out = data.get("output", "")
+    cost = data.get("ftns_charged", data.get("cost_ftns", "?"))
+    console.print(f"[bold]Output:[/bold] {out}")
+    console.print(f"[dim]Cost: {cost} FTNS[/dim]")
+    receipt = data.get("receipt") or {}
+    if receipt:
+        sig = receipt.get("settler_signature", "")
+        if sig:
+            console.print(
+                f"[dim]Signed receipt: settler="
+                f"{receipt.get('settler_node_id', '?')[:12]}…, "
+                f"sig present[/dim]"
+            )
+    if verify_receipt:
+        if verify_msg:
+            console.print(
+                "[green]Receipt verified[/green] against the "
+                "supplied pubkey."
+            )
+        else:
+            console.print(
+                "[red]Receipt verification failed[/red] — "
+                "supplied pubkey does not match the signer."
+            )
+            raise SystemExit(1)
+
+
 @compute.command("run")
 @click.option('--prompt', default=None, help='Prompt to process (legacy NWTN path)')
 @click.option('--query', default=None, help='Query for full forge pipeline (Rings 1-10)')
