@@ -1015,6 +1015,29 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "of the API surface still works.", exc,
         )
 
+    # Sprint 829 — F28 fix: wallet_api router was never mounted in
+    # the daemon's create_api_app path. Sprint 793 wired the
+    # SERVICES (set_services for shared state) but the multi-
+    # device arc's HTTP routes (/api/v1/auth/wallet/bind,
+    # /devices, /devices/earnings — sprints 786-794) lived in the
+    # router and only the unused app_factory.py path mounted it.
+    # Surfaced by live dogfood 2026-05-24: `prsm wallet devices
+    # add --register` → 404 from the daemon. Same fail-soft
+    # pattern as onboarding_router above.
+    try:
+        from prsm.interface.api.wallet_api import (
+            router as _wallet_router,
+        )
+        app.include_router(_wallet_router)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Sprint 829: wallet router include failed (%s); "
+            "/api/v1/auth/wallet/* will return 404. Non-fatal — "
+            "operators using PRIVATE_KEY-only flows still work; "
+            "only the multi-device registration path is impacted.",
+            exc,
+        )
+
     # Audit log middleware (ships 2026-05-09). Records every
     # non-GET request to the in-process ring buffer for operator
     # review via /audit/recent. GET excluded so the buffer stays
