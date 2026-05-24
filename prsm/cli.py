@@ -9225,6 +9225,157 @@ def content_search_cli(
         )
 
 
+@content.command("publish-shard")
+@click.argument(
+    "file_path", type=click.Path(dir_okay=False),
+)
+@click.option(
+    "--dataset-id", "dataset_id", required=True,
+    help="Operator-chosen dataset identifier (used as the "
+    "manifest's primary key + display fallback when --title "
+    "isn't set).",
+)
+@click.option(
+    "--title", "title", default=None,
+    help="Human-readable title (default: dataset_id).",
+)
+@click.option(
+    "--shard-count", "shard_count", default=4, type=int,
+    help="Number of semantic shards (default 4; server caps "
+    "via PRSM_MAX_SHARD_COUNT, default 1000).",
+)
+@click.option(
+    "--royalty-rate", "royalty_rate", default=0.05, type=float,
+    help="FTNS earned per access (server bounds 0.001-0.1).",
+)
+@click.option(
+    "--base-access-fee", "base_access_fee",
+    default=5.0, type=float,
+    help="Base FTNS fee per dataset access (default 5.0).",
+)
+@click.option(
+    "--per-shard-fee", "per_shard_fee",
+    default=0.5, type=float,
+    help="Additional FTNS fee per shard fetched (default 0.5).",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def content_publish_shard_cli(
+    file_path: str, dataset_id: str, title: Optional[str],
+    shard_count: int, royalty_rate: float,
+    base_access_fee: float, per_shard_fee: float,
+    api_url_override: Optional[str], output_format: str,
+) -> None:
+    """Sprint 817 — upload a binary dataset via the shard endpoint.
+
+    Reads FILE as bytes (binary-safe), base64-encodes, POSTs to
+    /content/upload/shard. Server splits into semantic shards
+    + returns per-shard CIDs + manifest CID.
+
+    Use this for binary content or text > 100MB (the regular
+    /content/upload endpoint caps at 100MB UTF-8).
+
+    Exit codes:
+      0 — uploaded
+      1 — file missing / server error / validation error
+      2 — daemon unreachable
+    """
+    import base64 as _b64
+    import json as _json
+    from pathlib import Path as _Path
+    import httpx as _httpx
+
+    path = _Path(file_path)
+    if not path.exists():
+        msg = f"File not found: {file_path}"
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        msg = f"Read failed: {exc}"
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+
+    body: Dict[str, Any] = {
+        "dataset_id": dataset_id,
+        "title": title or dataset_id,
+        "content_b64": _b64.b64encode(content).decode("ascii"),
+        "shard_count": shard_count,
+        "royalty_rate": royalty_rate,
+        "base_access_fee": base_access_fee,
+        "per_shard_fee": per_shard_fee,
+    }
+
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/content/upload/shard"
+    try:
+        resp = _httpx.post(endpoint, json=body, timeout=300.0)
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False, "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]Shard upload failed "
+                f"({resp.status_code}):[/red] {resp.text}"
+            )
+        raise SystemExit(1)
+
+    data = resp.json()
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+
+    shards = data.get("shards", [])
+    console.print(
+        f"[green]Uploaded shard dataset[/green] "
+        f"dataset_id=[cyan]{data.get('dataset_id', dataset_id)}"
+        f"[/cyan]"
+    )
+    console.print(
+        f"  manifest_cid: [cyan]"
+        f"{data.get('manifest_cid', '?')}[/cyan]"
+    )
+    console.print(
+        f"  shard_count: [bold]{len(shards)}[/bold]"
+    )
+    for s in shards:
+        console.print(
+            f"  • shard[{s.get('shard_index')}] "
+            f"cid=[cyan]{s.get('cid', '?')}[/cyan]  "
+            f"[dim]size_bytes={s.get('size_bytes', '?')}[/dim]"
+        )
+
+
 @content.command("publish")
 @click.argument(
     "file_path", type=click.Path(dir_okay=False),
