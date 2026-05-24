@@ -146,13 +146,26 @@ def test_missing_settler_signature_exits_1():
 
 
 def test_no_pool_flag_skips_pool_check():
-    """--no-pool skips snapshot probe; only inference is exercised.
-    Useful on single-node dev where DHT is empty."""
+    """--no-pool skips snapshot probe specifically. Sprint 828
+    added auto-detect for --model which GETs /compute/models;
+    --no-pool MUST still skip the pool-snapshot URL, but the
+    model-catalog lookup is orthogonal (different surface) and
+    is allowed."""
     with patch("httpx.get") as mock_get, \
          patch("httpx.post", return_value=_inference_ok()):
-        result = _invoke(["--no-pool", "--format", "text"])
+        # Make auto-detect fail-soft so it doesn't perturb the
+        # original test's intent — gpt2 fallback then sprint 824
+        # error path would fire. Instead, pass --model explicitly
+        # so sprint-828's auto-detect short-circuits + httpx.get
+        # is genuinely not called.
+        result = _invoke([
+            "--no-pool", "--model", "gpt2", "--format", "text",
+        ])
     assert result.exit_code == 0, result.output
-    mock_get.assert_not_called()
+    # /admin/parallax/pool/snapshot was NOT hit
+    for call in mock_get.call_args_list:
+        url = call.args[0] if call.args else call.kwargs.get("url", "")
+        assert "/admin/parallax/pool/snapshot" not in url
 
 
 def test_prompt_override_flag_wired():

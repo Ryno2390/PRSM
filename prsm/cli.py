@@ -3699,8 +3699,11 @@ def node_stake_info_cli(
     help="Inference prompt override. Default: 'The capital of France is'",
 )
 @click.option(
-    "--model", "model_id", default="gpt2",
-    help="model_id for the inference call (default: gpt2)",
+    "--model", "model_id", default=None,
+    help="model_id for the inference call. When unset (default), "
+    "smoke-test auto-detects from GET /compute/models — picks "
+    "gpt2 if present, else the first listed model. Pass an "
+    "explicit value to skip auto-detection.",
 )
 @click.option(
     "--format", "output_format",
@@ -3713,7 +3716,7 @@ def node_stake_info_cli(
 )
 def node_smoke_test_cli(
     skip_pool: bool, prompt_override: Optional[str],
-    model_id: str, output_format: str,
+    model_id: Optional[str], output_format: str,
     api_url_override: Optional[str],
 ):
     """Sprint 771 — automated smoke test from runbook §8.
@@ -3789,10 +3792,53 @@ def node_smoke_test_cli(
                 f"pool_kind={pdata.get('pool_kind')}"
             )
 
+    # Sprint 828 — auto-detect model when --model not passed.
+    # Sprint 824 made the gpt2-vs-mock-catalog error message
+    # actionable, but the friction remained: every fresh
+    # mock-executor operator hit the same wall + had to re-run
+    # with --model. Now we GET /compute/models first when
+    # --model is unset, prefer gpt2 if present (preserves prod
+    # default), else pick the first listed model + log the
+    # substitution. Explicit --model bypasses this entirely.
+    resolved_model = model_id
+    auto_detected = False
+    if resolved_model is None:
+        try:
+            mr = _httpx.get(f"{url}/compute/models", timeout=10.0)
+            if mr.status_code == 200:
+                mdata = mr.json() or {}
+                models = mdata.get("models") or []
+                # Wire format tolerated: list of bare strings
+                # (production daemon — confirmed live) OR list of
+                # dicts {model_id: ...} (older test fixtures).
+                # Live-verified 2026-05-24 mock daemon returns
+                # bare strings.
+                model_ids = []
+                for m in models:
+                    if isinstance(m, str):
+                        model_ids.append(m)
+                    elif isinstance(m, dict) and m.get("model_id"):
+                        model_ids.append(m["model_id"])
+                if "gpt2" in model_ids:
+                    resolved_model = "gpt2"
+                elif model_ids:
+                    resolved_model = model_ids[0]
+                    auto_detected = True
+        except Exception:
+            pass
+        if resolved_model is None:
+            resolved_model = "gpt2"
+    if auto_detected and output_format == "text":
+        console.print(
+            f"[dim]Auto-detected --model="
+            f"[bold]{resolved_model}[/bold] from daemon catalog "
+            f"(gpt2 not present).[/dim]"
+        )
+
     inf_endpoint = f"{url}/compute/inference"
     body = {
         "prompt": prompt_override or "The capital of France is",
-        "model_id": model_id,
+        "model_id": resolved_model,
         "budget_ftns": 1.0,
         "privacy_tier": "none",
         "content_tier": "A",
