@@ -328,6 +328,12 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         )
         self._allow_partial_regions = allow_partial_regions
 
+        # Sprint 811 — output cache for deterministic
+        # (privacy_tier=none) repeat inferences. Default None;
+        # operators opt in by setting `executor._output_cache = OutputCache(...)`
+        # at construction time. See sprint 810's resolve_output_cache_from_env.
+        self._output_cache: Optional[Any] = None
+
         # Phase-1 allocation cache:
         #   model_id → (AllocationResult, frozenset_of_stage_node_ids)
         # Localized GPU-leave is absorbed when the cached stage-set is
@@ -359,6 +365,88 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         )
         return base * overhead
 
+    def _try_output_cache(
+        self, *, request: "InferenceRequest", cost: Decimal,
+    ) -> "Optional[InferenceResult]":
+        """Sprint 811 — return a fresh signed InferenceResult
+        from the output cache, or None on miss / non-cacheable
+        tier / cache absent.
+
+        Cache hit derives a FRESH receipt (new job_id + new
+        signature). Privacy invariant: only privacy_tier="none"
+        ever reaches the lookup (make_cache_key returns "" for
+        other tiers; OutputCache.get("") returns None).
+        """
+        if self._output_cache is None:
+            return None
+        from prsm.compute.inference.output_cache import (
+            make_cache_key,
+        )
+        key = make_cache_key(
+            request.prompt,
+            request.model_id,
+            int(request.max_tokens),
+            request.privacy_tier.value,
+        )
+        if not key:
+            return None
+        hit = self._output_cache.get(key)
+        if hit is None:
+            return None
+        cached_value, _age = hit
+        # Build a synthetic outcome that the receipt builder
+        # consumes. duration_seconds=0 + epsilon_spent=0 reflect
+        # the no-compute reality. tee_attestation comes from the
+        # cached entry — replaying the original is honest since
+        # the output_hash is bound to it via signing_payload.
+        from prsm.compute.tee.models import TEEType
+        synthetic_outcome = ChainExecutionResult(
+            output=cached_value.get("output", ""),
+            duration_seconds=0.0,
+            tee_attestation=cached_value.get("tee_attestation", b""),
+            tee_type=TEEType.SOFTWARE,
+            epsilon_spent=0.0,
+        )
+        receipt = self._build_signed_receipt(
+            request=request,
+            cost=cost,
+            outcome=synthetic_outcome,
+            streamed=False,
+        )
+        return InferenceResult(
+            request_id=request.request_id,
+            success=True,
+            output=synthetic_outcome.output,
+            receipt=receipt,
+        )
+
+    def _put_output_cache(
+        self, *, request: "InferenceRequest",
+        outcome: "ChainExecutionResult",
+    ) -> None:
+        """Sprint 811 — store output in cache for future hits.
+
+        No-op when cache absent or privacy_tier != "none" (the
+        empty cache key from make_cache_key short-circuits the
+        cache.put — defense-in-depth on the privacy invariant)."""
+        if self._output_cache is None:
+            return
+        from prsm.compute.inference.output_cache import (
+            make_cache_key,
+        )
+        key = make_cache_key(
+            request.prompt,
+            request.model_id,
+            int(request.max_tokens),
+            request.privacy_tier.value,
+        )
+        if not key:
+            return
+        self._output_cache.put(key, {
+            "output": outcome.output,
+            "tee_attestation": outcome.tee_attestation,
+        })
+
     async def execute(self, request: InferenceRequest) -> InferenceResult:
         """End-to-end: filter → allocate → route → execute → sign."""
         # Phase 3.x.8.1 Task 1 refactor: pre-execute gates 1-6
@@ -373,6 +461,16 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         allocation = gate_outcome.allocation
         tier_filtered = gate_outcome.tier_filtered
         model_info = gate_outcome.model_info
+
+        # Sprint 811 — output cache lookup. On hit, return a
+        # fresh signed receipt + cached output WITHOUT running
+        # the chain executor. Only fires for privacy_tier="none"
+        # (cache key is "" sentinel for other tiers).
+        cached = self._try_output_cache(
+            request=request, cost=cost,
+        )
+        if cached is not None:
+            return cached
 
         # 7. Execute primary chain (unary).
         # Sprint 687 F35 — `execute_chain` is SYNC and internally
@@ -407,6 +505,13 @@ class ParallaxScheduledExecutor(InferenceExecutor):
             model_info=model_info,
             primary_chain=chain,
             primary_outcome=primary_outcome,
+        )
+
+        # Sprint 811 — store the result so identical future
+        # requests hit cache. Pure side-effect; failures are
+        # silently absorbed inside the helper.
+        self._put_output_cache(
+            request=request, outcome=primary_outcome,
         )
 
         # 9. Build + sign receipt; return InferenceResult.
