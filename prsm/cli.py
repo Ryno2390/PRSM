@@ -7337,72 +7337,126 @@ def info(cid: str, api_url: str):
 
 @storage.command()
 @click.argument('cid')
-@click.option('--replication', default=3, type=int, help='Replication factor')
 @click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def pin(cid: str, replication: int, api_url: str):
-    """Pin content for persistent storage."""
+def pin(cid: str, api_url: str):
+    """Pin content for persistent storage.
+
+    Sprint 834 — F29 fix: pre-834 the CLI hit
+    /api/v1/storage/{cid}/pin which has NEVER existed
+    (no storage_api router file). Sprint 834 adds inline
+    /content/{cid}/pin (node/api.py) wired to
+    StorageProvider.pin_content + switches the CLI to it.
+
+    Replication factor option dropped — the inline endpoint
+    promotes a single-node pin (GC-protected); cross-node
+    replication is handled by sprint-263's replica management.
+    """
     import httpx
-    
+
     console.print(f"📌 Pinning {cid}...", style="bold blue")
-    
+
     try:
         response = httpx.post(
-            f"{api_url}/api/v1/storage/{cid}/pin",
-            json={"replication": replication},
-            timeout=10.0
+            f"{api_url}/content/{cid}/pin", timeout=10.0,
         )
-        
-        if response.status_code == 200:
-            data = response.json()
-            console.print(f"✅ Content pinned!", style="bold green")
-            console.print(f"   Replication: {data.get('replication')}")
-            console.print(f"   Monthly cost: {data.get('monthly_cost', 0):.4f} FTNS")
-        else:
-            console.print(f"❌ Pinning failed: {response.status_code}", style="red")
     except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+        console.print(
+            "❌ Cannot connect to PRSM server. "
+            "Run [bold]prsm node start[/bold].",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        console.print(f"✅ Content pinned!", style="bold green")
+        console.print(f"   CID: {data.get('cid')}")
+        console.print(f"   Size: {data.get('size_bytes', 0)} bytes")
+        return
+    if response.status_code == 404:
+        console.print(
+            f"[yellow]CID not present locally.[/yellow] Upload "
+            f"or retrieve [bold]{cid}[/bold] before pinning.",
+        )
+        raise SystemExit(1)
+    if response.status_code == 503:
+        console.print(
+            "[red]FAIL[/red] Storage provider not initialized. "
+            "Run [bold]prsm node start[/bold].",
+        )
+        raise SystemExit(1)
+    console.print(
+        f"❌ Pinning failed: HTTP {response.status_code} "
+        f"{response.text[:200]}",
+        style="red",
+    )
+    raise SystemExit(1)
 
 
 @storage.command()
 @click.option('--limit', default=20, type=int, help='Maximum results')
 @click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
 def pins(limit: int, api_url: str):
-    """List pinned content."""
+    """List pinned content.
+
+    Sprint 834 — F29 fix: switches from phantom
+    /api/v1/storage/pins to inline /storage/pinned-stats
+    (existing surface; sprint 263). Response shape changed: the
+    inline endpoint returns {pinned: [...], count} where each
+    entry has cid/size_bytes/pinned_at/successful_challenges/
+    failed_challenges rather than the legacy
+    {replication, monthly_cost} columns.
+    """
     import httpx
-    
+
     try:
-        response = httpx.get(f"{api_url}/api/v1/storage/pins?limit={limit}", timeout=10.0)
-        
-        if response.status_code == 200:
-            data = response.json()
-            pins = data.get('pins', [])
-            
-            if not pins:
-                console.print("No pinned content.", style="dim")
-                return
-            
-            table = Table(title="Pinned Content")
-            table.add_column("CID", style="cyan")
-            table.add_column("Size", style="green")
-            table.add_column("Replication", style="magenta")
-            table.add_column("Monthly Cost", style="blue")
-            
-            for pin in pins:
-                table.add_row(
-                    pin.get('cid', 'N/A')[:20] + "...",
-                    f"{pin.get('size', 0)} bytes",
-                    str(pin.get('replication', 0)),
-                    f"{pin.get('monthly_cost', 0):.4f} FTNS"
-                )
-            console.print(table)
-        else:
-            console.print(f"❌ Failed to list pins: {response.status_code}", style="red")
+        response = httpx.get(
+            f"{api_url}/storage/pinned-stats", timeout=10.0,
+        )
     except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+        console.print(
+            "❌ Cannot connect to PRSM server. "
+            "Run [bold]prsm node start[/bold].",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    if response.status_code == 503:
+        console.print(
+            "[red]FAIL[/red] Storage provider not initialized.",
+            style="red",
+        )
+        raise SystemExit(1)
+    if response.status_code != 200:
+        console.print(
+            f"❌ Failed to list pins: HTTP {response.status_code}",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    data = response.json()
+    entries = data.get('pinned', [])[:limit]
+    if not entries:
+        console.print("No pinned content.", style="dim")
+        return
+
+    table = Table(title="Pinned Content")
+    table.add_column("CID", style="cyan")
+    table.add_column("Size", style="green", justify="right")
+    table.add_column("Pinned At", style="magenta")
+    table.add_column("Challenges ✓/✗", style="blue", justify="right")
+
+    for p in entries:
+        cid = p.get('cid', 'N/A')
+        cid_display = cid if len(cid) <= 24 else cid[:20] + "..."
+        table.add_row(
+            cid_display,
+            f"{p.get('size_bytes', 0)} bytes",
+            str(p.get('pinned_at', '?')),
+            f"{p.get('successful_challenges', 0)} / "
+            f"{p.get('failed_challenges', 0)}",
+        )
+    console.print(table)
 
 
 # ============================================================================

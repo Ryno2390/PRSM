@@ -15249,6 +15249,44 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     # Sprint 267 — surface per-content challenge stats for the
     # storage operator's pinned set. Closes the "is my pinned
     # data still being challenged?" triage gap.
+    # Sprint 834 — F29 fix: `prsm storage pin <cid>` CLI hit
+    # /api/v1/storage/{cid}/pin (legacy storage_api router,
+    # never mounted; in fact storage_api.py doesn't exist).
+    # Add inline POST that wires the existing
+    # StorageProvider.pin_content(cid) → ContentStore. Returns
+    # 200 with {pinned: True, cid, size_bytes} on success;
+    # 404 if the CID isn't present locally; 503 if storage
+    # provider not initialized.
+    @app.post("/content/{cid}/pin", tags=["storage"])
+    async def pin_content(cid: str) -> Dict[str, Any]:
+        sp = getattr(node, "storage_provider", None)
+        if sp is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Storage provider not initialized.",
+            )
+        try:
+            ok = await sp.pin_content(cid)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=f"pin_content raised: {exc}",
+            )
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"CID {cid} not present locally — upload "
+                    "or retrieve before pinning."
+                ),
+            )
+        size = sp.pinned_content.get(cid)
+        return {
+            "pinned": True,
+            "cid": cid,
+            "size_bytes": size.size_bytes if size else 0,
+        }
+
     @app.get("/storage/pinned-stats", tags=["storage"])
     async def get_storage_pinned_stats() -> Dict[str, Any]:
         """Per-pinned-content storage statistics: size, pinned_at,
