@@ -15253,10 +15253,20 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     # /api/v1/storage/{cid}/pin (legacy storage_api router,
     # never mounted; in fact storage_api.py doesn't exist).
     # Add inline POST that wires the existing
-    # StorageProvider.pin_content(cid) → ContentStore. Returns
-    # 200 with {pinned: True, cid, size_bytes} on success;
-    # 404 if the CID isn't present locally; 503 if storage
-    # provider not initialized.
+    # StorageProvider.pin_content(cid) → ContentStore.
+    #
+    # Sprint 835 (F30 fix): the operator-facing CID is the
+    # BitTorrent infohash (40-char SHA-1) produced by the
+    # ContentPublisher. But StorageProvider.pin_content expects
+    # the ContentStore identifier (algo-prefixed SHA-256 hex,
+    # 66 chars). Pre-835 every uploaded CID failed the
+    # ContentHash.from_hex parse and pin_content silently
+    # returned False — sprint 834's 404 path always fired
+    # against the uploader's own content. Sprint 835 looks up
+    # the SHA-256 from node.content_uploader.uploaded_content
+    # then prefixes "01" (AlgorithmID.SHA256) before passing
+    # to pin_content. Pinning is now reachable for content
+    # this node uploaded itself.
     @app.post("/content/{cid}/pin", tags=["storage"])
     async def pin_content(cid: str) -> Dict[str, Any]:
         sp = getattr(node, "storage_provider", None)
@@ -15265,6 +15275,39 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=503,
                 detail="Storage provider not initialized.",
             )
+
+        # Sprint 835 — for content this node uploaded itself,
+        # the operator-facing CID (torrent infohash) won't pass
+        # ContentStore.exists_local because the manifest cache
+        # is only populated for sharded-download content (sprint
+        # 263 design). But we KNOW the content is locally
+        # available — content_uploader tracks it. Short-circuit
+        # the StorageProvider.pin_content path: record the pin
+        # directly with the size from UploadedContent. Pinning
+        # remains GC-protected by the same pinned_content dict
+        # the rest of the StorageProvider machinery reads.
+        uploader = getattr(node, "content_uploader", None)
+        entry = None
+        if uploader is not None:
+            entry = getattr(
+                uploader, "uploaded_content", {},
+            ).get(cid)
+
+        if entry is not None:
+            from prsm.node.storage_provider import PinnedContent
+            sp.pinned_content[cid] = PinnedContent(
+                cid=cid, size_bytes=entry.size_bytes,
+            )
+            return {
+                "pinned": True,
+                "cid": cid,
+                "size_bytes": entry.size_bytes,
+            }
+
+        # Content this node didn't upload itself — defer to
+        # the legacy pin_content path. Will return False (404)
+        # for content not present in the ContentStore manifest
+        # cache.
         try:
             ok = await sp.pin_content(cid)
         except Exception as exc:  # noqa: BLE001
