@@ -8981,6 +8981,111 @@ def content():
     pass
 
 
+@content.command("search")
+@click.argument("query")
+@click.option(
+    "--limit", "limit", default=20, type=int,
+    help="Max results (server caps at 100; default 20).",
+)
+@click.option(
+    "--min-tier", "min_tier",
+    type=click.Choice(["low", "medium", "high"]), default=None,
+    help="Filter to creators >= tier (default: no filter, "
+    "includes cold-start creators).",
+)
+@click.option(
+    "--exclude-new", "exclude_new", is_flag=True, default=False,
+    help="Hide cold-start (TIER_NEW) creators.",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def content_search_cli(
+    query: str, limit: int, min_tier: Optional[str],
+    exclude_new: bool, api_url_override: Optional[str],
+    output_format: str,
+) -> None:
+    """Sprint 808 — keyword search across the content index.
+
+    Wraps GET /content/search. Returns a list of content rows
+    matching QUERY. Use --min-tier to filter to creators with
+    a minimum reputation; --exclude-new to hide cold-start.
+
+    Exit codes:
+      0 — searched (zero hits is OK, not an error)
+      1 — server error (422 bad params, 413 too long, etc.)
+      2 — daemon unreachable
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/content/search"
+    params: Dict[str, Any] = {"q": query, "limit": limit}
+    if min_tier:
+        params["min_tier"] = min_tier
+    if exclude_new:
+        params["exclude_new"] = True
+    try:
+        resp = _httpx.get(endpoint, params=params, timeout=15.0)
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False, "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]search failed ({resp.status_code}):"
+                f"[/red] {resp.text}"
+            )
+        raise SystemExit(1)
+
+    data = resp.json()
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+
+    results = data.get("results", [])
+    count = data.get("count", len(results))
+    if not results:
+        console.print(
+            f"[dim]No matches[/dim] for [bold]{query}[/bold]. "
+            "Try a broader query or drop --min-tier / "
+            "--exclude-new."
+        )
+        return
+    console.print(
+        f"[bold]{count} result(s)[/bold] for "
+        f"[bold]{query}[/bold]:"
+    )
+    for r in results:
+        tier = r.get("creator_tier", "?")
+        fname = r.get("filename", "?")
+        cid = r.get("cid", "?")
+        console.print(
+            f"  • [cyan]{cid}[/cyan]  [bold]{fname}[/bold]  "
+            f"[dim](tier={tier})[/dim]"
+        )
+
+
 @content.command("publish")
 @click.argument(
     "file_path", type=click.Path(dir_okay=False),
