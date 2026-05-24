@@ -2967,6 +2967,8 @@ _PARALLAX_ENV_REGISTRY = [
      "Override advertised tflops_fp16 (float). Useful when CPU benchmark is too low."),
     ("PRSM_PARALLAX_DEFAULT_RTT_MS", False, None,
      "Default inter-peer RTT in ms. Required for Phase-2 routing on pools without profile measurements."),
+    ("PRSM_PARALLAX_ADMIT_UNKNOWN_HARDWARE", False, ["1", "true", "yes", "0", "false", "no", ""],
+     "Sprint 836 (F31) — admit peers with no hardware_profile under conservative synthetic defaults (1vCPU/1GB). Closes cold-start gossip gap: bootstrap doesn't propagate hardware_profile, so a fresh joiner sees known peers but no hw → DHT pool reports 0 GPUs. Default unset = strict (legacy behavior). Set to 1/true/yes for dogfood + multi-host testing."),
     ("PRSM_PARALLAX_SEND_MESSAGE_TIMEOUT_S", False, None,
      "Per-stage dispatch timeout in seconds (default 30)."),
     ("PRSM_PARALLAX_REGION", False, None,

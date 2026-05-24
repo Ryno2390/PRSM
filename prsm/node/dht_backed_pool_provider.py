@@ -252,15 +252,71 @@ def build_dht_backed_pool_provider(
             if gpu is not None:
                 gpus.append(gpu)
 
-        peers: Dict[str, Any] = (
-            getattr(discovery, "known_peers", {}) or {}
-        )
-        for peer_id, info in peers.items():
-            if peer_id == own_id:
+        # Sprint 836 — F31 fix: when admit-unknown-hardware is
+        # enabled, fall back to a synthetic conservative
+        # hardware profile for peers that haven't advertised
+        # one via DISCOVERY_ANNOUNCE. Closes the cold-start
+        # gossip gap surfaced during multi-host re-attest:
+        # bootstrap-server doesn't propagate hardware_profile,
+        # so a fresh-joining operator sees known peers (peer_id +
+        # address + capabilities) but no hw → DHT pool silently
+        # excludes them → 0 GPUs in pool → can't dispatch. Env-
+        # gated opt-in keeps production behavior strict (real
+        # hardware required for staking + tier policy); dogfood/
+        # multi-host tests set the flag to admit cold-start
+        # peers under conservative defaults.
+        _admit_unknown_raw = os.environ.get(
+            "PRSM_PARALLAX_ADMIT_UNKNOWN_HARDWARE", "",
+        ).strip().lower()
+        _admit_unknown = _admit_unknown_raw in ("1", "true", "yes")
+        # Sprint 836 — F31 fix part 2: PRSM has two discovery
+        # implementations (Libp2pDiscovery for libp2p transport,
+        # PeerDiscovery for WebSocket transport). Only the
+        # latter exposes a `known_peers` dict attribute; the
+        # former only exposes `get_known_peers()` method.
+        # Pre-836 the pool provider read `discovery.known_peers`
+        # which silently returned {} on Libp2p — so the
+        # dht-backed pool always saw 0 peers under libp2p
+        # transport (the default). Prefer the API-stable
+        # `get_known_peers()` method (both implementations
+        # provide it). Fall back to `.known_peers.values()` for
+        # callers (legacy test fixtures, mock objects) where
+        # the method returns something unusable.
+        peer_list: List[Any] = []
+        getter = getattr(discovery, "get_known_peers", None)
+        if callable(getter):
+            try:
+                got = getter()
+                if got is not None:
+                    peer_list = list(got)
+            except Exception:
+                peer_list = []
+        if not peer_list:
+            attr_peers = getattr(discovery, "known_peers", None)
+            if isinstance(attr_peers, dict):
+                peer_list = list(attr_peers.values())
+
+        for info in peer_list:
+            peer_id = getattr(info, "node_id", None)
+            if not peer_id or peer_id == own_id:
                 continue
             peer_hw = getattr(info, "hardware_profile", None)
             if peer_hw is None:
-                continue
+                if not _admit_unknown:
+                    continue
+                # Conservative synthetic profile — matches a
+                # generic 1vCPU / 1GB-RAM CPU operator (the
+                # weakest realistic peer). Memory math gates
+                # downstream allocation; tflops_fp16=0.1 lets
+                # Phase-2 routing see SOME path but the DP
+                # optimizer will favor better peers when
+                # they're present.
+                peer_hw = {
+                    "tflops_fp16": 0.1,
+                    "ram_total_gb": 1.0,
+                    "gpu_vram_gb": 0.0,
+                    "memory_bandwidth_gbps": 25.0,
+                }
             gpu = _hw_dict_to_parallax_gpu(
                 peer_id, peer_hw, region, stake_reader=stake_reader,
             )
