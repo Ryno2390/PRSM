@@ -4901,11 +4901,18 @@ def list_compute_jobs(limit: int):
     "operator's published pubkey (e.g., from "
     "/admin/parallax/pool/snapshot or /info).",
 )
+@click.option(
+    "--stream", "do_stream", is_flag=True, default=False,
+    help="Sprint 803 — consume the SSE event stream at "
+    "/compute/inference/stream. Tokens print inline as they "
+    "arrive; the final receipt is surfaced on stream end.",
+)
 def compute_infer_cli(
     prompt: str, model_id: str, max_tokens: int,
     budget_ftns: float, privacy_tier: str, content_tier: str,
     api_url_override: Optional[str], output_format: str,
     verify_receipt: bool, verify_pubkey_b64: Optional[str],
+    do_stream: bool,
 ) -> None:
     """Sprint 802 — user-facing verifiable-inference CLI.
 
@@ -4924,7 +4931,6 @@ def compute_infer_cli(
     import json as _json
     import httpx as _httpx
     url = _api_url_from_creds(api_url_override)
-    endpoint = f"{url}/compute/inference"
     body = {
         "prompt": prompt,
         "model_id": model_id,
@@ -4933,6 +4939,108 @@ def compute_infer_cli(
         "content_tier": content_tier,
         "max_tokens": max_tokens,
     }
+
+    # Sprint 803 — streaming branch
+    if do_stream:
+        stream_endpoint = f"{url}/compute/inference/stream"
+        tokens_collected = []
+        result_payload = None
+        try:
+            with _httpx.stream(
+                "POST", stream_endpoint,
+                json=body, timeout=120.0,
+            ) as resp:
+                if resp.status_code != 200:
+                    if output_format == "json":
+                        click.echo(_json.dumps({
+                            "ok": False,
+                            "status": resp.status_code,
+                            "detail": resp.text,
+                        }))
+                    else:
+                        console.print(
+                            f"[red]Inference stream failed "
+                            f"({resp.status_code}):[/red] {resp.text}"
+                        )
+                    raise SystemExit(1)
+                # Parse SSE event/data lines
+                current_event = None
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("event: "):
+                        current_event = line[len("event: "):].strip()
+                    elif line.startswith("data: "):
+                        try:
+                            payload = _json.loads(line[len("data: "):])
+                        except Exception:
+                            continue
+                        if current_event == "token":
+                            tokens_collected.append(payload)
+                            if output_format == "text":
+                                # Print delta inline, no newline
+                                click.echo(
+                                    payload.get("text_delta", ""),
+                                    nl=False,
+                                )
+                        elif current_event == "result":
+                            result_payload = payload
+                        elif current_event == "error":
+                            if output_format == "json":
+                                click.echo(_json.dumps({
+                                    "ok": False,
+                                    "error": payload.get(
+                                        "detail",
+                                        "stream error",
+                                    ),
+                                }))
+                            else:
+                                console.print(
+                                    f"\n[red]Stream error:[/red] "
+                                    f"{payload.get('detail', payload)}"
+                                )
+                            raise SystemExit(1)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            if output_format == "json":
+                click.echo(_json.dumps({
+                    "ok": False,
+                    "error": f"daemon unreachable: {exc}",
+                }))
+            else:
+                console.print(
+                    f"[red]Daemon unreachable at {stream_endpoint}"
+                    f"[/red] — {exc}"
+                )
+            raise SystemExit(2)
+
+        # End of stream → render terminal state
+        if output_format == "json":
+            combined = dict(result_payload or {})
+            combined["tokens"] = tokens_collected
+            click.echo(_json.dumps(combined, indent=2))
+            return
+
+        # Text mode: tokens already printed inline; finish with
+        # cost + receipt summary
+        click.echo("")  # close the inline token line
+        if result_payload:
+            cost = result_payload.get(
+                "ftns_charged", result_payload.get("cost_ftns", "?"),
+            )
+            console.print(f"[dim]Cost: {cost} FTNS[/dim]")
+            receipt = result_payload.get("receipt") or {}
+            sig = receipt.get("settler_signature", "")
+            if sig:
+                console.print(
+                    f"[dim]Signed receipt: settler="
+                    f"{(receipt.get('settler_node_id') or '?')[:12]}…, "
+                    f"sig present[/dim]"
+                )
+        return
+
+    endpoint = f"{url}/compute/inference"
     try:
         resp = _httpx.post(endpoint, json=body, timeout=120.0)
     except Exception as exc:
