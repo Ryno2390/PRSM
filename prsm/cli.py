@@ -2683,6 +2683,22 @@ _PARALLAX_ENV_REGISTRY = [
      "Sprint 765 — auto-claim accumulated FTNS rewards when total reaches this threshold. Decimal value (e.g., '100' = claim at 100 FTNS). Default unset/0 = disabled. Operator opts in for set-and-forget earnings claiming. Combined with PRSM_AUTO_CLAIM_INTERVAL_S to control claim cadence."),
     ("PRSM_AUTO_CLAIM_INTERVAL_S", False, None,
      "Sprint 765 — seconds between auto-claim checks. Default 3600 (1 hour). Clamped to >= 60s. Only effective when PRSM_AUTO_CLAIM_THRESHOLD_FTNS is set."),
+    ("PRSM_INFERENCE_OUTPUT_CACHE_ENABLED", False,
+     ["", "0", "1", "true", "false", "yes", "no"],
+     "Sprint 810/811 — opt-in output cache for deterministic "
+     "inference. PRIVACY INVARIANT: only privacy_tier=none "
+     "requests are cached; standard/high/maximum tiers require "
+     "DP per-request and never enter the cache. Default unset = "
+     "no cache (pre-811 behavior). Set to 1 to enable."),
+    ("PRSM_INFERENCE_OUTPUT_CACHE_TTL_S", False, None,
+     "Sprint 810 — per-entry TTL in seconds for the output "
+     "cache. Default 3600 (1h). Lower values trade hit rate "
+     "for freshness; higher values amortize compute across "
+     "more requests but risk staleness when models change."),
+    ("PRSM_INFERENCE_OUTPUT_CACHE_MAX_ENTRIES", False, None,
+     "Sprint 810 — max entries in the LRU output cache. "
+     "Default 1024. Each entry holds prompt+output bytes; "
+     "memory cost scales with average output size."),
     ("PRSM_PREEMPTION_DETECTOR", False, ["", "aws", "gcp"],
      "Sprint 772 — cloud-spot preemption detector backend. 'aws' polls EC2 instance-action metadata (169.254.169.254). 'gcp' polls GCE preemptible-metadata. Unset/'' = disabled (safe default for non-cloud nodes). Future sprints wire the flag into discovery + dispatch gates. Fail-safe: metadata endpoint unreachable → flag stays clear."),
     ("PRSM_PREEMPTION_POLL_INTERVAL_S", False, None,

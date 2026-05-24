@@ -1121,13 +1121,34 @@ def build_parallax_executor_or_none(node: Any) -> Optional[Any]:
         from prsm.compute.inference.parallax_executor import (
             ParallaxScheduledExecutor,
         )
-        return ParallaxScheduledExecutor(
+        executor = ParallaxScheduledExecutor(
             gpu_pool_provider=pool_provider,
             trust_stack=trust_stack,
             model_catalog=catalog,
             chain_executor=_build_chain_executor(node),
             node_identity=identity,
         )
+        # Sprint 812 — opt-in output cache via env. Fail-soft:
+        # any error here keeps the executor working without
+        # cache (pre-811 behavior).
+        try:
+            from prsm.compute.inference.output_cache import (
+                resolve_output_cache_from_env,
+            )
+            cache = resolve_output_cache_from_env()
+            if cache is not None:
+                executor._output_cache = cache
+                logger.info(
+                    "Sprint 812 — output cache enabled "
+                    "(max_entries=%d, ttl_seconds=%s)",
+                    cache.max_entries, cache.ttl_seconds,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Sprint 812 — output cache wire-up failed; "
+                "executor will run without cache: %s", exc,
+            )
+        return executor
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Sprint 558 ParallaxScheduledExecutor wiring: "
