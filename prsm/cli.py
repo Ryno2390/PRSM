@@ -8900,6 +8900,144 @@ def content():
     pass
 
 
+@content.command("fetch")
+@click.argument("cid")
+@click.option(
+    "--output", "output_path", default=None,
+    type=click.Path(dir_okay=False),
+    help="Write decoded content to PATH. Without this, JSON "
+    "mode emits the full server payload (base64 data included); "
+    "text mode prints a summary.",
+)
+@click.option(
+    "--timeout", "timeout_s", default=30.0, type=float,
+    help="Server-side retrieval timeout (default 30s).",
+)
+@click.option(
+    "--no-verify-hash", "no_verify_hash",
+    is_flag=True, default=False,
+    help="Skip server-side SHA-256 verification of the "
+    "retrieved bytes. Default: verify on.",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def content_fetch_cli(
+    cid: str, output_path: Optional[str], timeout_s: float,
+    no_verify_hash: bool, api_url_override: Optional[str],
+    output_format: str,
+) -> None:
+    """Sprint 805 — retrieve content from the P2P network by CID.
+
+    Wraps GET /content/retrieve/{cid}. base64-decodes the data
+    and writes to --output when set. Exit 0 on success, 1 on
+    not_found / server-side error, 2 on daemon unreachable.
+    """
+    import base64 as _b64
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/content/retrieve/{cid}"
+    params: Dict[str, Any] = {"timeout": timeout_s}
+    if no_verify_hash:
+        params["verify_hash"] = False
+    try:
+        resp = _httpx.get(endpoint, params=params, timeout=timeout_s + 5.0)
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False, "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]Retrieve failed ({resp.status_code}):"
+                f"[/red] {resp.text}"
+            )
+        raise SystemExit(1)
+
+    data = resp.json()
+    status = data.get("status", "")
+    if status != "success":
+        if output_format == "json":
+            click.echo(_json.dumps(data, indent=2))
+        else:
+            if status == "not_found":
+                console.print(
+                    f"[red]not_found[/red] — CID [cyan]{cid}[/cyan] "
+                    f"not retrievable from "
+                    f"{data.get('providers_tried', 0)} providers."
+                )
+            else:
+                console.print(
+                    f"[red]error[/red] — {data.get('error', status)}"
+                )
+        raise SystemExit(1)
+
+    # success
+    if output_path:
+        try:
+            content_bytes = _b64.b64decode(
+                (data.get("data") or "").encode("ascii"),
+            )
+        except Exception as exc:
+            console.print(
+                f"[red]base64 decode failed:[/red] {exc}"
+            )
+            raise SystemExit(1)
+        try:
+            from pathlib import Path as _Path
+            _Path(output_path).write_bytes(content_bytes)
+        except OSError as exc:
+            console.print(f"[red]Write failed:[/red] {exc}")
+            raise SystemExit(1)
+
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+
+    # text mode summary
+    console.print(
+        f"[green]Retrieved[/green] cid=[cyan]{cid}[/cyan]"
+    )
+    if data.get("filename"):
+        console.print(
+            f"  filename: [bold]{data['filename']}[/bold]"
+        )
+    console.print(
+        f"  size_bytes: [bold]{data.get('size_bytes', '?')}[/bold]"
+    )
+    console.print(
+        f"  content_hash: [dim]{data.get('content_hash', '?')}[/dim]"
+    )
+    console.print(
+        f"  providers_tried: "
+        f"[dim]{data.get('providers_tried', 0)}[/dim]"
+    )
+    if output_path:
+        console.print(
+            f"  wrote → [bold]{output_path}[/bold]"
+        )
+
+
 @content.command("mine")
 @click.option("--api-port", default=8000, type=int)
 @click.option(
