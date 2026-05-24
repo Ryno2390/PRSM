@@ -200,6 +200,40 @@ class PRSMClient:
             body["royalty_rate"] = royalty_rate
         return await self._post("/content/upload", body)
 
+    async def search_content(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        min_tier: Optional[str] = None,
+        exclude_new: bool = False,
+    ) -> Dict[str, Any]:
+        """Sprint 822 — GET /content/search; return server payload.
+
+        Mirror of `prsm content search` CLI (sprint 808).
+        Defaults match the CLI.
+
+        Returns ``{results, count}``. Each result row carries
+        ``cid``, ``filename``, ``creator_tier`` (server-side
+        sprint 289).
+        """
+        await self._ensure_session()
+        import aiohttp as _aiohttp
+
+        params: Dict[str, Any] = {"q": query, "limit": limit}
+        if min_tier:
+            params["min_tier"] = min_tier
+        if exclude_new:
+            params["exclude_new"] = "true"
+
+        async with self._session.get(
+            f"{self.base_url}/content/search",
+            headers=self._headers(),
+            timeout=_aiohttp.ClientTimeout(total=15.0),
+            params=params,
+        ) as resp:
+            return await resp.json()
+
     async def fetch_content(
         self,
         cid: str,
