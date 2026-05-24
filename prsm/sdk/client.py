@@ -110,6 +110,65 @@ class PRSMClient:
         """Submit a prompt via legacy NWTN path."""
         return await self._post("/compute/query", {"prompt": prompt, "budget": budget})
 
+    # ── Sprint 819 — Verifiable Inference ─────────────────────────
+
+    async def infer(
+        self,
+        prompt: str,
+        *,
+        model_id: str = "gpt2",
+        max_tokens: int = 8,
+        budget_ftns: float = 1.0,
+        privacy_tier: str = "none",
+        content_tier: str = "A",
+        verify_pubkey_b64: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Sprint 819 — POST /compute/inference for verifiable
+        inference + signed receipt.
+
+        Returns the parsed server payload:
+          {success, output, ftns_charged, receipt, ...}
+
+        When ``verify_pubkey_b64`` is set, the returned dict
+        gains a ``receipt_verified`` boolean computed via
+        sprint-706 verify_receipt against the supplied pubkey.
+        Useful when a caller pins an operator's published pubkey
+        and wants the verify check inline with the inference
+        request (avoids a separate verify-receipt round-trip).
+
+        Defaults match the `prsm compute infer` CLI (sprint 802)
+        so users moving between CLI + SDK see consistent
+        behavior.
+        """
+        body = {
+            "prompt": prompt,
+            "model_id": model_id,
+            "budget_ftns": budget_ftns,
+            "privacy_tier": privacy_tier,
+            "content_tier": content_tier,
+            "max_tokens": max_tokens,
+        }
+        result = await self._post("/compute/inference", body)
+        if verify_pubkey_b64:
+            try:
+                from prsm.compute.inference.models import (
+                    InferenceReceipt,
+                )
+                from prsm.compute.inference.receipt import (
+                    verify_receipt,
+                )
+                receipt = InferenceReceipt.from_dict(
+                    result.get("receipt") or {},
+                )
+                result["receipt_verified"] = bool(
+                    verify_receipt(
+                        receipt, public_key_b64=verify_pubkey_b64,
+                    ),
+                )
+            except Exception:
+                result["receipt_verified"] = False
+        return result
+
     # ── Ring 4: Pricing ───────────────────────────────────────────
 
     async def quote(
