@@ -19,7 +19,7 @@ import logging
 import os
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,53 @@ class ReceiptStore:
         """Symmetric with JobHistoryStore.count() — useful where
         callers want a method instead of len()."""
         return len(self._cache)
+
+    def list_for_node_ids(
+        self,
+        node_ids: "Iterable[str]",
+    ) -> "List[Dict[str, Any]]":
+        """Sprint 801 — return ALL receipts whose
+        ``settler_node_id`` is in ``node_ids``.
+
+        Persistence-aware: when ``persist_dir`` is set, iterates
+        the on-disk file glob (uncapped by the in-memory cache).
+        Without persist_dir, falls back to scanning the cache.
+
+        Closes the sprint-793 limitation in
+        ``_ReceiptStoreAdapter`` where queries were bounded by
+        the 1024-entry LRU cap even when persistence was on —
+        long-running operators silently lost earnings history
+        for receipts that had aged out of cache.
+
+        Empty ``node_ids`` → ``[]`` (defense against unbounded
+        "give me all" scans).
+        """
+        ids = list(node_ids)
+        if not ids:
+            return []
+        allowed = set(ids)
+
+        # Persistence path: scan disk, uncapped.
+        if self._persist_dir is not None:
+            results: List[Dict[str, Any]] = []
+            for path in self._persist_dir.glob("*.json"):
+                try:
+                    with open(path, "r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                except (json.JSONDecodeError, OSError):
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                if data.get("settler_node_id") in allowed:
+                    results.append(data)
+            return results
+
+        # In-memory fallback: scan the cache.
+        return [
+            r for r in self._cache.values()
+            if isinstance(r, dict)
+            and r.get("settler_node_id") in allowed
+        ]
 
     def list(
         self,

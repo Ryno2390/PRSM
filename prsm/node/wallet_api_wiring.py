@@ -81,28 +81,21 @@ class _ReceiptStoreAdapter:
     ) -> List[Dict[str, Any]]:
         if self._receipt_store is None:
             return []
-        # Materialize early — empty node_ids returns empty
-        # regardless of store contents (defense against unbounded
-        # scans being mistaken for "give me all receipts").
         ids = list(node_ids)
         if not ids:
             return []
+        # Sprint 801 — delegate to ReceiptStore.list_for_node_ids
+        # so persistence-backed stores return the FULL history
+        # (uncapped by the 1024-entry LRU cap). For cache-only
+        # stores the method scans the cache; either way the
+        # adapter doesn't need its own filter loop.
         try:
-            receipts = self._receipt_store.list(
-                offset=0,
-                limit=_MAX_RECEIPTS_SCAN,
-            )
+            return self._receipt_store.list_for_node_ids(ids)
         except Exception as exc:  # noqa: BLE001
             logger.debug(
                 "_ReceiptStoreAdapter scan failed: %s", exc,
             )
             return []
-        allowed = set(ids)
-        return [
-            r for r in receipts
-            if isinstance(r, dict)
-            and r.get("settler_node_id") in allowed
-        ]
 
 
 def wire_wallet_api_services(node: Any) -> None:
