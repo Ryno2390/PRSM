@@ -367,8 +367,9 @@ class ParallaxScheduledExecutor(InferenceExecutor):
 
     def _try_output_cache(
         self, *, request: "InferenceRequest", cost: Decimal,
+        streamed: bool = False,
     ) -> "Optional[InferenceResult]":
-        """Sprint 811 — return a fresh signed InferenceResult
+        """Sprint 811/813 — return a fresh signed InferenceResult
         from the output cache, or None on miss / non-cacheable
         tier / cache absent.
 
@@ -376,6 +377,12 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         signature). Privacy invariant: only privacy_tier="none"
         ever reaches the lookup (make_cache_key returns "" for
         other tiers; OutputCache.get("") returns None).
+
+        Sprint 813: `streamed` kwarg threads through
+        `_build_signed_receipt` so the streaming path's cache
+        hits get receipts with `streamed_output=True` baked
+        into the signing payload (Phase 3.x.8 downgrade-
+        resistance).
         """
         if self._output_cache is None:
             return None
@@ -411,7 +418,7 @@ class ParallaxScheduledExecutor(InferenceExecutor):
             request=request,
             cost=cost,
             outcome=synthetic_outcome,
-            streamed=False,
+            streamed=streamed,
         )
         return InferenceResult(
             request_id=request.request_id,
@@ -559,6 +566,24 @@ class ParallaxScheduledExecutor(InferenceExecutor):
         chain = gate_outcome.chain
         cost = gate_outcome.cost
 
+        # Sprint 813 — output cache lookup on the streaming path.
+        # On hit: emit one token event carrying the full cached
+        # output (finish_reason="cache_hit"), then one terminal
+        # InferenceResult with a fresh streamed-flagged receipt.
+        # No chain executor runs.
+        cached = self._try_output_cache(
+            request=request, cost=cost, streamed=True,
+        )
+        if cached is not None:
+            yield InferenceTokenEvent(
+                sequence_index=0,
+                text_delta=cached.output,
+                token_id=None,
+                finish_reason="cache_hit",
+            )
+            yield cached
+            return
+
         # Phase 3.x.11.q — Tier C streaming routes through the
         # constant-time chain decorator when wired. Tier A/B
         # continues to use the default chain_executor. When Tier C
@@ -673,6 +698,14 @@ class ParallaxScheduledExecutor(InferenceExecutor):
                 "ChainExecutionResult",
             )
             return
+
+        # Sprint 813 — record the result so identical future
+        # streaming requests hit cache and skip the chain
+        # executor entirely. Same cache key as unary (sprint 811);
+        # streamed flag tracked at receipt-build time, not in key.
+        self._put_output_cache(
+            request=request, outcome=outcome,
+        )
 
         # Build + sign receipt with streamed_output=True (Phase 3.x.8
         # Task 4 downgrade-resistant flag). Skips consensus check on
