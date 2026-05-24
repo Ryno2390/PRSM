@@ -5129,6 +5129,134 @@ def compute_infer_cli(
             raise SystemExit(1)
 
 
+@compute.command("verify-receipt")
+@click.option(
+    "--file", "receipt_file",
+    type=click.Path(exists=False, dir_okay=False),
+    required=True,
+    help="Path to a saved InferenceReceipt JSON file (the "
+    "output of `compute infer --format json` is "
+    "directly compatible).",
+)
+@click.option(
+    "--pubkey-b64", "pubkey_b64", required=True,
+    help="Base64-encoded Ed25519 public key of the expected "
+    "signer (the operator's published pubkey).",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def compute_verify_receipt_cli(
+    receipt_file: str, pubkey_b64: str, output_format: str,
+) -> None:
+    """Sprint 804 — pure-offline receipt verifier.
+
+    Loads a saved InferenceReceipt JSON file + verifies the
+    Ed25519 signature against the supplied pubkey. No daemon
+    required; runs anywhere Python + cryptography are
+    installed. Use for offline audits, CI gates, and
+    independent third-party verification.
+
+    Exit 0 verified, 1 on any failure (file missing, JSON
+    parse error, receipt-schema error, signature mismatch).
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    path = _Path(receipt_file)
+    if not path.exists():
+        msg = f"File not found: {receipt_file}"
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+
+    try:
+        raw = path.read_text()
+        blob = _json.loads(raw)
+    except _json.JSONDecodeError as exc:
+        msg = f"Failed to parse JSON: {exc}"
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+    except OSError as exc:
+        msg = f"Read failed: {exc}"
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+
+    # A user passing the FULL inference response (from
+    # sprint 802 `compute infer --format json`) gets a dict
+    # with `receipt` nested inside. Accept both shapes.
+    if "receipt" in blob and isinstance(blob["receipt"], dict):
+        blob = blob["receipt"]
+
+    try:
+        from prsm.compute.inference.models import InferenceReceipt
+        from prsm.compute.inference.receipt import (
+            verify_receipt as _verify,
+        )
+        receipt = InferenceReceipt.from_dict(blob)
+    except (KeyError, TypeError, ValueError) as exc:
+        msg = (
+            f"Receipt missing required fields or invalid: {exc}"
+        )
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+    except Exception as exc:  # noqa: BLE001
+        msg = f"Receipt parse failed: {exc}"
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+
+    try:
+        ok = bool(_verify(receipt, public_key_b64=pubkey_b64))
+    except Exception as exc:  # noqa: BLE001
+        msg = f"verify_receipt raised: {exc}"
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+
+    if output_format == "json":
+        click.echo(_json.dumps({
+            "ok": True,
+            "verified": ok,
+            "job_id": receipt.job_id,
+            "settler_node_id": receipt.settler_node_id,
+        }, indent=2))
+        if not ok:
+            raise SystemExit(1)
+        return
+
+    if ok:
+        console.print(
+            f"[green]Receipt verified[/green] — "
+            f"job_id={receipt.job_id}, settler="
+            f"{receipt.settler_node_id[:16]}…"
+        )
+        return
+    console.print(
+        f"[red]Receipt verification failed[/red] — supplied "
+        f"pubkey does not match the signer for "
+        f"job_id={receipt.job_id}."
+    )
+    raise SystemExit(1)
+
+
 @compute.command("run")
 @click.option('--prompt', default=None, help='Prompt to process (legacy NWTN path)')
 @click.option('--query', default=None, help='Query for full forge pipeline (Rings 1-10)')
