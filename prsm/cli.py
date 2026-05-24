@@ -1758,6 +1758,244 @@ def node_slash_history(api_port, output_format, limit):
     )
 
 
+@node.command("doctor")
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_doctor_cli(
+    api_url_override: Optional[str], output_format: str,
+) -> None:
+    """Sprint 818 — composite triage. ONE command tells you
+    what's wrong.
+
+    Runs 4 daemon checks (daemon up, preemption status, output
+    cache, peer count) and reports PASS / WARN / FAIL per check
+    + an overall verdict. Exit codes:
+      0 — overall PASS or WARN (warnings are advisory)
+      1 — overall FAIL (one or more FAIL-class issues)
+      2 — daemon unreachable at /health
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+
+    # ── /health probe — special case: failure → exit 2 ──
+    try:
+        h = _httpx.get(f"{url}/health", timeout=5.0)
+    except Exception as exc:
+        msg = f"daemon unreachable at {url}/health: {exc}"
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False, "error": msg,
+                "checks": [], "overall": "FAIL",
+            }))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(2)
+
+    checks = []
+    if h.status_code == 200:
+        try:
+            hdata = h.json()
+            node_id = hdata.get("node_id", "unknown")
+        except Exception:
+            node_id = "unknown"
+        checks.append({
+            "name": "daemon",
+            "status": "PASS",
+            "detail": f"ok (node_id={(node_id or 'unknown')[:16]}…)",
+        })
+    else:
+        checks.append({
+            "name": "daemon",
+            "status": "FAIL",
+            "detail": f"/health returned {h.status_code}",
+        })
+
+    # ── preemption status ──
+    try:
+        r = _httpx.get(
+            f"{url}/admin/preemption/status", timeout=5.0,
+        )
+        if r.status_code == 200:
+            pdata = r.json()
+            if pdata.get("preempted"):
+                checks.append({
+                    "name": "preemption",
+                    "status": "WARN",
+                    "detail": (
+                        f"PREEMPTED — node draining "
+                        f"(backend={pdata.get('backend', '?')})"
+                    ),
+                })
+            else:
+                checks.append({
+                    "name": "preemption",
+                    "status": "PASS",
+                    "detail": (
+                        f"clear (backend="
+                        f"{pdata.get('backend', '?')})"
+                    ),
+                })
+        elif r.status_code == 503:
+            checks.append({
+                "name": "preemption",
+                "status": "WARN",
+                "detail": "detector not configured "
+                "(PRSM_PREEMPTION_DETECTOR unset)",
+            })
+        else:
+            checks.append({
+                "name": "preemption",
+                "status": "FAIL",
+                "detail": (
+                    f"/admin/preemption/status returned "
+                    f"{r.status_code}"
+                ),
+            })
+    except Exception as exc:
+        checks.append({
+            "name": "preemption",
+            "status": "FAIL",
+            "detail": f"probe raised: {exc}",
+        })
+
+    # ── output cache stats ──
+    try:
+        r = _httpx.get(
+            f"{url}/admin/output-cache-stats", timeout=5.0,
+        )
+        if r.status_code == 200:
+            cdata = r.json()
+            hits = int(cdata.get("hits", 0))
+            misses = int(cdata.get("misses", 0))
+            total = hits + misses
+            if total == 0:
+                checks.append({
+                    "name": "output_cache",
+                    "status": "PASS",
+                    "detail": "configured (no traffic yet)",
+                })
+            else:
+                rate = round((hits / total) * 100, 1)
+                checks.append({
+                    "name": "output_cache",
+                    "status": "PASS",
+                    "detail": (
+                        f"hit_rate={rate}% "
+                        f"(hits={hits} misses={misses})"
+                    ),
+                })
+        elif r.status_code == 503:
+            checks.append({
+                "name": "output_cache",
+                "status": "WARN",
+                "detail": "not configured "
+                "(PRSM_INFERENCE_OUTPUT_CACHE_ENABLED unset)",
+            })
+        else:
+            checks.append({
+                "name": "output_cache",
+                "status": "FAIL",
+                "detail": (
+                    f"/admin/output-cache-stats returned "
+                    f"{r.status_code}"
+                ),
+            })
+    except Exception as exc:
+        checks.append({
+            "name": "output_cache",
+            "status": "FAIL",
+            "detail": f"probe raised: {exc}",
+        })
+
+    # ── peers ──
+    try:
+        r = _httpx.get(f"{url}/peers", timeout=5.0)
+        if r.status_code == 200:
+            pdata = r.json()
+            connected = pdata.get("connected", []) or []
+            n = len(connected)
+            if n == 0:
+                checks.append({
+                    "name": "peers",
+                    "status": "WARN",
+                    "detail": (
+                        "0 connected (node is isolated — check "
+                        "bootstrap reachability)"
+                    ),
+                })
+            else:
+                checks.append({
+                    "name": "peers",
+                    "status": "PASS",
+                    "detail": f"{n} connected",
+                })
+        else:
+            checks.append({
+                "name": "peers",
+                "status": "FAIL",
+                "detail": f"/peers returned {r.status_code}",
+            })
+    except Exception as exc:
+        checks.append({
+            "name": "peers",
+            "status": "FAIL",
+            "detail": f"probe raised: {exc}",
+        })
+
+    # ── aggregate overall ──
+    any_fail = any(c["status"] == "FAIL" for c in checks)
+    any_warn = any(c["status"] == "WARN" for c in checks)
+    if any_fail:
+        overall = "FAIL"
+        exit_code = 1
+    elif any_warn:
+        overall = "WARN"
+        exit_code = 0
+    else:
+        overall = "PASS"
+        exit_code = 0
+
+    if output_format == "json":
+        click.echo(_json.dumps({
+            "ok": overall != "FAIL",
+            "checks": checks,
+            "overall": overall,
+        }, indent=2))
+        if exit_code != 0:
+            raise SystemExit(exit_code)
+        return
+
+    # text mode
+    console.print("[bold]PRSM Node Doctor[/bold]")
+    console.print("[dim]" + "─" * 16 + "[/dim]")
+    color_map = {"PASS": "green", "WARN": "yellow", "FAIL": "red"}
+    for c in checks:
+        color = color_map.get(c["status"], "white")
+        console.print(
+            f"[{color}][{c['status']}][/{color}] "
+            f"[bold]{c['name']}[/bold]: {c['detail']}"
+        )
+    console.print("[dim]" + "─" * 16 + "[/dim]")
+    n_warn = sum(1 for c in checks if c["status"] == "WARN")
+    n_fail = sum(1 for c in checks if c["status"] == "FAIL")
+    overall_color = color_map[overall]
+    console.print(
+        f"[{overall_color}]Overall: {overall}[/{overall_color}] "
+        f"({n_warn} warning{'s' if n_warn != 1 else ''}, "
+        f"{n_fail} failure{'s' if n_fail != 1 else ''})"
+    )
+    if exit_code != 0:
+        raise SystemExit(exit_code)
+
+
 @node.command("output-cache-stats")
 @click.option(
     "--api-url", "api_url_override", default=None,
