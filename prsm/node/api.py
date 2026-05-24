@@ -787,6 +787,68 @@ def register_auto_claim_status_endpoint(app: Any, node: Any) -> None:
         }
 
 
+def register_partial_completion_events_endpoint(
+    app: Any, node: Any,
+) -> None:
+    """Sprint 799 — GET /admin/partial-completion-events.
+
+    Surfaces sprint-798's PartialCompletionEventRing for
+    operator audit. Pagination + operator_node_id filter mirror
+    /admin/slash-history's shape (sprint 262).
+
+    Status codes:
+      200 — entries returned
+      422 — limit out of [1, 1000] OR offset < 0
+      503 — ring not initialized (daemon hasn't constructed
+            it; expected during startup race or in test fixtures
+            that don't set node._partial_completion_event_log)
+    """
+    from fastapi import HTTPException
+
+    @app.get(
+        "/admin/partial-completion-events",
+        tags=["admin"],
+    )
+    async def get_partial_completion_events(
+        limit: int = 50,
+        offset: int = 0,
+        operator_node_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if limit <= 0 or limit > 1000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 1000], got {limit}",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"offset must be >= 0, got {offset}",
+            )
+        ring = getattr(
+            node, "_partial_completion_event_log", None,
+        )
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Partial-completion event log not "
+                    "initialized on this daemon. Set "
+                    "node._partial_completion_event_log at "
+                    "startup (sprint 799 wire-up)."
+                ),
+            )
+        entries = ring.recent(
+            limit=limit, offset=offset,
+            operator_node_id=operator_node_id,
+        )
+        return {
+            "entries": entries,
+            "total": ring.count(),
+            "offset": offset,
+            "limit": limit,
+        }
+
+
 def register_preemption_status_endpoint(app: Any, node: Any) -> None:
     """Sprint 776 — /admin/preemption/status.
 
@@ -15997,6 +16059,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     # admin endpoint registered after it).
     register_auto_claim_status_endpoint(app, node)
     register_preemption_status_endpoint(app, node)
+    register_partial_completion_events_endpoint(app, node)
 
     try:
         from prsm.dashboard.app import create_dashboard_app as _create_dash_app

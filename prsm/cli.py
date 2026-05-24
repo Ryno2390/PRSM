@@ -1758,6 +1758,100 @@ def node_slash_history(api_port, output_format, limit):
     )
 
 
+@node.command("partial-completion-history")
+@click.option(
+    "--limit", "limit", default=50, type=int,
+    help="Max entries to return (default 50, max 1000).",
+)
+@click.option(
+    "--offset", "offset", default=0, type=int,
+    help="Pagination offset (default 0).",
+)
+@click.option(
+    "--operator-node-id", "operator_node_id", default=None,
+    help="Filter to a single operator_node_id (32-char hex).",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+def node_partial_completion_history_cli(
+    limit: int, offset: int, operator_node_id: Optional[str],
+    output_format: str, api_url_override: Optional[str],
+) -> None:
+    """Sprint 799 — show recent partial-completion slash events.
+
+    Queries /admin/partial-completion-events. Each entry records
+    a settle-time `should_slash=True` decision (sprints 784/785)
+    persisted by the sprint-798 ring.
+
+    Exit 0 on success, 1 on daemon error, 2 on unreachable.
+    """
+    import json as _json
+    import httpx as _httpx
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/admin/partial-completion-events"
+    params: Dict[str, Any] = {"limit": limit, "offset": offset}
+    if operator_node_id:
+        params["operator_node_id"] = operator_node_id
+    try:
+        resp = _httpx.get(endpoint, params=params, timeout=10.0)
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False, "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]history query failed "
+                f"({resp.status_code}):[/red] {resp.text}"
+            )
+        raise SystemExit(1)
+    data = resp.json()
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+
+    entries = data.get("entries", [])
+    total = data.get("total", 0)
+    if not entries:
+        console.print(
+            "[dim]No partial-completion events recorded.[/dim] "
+            "Operator-attributable receipt errors (reason=error) "
+            "would appear here. Healthy operators see zero."
+        )
+        return
+    console.print(
+        f"[bold]Partial-completion events[/bold] "
+        f"({len(entries)} of {total} shown):"
+    )
+    for e in entries:
+        console.print(
+            f"  [dim]ts={e.get('timestamp'):.0f}[/dim]  "
+            f"job=[cyan]{e.get('job_id')}[/cyan]  "
+            f"reason=[yellow]{e.get('reason')}[/yellow]  "
+            f"tokens={e.get('tokens_completed')}/"
+            f"{e.get('tokens_requested')}"
+        )
+
+
 @node.command("heartbeats")
 @click.option("--api-port", default=8000, type=int)
 @click.option(

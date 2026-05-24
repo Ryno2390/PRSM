@@ -4586,6 +4586,25 @@ class PRSMNode:
                 "%s", exc,
             )
 
+        # Sprint 799 — construct the partial-completion event
+        # ring so sprint-784/785 settle-path appends + sprint-799
+        # /admin/partial-completion-events endpoint both see a
+        # live instance. Bounded in-memory (256 entries default).
+        try:
+            from prsm.node.partial_completion_event_log import (
+                PartialCompletionEventRing,
+            )
+            self._partial_completion_event_log = (
+                PartialCompletionEventRing()
+            )
+        except Exception as exc:
+            logger.warning(
+                "PartialCompletionEventRing construction "
+                "failed (/admin/partial-completion-events will "
+                "return 503): %s", exc,
+            )
+            self._partial_completion_event_log = None
+
         self._started = True
         self._start_time = time.time()
         bootstrap_status = self.discovery.get_bootstrap_status() if self.discovery else {}
