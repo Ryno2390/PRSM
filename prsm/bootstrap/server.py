@@ -424,6 +424,19 @@ class BootstrapServer:
         version = data.get("version")
         region = data.get("region")
         public_key = data.get("public_key")
+        # Sprint 838 — hardware_profile relay. Operators with a
+        # locally-detected hw profile (sprint 681) opt to advertise
+        # it via the registration payload; the bootstrap caches
+        # the latest value + re-broadcasts in peer-list responses
+        # so cold-start joiners can populate their DHT-backed pool
+        # without waiting on direct DISCOVERY_ANNOUNCE that NAT
+        # may block. Only accept dict shapes; reject other types
+        # silently (defensive — don't break the handshake on a
+        # buggy/malicious client).
+        supplied_hw = data.get("hardware_profile")
+        hardware_profile = (
+            supplied_hw if isinstance(supplied_hw, dict) else None
+        )
 
         # Sprint 566: honor a client-supplied `address` field when
         # present + non-empty string. Operators co-located with a
@@ -449,7 +462,20 @@ class BootstrapServer:
             await websocket.close(code=1008, reason="Peer banned")
             return ""
 
-        # Create peer info
+        # Create peer info. Sprint 838 — preserve the existing
+        # cached hw_profile if the new registration didn't supply
+        # one (legacy clients pre-838) so a re-registration after
+        # a brief disconnect doesn't drop hw advertisement we
+        # already had. New value overwrites old (operator may
+        # have upgraded hardware).
+        existing_hw = None
+        existing = self.peers.get(peer_id)
+        if existing is not None:
+            existing_hw = existing.hardware_profile
+        effective_hw = (
+            hardware_profile if hardware_profile is not None
+            else existing_hw
+        )
         peer = PeerInfo(
             peer_id=peer_id,
             address=effective_address,
@@ -460,6 +486,7 @@ class BootstrapServer:
             region=region,
             version=version,
             connection_count=self.peers.get(peer_id, PeerInfo(peer_id, client_ip, port)).connection_count + 1,
+            hardware_profile=effective_hw,
         )
         
         # Check max peers limit
@@ -700,14 +727,21 @@ class BootstrapServer:
             if region and peer.region != region:
                 continue
             
-            peers.append({
+            entry: Dict[str, Any] = {
                 "peer_id": peer.peer_id,
                 "address": peer.address,
                 "port": peer.port,
                 "capabilities": peer.capabilities,
                 "region": peer.region,
                 "version": peer.version,
-            })
+            }
+            # Sprint 838 — relay hardware_profile if cached.
+            # Omit the key entirely for peers that haven't
+            # advertised hw so pre-838 wire format stays byte-
+            # identical for legacy fleets.
+            if peer.hardware_profile is not None:
+                entry["hardware_profile"] = peer.hardware_profile
+            peers.append(entry)
         
         # Sort by last seen (most recent first)
         peers.sort(key=lambda p: self.peers[p["peer_id"]].last_seen, reverse=True)

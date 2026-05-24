@@ -1738,6 +1738,11 @@ class PRSMNode:
                 bootstrap_fallback_enabled=(
                     self.config.bootstrap_fallback_enabled
                 ),
+                # Sprint 838 — advertise local hardware_profile
+                # via bootstrap so cold-start joiners (NAT'd
+                # operators) see the fleet's real capacity
+                # without waiting on direct DISCOVERY_ANNOUNCE.
+                local_hardware_profile=self._local_hardware_profile,
             )
             logger.info("Using libp2p transport backend")
         else:

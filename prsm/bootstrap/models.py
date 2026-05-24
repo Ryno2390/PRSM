@@ -72,6 +72,19 @@ class PeerInfo:
     
     metadata: Dict[str, Any] = field(default_factory=dict)
     """Additional metadata about the peer."""
+
+    # Sprint 838 — hardware_profile relay. Cold-start joiners
+    # connecting only to the bootstrap-server need to see real
+    # fleet capacity (tflops_fp16, ram_total_gb, etc.) so the
+    # DHT-backed pool can route through actual hardware. Pre-838
+    # bootstrap only forwarded peer_id+address+capabilities; the
+    # hw advertisement traveled in DISCOVERY_ANNOUNCE between
+    # peers but never reached operators that hadn't directly
+    # contacted the advertiser yet (NAT/firewall blocked). The
+    # bootstrap caches whatever profile each peer sent at
+    # registration time + re-broadcasts in peer-list responses.
+    hardware_profile: Optional[Dict[str, Any]] = None
+    """Hardware profile relayed from the peer's registration."""
     
     connection_count: int = 0
     """Number of times this peer has connected."""
@@ -84,7 +97,7 @@ class PeerInfo:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert peer info to dictionary for serialization."""
-        return {
+        out: Dict[str, Any] = {
             "peer_id": self.peer_id,
             "address": self.address,
             "port": self.port,
@@ -100,6 +113,12 @@ class PeerInfo:
             "bytes_sent": self.bytes_sent,
             "bytes_received": self.bytes_received,
         }
+        # Sprint 838 — only emit hardware_profile when present;
+        # keeps the wire format byte-identical for pre-838 peers
+        # that don't advertise hw at all (legacy compatibility).
+        if self.hardware_profile is not None:
+            out["hardware_profile"] = self.hardware_profile
+        return out
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "PeerInfo":
@@ -119,6 +138,9 @@ class PeerInfo:
             connection_count=data.get("connection_count", 0),
             bytes_sent=data.get("bytes_sent", 0),
             bytes_received=data.get("bytes_received", 0),
+            # Sprint 838 — defensive: accept hw_profile if present,
+            # default to None for legacy serialized peers.
+            hardware_profile=data.get("hardware_profile"),
         )
     
     @property

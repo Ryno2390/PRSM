@@ -39,6 +39,10 @@ class BootstrapPeer:
     capabilities: List[str] = field(default_factory=list)
     region: Optional[str] = None
     version: Optional[str] = None
+    # Sprint 838 — hw_profile relayed from the bootstrap. None
+    # when the peer hasn't advertised one (pre-838 client OR
+    # operator without local profile detection).
+    hardware_profile: Optional[Dict[str, Any]] = None
 
 
 class BootstrapClient:
@@ -75,6 +79,7 @@ class BootstrapClient:
         heartbeat_interval: int = 30,
         on_peers_discovered: Optional[Callable[[List[BootstrapPeer]], Any]] = None,
         advertise_address: Optional[str] = None,
+        hardware_profile: Optional[Dict[str, Any]] = None,
     ):
         self.bootstrap_url = bootstrap_url
         self.node_id = node_id
@@ -85,6 +90,12 @@ class BootstrapClient:
         self.connect_timeout = connect_timeout
         self.heartbeat_interval = heartbeat_interval
         self.on_peers_discovered = on_peers_discovered
+        # Sprint 838 — hardware_profile relay. When supplied, the
+        # client advertises this profile in the registration
+        # payload. Bootstrap caches + re-broadcasts to other
+        # peers so cold-start joiners see real fleet capacity
+        # without waiting on direct DISCOVERY_ANNOUNCE.
+        self.hardware_profile = hardware_profile
         # Sprint 566: operator-supplied address the bootstrap-server
         # should record + advertise to other peers. When None, the
         # server falls back to the WS client_ip (pre-566 behavior).
@@ -184,6 +195,11 @@ class BootstrapClient:
             # so legacy servers still see byte-identical messages.
             if self.advertise_address:
                 register_msg["address"] = self.advertise_address
+            # Sprint 838: similarly omit hardware_profile when not
+            # supplied so pre-838 servers + pre-838 clients see
+            # byte-identical register messages.
+            if self.hardware_profile is not None:
+                register_msg["hardware_profile"] = self.hardware_profile
             await self._ws.send(json.dumps(register_msg))
             logger.debug("Sent register message for node %s", self.node_id)
 
@@ -214,6 +230,10 @@ class BootstrapClient:
                         capabilities=p.get("capabilities", []),
                         region=p.get("region"),
                         version=p.get("version"),
+                        # Sprint 838 — pick up relayed hardware
+                        # profile when present; tolerates pre-838
+                        # servers that omit the key.
+                        hardware_profile=p.get("hardware_profile"),
                     ))
 
                 logger.info(
@@ -387,6 +407,9 @@ class BootstrapClient:
                 capabilities=p.get("capabilities", []),
                 region=p.get("region"),
                 version=p.get("version"),
+                # Sprint 838 — relayed hw_profile, sibling
+                # to the register-ack path above.
+                hardware_profile=p.get("hardware_profile"),
             ))
 
         self._peers = peers

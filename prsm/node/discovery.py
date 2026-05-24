@@ -311,6 +311,11 @@ class PeerDiscovery:
                     version=_prsm_pkg.__version__,
                     connect_timeout=self.bootstrap_connect_timeout,
                     advertise_address=_resolve_advertise_address(),
+                    # Sprint 838 — advertise local hw_profile to
+                    # bootstrap-server for relay (closes cold-start
+                    # gossip gap; sp682 pool reads this on the
+                    # receiving side).
+                    hardware_profile=self._local_hardware_profile,
                 )
 
                 peers = await client.connect()
@@ -346,13 +351,21 @@ class PeerDiscovery:
                 if address in self.bootstrap_failed_nodes:
                     self.bootstrap_failed_nodes.remove(address)
 
-                # Feed discovered peers into known_peers
+                # Feed discovered peers into known_peers.
+                # Sprint 838 — propagate any relayed hardware_profile
+                # from bootstrap into known_peers so cold-start
+                # joiners see real fleet capacity (sp682 pool
+                # provider reads this field).
                 for bp in peers:
                     if bp.peer_id and bp.peer_id != self.transport.identity.node_id:
+                        bp_hw = getattr(bp, "hardware_profile", None)
                         self.known_peers[bp.peer_id] = PeerInfo(
                             node_id=bp.peer_id,
                             address=f"{bp.address}:{bp.port}",
                             capabilities=bp.capabilities,
+                            hardware_profile=(
+                                bp_hw if isinstance(bp_hw, dict) else None
+                            ),
                         )
 
                 logger.info(

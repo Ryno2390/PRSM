@@ -115,6 +115,7 @@ class Libp2pDiscovery:
         gossip: Optional[Any] = None,
         bootstrap_fallback_nodes: Optional[List[str]] = None,
         bootstrap_fallback_enabled: bool = True,
+        local_hardware_profile: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -147,6 +148,13 @@ class Libp2pDiscovery:
         )
         self.bootstrap_fallback_enabled: bool = (
             bootstrap_fallback_enabled
+        )
+        # Sprint 838 — operator's locally-detected hardware
+        # profile (sprint 681). Forwarded to BootstrapClient
+        # so the bootstrap-server caches + relays it to other
+        # peers, closing the cold-start gossip gap.
+        self._local_hardware_profile: Optional[Dict[str, Any]] = (
+            local_hardware_profile
         )
         self.gossip = gossip
 
@@ -376,6 +384,10 @@ class Libp2pDiscovery:
                     capabilities=self._local_capabilities,
                     version=_ver,
                     advertise_address=_resolve_advertise_address(),
+                    # Sprint 838 — advertise hw_profile so the
+                    # bootstrap-server can relay it to other
+                    # operators.
+                    hardware_profile=self._local_hardware_profile,
                 )
                 peers = await client.connect()
                 await client.start_heartbeat()
@@ -429,6 +441,12 @@ class Libp2pDiscovery:
             # candidate set. Pre-fix this list was dropped and
             # every bootstrap-discovered peer appeared
             # capability-less to consumers.
+            # Sprint 838 — bootstrap may have relayed each peer's
+            # hardware_profile (cached from their registration).
+            # Thread it through PeerInfo so the DHT-backed pool
+            # (sp682) sees real fleet capacity for cold-start
+            # joiners instead of sp836's conservative synthesis.
+            bp_hw = getattr(bp, "hardware_profile", None)
             self._capability_index[pid] = PeerInfo(
                 node_id=pid,
                 address=f"{getattr(bp, 'address', '')}:"
@@ -436,6 +454,7 @@ class Libp2pDiscovery:
                 capabilities=list(getattr(bp, "capabilities", []) or []),
                 last_seen=time.time(),
                 last_capability_update=time.time(),
+                hardware_profile=bp_hw if isinstance(bp_hw, dict) else None,
             )
             hydrated += 1
         # Sprint 167 — track how many peers the bootstrap server
