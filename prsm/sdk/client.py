@@ -321,6 +321,29 @@ class PRSMClient:
             headers=self._headers(),
             timeout=_aiohttp.ClientTimeout(total=300),
         ) as resp:
+            # Sprint 827 — non-200 → yield an `error` event with the
+            # server's detail body and terminate. Pre-827 the SSE
+            # parser ignored resp.status; if the daemon returned a
+            # JSON error body (e.g. 503 "executor does not support
+            # streaming") the parser silently yielded zero events
+            # because the body had no `event:` lines, leaving SDK
+            # callers staring at an empty generator with no clue
+            # what went wrong. Symmetric to sprint 826's CLI fix.
+            if resp.status != 200:
+                try:
+                    detail_bytes = await resp.read()
+                    detail_text = detail_bytes.decode("utf-8", "replace")
+                except Exception:
+                    detail_text = (
+                        f"<unable to read response body for "
+                        f"status {resp.status}>"
+                    )
+                yield {
+                    "type": "error",
+                    "status": resp.status,
+                    "detail": detail_text,
+                }
+                return
             # Parse SSE event/data frames from line-streamed bytes.
             current_event = None
             buffer = b""

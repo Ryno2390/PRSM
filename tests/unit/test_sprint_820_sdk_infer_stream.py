@@ -262,3 +262,96 @@ async def test_infer_stream_terminates_after_result():
     assert all(
         ev.get("text_delta") != "ghost" for ev in events
     )
+
+
+# ---- Sprint 827 — non-200 surfaces error event ---------------
+
+
+class _FakeJsonBodyResponse:
+    """Mimics aiohttp Response for non-200 paths where the body
+    is plain JSON (no SSE frames). Exposes .read() to return the
+    raw bytes — the sprint 827 SDK fix path."""
+
+    def __init__(self, status: int, body_text: str):
+        self.status = status
+        self._body = body_text.encode("utf-8")
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    @property
+    def content(self):
+        return _FakeContent(self._body)
+
+    async def read(self):
+        return self._body
+
+
+async def test_infer_stream_503_yields_error_event_not_silent():
+    """Live dogfood surfaced this: pre-827 the SDK silently
+    yielded ZERO events when the daemon returned a non-200 JSON
+    body (e.g. mock executor's clean 503). Operators got an
+    empty generator with no clue what went wrong. Sprint 827
+    fix: emit an `error` event with status + detail."""
+    from prsm.sdk.client import PRSMClient
+
+    body = (
+        '{"detail":"Inference executor does not support '
+        'streaming. Wire a ParallaxScheduledExecutor."}'
+    )
+    fake_session = _FakeSession(_FakeJsonBodyResponse(503, body))
+    client = PRSMClient("http://node:8000")
+    client._session = fake_session
+
+    events = []
+    async for ev in client.infer_stream(prompt="Hi"):
+        events.append(ev)
+
+    assert len(events) == 1
+    assert events[0]["type"] == "error"
+    assert events[0]["status"] == 503
+    assert "does not support streaming" in events[0]["detail"]
+
+
+async def test_infer_stream_non_200_terminates_immediately():
+    """After yielding the error event, the generator MUST stop —
+    no attempt to parse the JSON body as SSE frames."""
+    from prsm.sdk.client import PRSMClient
+
+    fake_session = _FakeSession(
+        _FakeJsonBodyResponse(500, '{"detail":"boom"}'),
+    )
+    client = PRSMClient("http://node:8000")
+    client._session = fake_session
+
+    events = []
+    async for ev in client.infer_stream(prompt="Hi"):
+        events.append(ev)
+
+    assert len(events) == 1
+    assert events[0]["type"] == "error"
+
+
+async def test_infer_stream_200_path_unchanged():
+    """Regression guard: the sprint 827 fix MUST NOT affect the
+    happy 200 path. Sprint 820's existing 6 tests cover this,
+    but pin it once here so the relationship is obvious."""
+    from prsm.sdk.client import PRSMClient
+
+    body_text = _sse_frame("result", {
+        "success": True, "output": "ok",
+        "ftns_charged": "0.1", "receipt": {},
+    })
+    fake_session = _FakeSession(_FakeSSEResponse(200, body_text))
+    client = PRSMClient("http://node:8000")
+    client._session = fake_session
+
+    events = []
+    async for ev in client.infer_stream(prompt="Hi"):
+        events.append(ev)
+
+    assert len(events) == 1
+    assert events[0]["type"] == "result"
