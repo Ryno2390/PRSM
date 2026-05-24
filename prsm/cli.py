@@ -2690,6 +2690,22 @@ _PARALLAX_ENV_REGISTRY = [
 ]
 
 
+# Sprint 809 — recommended production defaults for `node init`.
+# Only includes vars with STABLE recommended values that work for
+# most operators. Operator-specific values (wallet addresses,
+# model paths) deliberately stay placeholder.
+_RECOMMENDED_DEFAULTS = {
+    "PRSM_INFERENCE_EXECUTOR": "parallax",
+    "PRSM_PARALLAX_GPU_POOL_KIND": "dht-backed",
+    "PRSM_PARALLAX_TRUST_STACK_KIND": "production",
+    "PRSM_PARALLAX_CHAIN_EXECUTOR_KIND": "rpc",
+    "PRSM_PARALLAX_STAGE_EXECUTOR_KIND": "layer_stage",
+    "PRSM_PARALLAX_LAYER_SLICE_RUNNER_KIND": "huggingface",
+    "PRSM_PARALLAX_HF_DEVICE": "cpu",
+    "PRSM_PARALLAX_PROMPT_ENCODER_KIND": "huggingface",
+}
+
+
 @node.command("init")
 @click.option(
     "--output", "output_path", default=None,
@@ -2703,9 +2719,19 @@ _PARALLAX_ENV_REGISTRY = [
     "--dry-run", "dry_run", is_flag=True, default=False,
     help="Print to stdout instead of writing.",
 )
+@click.option(
+    "--recommended", "recommended_defaults",
+    is_flag=True, default=False,
+    help="Sprint 809 — pre-fill sensible production defaults "
+    "for vars with stable recommended values "
+    "(PRSM_INFERENCE_EXECUTOR=parallax, etc.). Operator-"
+    "specific values (PRSM_OPERATOR_ADDRESS, "
+    "PRSM_PARALLAX_HF_MODEL_ID) stay placeholder. Filled "
+    "lines carry a '# recommended:' annotation.",
+)
 def node_init_env_template_cli(
     output_path: Optional[str], force_overwrite: bool,
-    dry_run: bool,
+    dry_run: bool, recommended_defaults: bool,
 ) -> None:
     """Sprint 800 — write a starter operator.env template.
 
@@ -2754,7 +2780,16 @@ def node_init_env_template_cli(
                 lines.append(
                     f"#   Allowed: {', '.join(allowed)}"
                 )
-        lines.append(f"{name}=")
+        # Sprint 809 — recommended-defaults fill
+        rec_val = (
+            _RECOMMENDED_DEFAULTS.get(name)
+            if recommended_defaults else None
+        )
+        if rec_val:
+            lines.append(f"# recommended: {rec_val}")
+            lines.append(f"{name}={rec_val}")
+        else:
+            lines.append(f"{name}=")
         lines.append("")
     content = "\n".join(lines)
 
