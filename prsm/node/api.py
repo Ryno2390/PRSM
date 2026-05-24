@@ -340,6 +340,29 @@ async def _settle_streaming_escrow(
                     "deferred to a later sprint.",
                     job_id,
                 )
+                # Sprint 798 — persist to operator-visible ring.
+                ring = getattr(
+                    node, "_partial_completion_event_log", None,
+                )
+                if ring is not None:
+                    try:
+                        info = result.receipt.partial_completion
+                        ring.append(
+                            job_id=job_id,
+                            operator_node_id=operator_id,
+                            reason=getattr(info, "reason", "error"),
+                            tokens_completed=int(
+                                getattr(info, "tokens_completed", 0),
+                            ),
+                            tokens_requested=int(
+                                getattr(info, "tokens_requested", 0),
+                            ),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(
+                            "Sprint 798 — partial_completion ring "
+                            "append failed: %s", exc,
+                        )
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 f"Streaming receipt-aware settle failed for "
@@ -6776,6 +6799,41 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                 "a later sprint.",
                                 job_id,
                             )
+                            # Sprint 798 — persist to operator-visible ring.
+                            ring = getattr(
+                                node,
+                                "_partial_completion_event_log",
+                                None,
+                            )
+                            if ring is not None:
+                                try:
+                                    info = receipt.partial_completion
+                                    ring.append(
+                                        job_id=job_id,
+                                        operator_node_id=operator_id,
+                                        reason=getattr(
+                                            info, "reason", "error",
+                                        ),
+                                        tokens_completed=int(
+                                            getattr(
+                                                info,
+                                                "tokens_completed",
+                                                0,
+                                            ),
+                                        ),
+                                        tokens_requested=int(
+                                            getattr(
+                                                info,
+                                                "tokens_requested",
+                                                0,
+                                            ),
+                                        ),
+                                    )
+                                except Exception as exc:  # noqa: BLE001
+                                    logger.debug(
+                                        "Sprint 798 — partial_completion "
+                                        "ring append failed: %s", exc,
+                                    )
                     except Exception as e:
                         logger.warning(
                             f"Inference receipt-aware settle failed "
