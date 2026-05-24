@@ -7206,65 +7206,133 @@ def upload(
 @click.option('--output', '-o', type=click.Path(), help='Output file path')
 @click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
 def download(cid: str, output: str, api_url: str):
-    """Download content from ContentStore by content ID."""
+    """Download content from ContentStore by content ID.
+
+    Sprint 833 — F29 fix: pre-833 this command hit
+    /api/v1/storage/{cid}/download (legacy storage_api router,
+    unmounted on production daemon per sprint 830). Every
+    operator got a bare 404. Sprint 833 switches to inline
+    /content/retrieve/{cid} which returns JSON
+    {status, data: base64, filename, size_bytes} — same shape
+    `prsm content fetch` (sprint 805) consumes.
+    """
+    import base64
     import httpx
-    
+
     console.print(f"📥 Downloading {cid}...", style="bold blue")
-    
+
     try:
-        response = httpx.get(f"{api_url}/api/v1/storage/{cid}/download", timeout=60.0)
-        
-        if response.status_code == 200:
-            if output:
-                with open(output, 'wb') as f:
-                    f.write(response.content)
-                console.print(f"✅ Downloaded to {output}", style="green")
-            else:
-                # Print to console if no output file
-                try:
-                    console.print(response.content.decode('utf-8'))
-                except UnicodeDecodeError:
-                    console.print(f"Binary content ({len(response.content)} bytes)", style="dim")
-        else:
-            console.print(f"❌ Download failed: {response.status_code}", style="red")
+        response = httpx.get(
+            f"{api_url}/content/retrieve/{cid}", timeout=60.0,
+        )
     except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+        console.print(
+            "❌ Cannot connect to PRSM server. "
+            "Run [bold]prsm node start[/bold] to bring up the daemon.",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    if response.status_code != 200:
+        console.print(
+            f"[red]Download failed[/red] (HTTP "
+            f"{response.status_code}): "
+            f"{response.text[:200]}",
+        )
+        raise SystemExit(1)
+
+    data = response.json()
+    status = data.get("status")
+    if status != "success":
+        err = data.get("error") or status or "unknown"
+        console.print(
+            f"[yellow]{status or 'not_found'}:[/yellow] {err}",
+        )
+        raise SystemExit(1)
+
+    try:
+        payload = base64.b64decode(data.get("data", ""))
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]base64 decode failed[/red]: {exc}")
+        raise SystemExit(1)
+
+    if output:
+        with open(output, 'wb') as f:
+            f.write(payload)
+        console.print(
+            f"✅ Downloaded to {output} ({len(payload)} bytes, "
+            f"filename={data.get('filename', '?')})",
+            style="green",
+        )
+    else:
+        try:
+            console.print(payload.decode('utf-8'))
+        except UnicodeDecodeError:
+            console.print(
+                f"Binary content ({len(payload)} bytes)",
+                style="dim",
+            )
 
 
 @storage.command()
 @click.argument('cid')
 @click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
 def info(cid: str, api_url: str):
-    """Get information about stored content."""
+    """Get information about stored content.
+
+    Sprint 833 — F29 fix: pre-833 this command hit
+    /api/v1/storage/{cid} (legacy storage_api router, inert per
+    sp830). Switches to inline /content/retrieve/{cid} which
+    carries metadata (filename, size_bytes, content_hash, status)
+    alongside the data — we ignore the data payload + render
+    metadata only.
+    """
     import httpx
-    
+
     try:
-        response = httpx.get(f"{api_url}/api/v1/storage/{cid}", timeout=10.0)
-        
-        if response.status_code == 200:
-            data = response.json()
-            table = Table(title=f"Storage Info: {cid}")
-            table.add_column("Property", style="cyan")
-            table.add_column("Value", style="green")
-            table.add_row("CID", data.get('cid', 'N/A'))
-            table.add_row("Content Type", data.get('content_type', 'N/A'))
-            table.add_row("Size", f"{data.get('size', 0)} bytes")
-            table.add_row("Status", data.get('status', 'N/A'))
-            table.add_row("Pinned", "Yes" if data.get('is_pinned') else "No")
-            table.add_row("Public", "Yes" if data.get('is_public') else "No")
-            if data.get('filename'):
-                table.add_row("Filename", data.get('filename'))
-            console.print(table)
-        elif response.status_code == 404:
-            console.print(f"❌ Content not found: {cid}", style="red")
-        else:
-            console.print(f"❌ Failed to get info: {response.status_code}", style="red")
+        response = httpx.get(
+            f"{api_url}/content/retrieve/{cid}", timeout=10.0,
+        )
     except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+        console.print(
+            "❌ Cannot connect to PRSM server. "
+            "Run [bold]prsm node start[/bold] to bring up the daemon.",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    if response.status_code != 200:
+        console.print(
+            f"[red]Info lookup failed[/red] (HTTP "
+            f"{response.status_code}): "
+            f"{response.text[:200]}",
+        )
+        raise SystemExit(1)
+
+    data = response.json()
+    status = data.get("status")
+    if status != "success":
+        err = data.get("error") or status or "unknown"
+        console.print(
+            f"[yellow]{status or 'not_found'}:[/yellow] {err}",
+        )
+        raise SystemExit(1)
+
+    table = Table(title=f"Storage Info: {cid}")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("CID", cid)
+    table.add_row("Filename", data.get('filename', 'N/A'))
+    table.add_row("Size", f"{data.get('size_bytes', 0)} bytes")
+    table.add_row(
+        "Content Hash", data.get('content_hash', 'N/A')[:32] + "...",
+    )
+    table.add_row("Status", str(status))
+    if data.get('providers_tried') is not None:
+        table.add_row(
+            "Providers Tried", str(data.get('providers_tried')),
+        )
+    console.print(table)
 
 
 @storage.command()
