@@ -8900,6 +8900,148 @@ def content():
     pass
 
 
+@content.command("publish")
+@click.argument(
+    "file_path", type=click.Path(dir_okay=False),
+)
+@click.option(
+    "--filename", "filename_override", default=None,
+    help="Override the filename advertised to peers "
+    "(default: derived from FILE basename).",
+)
+@click.option(
+    "--replicas", "replicas", default=3, type=int,
+    help="Replication factor (0=local-only, max 1000; default 3).",
+)
+@click.option(
+    "--royalty-rate", "royalty_rate", default=None, type=float,
+    help="FTNS earned per access (0.001-0.1; default 0.01 "
+    "server-side when omitted).",
+)
+@click.option(
+    "--parent-cid", "parent_cids", default=(), multiple=True,
+    help="CID of source material this content derives from. "
+    "Repeatable for multiple parents.",
+)
+@click.option(
+    "--api-url", "api_url_override", default=None,
+    help="Override daemon URL",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def content_publish_cli(
+    file_path: str, filename_override: Optional[str],
+    replicas: int, royalty_rate: Optional[float],
+    parent_cids: tuple, api_url_override: Optional[str],
+    output_format: str,
+) -> None:
+    """Sprint 806 — upload a text file to the P2P content store.
+
+    Reads FILE as UTF-8, POSTs to /content/upload, returns the
+    CID. For binary content use /content/upload/shard (CLI
+    wrapper TBD).
+
+    Exit codes:
+      0 — uploaded
+      1 — file missing / non-UTF-8 / server error
+      2 — daemon unreachable
+    """
+    import json as _json
+    from pathlib import Path as _Path
+    import httpx as _httpx
+
+    path = _Path(file_path)
+    if not path.exists():
+        msg = f"File not found: {file_path}"
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        msg = (
+            f"{file_path}: not UTF-8 decodable ({exc}). The "
+            "/content/upload endpoint takes text; for binary, "
+            "use /content/upload/shard."
+        )
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+    except OSError as exc:
+        msg = f"Read failed: {exc}"
+        if output_format == "json":
+            click.echo(_json.dumps({"ok": False, "error": msg}))
+        else:
+            console.print(f"[red]{msg}[/red]")
+        raise SystemExit(1)
+
+    body: Dict[str, Any] = {
+        "text": text,
+        "filename": filename_override or path.name,
+        "replicas": replicas,
+        "parent_cids": list(parent_cids),
+    }
+    if royalty_rate is not None:
+        body["royalty_rate"] = royalty_rate
+
+    url = _api_url_from_creds(api_url_override)
+    endpoint = f"{url}/content/upload"
+    try:
+        resp = _httpx.post(endpoint, json=body, timeout=120.0)
+    except Exception as exc:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False,
+                "error": f"daemon unreachable: {exc}",
+            }))
+        else:
+            console.print(
+                f"[red]Daemon unreachable at {endpoint}[/red] — "
+                f"{exc}"
+            )
+        raise SystemExit(2)
+
+    if resp.status_code != 200:
+        if output_format == "json":
+            click.echo(_json.dumps({
+                "ok": False, "status": resp.status_code,
+                "detail": resp.text,
+            }))
+        else:
+            console.print(
+                f"[red]Upload failed ({resp.status_code}):"
+                f"[/red] {resp.text}"
+            )
+        raise SystemExit(1)
+
+    data = resp.json()
+    if output_format == "json":
+        click.echo(_json.dumps(data, indent=2))
+        return
+
+    console.print(
+        f"[green]Uploaded[/green] "
+        f"filename=[bold]{data.get('filename', path.name)}[/bold] "
+        f"cid=[cyan]{data.get('cid', '?')}[/cyan]"
+    )
+    if data.get("size_bytes") is not None:
+        console.print(
+            f"  size_bytes: [dim]{data['size_bytes']}[/dim]"
+        )
+    if data.get("replicas") is not None:
+        console.print(
+            f"  replicas: [dim]{data['replicas']}[/dim]"
+        )
+
+
 @content.command("fetch")
 @click.argument("cid")
 @click.option(
