@@ -218,6 +218,33 @@ class PublisherKeyAnchorClient:
         # known-unregistered (avoid re-querying every time).
         self._cache: dict[str, Tuple[Any, float]] = {}
 
+        # Sprint 837 — RPC resilience. Multi-host live test 2026-05-24
+        # surfaced that a single transient Base RPC error (rate-limit
+        # from the free mainnet.base.org endpoint) bricked chain
+        # inference dispatch with `lookup(<peer>) RPC failed`. Now we
+        # retry transient transport errors with exponential backoff
+        # before propagating AnchorRPCError. Cached lookups are
+        # unaffected — only the contract-call path retries.
+        import os as _os
+        try:
+            _attempts = int(
+                _os.environ.get("PRSM_ANCHOR_LOOKUP_RETRY_ATTEMPTS", "3"),
+            )
+            if _attempts < 1:
+                _attempts = 1
+        except ValueError:
+            _attempts = 3
+        try:
+            _backoff = float(
+                _os.environ.get("PRSM_ANCHOR_LOOKUP_RETRY_BACKOFF_S", "0.5"),
+            )
+            if _backoff < 0.0:
+                _backoff = 0.5
+        except ValueError:
+            _backoff = 0.5
+        self._lookup_retry_attempts = _attempts
+        self._lookup_retry_backoff_s = _backoff
+
     # ── Read path ─────────────────────────────────────────────────────
 
     @property
@@ -261,14 +288,36 @@ class PublisherKeyAnchorClient:
                 return value
 
         # Cache miss / expired — fetch fresh.
-        try:
-            raw_bytes = self._call_lookup(_node_id_to_bytes16(node_id_lower))
-        except ValueError:
-            raise
-        except Exception as exc:
+        # Sprint 837 — retry transient RPC errors with exponential
+        # backoff. The Base mainnet free RPC throttles aggressively;
+        # a single 429 / timeout pre-837 bricked the entire chain
+        # inference dispatch. ValueError (e.g. malformed node_id
+        # downstream) is NOT retried — that's a deterministic input
+        # error, not a transient transport blip.
+        import time as _time
+        raw_bytes = None
+        last_exc: Optional[BaseException] = None
+        for _attempt in range(self._lookup_retry_attempts):
+            try:
+                raw_bytes = self._call_lookup(
+                    _node_id_to_bytes16(node_id_lower),
+                )
+                last_exc = None
+                break
+            except ValueError:
+                raise
+            except Exception as exc:
+                last_exc = exc
+                if _attempt + 1 < self._lookup_retry_attempts:
+                    # Exponential backoff: base * 2**attempt
+                    _time.sleep(
+                        self._lookup_retry_backoff_s * (2 ** _attempt),
+                    )
+        if last_exc is not None:
             raise AnchorRPCError(
-                f"lookup({node_id_lower}) RPC failed: {exc}"
-            ) from exc
+                f"lookup({node_id_lower}) RPC failed after "
+                f"{self._lookup_retry_attempts} attempt(s): {last_exc}"
+            ) from last_exc
 
         expires_at = time.monotonic() + self._cache_ttl
         if not raw_bytes:
