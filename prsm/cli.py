@@ -10934,6 +10934,21 @@ def wallet_devices_add(
             f"bound at unix={registration_resp.get('bound_at_unix')}. "
             "Run [bold]prsm wallet devices list[/bold] to confirm."
         )
+    elif written_path is not None:
+        # Sprint 823 — when --write/--write-path already wrote the
+        # file, drop the "Save the JSON above" step (operator
+        # would otherwise duplicate-save the same content).
+        console.print(
+            f"\n[dim]Delegation written to[/dim] "
+            f"[bold]{written_path}[/bold]\n"
+            "  [dim]Next:[/dim] restart the daemon — sprint-797 "
+            "auto-loads [bold]~/.prsm/operator_delegation.json"
+            "[/bold] from that path, or set "
+            "[bold]PRSM_OPERATOR_DELEGATION_FILE[/bold] to "
+            "override.\n"
+            "  [dim]Tip:[/dim] add [bold]--register[/bold] to "
+            "also auto-record this binding with the daemon."
+        )
     else:
         console.print(
             "\n[dim]Deploy to the new device:[/dim]\n"
@@ -10943,9 +10958,12 @@ def wallet_devices_add(
             "$(cat ~/.prsm/operator_delegation.json)[/bold]\n"
             "  3. Restart the daemon. operator_address will now be "
             "trusted across the network.\n"
-            "  [dim]Tip:[/dim] add [bold]--register[/bold] to "
-            "auto-record this binding with the daemon so it shows "
-            "in [bold]wallet devices list[/bold]."
+            "  [dim]Tip:[/dim] add [bold]--write[/bold] to skip "
+            "the manual save (writes to "
+            "[bold]~/.prsm/operator_delegation.json[/bold] which "
+            "sprint-797 auto-loads on daemon start), or "
+            "[bold]--register[/bold] to auto-record with the "
+            "daemon."
         )
 
 
