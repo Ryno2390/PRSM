@@ -169,6 +169,93 @@ class PRSMClient:
                 result["receipt_verified"] = False
         return result
 
+    # ── Sprint 820 — Streaming verifiable inference ─────────────
+
+    async def infer_stream(
+        self,
+        prompt: str,
+        *,
+        model_id: str = "gpt2",
+        max_tokens: int = 8,
+        budget_ftns: float = 1.0,
+        privacy_tier: str = "none",
+        content_tier: str = "A",
+    ):
+        """Sprint 820 — async generator consuming SSE from
+        /compute/inference/stream.
+
+        Yields events as dicts with a `type` discriminator:
+          {"type": "token", "sequence_index": N, "text_delta",
+           "token_id", "finish_reason"}
+          {"type": "result", "success", "output",
+           "ftns_charged", "receipt", ...}
+          {"type": "error", "detail"}
+
+        Iteration terminates after the first `result` or
+        `error` event — extra frames after a terminal event
+        are ignored (defense against misbehaving servers).
+
+        Defaults match sprint 819 .infer() so users can swap
+        between unary and streaming with one keyword.
+
+        Usage:
+            async for ev in client.infer_stream(prompt="..."):
+                if ev["type"] == "token":
+                    print(ev["text_delta"], end="", flush=True)
+                elif ev["type"] == "result":
+                    print()
+                    print("Receipt:", ev["receipt"])
+        """
+        await self._ensure_session()
+        body = {
+            "prompt": prompt,
+            "model_id": model_id,
+            "budget_ftns": budget_ftns,
+            "privacy_tier": privacy_tier,
+            "content_tier": content_tier,
+            "max_tokens": max_tokens,
+        }
+        import aiohttp as _aiohttp
+
+        async with self._session.post(
+            f"{self.base_url}/compute/inference/stream",
+            json=body,
+            headers=self._headers(),
+            timeout=_aiohttp.ClientTimeout(total=300),
+        ) as resp:
+            # Parse SSE event/data frames from line-streamed bytes.
+            current_event = None
+            buffer = b""
+            terminal_seen = False
+            async for chunk in resp.content:
+                buffer += chunk
+                # Split on \n to extract complete lines; keep
+                # the (possibly partial) trailing fragment.
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    line_text = line.decode("utf-8", "replace").rstrip("\r")
+                    if not line_text:
+                        # blank line = end of an event
+                        current_event = None
+                        continue
+                    if line_text.startswith("event: "):
+                        current_event = line_text[len("event: "):].strip()
+                    elif line_text.startswith("data: "):
+                        if current_event is None:
+                            continue
+                        try:
+                            import json as _json
+                            payload = _json.loads(
+                                line_text[len("data: "):],
+                            )
+                        except Exception:
+                            continue
+                        ev = {"type": current_event, **payload}
+                        yield ev
+                        if current_event in ("result", "error"):
+                            terminal_seen = True
+                            return
+
     # ── Ring 4: Pricing ───────────────────────────────────────────
 
     async def quote(
