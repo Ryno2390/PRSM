@@ -13090,6 +13090,66 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "metrics receipt_store probe failed: %s", exc,
             )
 
+        # Sprint 816 — prsm_inference_output_cache_*. Cache
+        # observability for operators tuning TTL + MAX_ENTRIES.
+        # Counters use *_total suffix per Prometheus convention.
+        # size is a gauge (snapshot).
+        try:
+            executor = getattr(node, "inference_executor", None)
+            cache = (
+                getattr(executor, "_output_cache", None)
+                if executor is not None else None
+            )
+            if cache is not None:
+                stats = cache.stats()
+                # Counters
+                for name, desc, value in [
+                    (
+                        "prsm_inference_output_cache_hits_total",
+                        "OutputCache hit count (cumulative)",
+                        stats.get("hits", 0),
+                    ),
+                    (
+                        "prsm_inference_output_cache_misses_total",
+                        "OutputCache miss count (cumulative)",
+                        stats.get("misses", 0),
+                    ),
+                    (
+                        "prsm_inference_output_cache_puts_total",
+                        "OutputCache put count (cumulative)",
+                        stats.get("puts", 0),
+                    ),
+                    (
+                        "prsm_inference_output_cache_evictions_total",
+                        "OutputCache LRU evictions (cumulative)",
+                        stats.get("evictions", 0),
+                    ),
+                    (
+                        "prsm_inference_output_cache_ttl_evictions_total",
+                        "OutputCache TTL evictions (cumulative)",
+                        stats.get("ttl_evictions", 0),
+                    ),
+                ]:
+                    lines.append(f"# HELP {name} {desc}")
+                    lines.append(f"# TYPE {name} counter")
+                    lines.append(f"{name} {value}")
+                # Gauge
+                lines.append(
+                    "# HELP prsm_inference_output_cache_size "
+                    "OutputCache current entry count"
+                )
+                lines.append(
+                    "# TYPE prsm_inference_output_cache_size gauge"
+                )
+                lines.append(
+                    f"prsm_inference_output_cache_size "
+                    f"{stats.get('size', 0)}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "metrics output_cache probe failed: %s", exc,
+            )
+
         # Sprint 254 — prsm_royalty_dispatch_ring_size. On-chain
         # content-royalty dispatch audit outcomes. Goes nonzero
         # only when PRSM_ONCHAIN_CONTENT_ROYALTY_ENABLED=1.
