@@ -63,51 +63,72 @@ def _hw_dict_to_parallax_gpu(
     if memory_gb <= 0:
         return None
 
-    # Sprint 695 — operator override for the advertised tflops_fp16.
-    # The Phase-2 router's optimization uses tflops_fp16 to compute
-    # per-layer compute latency; for CPU peers with realistic
-    # benchmark numbers (~0.07 tflops on a 1vCPU droplet), the
-    # router rejects the resulting chain as too slow. Operators
-    # testing multi-stage allocation on slow hardware can override
-    # this to a higher value to clear the threshold. Pure-additive.
-    _tflops_override_raw = os.environ.get(
-        "PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE", "",
-    ).strip()
-    if _tflops_override_raw:
-        try:
-            override = float(_tflops_override_raw)
-            if override > 0:
-                tflops_fp16 = override
-        except ValueError:
-            logger.debug(
-                "PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE=%r not float; "
-                "keeping detected tflops_fp16=%s",
-                _tflops_override_raw, tflops_fp16,
-            )
+    # Sprint 843 — per-peer override field takes precedence over
+    # consumer-side env. Producer (sp681 hardware_profile_loader)
+    # writes operator's PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE into
+    # the advertised hw_profile as `tflops_fp16_override`; relay
+    # carries it to other consumers via sp838. Coerce defensively
+    # — wire data is untrusted.
+    _peer_tflops_override = hw.get("tflops_fp16_override")
+    if isinstance(_peer_tflops_override, (int, float)) and \
+            _peer_tflops_override > 0:
+        tflops_fp16 = float(_peer_tflops_override)
+    else:
+        # Sprint 695 — operator override for the advertised tflops_fp16.
+        # The Phase-2 router's optimization uses tflops_fp16 to compute
+        # per-layer compute latency; for CPU peers with realistic
+        # benchmark numbers (~0.07 tflops on a 1vCPU droplet), the
+        # router rejects the resulting chain as too slow. Operators
+        # testing multi-stage allocation on slow hardware can override
+        # this to a higher value to clear the threshold. Pure-additive.
+        # Sprint 843: consumer-side env now acts as fallback for peers
+        # that haven't advertised an explicit override field.
+        _tflops_override_raw = os.environ.get(
+            "PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE", "",
+        ).strip()
+        if _tflops_override_raw:
+            try:
+                override = float(_tflops_override_raw)
+                if override > 0:
+                    tflops_fp16 = override
+            except ValueError:
+                logger.debug(
+                    "PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE=%r not float; "
+                    "keeping detected tflops_fp16=%s",
+                    _tflops_override_raw, tflops_fp16,
+                )
 
-    # Sprint 695 — operator override for the advertised memory_gb.
-    # The upstream Parallax allocator uses memory_gb as input to
-    # its water-filling step that decides per-stage layer counts;
-    # large memory → all layers fit on one GPU → 1-stage allocation
-    # (live-attested in sprint 688 for gpt2 on 1.92GB droplets).
-    # Operators wanting to force a multi-stage split for testing
-    # (or to reserve memory for runtime overhead) can pin this to
-    # a smaller value. Pure-additive: env unset → existing
-    # heuristic preserved.
-    _mem_override_raw = os.environ.get(
-        "PRSM_PARALLAX_MEMORY_GB_OVERRIDE", "",
-    ).strip()
-    if _mem_override_raw:
-        try:
-            memory_gb = float(_mem_override_raw)
-            if memory_gb <= 0:
-                return None
-        except ValueError:
-            logger.debug(
-                "PRSM_PARALLAX_MEMORY_GB_OVERRIDE=%r not float; "
-                "falling back to advertised memory_gb=%s",
-                _mem_override_raw, memory_gb,
-            )
+    # Sprint 843 — per-peer memory override takes precedence
+    # over consumer-side env.
+    _peer_mem_override = hw.get("memory_gb_override")
+    if isinstance(_peer_mem_override, (int, float)) and \
+            _peer_mem_override > 0:
+        memory_gb = float(_peer_mem_override)
+    else:
+        # Sprint 695 — operator override for the advertised memory_gb.
+        # The upstream Parallax allocator uses memory_gb as input to
+        # its water-filling step that decides per-stage layer counts;
+        # large memory → all layers fit on one GPU → 1-stage allocation
+        # (live-attested in sprint 688 for gpt2 on 1.92GB droplets).
+        # Operators wanting to force a multi-stage split for testing
+        # (or to reserve memory for runtime overhead) can pin this to
+        # a smaller value. Pure-additive: env unset → existing
+        # heuristic preserved.
+        # Sprint 843: consumer-side env now acts as fallback.
+        _mem_override_raw = os.environ.get(
+            "PRSM_PARALLAX_MEMORY_GB_OVERRIDE", "",
+        ).strip()
+        if _mem_override_raw:
+            try:
+                memory_gb = float(_mem_override_raw)
+                if memory_gb <= 0:
+                    return None
+            except ValueError:
+                logger.debug(
+                    "PRSM_PARALLAX_MEMORY_GB_OVERRIDE=%r not float; "
+                    "falling back to advertised memory_gb=%s",
+                    _mem_override_raw, memory_gb,
+                )
 
     memory_bandwidth_gbps = float(
         hw.get("memory_bandwidth_gbps", _DEFAULT_MEMORY_BANDWIDTH_GBPS)
@@ -116,28 +137,41 @@ def _hw_dict_to_parallax_gpu(
     if memory_bandwidth_gbps <= 0:
         memory_bandwidth_gbps = _DEFAULT_MEMORY_BANDWIDTH_GBPS
 
-    # Sprint 686 — operator override for the layer_capacity
-    # heuristic. The default 2GB-per-layer formula targets 7B-class
-    # fp16 models; operators serving smaller models (gpt2, phi-2,
-    # etc.) need a higher cap or Phase-1 allocation can't place
-    # all layers. Set PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=<int>
-    # to pin per-GPU capacity explicitly. Live-attest of sprint
-    # 685's gpt2 (12 layers / ~27MB each) surfaced this.
-    _override_raw = os.environ.get(
-        "PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE", "",
-    ).strip()
-    if _override_raw:
-        try:
-            layer_capacity = max(1, int(_override_raw))
-        except ValueError:
-            logger.debug(
-                "PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=%r not "
-                "integer; falling back to memory heuristic",
-                _override_raw,
-            )
-            layer_capacity = max(1, int(memory_gb / _BYTES_PER_LAYER_GB))
+    # Sprint 843 — per-peer layer_capacity override takes
+    # precedence. When producer (operator) sets
+    # PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE, sp681's
+    # _merge_hardware_overrides writes it as
+    # `layer_capacity_override` into the advertised hw_profile;
+    # sp838 relays it; we honor it here per-peer. Fallback
+    # order: peer field → consumer env → memory heuristic.
+    _peer_cap_override = hw.get("layer_capacity_override")
+    if isinstance(_peer_cap_override, int) and \
+            _peer_cap_override > 0:
+        layer_capacity = _peer_cap_override
     else:
-        layer_capacity = max(1, int(memory_gb / _BYTES_PER_LAYER_GB))
+        # Sprint 686 — operator override for the layer_capacity
+        # heuristic. The default 2GB-per-layer formula targets 7B-class
+        # fp16 models; operators serving smaller models (gpt2, phi-2,
+        # etc.) need a higher cap or Phase-1 allocation can't place
+        # all layers. Set PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=<int>
+        # to pin per-GPU capacity explicitly. Live-attest of sprint
+        # 685's gpt2 (12 layers / ~27MB each) surfaced this.
+        # Sprint 843: consumer-side env now acts as fallback.
+        _override_raw = os.environ.get(
+            "PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE", "",
+        ).strip()
+        if _override_raw:
+            try:
+                layer_capacity = max(1, int(_override_raw))
+            except ValueError:
+                logger.debug(
+                    "PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE=%r not "
+                    "integer; falling back to memory heuristic",
+                    _override_raw,
+                )
+                layer_capacity = max(1, int(memory_gb / _BYTES_PER_LAYER_GB))
+        else:
+            layer_capacity = max(1, int(memory_gb / _BYTES_PER_LAYER_GB))
 
     gpu_api = hw.get("gpu_api", "") or ""
     device_map = {

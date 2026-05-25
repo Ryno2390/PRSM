@@ -66,6 +66,7 @@ def load_local_hardware_profile(
             return None
         _merge_operator_address(data)
         _merge_operator_delegation(data)
+        _merge_hardware_overrides(data)
         return data
 
     # 2) on-disk cache
@@ -76,6 +77,7 @@ def load_local_hardware_profile(
             if isinstance(data, dict):
                 _merge_operator_address(data)
                 _merge_operator_delegation(data)
+                _merge_hardware_overrides(data)
                 return data
             logger.warning(
                 "hardware_profile cache %s top-level is not a dict; "
@@ -111,7 +113,59 @@ def load_local_hardware_profile(
 
     _merge_operator_address(data)
     _merge_operator_delegation(data)
+    _merge_hardware_overrides(data)
     return data
+
+
+def _merge_hardware_overrides(data: Dict[str, Any]) -> None:
+    """Sprint 843 — propagate producer-side hw overrides into the
+    advertised profile so the sp838 relay carries them to other
+    consumers.
+
+    Pre-843 the three override envs (TFLOPS_FP16, MEMORY_GB,
+    LAYER_CAPACITY) were consumer-side only — setting them on
+    a droplet only affected what THAT droplet saw in ITS pool
+    view, not what a remote consumer (e.g., a Mac joining via
+    bootstrap relay) saw for THAT droplet. Multi-host live test
+    2026-05-25 (post-sp838 fleet deploy) confirmed the gap: Mac
+    saw 1.92GB raw memory + computed cap=1 for both 2GB droplets
+    despite each droplet's local env having LAYER_CAPACITY_OVERRIDE=3.
+
+    Sprint 843 fix: producer writes the env-resolved overrides
+    into the hw_profile dict as explicit fields
+    (``tflops_fp16_override``, ``memory_gb_override``,
+    ``layer_capacity_override``). Consumer reads per-peer
+    fields first, falls back to its own env if absent. The
+    consumer-side env behavior becomes a coarse default for
+    peers that don't advertise an explicit override.
+
+    Wire-format compatibility: missing/invalid env → no key
+    written → pre-843 relay shape preserved.
+    """
+    for env_key, dict_key, caster in (
+        ("PRSM_PARALLAX_TFLOPS_FP16_OVERRIDE",
+         "tflops_fp16_override", float),
+        ("PRSM_PARALLAX_MEMORY_GB_OVERRIDE",
+         "memory_gb_override", float),
+        ("PRSM_PARALLAX_LAYER_CAPACITY_OVERRIDE",
+         "layer_capacity_override", int),
+    ):
+        raw = os.environ.get(env_key, "").strip()
+        if not raw:
+            continue
+        try:
+            value = caster(raw)
+        except (ValueError, TypeError):
+            logger.debug(
+                "Sprint 843 — %s=%r not parseable as %s; skipping",
+                env_key, raw, caster.__name__,
+            )
+            continue
+        # Reject non-positive — same posture as the consumer-side
+        # validators in dht_backed_pool_provider.
+        if value <= 0:
+            continue
+        data[dict_key] = value
 
 
 def _merge_operator_address(data: Dict[str, Any]) -> None:
