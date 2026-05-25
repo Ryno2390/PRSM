@@ -15,6 +15,21 @@
       "mlx_param_bytes_per_element": 4,
       "cache_bytes_per_element": 4,
       "embedding_bytes_per_element": 4
+    },
+    "distilgpt2": {
+      "model_name": "distilgpt2",
+      "mlx_model_name": "distilgpt2",
+      "num_layers": 6,
+      "hidden_dim": 768,
+      "num_attention_heads": 12,
+      "num_kv_heads": 12,
+      "vocab_size": 50257,
+      "head_size": 64,
+      "intermediate_dim": 3072,
+      "param_bytes_per_element": 4,
+      "mlx_param_bytes_per_element": 4,
+      "cache_bytes_per_element": 4,
+      "embedding_bytes_per_element": 4
     }
   }
 }
