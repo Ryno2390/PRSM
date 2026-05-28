@@ -2598,6 +2598,115 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             ),
         }
 
+    # Sp853 — onramp execute: builds the user-facing Coinbase Pay
+    # widget URL that completes USD → USDC purchase. User opens
+    # the URL, pays via Coinbase, and USDC lands in their WaaS
+    # wallet on Base. From there a separate Aerodrome swap step
+    # (sibling sprint, gated on pool ceremony) converts to FTNS.
+    @app.post("/wallet/onramp/execute", tags=["wallet"])
+    async def post_onramp_execute(
+        body: OnrampQuoteRequest,
+    ) -> Dict[str, Any]:
+        if body.usd_amount <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="usd_amount must be positive (> 0)",
+            )
+        # Same XOR destination validation as the quote endpoint.
+        has_user_id = bool(body.destination_user_id)
+        has_address = bool(body.destination_address)
+        if has_user_id and has_address:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "supply destination_user_id OR "
+                    "destination_address, not both"
+                ),
+            )
+        if not has_user_id and not has_address:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "either destination_user_id or "
+                    "destination_address is required"
+                ),
+            )
+
+        destination_address: Optional[str] = body.destination_address
+        if has_user_id:
+            waas = getattr(node, "_coinbase_waas_client", None)
+            if waas is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "WaaS client not initialized; cannot "
+                        "resolve destination_user_id."
+                    ),
+                )
+            record = waas.get_wallet(body.destination_user_id)
+            if record is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"no WaaS wallet for destination_user_id="
+                        f"{body.destination_user_id!r}; run "
+                        f"/wallet/waas/provision first"
+                    ),
+                )
+            destination_address = record.address
+
+        if not destination_address:
+            return {
+                "status": "PENDING_COMMISSION",
+                "session_url": None,
+                "note": (
+                    "Destination WaaS wallet has no address yet "
+                    "(adapter_wired=False). Paste Ed25519 PEM "
+                    "into COINBASE_CDP_API_KEY_PRIVATE so the "
+                    "next provision call returns a real address."
+                ),
+            }
+
+        from prsm.economy.web3.coinbase_onramp_url import (
+            build_onramp_url,
+        )
+        try:
+            session_url = build_onramp_url(
+                destination_address=destination_address,
+                usd_amount=body.usd_amount,
+                partner_user_id=body.destination_user_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+        if session_url is None:
+            return {
+                "status": "PENDING_COMMISSION",
+                "session_url": None,
+                "destination_address": destination_address,
+                "note": (
+                    "COINBASE_PAY_APP_ID env var unset. Register "
+                    "a Coinbase Pay project at "
+                    "https://portal.cdp.coinbase.com/products/onramp"
+                    " and export the App ID."
+                ),
+            }
+
+        return {
+            "status": "SESSION_READY",
+            "session_url": session_url,
+            "destination_address": destination_address,
+            "usd_amount": body.usd_amount,
+            "asset": "USDC",
+            "network": "base",
+            "note": (
+                "Open session_url to complete USD → USDC purchase. "
+                "USDC lands at destination_address on Base. "
+                "Aerodrome USDC→FTNS swap is a separate step "
+                "(gated on pool ceremony, Vision gantt 2026-06-15)."
+            ),
+        }
+
     @app.get("/wallet/spend")
     async def get_wallet_spend(
         days: int = 30,
