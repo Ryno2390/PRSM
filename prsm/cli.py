@@ -2048,6 +2048,212 @@ def node_treasury(
     console.print(per_wallet)
 
 
+# Sp876 — `prsm node aerodrome-ceremony` Safe TX batch + runbook
+# generator backed by sp875's pure-payload builders. Lets operators
+# generate ceremony artifacts from terminal without writing Python.
+@node.command("aerodrome-ceremony")
+@click.option(
+    "--network", type=click.Choice(["mainnet", "sepolia"]),
+    default="mainnet",
+    help="Target network — default mainnet; use sepolia for rehearsal",
+)
+@click.option(
+    "--foundation-safe", required=True, type=str,
+    help="Foundation Safe address (0x...)",
+)
+@click.option(
+    "--seed-usdc", required=True, type=float,
+    help="USDC seed amount in whole tokens (e.g., 50000 = 50k USDC)",
+)
+@click.option(
+    "--seed-ftns", required=True, type=float,
+    help="FTNS seed amount in whole tokens (e.g., 50000 = 50k FTNS)",
+)
+@click.option(
+    "--slippage-bps", default=100, type=int,
+    help="Slippage tolerance in basis points (default 100 = 1%)",
+)
+@click.option(
+    "--deadline-seconds", default=3600, type=int,
+    help="Deadline from now in seconds (default 3600 = 1h)",
+)
+@click.option(
+    "--output-json", "-j", type=click.Path(), default=None,
+    help="Write batch JSON to this path (Safe TX Builder format)",
+)
+@click.option(
+    "--output-runbook", "-r", type=click.Path(), default=None,
+    help="Write co-signer runbook markdown to this path",
+)
+def node_aerodrome_ceremony(
+    network: str,
+    foundation_safe: str,
+    seed_usdc: float,
+    seed_ftns: float,
+    slippage_bps: int,
+    deadline_seconds: int,
+    output_json: Optional[str],
+    output_runbook: Optional[str],
+):
+    """Generate Aerodrome pool seeding ceremony artifacts.
+
+    Produces Safe-Transaction-Builder-compatible JSON (3-tx batch:
+    USDC.approve + FTNS.approve + Router.addLiquidity) and a
+    co-signer runbook markdown. Pure-payload — never signs or
+    submits. Upload JSON via wallet.safe.global → TX Builder.
+
+    The seed amounts encode the OPENING MARKET PRICE for FTNS:
+    price = USDC / FTNS. Choose deliberately.
+    """
+    import json as _json
+    from prsm.economy.web3.aerodrome_pool_ceremony import (
+        MAINNET_CONFIG, SEPOLIA_CONFIG,
+        build_ceremony_batch, build_runbook_markdown,
+    )
+
+    if not foundation_safe.startswith("0x") or len(
+        foundation_safe,
+    ) != 42:
+        console.print(
+            f"[red]foundation_safe must be 0x + 40 hex chars[/red]"
+        )
+        sys.exit(2)
+    if seed_usdc <= 0 or seed_ftns <= 0:
+        console.print(
+            "[red]Both --seed-usdc and --seed-ftns must be > 0[/red]"
+        )
+        sys.exit(2)
+
+    config = (
+        MAINNET_CONFIG if network == "mainnet"
+        else SEPOLIA_CONFIG
+    )
+
+    # Convert whole tokens to base units.
+    seed_usdc_units = int(seed_usdc * 10**6)
+    seed_ftns_units = int(seed_ftns * 10**18)
+    opening_price = seed_usdc / seed_ftns if seed_ftns > 0 else 0
+
+    # Color-code mainnet differently — visual signal that this is
+    # REAL MONEY, not rehearsal.
+    net_color = "red" if network == "mainnet" else "yellow"
+
+    console.print(
+        f"[bold]Aerodrome USDC↔FTNS Ceremony Generator[/bold]"
+    )
+    console.print(
+        f"  Network:           [{net_color}]{network}[/{net_color}] "
+        f"(chain_id {config.chain_id})"
+    )
+    console.print(f"  Foundation Safe:   {foundation_safe}")
+    console.print(
+        f"  Seed USDC:         {seed_usdc:.6f} "
+        f"({seed_usdc_units} base units, 6 decimals)"
+    )
+    console.print(
+        f"  Seed FTNS:         {seed_ftns:.6f} "
+        f"({seed_ftns_units} base units, 18 decimals)"
+    )
+    console.print(
+        f"  Opening price:     "
+        f"[bold]${opening_price:.6f} per FTNS[/bold]"
+    )
+    console.print(f"  Slippage:          {slippage_bps} bps")
+    console.print(f"  Deadline:          +{deadline_seconds}s from now")
+    console.print()
+
+    if network == "mainnet":
+        console.print(
+            "[red]⚠ MAINNET — this batch will move real money "
+            "when executed.[/red]"
+        )
+        console.print(
+            "[dim]Strongly recommend a Sepolia rehearsal first "
+            "(--network sepolia) with throwaway amounts.[/dim]"
+        )
+        console.print()
+
+    try:
+        batch = build_ceremony_batch(
+            network=config,
+            foundation_safe=foundation_safe,
+            seed_usdc_units=seed_usdc_units,
+            seed_ftns_units=seed_ftns_units,
+            slippage_bps=slippage_bps,
+            deadline_seconds=deadline_seconds,
+        )
+        runbook = build_runbook_markdown(
+            network=config,
+            foundation_safe=foundation_safe,
+            seed_usdc_units=seed_usdc_units,
+            seed_ftns_units=seed_ftns_units,
+            slippage_bps=slippage_bps,
+        )
+    except ValueError as exc:
+        console.print(f"[red]Validation error: {exc}[/red]")
+        sys.exit(1)
+
+    # Output handling: either to files (with confirmation) or
+    # stdout (JSON to stdout, runbook to stderr-ish console).
+    if output_json:
+        with open(output_json, "w", encoding="utf-8") as f:
+            _json.dump(batch, f, indent=2)
+        console.print(
+            f"[green]✓[/green] Wrote batch JSON to "
+            f"[cyan]{output_json}[/cyan] "
+            f"({len(batch['transactions'])} transactions)"
+        )
+    if output_runbook:
+        with open(output_runbook, "w", encoding="utf-8") as f:
+            f.write(runbook)
+        console.print(
+            f"[green]✓[/green] Wrote runbook to "
+            f"[cyan]{output_runbook}[/cyan] "
+            f"({runbook.count(chr(10)) + 1} lines)"
+        )
+
+    if not output_json and not output_runbook:
+        # No outputs — print summary + suggest next step
+        console.print(
+            "[yellow]No --output-json / --output-runbook[/yellow] "
+            "specified — nothing written."
+        )
+        console.print(
+            "[dim]Example:[/dim]\n"
+            "[dim]  prsm node aerodrome-ceremony "
+            "--network sepolia --foundation-safe 0x... "
+            "--seed-usdc 1 --seed-ftns 1 "
+            "-j /tmp/sepolia-batch.json "
+            "-r /tmp/sepolia-runbook.md[/dim]"
+        )
+        sys.exit(1)
+
+    console.print()
+    console.print("[bold]Next steps[/bold]")
+    console.print(
+        "  1. Distribute the runbook to all co-signers BEFORE "
+        "ceremony"
+    )
+    console.print(
+        "  2. Co-signers verify every address in the runbook "
+        "matches what their hardware wallet shows during signing"
+    )
+    console.print(
+        "  3. Upload batch JSON: wallet.safe.global → "
+        f"connect to {foundation_safe[:8]}... → Apps → "
+        "Transaction Builder → Load from JSON"
+    )
+    console.print(
+        "  4. Threshold co-signers sign via hardware wallets + "
+        "execute"
+    )
+    console.print(
+        "  5. After landing, set "
+        "[yellow]AERODROME_USDC_FTNS_POOL_ADDRESS[/yellow] in "
+        "operator env to the resulting pool address"
+    )
+
+
 # Sp873 — `prsm node compliance-export` terminal export of sp872's
 # /admin/fiat-compliance/export.csv. Lets operators run quarterly /
 # annual exports from a single command without needing curl +
