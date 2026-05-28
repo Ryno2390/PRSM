@@ -4306,6 +4306,56 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "total_entries": ring.count(),
         }
 
+    # Sp872 — CSV export for AUSTRAC / FinCEN / IRS reporting.
+    @app.get(
+        "/admin/fiat-compliance/export.csv", tags=["admin"],
+    )
+    async def get_fiat_compliance_csv_export(
+        since: Optional[float] = None,
+        until: Optional[float] = None,
+        user_id: Optional[str] = None,
+        kind: Optional[str] = None,
+        min_usd: Optional[float] = None,
+    ):
+        """Canonical CSV export of fiat compliance ring entries.
+
+        Filters: since/until (Unix timestamp), user_id, kind,
+        min_usd (FinCEN $10k CTR threshold typical). Returns
+        text/csv with the canonical sp872 header schema.
+        """
+        from fastapi.responses import PlainTextResponse
+        from prsm.economy.web3.compliance_csv_export import (
+            export_to_csv,
+        )
+        ring = getattr(node, "_fiat_compliance_ring", None)
+        if ring is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Fiat compliance ring not initialized.",
+            )
+        entries = ring.recent(limit=ring.count() or 1)
+        kinds = {kind} if kind else None
+        csv_text = export_to_csv(
+            entries, since=since, until=until,
+            user_id=user_id, kinds=kinds, min_usd=min_usd,
+        )
+        # Filename includes the time window if specified for
+        # operator-side archive hygiene.
+        from datetime import datetime, timezone
+        ts = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        suffix = f"-since{int(since)}" if since else ""
+        suffix += f"-until{int(until)}" if until else ""
+        filename = f"prsm-compliance-{ts}{suffix}.csv"
+        return PlainTextResponse(
+            content=csv_text,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{filename}"'
+                ),
+            },
+        )
+
     @app.get(
         "/admin/fiat-compliance/{entry_id}", tags=["admin"],
     )
