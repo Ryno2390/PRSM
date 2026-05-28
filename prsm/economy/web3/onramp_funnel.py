@@ -71,6 +71,13 @@ class OnrampIntent:
     usdc_received: float = 0.0
     usdc_received_units: int = 0
     expired_at: float = 0.0
+    # Sp871 — when funnel sweep CONFIRMS USDC arrival, the
+    # auto-swap orchestrator stores the prepared Aerodrome swap
+    # envelope here (router address + amountIn + amountOutMin +
+    # deadline + routes). User retrieves via
+    # GET /wallet/onramp/funnel/{intent_id} to execute the swap
+    # once the pool ceremony closes. None until CONFIRMED.
+    swap_envelope: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -89,6 +96,7 @@ class OnrampIntent:
             usdc_received=d.get("usdc_received", 0.0),
             usdc_received_units=d.get("usdc_received_units", 0),
             expired_at=d.get("expired_at", 0.0),
+            swap_envelope=d.get("swap_envelope"),
         )
 
 
@@ -176,6 +184,7 @@ class OnrampFunnel:
 
     def sweep(
         self, *, balance_reader: Any,
+        on_confirmed: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Periodic sweep: check on-chain USDC balance against
         each open intent. Transitions:
@@ -215,6 +224,19 @@ class OnrampFunnel:
                 rec.usdc_received = bal.usdc
                 rec.usdc_received_units = bal.usdc_units
                 confirmed_new += 1
+                # Sp871 — fire optional callback on confirm.
+                # Fail-soft: a misbehaving callback (e.g., pool
+                # not yet seeded → swap-envelope build raises)
+                # must NOT undo the CONFIRMED transition.
+                if on_confirmed is not None:
+                    try:
+                        on_confirmed(rec)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "OnrampFunnel sweep: on_confirmed "
+                            "callback raised for intent %s: %s",
+                            rec.intent_id, exc,
+                        )
             elif (
                 now - rec.created_at > _EXPIRY_SECONDS
             ):

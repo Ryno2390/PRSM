@@ -3374,18 +3374,43 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """Trigger an on-chain balance sweep across open intents.
         Transitions PENDING_SETTLEMENT → CONFIRMED when USDC
         arrives, and stale intents → EXPIRED after 24h.
+
+        Sp871: on CONFIRMED transition, the onramp→swap
+        orchestrator immediately builds an Aerodrome USDC→FTNS
+        swap envelope and attaches it to the intent. User
+        retrieves via GET /wallet/onramp/funnel/{intent_id}.
+        Fail-soft when Aerodrome pool isn't yet seeded — envelope
+        stays None, next sweep retries.
         """
         from prsm.economy.web3.onramp_funnel import OnrampFunnel
         from prsm.economy.web3.wallet_balance_reader import (
             from_env as _wbr_from_env,
         )
+        from prsm.economy.web3.onramp_to_swap_orchestrator import (
+            make_on_confirmed_callback,
+        )
+        from prsm.config.networks import get_network_config
         funnel = getattr(node, "_onramp_funnel", None)
         if funnel is None:
             funnel = OnrampFunnel()
             setattr(node, "_onramp_funnel", funnel)
         reader = _wbr_from_env()
+        # Sp871 — wire the auto-orchestrator if Aerodrome client
+        # is available. Callback fires per CONFIRMED intent.
+        aero = getattr(node, "_aerodrome_client", None)
+        net = get_network_config("mainnet")
+        on_confirmed = None
+        if aero is not None and net.ftns_token:
+            on_confirmed = make_on_confirmed_callback(
+                funnel=funnel,
+                aerodrome_client=aero,
+                ftns_address=net.ftns_token,
+            )
         try:
-            return funnel.sweep(balance_reader=reader)
+            return funnel.sweep(
+                balance_reader=reader,
+                on_confirmed=on_confirmed,
+            )
         finally:
             reader.close()
 
