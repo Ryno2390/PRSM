@@ -189,6 +189,38 @@ def _compute_counterfactual_sender(
     return "0x" + addr_hex
 
 
+def _build_cdp_bearer_jwt(
+    api_key_name: str,
+    api_key_private_pem: str,
+    method: str,
+    host: str,
+    path: str,
+) -> str:
+    """Build CDP Bearer JWT per sp854b spec (Ed25519/EdDSA)."""
+    import secrets as _sec
+    import jwt as _jwt
+    from prsm.economy.web3.coinbase_waas_cdp_backend import (
+        _load_ed25519_pem,
+    )
+    private_key = _load_ed25519_pem(api_key_private_pem)
+    now = int(time.time())
+    headers = {
+        "alg": "EdDSA", "typ": "JWT",
+        "kid": api_key_name,
+        "nonce": _sec.token_hex(8),
+    }
+    payload = {
+        "iss": "cdp", "sub": api_key_name,
+        "nbf": now, "exp": now + 120,
+        "aud": [method, host],
+        "uri": f"{method} {host}{path}",
+    }
+    return _jwt.encode(
+        payload, private_key, algorithm="EdDSA",
+        headers=headers,
+    )
+
+
 def _rpc_call(
     rpc_url: str, method: str, params: list,
     bearer_jwt: Optional[str] = None,
@@ -210,6 +242,29 @@ def _rpc_call(
             f"RPC {method} error: {payload['error']!r}"
         )
     return payload.get("result")
+
+
+def _cdp_rpc_call(
+    rpc_url: str, method: str, params: list,
+    api_key_name: str, api_key_private_pem: str,
+) -> Any:
+    """JSON-RPC call against CDP with fresh Bearer JWT per request.
+
+    CDP signs requests at the Cloudflare layer using JWT — the
+    URL-baked token is the project identifier, not auth.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(rpc_url)
+    host = parsed.netloc
+    path = parsed.path
+    bearer = _build_cdp_bearer_jwt(
+        api_key_name=api_key_name,
+        api_key_private_pem=api_key_private_pem,
+        method="POST", host=host, path=path,
+    )
+    return _rpc_call(
+        rpc_url, method, params, bearer_jwt=bearer,
+    )
 
 
 def _pack_user_op_for_hashing(
@@ -274,6 +329,15 @@ def _user_op_hash(
 def main() -> int:
     pk = _require_env("PRSM_DEPLOYER_PRIVATE_KEY")
     paymaster_url = _require_env("COINBASE_CDP_PAYMASTER_ENDPOINT")
+    # Sp867 — CDP paymaster endpoint requires Bearer JWT auth on
+    # every call (Ed25519, sp854b spec). Use a separate standard
+    # RPC for state reads (no auth needed).
+    base_rpc = (
+        os.environ.get("BASE_RPC_URL", "").strip()
+        or "https://mainnet.base.org"
+    )
+    cdp_key_name = _require_env("COINBASE_CDP_API_KEY_NAME")
+    cdp_key_priv = _require_env("COINBASE_CDP_API_KEY_PRIVATE")
 
     if not pk.startswith("0x"):
         pk = "0x" + pk
@@ -282,22 +346,30 @@ def main() -> int:
     acct = Account.from_key(pk)
     owner = acct.address
     print(f"Owner EOA: {owner}")
+    print(f"Base RPC: {base_rpc}")
+    print(f"Paymaster: {paymaster_url[:60]}...")
 
-    # Factory data: createAccount(owner, salt=0)
-    factory_data = _encode_create_account_calldata(owner, 0)
+    # Factory data: createAccount(owner, salt) — use a non-zero
+    # salt so each script invocation gets a fresh counterfactual
+    # sender address. The previous salt=0 sender accumulated
+    # phantom per-user spend across failed sponsor calls;
+    # rotating salt sidesteps that cap poisoning.
+    salt = int(os.environ.get("PRSM_SP867_SALT", "1"))
+    factory_data = _encode_create_account_calldata(owner, salt)
+    print(f"Salt: {salt}")
 
-    # Counterfactual sender address.
+    # Counterfactual sender address via standard Base RPC.
     print("Querying EntryPoint.getSenderAddress for counterfactual...")
     sender = _compute_counterfactual_sender(
-        rpc_url=paymaster_url,
+        rpc_url=base_rpc,
         factory=SIMPLE_ACCOUNT_FACTORY_V07,
         factory_data=factory_data,
     )
     print(f"SimpleAccount counterfactual address: {sender}")
 
-    # Verify the account isn't already deployed (nonce / code check)
+    # Verify the account isn't already deployed (state read on Base RPC)
     code = _rpc_call(
-        paymaster_url, "eth_getCode", [sender, "latest"],
+        base_rpc, "eth_getCode", [sender, "latest"],
     )
     if code and code != "0x":
         print(
@@ -308,29 +380,52 @@ def main() -> int:
         )
         return 1
 
-    # Inner approve calldata: FTNS.approve(AerodromeRouter, 0)
-    approve_data = _encode_approve_calldata(AERODROME_ROUTER, 0)
-    # SimpleAccount.execute(FTNS, 0, approve_data)
-    call_data = _encode_execute_calldata(FTNS_TOKEN, 0, approve_data)
-    print(f"callData built: {len(call_data)} bytes")
+    # Simplified inner call: execute(SimpleAccount, 0, "")  — self-call
+    # with empty data. Tests deploy + sponsor pathway without
+    # depending on FTNS or any external contract state. The original
+    # approve(Router, 0) call moves to a follow-on once the basic
+    # sponsorship path is proven live.
+    call_data = _encode_execute_calldata(sender, 0, b"")
+    print(f"callData built: {len(call_data)} bytes (self-call no-op)")
 
     # Initial gas estimates — bundler will recompute via sponsor call
     # but we need reasonable starting values.
+    # Dummy signature for gas estimation: 65 bytes = 32 r + 32 s + 1 v.
+    # CRITICAL constraints to avoid AA23 (ECDSA.recover revert):
+    #   v must be 27 or 28 (we use 28 = 0x1c)
+    #   r must be in [1, n) — secp256k1n=0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141
+    #   s must be in [1, n/2) — OZ ECDSA enforces low-s
+    # Small values like r=1, s=1 are trivially valid. They produce
+    # SOME recovered address (just not the real owner), so validation
+    # returns SIG_VALIDATION_FAILED cleanly instead of reverting.
+    DUMMY_SIG = (
+        "0x"
+        + "00" * 31 + "01"             # r = 1
+        + "00" * 31 + "01"             # s = 1
+        + "1c"                         # v = 28
+    )
+    assert len(DUMMY_SIG) == 2 + 130   # 0x + 65 bytes hex
     user_op: Dict[str, Any] = {
         "sender": sender,
         "nonce": "0x0",
         "factory": SIMPLE_ACCOUNT_FACTORY_V07,
         "factoryData": _hex(factory_data),
         "callData": _hex(call_data),
+        # Generous gas limits for the tracer (tightening caused
+        # "failed to trace calls" — bundler simulation needs
+        # headroom in the trace itself, not just static analysis).
+        # Per-user $5 cap accommodates worst-case projection.
         "callGasLimit": "0x" + format(200_000, "x"),
-        "verificationGasLimit": "0x" + format(500_000, "x"),
+        "verificationGasLimit": "0x" + format(2_000_000, "x"),
         "preVerificationGas": "0x" + format(100_000, "x"),
-        "maxFeePerGas": "0x" + format(2_000_000_000, "x"),  # 2 gwei
-        "maxPriorityFeePerGas": "0x" + format(1_000_000_000, "x"),
-        "signature": "0x" + "00" * 65,  # placeholder
+        "maxFeePerGas": "0x" + format(1_000_000_000, "x"),  # 1 gwei
+        "maxPriorityFeePerGas": "0x" + format(500_000_000, "x"),
+        "signature": DUMMY_SIG,
     }
 
-    # Step 1: pm_sponsorUserOperation → get paymaster fields
+    # Step 1: pm_sponsorUserOperation → get paymaster fields.
+    # Paymaster endpoint URL contains the project token in the
+    # path — no Bearer header needed.
     print("Calling pm_sponsorUserOperation...")
     sponsor = _rpc_call(
         paymaster_url, "pm_sponsorUserOperation",
