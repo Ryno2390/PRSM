@@ -43,30 +43,69 @@ _JWT_EXPIRY_SECONDS = 120
 
 
 def _load_ed25519_pem(pem: str):
-    """Parse an Ed25519 PEM private key. Raises ValueError on
-    placeholder strings or malformed PEM."""
+    """Parse an Ed25519 private key in any format CDP issues.
+
+    Supports three forms:
+      1. Standard PEM block (-----BEGIN PRIVATE KEY-----...-----END...)
+      2. Raw base64 64-byte libsodium format (32-byte seed +
+         32-byte derived public key) — CDP v2's default for new keys
+      3. Raw base64 32-byte seed only
+
+    Raises ValueError on placeholder strings or unrecognized format.
+    """
     if not pem or "REPLACE_WITH" in pem:
         raise ValueError(
             "COINBASE_CDP_API_KEY_PRIVATE is empty or still a "
-            "placeholder — paste the Ed25519 PEM from CDP."
+            "placeholder — paste the Ed25519 key from CDP."
         )
-    from cryptography.hazmat.primitives.serialization import (
-        load_pem_private_key,
-    )
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
         Ed25519PrivateKey,
     )
+
+    stripped = pem.strip()
+
+    # Form 1: standard PEM block
+    if stripped.startswith("-----BEGIN"):
+        from cryptography.hazmat.primitives.serialization import (
+            load_pem_private_key,
+        )
+        try:
+            key = load_pem_private_key(
+                stripped.encode("utf-8"), password=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(
+                f"Ed25519 PEM parse failed: {exc}",
+            ) from exc
+        if not isinstance(key, Ed25519PrivateKey):
+            raise ValueError(
+                f"expected Ed25519 private key, got "
+                f"{type(key).__name__}"
+            )
+        return key
+
+    # Forms 2 + 3: raw base64. Strip surrounding whitespace, allow
+    # accidental internal whitespace (paste mangling).
+    import base64
+    compact = "".join(stripped.split())
     try:
-        key = load_pem_private_key(
-            pem.encode("utf-8"), password=None,
-        )
+        raw = base64.b64decode(compact, validate=True)
     except Exception as exc:  # noqa: BLE001
-        raise ValueError(f"Ed25519 PEM parse failed: {exc}") from exc
-    if not isinstance(key, Ed25519PrivateKey):
         raise ValueError(
-            f"expected Ed25519 private key, got {type(key).__name__}"
+            f"Ed25519 base64 decode failed: {exc}",
+        ) from exc
+    if len(raw) == 64:
+        # libsodium format: first 32 bytes are the seed.
+        seed = raw[:32]
+    elif len(raw) == 32:
+        seed = raw
+    else:
+        raise ValueError(
+            f"Ed25519 raw key must be 32 or 64 bytes after base64 "
+            f"decode, got {len(raw)} bytes (input "
+            f"{len(compact)} base64 chars). PEM or base64 expected."
         )
-    return key
+    return Ed25519PrivateKey.from_private_bytes(seed)
 
 
 class CdpWaaSBackend:

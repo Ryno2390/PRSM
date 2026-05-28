@@ -89,15 +89,83 @@ def test_load_pem_rejects_empty():
 
 
 def test_load_pem_rejects_garbage():
+    """Random non-base64 garbage with characters outside the
+    base64 alphabet — surfaces the base64 decode error."""
     with pytest.raises(ValueError) as exc:
-        _load_ed25519_pem("not a real pem at all")
-    assert "Ed25519 PEM parse failed" in str(exc.value)
+        _load_ed25519_pem("not-a-real-pem!@#$%^&")
+    msg = str(exc.value)
+    assert (
+        "base64 decode failed" in msg
+        or "Ed25519 PEM parse failed" in msg
+    )
 
 
 def test_load_pem_accepts_real_ed25519():
     pem = _generate_test_pem()
     key = _load_ed25519_pem(pem)
     # Loaded successfully — no exception
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey,
+    )
+    assert isinstance(key, Ed25519PrivateKey)
+
+
+# ── Sp853-class follow-on: CDP v2 raw-base64 key format ──────
+
+def test_load_accepts_cdp_v2_raw_base64_64_byte():
+    """CDP v2 issues keys as 88-char base64 (libsodium 64-byte
+    format: 32-byte seed + 32-byte derived public key). Operator
+    pastes this raw form straight into .env without PEM markers."""
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey,
+    )
+    seed = b"\x01" * 32
+    public = Ed25519PrivateKey.from_private_bytes(seed).public_key()
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding, PublicFormat,
+    )
+    pub_bytes = public.public_bytes(
+        encoding=Encoding.Raw, format=PublicFormat.Raw,
+    )
+    libsodium_64 = seed + pub_bytes  # 64 bytes total
+    b64 = base64.b64encode(libsodium_64).decode()
+    assert len(b64) == 88  # CDP v2 wire format
+    key = _load_ed25519_pem(b64)
+    assert isinstance(key, Ed25519PrivateKey)
+
+
+def test_load_accepts_raw_base64_32_byte_seed():
+    """Some CDP keys ship as 32-byte seed only (44 base64 chars)."""
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey,
+    )
+    seed = b"\x02" * 32
+    b64 = base64.b64encode(seed).decode()
+    assert len(b64) == 44
+    key = _load_ed25519_pem(b64)
+    assert isinstance(key, Ed25519PrivateKey)
+
+
+def test_load_rejects_wrong_length_base64():
+    """A base64 blob that decodes to a length other than 32 or 64
+    isn't a valid Ed25519 key — surface the gotcha clearly."""
+    import base64
+    bad = base64.b64encode(b"\x03" * 16).decode()  # 16 bytes
+    with pytest.raises(ValueError) as exc:
+        _load_ed25519_pem(bad)
+    assert "must be 32 or 64 bytes" in str(exc.value)
+
+
+def test_load_tolerates_whitespace_in_base64():
+    """Paste-mangled base64 with internal spaces/newlines is
+    common — strip first."""
+    import base64
+    seed = b"\x04" * 32
+    b64 = base64.b64encode(seed).decode()
+    mangled = b64[:20] + "  \n  " + b64[20:]
+    key = _load_ed25519_pem(mangled)
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
         Ed25519PrivateKey,
     )
