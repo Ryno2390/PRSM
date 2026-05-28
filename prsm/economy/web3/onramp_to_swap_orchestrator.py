@@ -150,6 +150,7 @@ def make_on_confirmed_callback(
     aerodrome_client: Any,
     ftns_address: str,
     slippage_bps: int = _DEFAULT_SLIPPAGE_BPS,
+    completion_notifier: Any = None,
 ):
     """Factory that returns a callable suitable for OnrampFunnel
     .sweep(on_confirmed=...).
@@ -158,6 +159,8 @@ def make_on_confirmed_callback(
       - Builds the swap envelope (None-safe if pool not seeded yet)
       - Attaches to the intent's swap_envelope field
       - Persists the updated intent to disk via funnel._persist
+      - Sp874: fires the outbound completion webhook (no-op when
+        notifier isn't configured)
     """
     def _on_confirmed(intent):
         envelope = build_envelope_for_intent(
@@ -182,4 +185,13 @@ def make_on_confirmed_callback(
                 "for intent %s — envelope deferred",
                 intent.intent_id,
             )
+        # Sp874 — fire outbound completion webhook (fail-soft).
+        if completion_notifier is not None:
+            try:
+                completion_notifier.notify(intent=intent)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "sp874: completion notifier raised for "
+                    "intent %s: %s", intent.intent_id, exc,
+                )
     return _on_confirmed

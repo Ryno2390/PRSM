@@ -3397,14 +3397,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         reader = _wbr_from_env()
         # Sp871 — wire the auto-orchestrator if Aerodrome client
         # is available. Callback fires per CONFIRMED intent.
+        # Sp874 — also wire the outbound completion notifier
+        # (no-op when PRSM_ONRAMP_COMPLETION_WEBHOOK_URL unset).
+        from prsm.economy.web3.onramp_completion_notifier import (
+            from_env as _notifier_from_env,
+        )
         aero = getattr(node, "_aerodrome_client", None)
         net = get_network_config("mainnet")
         on_confirmed = None
+        notifier = _notifier_from_env()
         if aero is not None and net.ftns_token:
             on_confirmed = make_on_confirmed_callback(
                 funnel=funnel,
                 aerodrome_client=aero,
                 ftns_address=net.ftns_token,
+                completion_notifier=notifier,
             )
         try:
             return funnel.sweep(
@@ -3413,6 +3420,44 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         finally:
             reader.close()
+            notifier.close()
+
+    @app.get(
+        "/wallet/onramp/notifications", tags=["wallet"],
+    )
+    async def get_onramp_notification_deliveries(
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """List outbound completion-webhook delivery attempts.
+
+        Persistent cross-restart audit trail of sp874 dispatches.
+        Each entry records timestamp, intent_id, target URL,
+        status_code, success bool, error message (if any),
+        signature_attached bool.
+        """
+        if limit <= 0 or limit > 10_000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1,10000], got {limit}",
+            )
+        from prsm.economy.web3.onramp_completion_notifier import (
+            from_env as _notifier_from_env,
+        )
+        notifier = _notifier_from_env()
+        try:
+            records = notifier.list_deliveries(limit=limit)
+        finally:
+            notifier.close()
+        successes = sum(
+            1 for r in records if r.get("success")
+        )
+        return {
+            "count": len(records),
+            "success_count": successes,
+            "failure_count": len(records) - successes,
+            "configured": notifier.is_configured(),
+            "deliveries": records,
+        }
 
     @app.get(
         "/wallet/onramp/funnel/{intent_id}", tags=["wallet"],
