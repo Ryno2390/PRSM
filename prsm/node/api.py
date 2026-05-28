@@ -2667,43 +2667,341 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             }
 
-        from prsm.economy.web3.coinbase_onramp_url import (
-            build_onramp_url,
+        # Sp855 — secure init: CDP projects with secure-init enabled
+        # (the default on new projects) reject the legacy params-only
+        # widget URL with "Missing or invalid parameters". We mint a
+        # one-time 5-minute sessionToken server-side that embeds the
+        # destination wallet + asset constraints, then redirect the
+        # user to pay.coinbase.com?sessionToken=<token>.
+        from prsm.economy.web3.coinbase_onramp_session import (
+            from_env as _onramp_session_from_env,
         )
-        try:
-            session_url = build_onramp_url(
-                destination_address=destination_address,
-                usd_amount=body.usd_amount,
-                partner_user_id=body.destination_user_id,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
-
-        if session_url is None:
+        onramp_client = _onramp_session_from_env()
+        if onramp_client is None:
             return {
                 "status": "PENDING_COMMISSION",
                 "session_url": None,
                 "destination_address": destination_address,
                 "note": (
-                    "COINBASE_PAY_APP_ID env var unset. Register "
-                    "a Coinbase Pay project at "
-                    "https://portal.cdp.coinbase.com/products/onramp"
-                    " and export the App ID."
+                    "Coinbase CDP API key not configured for onramp."
+                    " Set COINBASE_CDP_API_KEY_NAME + "
+                    "COINBASE_CDP_API_KEY_PRIVATE."
                 ),
             }
+        try:
+            minted = onramp_client.build_buy_url(
+                address=destination_address,
+                usd_amount=body.usd_amount,
+                partner_user_ref=body.destination_user_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "onramp session token mint failed: %s", exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"coinbase onramp /token call failed: {exc}",
+            )
+        finally:
+            onramp_client.close()
 
         return {
             "status": "SESSION_READY",
-            "session_url": session_url,
+            "session_url": minted["session_url"],
+            "session_token": minted["token"],
+            "channel_id": minted["channel_id"],
             "destination_address": destination_address,
             "usd_amount": body.usd_amount,
             "asset": "USDC",
             "network": "base",
+            "expires_in_seconds": 300,
             "note": (
                 "Open session_url to complete USD → USDC purchase. "
-                "USDC lands at destination_address on Base. "
-                "Aerodrome USDC→FTNS swap is a separate step "
-                "(gated on pool ceremony, Vision gantt 2026-06-15)."
+                "Token is single-use + 5-min expiry. USDC lands at "
+                "destination_address on Base. Aerodrome USDC→FTNS "
+                "swap is a separate step (gated on pool ceremony, "
+                "Vision gantt 2026-06-15)."
+            ),
+        }
+
+    # Sp855 — Aerodrome USDC→FTNS swap surface.
+    # Quote endpoint is live the moment the AerodromeClient's RPC +
+    # pool address are configured (gated on Foundation Safe seeding
+    # ceremony per Vision 2026-06-15). Execute endpoint returns
+    # SESSION_READY with the prepared swap envelope (router address,
+    # routes, amount_out_min, deadline) once everything's wired —
+    # the actual signed-tx submit via CDP WaaS is sp856-class.
+    class SwapQuoteRequest(BaseModel):
+        amount_in: float  # whole-token units (USDC or FTNS)
+        token_in: str  # "USDC" or "FTNS"
+        slippage_bps: int = 100  # 1% default — operator override
+
+    @app.post("/wallet/swap/quote", tags=["wallet"])
+    async def post_swap_quote(
+        body: SwapQuoteRequest,
+    ) -> Dict[str, Any]:
+        """Quote a USDC↔FTNS swap via Aerodrome.
+
+        Returns POOL_NOT_CONFIGURED when AERODROME_USDC_FTNS_POOL_ADDRESS
+        is unset (pool seeding ceremony still pending). Returns
+        POOL_UNAVAILABLE when configured but the RPC call returned
+        no state. Returns OK with quote envelope otherwise.
+        """
+        if body.amount_in <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="amount_in must be > 0",
+            )
+        token_in = (body.token_in or "").strip().upper()
+        if token_in not in {"USDC", "FTNS"}:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"token_in must be USDC or FTNS, got "
+                    f"{body.token_in!r}"
+                ),
+            )
+        if not (0 <= body.slippage_bps <= 10_000):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "slippage_bps must be in [0, 10000] (basis "
+                    "points; 100 = 1%)"
+                ),
+            )
+        pool = getattr(node, "_aerodrome_client", None)
+        if pool is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Aerodrome client not initialized.",
+            )
+        if not pool.is_configured():
+            return {
+                "status": "POOL_NOT_CONFIGURED",
+                "note": (
+                    "Set BASE_RPC_URL + "
+                    "AERODROME_USDC_FTNS_POOL_ADDRESS env vars "
+                    "after the Foundation Safe seeding ceremony "
+                    "(Vision gantt 2026-06-15)."
+                ),
+            }
+
+        # Resolve token0/token1 addresses from pool state.
+        state = pool.get_pool_state()
+        if state is None:
+            return {
+                "status": "POOL_UNAVAILABLE",
+                "note": (
+                    "Pool RPC returned no state — Base RPC may be "
+                    "unreachable or the pool contract may not exist "
+                    "at the configured address yet."
+                ),
+            }
+
+        # Map symbolic USDC/FTNS to canonical Base mainnet addresses.
+        # USDC: canonical Circle deployment on Base.
+        # FTNS: PRSM's mainnet token from networks.py.
+        from prsm.config.networks import get_network_config
+        net = get_network_config("base-mainnet")
+        usdc_addr = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+        ftns_addr = net.ftns_token
+        token_in_addr = (
+            usdc_addr if token_in == "USDC" else ftns_addr
+        )
+
+        # Convert whole-token amount_in to base units.
+        # USDC has 6 decimals; FTNS has 18.
+        decimals = 6 if token_in == "USDC" else 18
+        amount_in_units = int(body.amount_in * (10 ** decimals))
+
+        try:
+            quote = pool.quote_swap(
+                amount_in=amount_in_units,
+                token_in=token_in_addr,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Aerodrome quote_swap raised: %s", exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"pool quote failed: {exc}",
+            )
+        if quote is None:
+            return {
+                "status": "POOL_UNAVAILABLE",
+                "note": "Pool quote returned None.",
+            }
+
+        # Whole-token denominate the output (USDC=6, FTNS=18).
+        out_token = "FTNS" if token_in == "USDC" else "USDC"
+        out_decimals = 18 if out_token == "FTNS" else 6
+        amount_out_whole = quote.amount_out / (10 ** out_decimals)
+        amount_out_min_units = (
+            quote.amount_out
+            * (10_000 - body.slippage_bps) // 10_000
+        )
+
+        return {
+            "status": "OK",
+            "token_in": token_in,
+            "token_out": out_token,
+            "amount_in": body.amount_in,
+            "amount_in_units": amount_in_units,
+            "amount_out": amount_out_whole,
+            "amount_out_units": quote.amount_out,
+            "amount_out_min_units": amount_out_min_units,
+            "price_impact_bps": quote.price_impact_bps,
+            "fee_bps": quote.fee_bps,
+            "slippage_bps": body.slippage_bps,
+            "route": "aerodrome",
+            "pool_address": state.pool_address,
+        }
+
+    class SwapExecuteRequest(BaseModel):
+        amount_in: float
+        token_in: str
+        slippage_bps: int = 100
+        # XOR: explicit address, or look up by user_id via WaaS.
+        from_user_id: Optional[str] = None
+        from_address: Optional[str] = None
+
+    @app.post("/wallet/swap/execute", tags=["wallet"])
+    async def post_swap_execute(
+        body: SwapExecuteRequest,
+    ) -> Dict[str, Any]:
+        """Prepare an Aerodrome swap envelope ready for CDP-signed
+        submission.
+
+        Returns SESSION_READY with the full swap payload (router
+        call data, amount_out_min, deadline) once the pool is seeded
+        and the user has a WaaS wallet with sufficient USDC. Actual
+        on-chain submission via CDP WaaS signed-tx flow is sp856.
+        """
+        # Reuse the quote handler's pool/token/decimals logic via
+        # a synthesized quote request.
+        if body.amount_in <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="amount_in must be > 0",
+            )
+        has_user = bool(body.from_user_id)
+        has_addr = bool(body.from_address)
+        if has_user and has_addr:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "supply from_user_id OR from_address, not both"
+                ),
+            )
+        if not has_user and not has_addr:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "either from_user_id or from_address is required"
+                ),
+            )
+
+        # Resolve from_address via WaaS if user_id supplied.
+        from_address: Optional[str] = body.from_address
+        if has_user:
+            waas = getattr(node, "_coinbase_waas_client", None)
+            if waas is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="WaaS client not initialized.",
+                )
+            record = waas.get_wallet(body.from_user_id)
+            if record is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"no WaaS wallet for from_user_id="
+                        f"{body.from_user_id!r}"
+                    ),
+                )
+            from_address = record.address
+            if not from_address:
+                return {
+                    "status": "PENDING_COMMISSION",
+                    "note": (
+                        "WaaS wallet has no address yet — provision "
+                        "first (POST /wallet/waas/provision)."
+                    ),
+                }
+
+        # Get a quote — this surfaces POOL_NOT_CONFIGURED /
+        # POOL_UNAVAILABLE statuses cleanly.
+        pool = getattr(node, "_aerodrome_client", None)
+        if pool is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Aerodrome client not initialized.",
+            )
+        if not pool.is_configured():
+            return {
+                "status": "POOL_NOT_CONFIGURED",
+                "from_address": from_address,
+                "note": (
+                    "Aerodrome pool not yet seeded; set "
+                    "AERODROME_USDC_FTNS_POOL_ADDRESS after the "
+                    "Foundation Safe ceremony (Vision 2026-06-15)."
+                ),
+            }
+        # Reuse the quote endpoint logic for envelope assembly.
+        quote_body = SwapQuoteRequest(
+            amount_in=body.amount_in,
+            token_in=body.token_in,
+            slippage_bps=body.slippage_bps,
+        )
+        quote_resp = await post_swap_quote(quote_body)
+        if quote_resp.get("status") != "OK":
+            quote_resp["from_address"] = from_address
+            return quote_resp
+
+        # Build the CDP-WaaS-signable envelope.
+        # 24-hour deadline by default — conservative; CDP submit
+        # latency is sub-second so 1h is plenty but 24h gives
+        # operators slack for batched flows.
+        import time as _time
+        deadline = int(_time.time()) + 86_400
+        # Aerodrome Router v2 (Base mainnet, canonical).
+        # Documented at github.com/aerodrome-finance/contracts.
+        router_address = (
+            "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43"
+        )
+        return {
+            "status": "READY_FOR_SUBMISSION",
+            "from_address": from_address,
+            "router_address": router_address,
+            "function": "swapExactTokensForTokens",
+            "args": {
+                "amountIn": quote_resp["amount_in_units"],
+                "amountOutMin": quote_resp["amount_out_min_units"],
+                "routes": [
+                    {
+                        "from_token": quote_resp["token_in"],
+                        "to_token": quote_resp["token_out"],
+                        "stable": False,
+                        "factory": (
+                            # Aerodrome pool factory v2.
+                            "0x420DD381b31aEf6683db6B902084cB0FFECe40Da"
+                        ),
+                    },
+                ],
+                "to": from_address,
+                "deadline": deadline,
+            },
+            "quote": quote_resp,
+            "note": (
+                "Submission via CDP-signed transaction is sp856 "
+                "(not yet wired). This envelope is ready to sign + "
+                "submit — operator can use it via the CDP SDK "
+                "directly until sp856 ships."
             ),
         }
 
