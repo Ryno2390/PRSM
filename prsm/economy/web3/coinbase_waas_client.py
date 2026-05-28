@@ -131,6 +131,24 @@ class CoinbaseWaaSClient:
         )
         persist_raw = os.environ.get("PRSM_WAAS_STORE_DIR")
         persist_dir = Path(persist_raw) if persist_raw else None
+        # Sp851 — auto-wire CDP WaaS backend when caller didn't
+        # supply one + both keys present + PEM parses cleanly.
+        # Placeholder PEMs (e.g., "REPLACE_WITH...") fail parse
+        # in CdpWaaSBackend's constructor; from_env catches and
+        # returns None → adapter_wired stays False (honest signal).
+        if backend is None and key_name and key_priv:
+            try:
+                from prsm.economy.web3.coinbase_waas_cdp_backend import (
+                    from_env as _cdp_waas_from_env,
+                )
+                backend = _cdp_waas_from_env()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "CoinbaseWaaSClient: CDP backend auto-wire "
+                    "failed (falling back to PENDING_COMMISSION): "
+                    "%s", exc,
+                )
+                backend = None
         return cls(
             api_key_name=key_name,
             api_key_private=key_priv,
