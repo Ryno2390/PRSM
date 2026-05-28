@@ -3959,6 +3959,23 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=422,
                 detail="webhook body must be a JSON object",
             )
+
+        # Sp852 — translate vendor-native JSON:API envelopes
+        # (Persona, etc.) into PRSM canonical
+        # {user_id, status, vendor_ref} shape. None return →
+        # fall through to legacy flat parsing.
+        from prsm.economy.web3.kyc_webhook_normalizer import (
+            normalize_webhook_payload,
+        )
+        try:
+            normalized = normalize_webhook_payload(
+                vendor=_vendor_lower, body=payload_json,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if normalized is not None:
+            payload_json = normalized
+
         user_id_raw = payload_json.get("user_id")
         status_raw = payload_json.get("status")
         vendor_ref_raw = payload_json.get("vendor_ref")
