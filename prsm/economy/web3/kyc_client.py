@@ -160,6 +160,24 @@ class KYCClient:
                 vendor, cls.SUPPORTED_VENDORS,
             )
             vendor = None
+        # Sp849 — auto-wire vendor HTTP backend when caller didn't
+        # supply one + env is fully populated. Keeps the existing
+        # injection seam (tests pass backend= explicitly) while
+        # closing the "commissioned but adapter_wired=False" gap
+        # for production deployments.
+        if backend is None and vendor == "persona" and api_key:
+            try:
+                from prsm.economy.web3.kyc_persona_backend import (
+                    from_env as _persona_from_env,
+                )
+                backend = _persona_from_env()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "KYCClient: persona backend auto-wire failed "
+                    "(falling back to PENDING_COMMISSION): %s",
+                    exc,
+                )
+                backend = None
         return cls(
             vendor=vendor or None,
             api_key=api_key,
