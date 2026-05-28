@@ -4397,6 +4397,11 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 detail="missing required field: status",
             )
 
+        # Capture old status BEFORE update so the orchestrator
+        # can detect a true transition (vs Persona re-firing the
+        # same event on retry).
+        old_record = kyc.get_status(user_id_raw)
+        old_status = old_record.status if old_record else None
         try:
             updated = kyc.update_status(
                 user_id=user_id_raw,
@@ -4412,6 +4417,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     f"no KYC record for user_id={user_id_raw!r}"
                 ),
             )
+
+        # Sp858 — auto-provision WaaS wallet on VERIFIED transition.
+        # Fail-soft: webhook still returns 200 even if provision
+        # errors so Persona doesn't keep retrying.
+        from prsm.economy.web3.kyc_to_waas_orchestrator import (
+            maybe_auto_provision_waas,
+        )
+        maybe_auto_provision_waas(
+            waas_client=getattr(node, "_coinbase_waas_client", None),
+            user_id=updated.user_id,
+            email=updated.email,
+            new_status=updated.status,
+            old_status=old_status,
+        )
+
         return updated.to_dict()
 
     # Renamed from `_RoyaltyClaimRequest` for OpenAPI hygiene.
