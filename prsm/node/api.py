@@ -3325,6 +3325,40 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             reader.close()
         return balances.to_dict()
 
+    # Sp864 — fleet treasury aggregator: roll up balances across
+    # every WaaS wallet.
+    @app.get("/wallet/treasury", tags=["wallet"])
+    async def get_wallet_treasury(
+        max_wallets: int = 100,
+    ) -> Dict[str, Any]:
+        """Fleet-wide treasury view: aggregated USDC + FTNS + ETH
+        across all PROVISIONED WaaS wallets, with per-wallet
+        breakdown. ``max_wallets`` caps the per-call RPC load."""
+        if max_wallets <= 0 or max_wallets > 10_000:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"max_wallets must be in [1, 10000], "
+                    f"got {max_wallets}"
+                ),
+            )
+        waas = getattr(node, "_coinbase_waas_client", None)
+        from prsm.economy.web3.wallet_balance_reader import (
+            from_env as _wbr_from_env,
+        )
+        from prsm.economy.web3.treasury_aggregator import (
+            aggregate_treasury,
+        )
+        reader = _wbr_from_env()
+        try:
+            return aggregate_treasury(
+                waas_client=waas,
+                balance_reader=reader,
+                max_wallets=max_wallets,
+            )
+        finally:
+            reader.close()
+
     # Sp859 — Phase 5 readiness aggregator endpoint.
     @app.get("/wallet/phase5/status", tags=["wallet"])
     async def get_phase5_status() -> Dict[str, Any]:
