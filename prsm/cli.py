@@ -2048,6 +2048,176 @@ def node_treasury(
     console.print(per_wallet)
 
 
+# Sp877 — `prsm node onramp-notifications` terminal viewer for sp874's
+# outbound webhook delivery history.
+@node.command("onramp-notifications")
+@click.option(
+    "--api-port", default=8000, type=int,
+    help="Local API port (default 8000)",
+)
+@click.option(
+    "--limit", default=50, type=int,
+    help="Max deliveries to show (default 50)",
+)
+@click.option(
+    "--success-only", is_flag=True,
+    help="Only show successful deliveries (status 2xx)",
+)
+@click.option(
+    "--failures-only", is_flag=True,
+    help="Only show failed deliveries (non-2xx or transport error)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_onramp_notifications(
+    api_port: int,
+    limit: int,
+    success_only: bool,
+    failures_only: bool,
+    output_format: str,
+):
+    """Show outbound onramp-completion webhook delivery history.
+
+    Backed by GET /wallet/onramp/notifications (sp874). Persistent
+    cross-restart audit trail — useful for operators investigating
+    "did the customer's downstream system get notified when their
+    onramp confirmed?"
+    """
+    import json as _json
+    import httpx
+    from datetime import datetime, timezone
+
+    if success_only and failures_only:
+        console.print(
+            "[red]Pass at most one of --success-only / "
+            "--failures-only[/red]"
+        )
+        sys.exit(2)
+
+    url = (
+        f"http://127.0.0.1:{api_port}/wallet/onramp/notifications"
+        f"?limit={limit}"
+    )
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(url)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Start with: prsm node start[/dim]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+    if resp.status_code != 200:
+        console.print(
+            f"[red]/wallet/onramp/notifications returned "
+            f"{resp.status_code}[/red]: {resp.text}"
+        )
+        sys.exit(1)
+    body = resp.json()
+
+    deliveries = body.get("deliveries") or []
+    if success_only:
+        deliveries = [
+            d for d in deliveries if d.get("success")
+        ]
+    if failures_only:
+        deliveries = [
+            d for d in deliveries if not d.get("success")
+        ]
+
+    if output_format == "json":
+        body["deliveries"] = deliveries  # apply filter
+        console.print(_json.dumps(body, indent=2))
+        return
+
+    configured = body.get("configured", False)
+    if not configured:
+        console.print(
+            "[yellow]⚠ PRSM_ONRAMP_COMPLETION_WEBHOOK_URL is "
+            "unset — notifier is no-op.[/yellow]"
+        )
+        console.print(
+            "[dim]Set the env var + restart the daemon to enable "
+            "outbound delivery.[/dim]"
+        )
+        console.print()
+
+    total = body.get("count", 0)
+    succ = body.get("success_count", 0)
+    fail = body.get("failure_count", 0)
+    rate = (succ / total) if total > 0 else 0.0
+    rate_color = (
+        "green" if rate >= 0.99 else
+        "yellow" if rate >= 0.5 else "red"
+    )
+
+    console.print("[bold]PRSM Onramp Completion Notifications[/bold]")
+    console.print(
+        f"  Total:         {total} · "
+        f"[green]{succ} successes[/green] · "
+        f"[red]{fail} failures[/red]"
+    )
+    if total > 0:
+        console.print(
+            f"  Success rate:  "
+            f"[{rate_color}]{rate * 100:.1f}%[/{rate_color}]"
+        )
+    console.print()
+
+    if not deliveries:
+        msg = "No deliveries recorded yet."
+        if success_only:
+            msg = "No successful deliveries match the filter."
+        if failures_only:
+            msg = "No failed deliveries match the filter."
+        console.print(f"[dim]{msg}[/dim]")
+        return
+
+    table = Table()
+    table.add_column("Timestamp (UTC)", style="dim")
+    table.add_column("Intent", style="cyan")
+    table.add_column("URL", overflow="fold")
+    table.add_column("Status", justify="right")
+    table.add_column("Sig")
+    table.add_column("Error", overflow="fold")
+
+    for d in deliveries:
+        ts = d.get("timestamp", 0)
+        ts_str = (
+            datetime.fromtimestamp(ts, tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%S",
+            ) if ts else "?"
+        )
+        intent = (d.get("intent_id") or "?")[:18]
+        durl = d.get("url") or ""
+        # Show shortened URL — full one in --format json
+        durl_short = durl[:40] + ("…" if len(durl) > 40 else "")
+        status = d.get("status_code", 0)
+        if status == 0:
+            status_cell = "[red]transport[/red]"
+        elif 200 <= status < 300:
+            status_cell = f"[green]{status}[/green]"
+        elif 400 <= status < 500:
+            status_cell = f"[yellow]{status}[/yellow]"
+        else:
+            status_cell = f"[red]{status}[/red]"
+        sig = (
+            "[green]✓[/green]"
+            if d.get("signature_attached") else "[dim]—[/dim]"
+        )
+        err = d.get("error") or ""
+        err_short = err[:60] + ("…" if len(err) > 60 else "")
+        table.add_row(
+            ts_str, intent, durl_short, status_cell,
+            sig, err_short,
+        )
+    console.print(table)
+
+
 # Sp876 — `prsm node aerodrome-ceremony` Safe TX batch + runbook
 # generator backed by sp875's pure-payload builders. Lets operators
 # generate ceremony artifacts from terminal without writing Python.
