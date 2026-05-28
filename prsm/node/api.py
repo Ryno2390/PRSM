@@ -3235,6 +3235,29 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "wallet_count": len(client.list_wallets()),
         }
 
+    # Sp859 — Phase 5 readiness aggregator endpoint.
+    @app.get("/wallet/phase5/status", tags=["wallet"])
+    async def get_phase5_status() -> Dict[str, Any]:
+        """One-shot Phase 5 readiness grid: KYC + WaaS + Paymaster
+        + Onramp + Aerodrome status in a single canonical envelope.
+        Powers operator dashboards + the `prsm node phase5-status`
+        CLI surface."""
+        from prsm.economy.web3.phase5_status import (
+            aggregate_phase5_status,
+        )
+        return aggregate_phase5_status(
+            kyc_client=getattr(node, "_kyc_client", None),
+            waas_client=getattr(
+                node, "_coinbase_waas_client", None,
+            ),
+            paymaster_client=getattr(
+                node, "_paymaster_client", None,
+            ),
+            aerodrome_client=getattr(
+                node, "_aerodrome_client", None,
+            ),
+        )
+
     @app.get("/wallet/waas", tags=["wallet"])
     async def list_waas_wallets(
         limit: int = 100,
