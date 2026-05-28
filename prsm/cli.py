@@ -2048,6 +2048,172 @@ def node_treasury(
     console.print(per_wallet)
 
 
+# Sp856 — `prsm node phase5-dashboard` unified operator view.
+# Combines phase5-status + treasury + onramp-funnel into one
+# command for fast operator triage. Calls each endpoint
+# independently so a partial failure in one surface doesn't blank
+# the rest (sibling pattern to sp864's per-wallet fail-soft).
+@node.command("phase5-dashboard")
+@click.option(
+    "--api-port", default=8000, type=int,
+    help="Local API port (default 8000)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_phase5_dashboard(api_port: int, output_format: str):
+    """Comprehensive Phase 5 operator dashboard.
+
+    Combines readiness grid + fleet treasury + conversion funnel
+    in one command. Each surface fails independently so partial
+    daemon outages still show what IS available.
+    """
+    import json
+    import httpx
+
+    base = f"http://127.0.0.1:{api_port}"
+
+    def _fetch(path):
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                r = client.get(f"{base}{path}")
+            if r.status_code == 200:
+                return r.json(), None
+            return None, f"{r.status_code} {r.text[:100]}"
+        except httpx.RequestError as exc:
+            return None, str(exc)
+
+    phase5, p5_err = _fetch("/wallet/phase5/status")
+    treasury, t_err = _fetch("/wallet/treasury?max_wallets=100")
+    funnel, f_err = _fetch("/wallet/onramp/funnel?limit=20")
+
+    if output_format == "json":
+        out = {
+            "phase5_status": phase5 or {"error": p5_err},
+            "treasury": treasury or {"error": t_err},
+            "onramp_funnel": funnel or {"error": f_err},
+        }
+        console.print(json.dumps(out, indent=2))
+        return
+
+    if p5_err and t_err and f_err:
+        console.print(
+            f"[red]All 3 endpoints unreachable[/red]\n"
+            f"[dim]phase5: {p5_err}[/dim]\n"
+            f"[dim]treasury: {t_err}[/dim]\n"
+            f"[dim]funnel: {f_err}[/dim]\n"
+            f"[dim]Start with: prsm node start[/dim]"
+        )
+        sys.exit(2)
+
+    console.print("[bold]═══ PRSM Phase 5 Dashboard ═══[/bold]")
+    console.print()
+
+    # ── Section 1: Surface readiness ──
+    if phase5:
+        overall = phase5.get("overall", "UNKNOWN")
+        live = phase5.get("live_surface_count", 0)
+        total = phase5.get("total_surface_count", 0)
+        color = {
+            "READY": "green", "PARTIAL": "yellow",
+            "NOT_READY": "red",
+        }.get(overall, "white")
+        console.print(
+            f"[bold]§ Readiness[/bold]   "
+            f"[{color}]{overall}[/{color}] ({live}/{total} live)"
+        )
+
+        rt = Table(show_header=True, padding=(0, 1))
+        rt.add_column("Surface", style="bold")
+        rt.add_column("Live")
+        rt.add_column("Notes", overflow="fold")
+        for sn in [
+            "kyc", "waas", "onramp", "paymaster", "aerodrome",
+        ]:
+            s = (phase5.get("surfaces") or {}).get(sn, {})
+            live_exec = s.get("live_exec", False)
+            marker = (
+                "[green]✓[/green]" if live_exec
+                else "[red]✗[/red]"
+            )
+            rt.add_row(sn, marker, s.get("notes", "—") or "—")
+        console.print(rt)
+    elif p5_err:
+        console.print(f"[red]§ Readiness ERR: {p5_err}[/red]")
+    console.print()
+
+    # ── Section 2: Fleet treasury ──
+    if treasury:
+        overall = treasury.get("overall") or {}
+        total_w = overall.get("wallet_count_total", 0)
+        with_addr = overall.get("wallet_count_with_address", 0)
+        funded = overall.get("wallet_count_funded", 0)
+        u = overall.get("total_usdc", 0.0)
+        ft = overall.get("total_ftns", 0.0)
+        eth = overall.get("total_native_eth", 0.0)
+        block = overall.get("block_number", 0)
+        u_color = "green" if u > 0 else "dim"
+        ft_color = "green" if ft > 0 else "dim"
+        eth_color = "green" if eth > 0 else "dim"
+        console.print(
+            f"[bold]§ Treasury[/bold]    "
+            f"{total_w} wallets · {with_addr} provisioned · "
+            f"{funded} funded · block {block}"
+        )
+        console.print(
+            f"              "
+            f"[{u_color}]{u:.6f} USDC[/{u_color}] · "
+            f"[{ft_color}]{ft:.6f} FTNS[/{ft_color}] · "
+            f"[{eth_color}]{eth:.6f} ETH[/{eth_color}]"
+        )
+    elif t_err:
+        console.print(f"[red]§ Treasury ERR: {t_err}[/red]")
+    console.print()
+
+    # ── Section 3: Onramp funnel ──
+    if funnel:
+        summary = funnel.get("summary") or {}
+        total_i = summary.get("total_intents", 0)
+        rate = summary.get("conversion_rate", 0.0)
+        expected = summary.get("total_expected_usd", 0.0)
+        conf_usdc = summary.get("total_confirmed_usdc", 0.0)
+        rate_color = (
+            "green" if rate >= 0.5 else
+            "yellow" if rate > 0 else "dim"
+        )
+        console.print(
+            f"[bold]§ Onramp[/bold]      "
+            f"{total_i} intents · "
+            f"[{rate_color}]{rate * 100:.1f}% conv rate"
+            f"[/{rate_color}] · "
+            f"${expected:.2f} expected → "
+            f"[green]${conf_usdc:.2f}[/green] confirmed"
+        )
+        counts = summary.get("status_counts") or {}
+        breakdown_parts = []
+        for s in [
+            "INTENT_RECORDED", "PENDING_SETTLEMENT",
+            "CONFIRMED", "EXPIRED",
+        ]:
+            n = counts.get(s, 0)
+            if n > 0:
+                short = {
+                    "INTENT_RECORDED": "recorded",
+                    "PENDING_SETTLEMENT": "pending",
+                    "CONFIRMED": "confirmed",
+                    "EXPIRED": "expired",
+                }[s]
+                breakdown_parts.append(f"{short}={n}")
+        if breakdown_parts:
+            console.print(
+                f"              {' · '.join(breakdown_parts)}"
+            )
+    elif f_err:
+        console.print(f"[red]§ Onramp ERR: {f_err}[/red]")
+
+
 # Sp866 — `prsm node onramp-funnel` conversion-tracker readout
 # backed by sp857's /wallet/onramp/funnel + /sweep endpoints.
 @node.command("onramp-funnel")
