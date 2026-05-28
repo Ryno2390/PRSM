@@ -107,6 +107,23 @@ class PaymasterClient:
         policy_id = (
             os.environ.get("PRSM_PAYMASTER_POLICY_ID") or None
         )
+        # Sp850 — auto-wire CDP backend when caller didn't supply one
+        # + endpoint env is set. Mirrors sp849's pattern on the KYC
+        # track. Endpoint-only (no api_key required because CDP v2
+        # bakes the token into the URL path).
+        if backend is None and endpoint:
+            try:
+                from prsm.economy.web3.paymaster_cdp_backend import (
+                    from_env as _cdp_from_env,
+                )
+                backend = _cdp_from_env()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "PaymasterClient: CDP backend auto-wire failed "
+                    "(falling back to PENDING_COMMISSION): %s",
+                    exc,
+                )
+                backend = None
         return cls(
             endpoint=endpoint,
             api_key=api_key,
