@@ -129,8 +129,17 @@ class CoinbaseWaaSClient:
         network = (
             os.environ.get("PRSM_WAAS_NETWORK") or "base-mainnet"
         )
+        # Sp860 — persist by default so wallets survive daemon
+        # restarts. Operators opt out by setting the env var to
+        # the sentinel ":memory:" (Python sqlite-style); explicit
+        # filesystem paths still take precedence as before.
         persist_raw = os.environ.get("PRSM_WAAS_STORE_DIR")
-        persist_dir = Path(persist_raw) if persist_raw else None
+        if persist_raw == ":memory:":
+            persist_dir = None
+        elif persist_raw:
+            persist_dir = Path(persist_raw)
+        else:
+            persist_dir = Path.home() / ".prsm" / "waas-wallets"
         # Sp851 — auto-wire CDP WaaS backend when caller didn't
         # supply one + both keys present + PEM parses cleanly.
         # Placeholder PEMs (e.g., "REPLACE_WITH...") fail parse

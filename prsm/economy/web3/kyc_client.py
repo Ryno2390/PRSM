@@ -147,8 +147,15 @@ class KYCClient:
     ) -> "KYCClient":
         vendor = (os.environ.get("KYC_VENDOR") or "").strip().lower()
         api_key = os.environ.get("KYC_VENDOR_API_KEY") or None
+        # Sp860 — persist by default so KYC records survive daemon
+        # restarts. Operators opt out via env=":memory:".
         persist_raw = os.environ.get("PRSM_KYC_STORE_DIR")
-        persist_dir = Path(persist_raw) if persist_raw else None
+        if persist_raw == ":memory:":
+            persist_dir = None
+        elif persist_raw:
+            persist_dir = Path(persist_raw)
+        else:
+            persist_dir = Path.home() / ".prsm" / "kyc-records"
         # If the vendor isn't recognized, drop it back to None
         # so is_commissioned() returns False — operator sees a
         # clear "not commissioned" signal rather than weird
