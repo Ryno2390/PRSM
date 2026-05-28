@@ -1899,6 +1899,155 @@ def node_wallet_balance(
     console.print(table)
 
 
+# Sp865 — `prsm node treasury` fleet-wide rollup readout backed by
+# sp864's /wallet/treasury endpoint.
+@node.command("treasury")
+@click.option(
+    "--api-port", default=8000, type=int,
+    help="Local API port (default 8000)",
+)
+@click.option(
+    "--max-wallets", default=100, type=int,
+    help="Max wallets to query (default 100)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_treasury(
+    api_port: int, max_wallets: int, output_format: str,
+):
+    """Show fleet-wide treasury: aggregated balances + per-wallet breakdown.
+
+    Backed by GET /wallet/treasury on the running daemon.
+    """
+    import json
+    import httpx
+
+    url = (
+        f"http://127.0.0.1:{api_port}/wallet/treasury"
+        f"?max_wallets={max_wallets}"
+    )
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.get(url)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Start with: prsm node start[/dim]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+    if resp.status_code != 200:
+        console.print(
+            f"[red]/wallet/treasury returned "
+            f"{resp.status_code}[/red]: {resp.text}"
+        )
+        sys.exit(1)
+    body = resp.json()
+
+    if output_format == "json":
+        console.print(json.dumps(body, indent=2))
+        return
+
+    overall = body.get("overall") or {}
+    note = body.get("note")
+    if note:
+        console.print(f"[yellow]{note}[/yellow]")
+        console.print()
+
+    console.print(f"[bold]PRSM Fleet Treasury[/bold]")
+    total_w = overall.get("wallet_count_total", 0)
+    with_addr = overall.get("wallet_count_with_address", 0)
+    funded = overall.get("wallet_count_funded", 0)
+    console.print(
+        f"  Wallets:   {total_w} total · {with_addr} provisioned "
+        f"· {funded} funded"
+    )
+    block = overall.get("block_number", 0)
+    rpc = overall.get("rpc_url") or "—"
+    console.print(
+        f"  Block:     {block} [dim](via {rpc})[/dim]"
+    )
+    console.print()
+
+    # Aggregated totals table
+    totals = Table(title="Aggregate Holdings")
+    totals.add_column("Asset", style="bold")
+    totals.add_column("Total Balance", justify="right")
+    totals.add_column("Base Units", justify="right", style="dim")
+
+    def _fmt(val: float, name: str) -> str:
+        color = "green" if val > 0 else "dim"
+        return f"[{color}]{val:.6f} {name}[/{color}]"
+
+    totals.add_row(
+        "USDC", _fmt(overall.get("total_usdc", 0.0), "USDC"),
+        str(overall.get("total_usdc_units", 0)),
+    )
+    totals.add_row(
+        "FTNS", _fmt(overall.get("total_ftns", 0.0), "FTNS"),
+        str(overall.get("total_ftns_units", 0)),
+    )
+    totals.add_row(
+        "ETH (native)",
+        _fmt(overall.get("total_native_eth", 0.0), "ETH"),
+        str(overall.get("total_native_eth_wei", 0)),
+    )
+    console.print(totals)
+    console.print()
+
+    # Per-wallet breakdown
+    wallets = body.get("wallets") or []
+    if not wallets:
+        console.print("[dim]No wallets to display.[/dim]")
+        return
+
+    per_wallet = Table(title="Per-Wallet Breakdown")
+    per_wallet.add_column("User ID", style="cyan")
+    per_wallet.add_column("Address", overflow="fold")
+    per_wallet.add_column("USDC", justify="right")
+    per_wallet.add_column("FTNS", justify="right")
+    per_wallet.add_column("ETH", justify="right")
+    per_wallet.add_column("Status")
+
+    for w in wallets:
+        addr = w.get("address") or "—"
+        short = (
+            f"{addr[:8]}..{addr[-6:]}" if len(addr) > 20 else addr
+        )
+        bal = w.get("balances")
+        if bal is None:
+            err = w.get("error") or "?"
+            per_wallet.add_row(
+                w.get("user_id", "?"), short,
+                "[red]err[/red]", "[red]err[/red]",
+                "[red]err[/red]", err[:30],
+            )
+            continue
+        usdc_v = bal.get("usdc", 0.0)
+        ftns_v = bal.get("ftns", 0.0)
+        eth_v = bal.get("native_eth", 0.0)
+        per_wallet.add_row(
+            w.get("user_id", "?"), short,
+            (
+                f"[green]{usdc_v:.4f}[/green]" if usdc_v > 0
+                else f"[dim]{usdc_v:.4f}[/dim]"
+            ),
+            (
+                f"[green]{ftns_v:.4f}[/green]" if ftns_v > 0
+                else f"[dim]{ftns_v:.4f}[/dim]"
+            ),
+            (
+                f"[green]{eth_v:.4f}[/green]" if eth_v > 0
+                else f"[dim]{eth_v:.4f}[/dim]"
+            ),
+            w.get("status", "?"),
+        )
+    console.print(per_wallet)
+
+
 def _render_webhook_row(e: dict) -> str:
     success = e.get("success")
     # Escape brackets so rich doesn't interpret as markup tags
