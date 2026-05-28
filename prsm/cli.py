@@ -1698,6 +1698,92 @@ def _short_addr(addr: str, *, head: int = 8, tail: int = 6) -> str:
     return f"{addr[:head]}..{addr[-tail:]}"
 
 
+# Sp861 — `prsm node phase5-status` terminal-friendly readiness grid.
+@node.command("phase5-status")
+@click.option(
+    "--api-port", default=8000, type=int,
+    help="Local API port (default 8000)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_phase5_status(api_port: int, output_format: str):
+    """Show the Phase 5 fiat-surface readiness grid.
+
+    Aggregates KYC + WaaS + Paymaster + Onramp + Aerodrome status
+    via GET /wallet/phase5/status on the running daemon. Rolls up
+    to READY / PARTIAL / NOT_READY for at-a-glance triage.
+    """
+    import json
+    import httpx
+
+    url = f"http://127.0.0.1:{api_port}/wallet/phase5/status"
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(url)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Start with: prsm node start[/dim]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+    if resp.status_code != 200:
+        console.print(
+            f"[red]/wallet/phase5/status returned "
+            f"{resp.status_code}[/red]: {resp.text}"
+        )
+        sys.exit(1)
+    body = resp.json()
+
+    if output_format == "json":
+        console.print(json.dumps(body, indent=2))
+        return
+
+    overall = body.get("overall", "UNKNOWN")
+    live = body.get("live_surface_count", 0)
+    total = body.get("total_surface_count", 0)
+    color = {
+        "READY": "green", "PARTIAL": "yellow", "NOT_READY": "red",
+    }.get(overall, "white")
+    console.print(
+        f"[bold]PRSM Phase 5 Readiness[/bold] — "
+        f"[{color}]{overall}[/{color}] "
+        f"({live}/{total} live)"
+    )
+    console.print()
+
+    table = Table()
+    table.add_column("Surface", style="bold")
+    table.add_column("Commissioned", justify="center")
+    table.add_column("Adapter Wired", justify="center")
+    table.add_column("Live Exec", justify="center")
+    table.add_column("Notes", overflow="fold")
+
+    def _tick(b: bool) -> str:
+        return "[green]✓[/green]" if b else "[red]✗[/red]"
+
+    # Order surfaces by user-onboarding flow sequence (more
+    # intuitive than dict-iteration order).
+    surface_order = [
+        "kyc", "waas", "onramp", "paymaster", "aerodrome",
+    ]
+    surfaces = body.get("surfaces", {})
+    for name in surface_order:
+        s = surfaces.get(name) or {}
+        table.add_row(
+            name,
+            _tick(s.get("commissioned", False)),
+            _tick(s.get("adapter_wired", False)),
+            _tick(s.get("live_exec", False)),
+            s.get("notes", "") or "—",
+        )
+
+    console.print(table)
+
+
 def _render_webhook_row(e: dict) -> str:
     success = e.get("success")
     # Escape brackets so rich doesn't interpret as markup tags
