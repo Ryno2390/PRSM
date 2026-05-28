@@ -2048,6 +2048,112 @@ def node_treasury(
     console.print(per_wallet)
 
 
+# Sp873 — `prsm node compliance-export` terminal export of sp872's
+# /admin/fiat-compliance/export.csv. Lets operators run quarterly /
+# annual exports from a single command without needing curl +
+# shell redirect.
+@node.command("compliance-export")
+@click.option(
+    "--api-port", default=8000, type=int,
+    help="Local API port (default 8000)",
+)
+@click.option(
+    "--since", type=float, default=None,
+    help="Include entries with timestamp ≥ (Unix seconds)",
+)
+@click.option(
+    "--until", "until_ts", type=float, default=None,
+    help="Include entries with timestamp < (Unix seconds)",
+)
+@click.option(
+    "--user-id", type=str, default=None,
+    help="Filter to a single user_id (exact match)",
+)
+@click.option(
+    "--kind", type=str, default=None,
+    help="Filter to a specific entry kind (e.g., onramp_quote)",
+)
+@click.option(
+    "--min-usd", type=float, default=None,
+    help=(
+        "Filter to entries above a USD threshold "
+        "(FinCEN $10k CTR typical)"
+    ),
+)
+@click.option(
+    "--output", "-o", type=click.Path(), default=None,
+    help="Output file path. If omitted, writes to stdout.",
+)
+def node_compliance_export(
+    api_port: int,
+    since: Optional[float],
+    until_ts: Optional[float],
+    user_id: Optional[str],
+    kind: Optional[str],
+    min_usd: Optional[float],
+    output: Optional[str],
+):
+    """Export fiat compliance ring entries as CSV.
+
+    Backed by GET /admin/fiat-compliance/export.csv. Filters
+    compose for AUSTRAC TTR / FinCEN CTR / IRS 1099 use cases.
+    Operators transform downstream to regulator-specific formats.
+    """
+    import httpx
+
+    params = {}
+    if since is not None: params["since"] = since
+    if until_ts is not None: params["until"] = until_ts
+    if user_id: params["user_id"] = user_id
+    if kind: params["kind"] = kind
+    if min_usd is not None: params["min_usd"] = min_usd
+
+    url = f"http://127.0.0.1:{api_port}/admin/fiat-compliance/export.csv"
+    try:
+        with httpx.Client(timeout=120.0) as client:
+            resp = client.get(url, params=params)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Start with: prsm node start[/dim]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+    if resp.status_code != 200:
+        console.print(
+            f"[red]Export returned {resp.status_code}[/red]: "
+            f"{resp.text}"
+        )
+        sys.exit(1)
+    csv_text = resp.text
+
+    # Count rows for the operator summary line.
+    row_count = max(csv_text.count("\n") - 1, 0)
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(csv_text)
+        console.print(
+            f"[green]✓[/green] Wrote {row_count} row(s) to "
+            f"[cyan]{output}[/cyan]"
+        )
+        # Show filter context for archive audit trail
+        if any([since, until_ts, user_id, kind, min_usd]):
+            filt_parts = []
+            if since: filt_parts.append(f"since={since}")
+            if until_ts: filt_parts.append(f"until={until_ts}")
+            if user_id: filt_parts.append(f"user_id={user_id}")
+            if kind: filt_parts.append(f"kind={kind}")
+            if min_usd: filt_parts.append(f"min_usd={min_usd}")
+            console.print(
+                f"  [dim]Filters: {' · '.join(filt_parts)}[/dim]"
+            )
+    else:
+        # stdout: emit the CSV directly so the operator can pipe
+        # (`prsm node compliance-export | column -ts,` etc.)
+        click.echo(csv_text, nl=False)
+
+
 # Sp856 — `prsm node phase5-dashboard` unified operator view.
 # Combines phase5-status + treasury + onramp-funnel into one
 # command for fast operator triage. Calls each endpoint
