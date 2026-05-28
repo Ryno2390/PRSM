@@ -1784,6 +1784,121 @@ def node_phase5_status(api_port: int, output_format: str):
     console.print(table)
 
 
+# Sp863 — `prsm node wallet-balance` terminal-friendly USDC/FTNS/ETH
+# readout backed by sp862's /wallet/balance/* endpoints.
+@node.command("wallet-balance")
+@click.argument("identifier")
+@click.option(
+    "--api-port", default=8000, type=int,
+    help="Local API port (default 8000)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_wallet_balance(
+    identifier: str, api_port: int, output_format: str,
+):
+    """Show live Base mainnet USDC + FTNS + ETH balances.
+
+    IDENTIFIER is either a WaaS user_id (resolved via local store)
+    or a raw 0x address. Auto-detects which based on shape.
+    Backed by GET /wallet/balance/{user_id} or
+    /wallet/balance/by-address/{address} on the running daemon.
+    """
+    import json
+    import httpx
+
+    # Auto-detect: anything matching 0x + 40 hex chars = address;
+    # anything else = user_id lookup.
+    is_address = (
+        identifier.startswith("0x")
+        and len(identifier) == 42
+    )
+    path = (
+        f"/wallet/balance/by-address/{identifier}"
+        if is_address
+        else f"/wallet/balance/{identifier}"
+    )
+    url = f"http://127.0.0.1:{api_port}{path}"
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.get(url)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Start with: prsm node start[/dim]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+    if resp.status_code == 404:
+        console.print(
+            f"[red]No wallet found for "
+            f"{identifier!r}[/red]\n"
+            f"[dim]If this is a user_id, provision first via: "
+            f"POST /wallet/waas/provision[/dim]"
+        )
+        sys.exit(1)
+    if resp.status_code != 200:
+        console.print(
+            f"[red]{path} returned {resp.status_code}[/red]: "
+            f"{resp.text}"
+        )
+        sys.exit(1)
+    body = resp.json()
+
+    if output_format == "json":
+        console.print(json.dumps(body, indent=2))
+        return
+
+    address = body.get("address") or "(none)"
+    user_id = body.get("user_id")
+    wallet_id = body.get("wallet_id")
+
+    title = "[bold]Wallet Balance[/bold]"
+    if user_id:
+        title += f" — user_id=[cyan]{user_id}[/cyan]"
+    console.print(title)
+    console.print(f"  Address:  {address}")
+    if wallet_id:
+        console.print(f"  Wallet:   {wallet_id}")
+    network = body.get("network") or "base"
+    console.print(f"  Network:  {network}")
+    console.print(
+        f"  Block:    {body.get('block_number', '?')} "
+        f"[dim](via {body.get('rpc_url', '?')})[/dim]"
+    )
+    console.print()
+
+    table = Table()
+    table.add_column("Asset", style="bold")
+    table.add_column("Balance", justify="right")
+    table.add_column("Base Units", justify="right", style="dim")
+
+    usdc = body.get("usdc", 0.0)
+    ftns = body.get("ftns", 0.0)
+    eth = body.get("native_eth", 0.0)
+
+    def _fmt(val: float, name: str) -> str:
+        color = "green" if val > 0 else "dim"
+        return f"[{color}]{val:.6f} {name}[/{color}]"
+
+    table.add_row(
+        "USDC", _fmt(usdc, "USDC"),
+        str(body.get("usdc_units", 0)),
+    )
+    table.add_row(
+        "FTNS", _fmt(ftns, "FTNS"),
+        str(body.get("ftns_units", 0)),
+    )
+    table.add_row(
+        "ETH (native)", _fmt(eth, "ETH"),
+        str(body.get("native_eth_wei", 0)),
+    )
+    console.print(table)
+
+
 def _render_webhook_row(e: dict) -> str:
     success = e.get("success")
     # Escape brackets so rich doesn't interpret as markup tags
