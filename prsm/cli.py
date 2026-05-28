@@ -2048,6 +2048,219 @@ def node_treasury(
     console.print(per_wallet)
 
 
+# Sp866 — `prsm node onramp-funnel` conversion-tracker readout
+# backed by sp857's /wallet/onramp/funnel + /sweep endpoints.
+@node.command("onramp-funnel")
+@click.option(
+    "--api-port", default=8000, type=int,
+    help="Local API port (default 8000)",
+)
+@click.option(
+    "--status", default=None,
+    type=click.Choice([
+        "INTENT_RECORDED", "PENDING_SETTLEMENT",
+        "CONFIRMED", "EXPIRED",
+    ]),
+    help="Filter intents by status",
+)
+@click.option(
+    "--sweep", is_flag=True,
+    help="Trigger an on-chain sweep before showing funnel",
+)
+@click.option(
+    "--limit", default=50, type=int,
+    help="Max intents to show (default 50)",
+)
+@click.option(
+    "--format", "output_format",
+    type=click.Choice(["text", "json"]), default="text",
+    help="Output format",
+)
+def node_onramp_funnel(
+    api_port: int,
+    status: Optional[str],
+    sweep: bool,
+    limit: int,
+    output_format: str,
+):
+    """Show onramp conversion funnel: intents + sweep results.
+
+    Backed by GET /wallet/onramp/funnel (and optionally POST
+    /wallet/onramp/sweep if --sweep is passed). Conversion rate
+    is the ratio of CONFIRMED intents to total — operator-visible
+    proxy for fiat-onramp UX health.
+    """
+    import json
+    import httpx
+
+    base = f"http://127.0.0.1:{api_port}"
+
+    sweep_result = None
+    if sweep:
+        try:
+            with httpx.Client(timeout=120.0) as client:
+                resp = client.post(f"{base}/wallet/onramp/sweep")
+        except httpx.RequestError as exc:
+            console.print(
+                f"[red]Cannot reach PRSM node at {base}[/red]\n"
+                f"[dim]Start with: prsm node start[/dim]\n"
+                f"[dim]Details: {exc}[/dim]"
+            )
+            sys.exit(2)
+        if resp.status_code != 200:
+            console.print(
+                f"[red]Sweep returned {resp.status_code}[/red]: "
+                f"{resp.text}"
+            )
+            sys.exit(1)
+        sweep_result = resp.json()
+
+    url = f"{base}/wallet/onramp/funnel?limit={limit}"
+    if status:
+        url += f"&status={status}"
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(url)
+    except httpx.RequestError as exc:
+        console.print(
+            f"[red]Cannot reach PRSM node at {url}[/red]\n"
+            f"[dim]Start with: prsm node start[/dim]\n"
+            f"[dim]Details: {exc}[/dim]"
+        )
+        sys.exit(2)
+    if resp.status_code != 200:
+        console.print(
+            f"[red]/wallet/onramp/funnel returned "
+            f"{resp.status_code}[/red]: {resp.text}"
+        )
+        sys.exit(1)
+    body = resp.json()
+
+    if output_format == "json":
+        if sweep_result is not None:
+            body["_sweep"] = sweep_result
+        console.print(json.dumps(body, indent=2))
+        return
+
+    if sweep_result is not None:
+        console.print(
+            f"[bold]Sweep:[/bold] checked={sweep_result['checked']} "
+            f"confirmed_new=[green]{sweep_result['confirmed_new']}[/green] "
+            f"expired_new=[yellow]{sweep_result['expired_new']}[/yellow]"
+        )
+        console.print()
+
+    summary = body.get("summary") or {}
+    total = summary.get("total_intents", 0)
+    rate = summary.get("conversion_rate", 0.0)
+    counts = summary.get("status_counts") or {}
+    expected = summary.get("total_expected_usd", 0.0)
+    confirmed_usdc = summary.get("total_confirmed_usdc", 0.0)
+
+    rate_color = (
+        "green" if rate >= 0.5 else
+        "yellow" if rate > 0 else "dim"
+    )
+
+    console.print("[bold]PRSM Onramp Conversion Funnel[/bold]")
+    console.print(
+        f"  Intents:           {total} total "
+        f"([{rate_color}]{rate * 100:.1f}% conversion rate[/{rate_color}])"
+    )
+    console.print(
+        f"  Expected USD:      ${expected:.2f}"
+    )
+    console.print(
+        f"  Confirmed USDC:    "
+        f"[green]${confirmed_usdc:.2f}[/green]"
+    )
+    console.print()
+
+    if counts:
+        ct = Table(title="Status Distribution")
+        ct.add_column("Status", style="bold")
+        ct.add_column("Count", justify="right")
+        status_color = {
+            "INTENT_RECORDED": "cyan",
+            "PENDING_SETTLEMENT": "yellow",
+            "CONFIRMED": "green",
+            "EXPIRED": "red",
+        }
+        order = [
+            "INTENT_RECORDED", "PENDING_SETTLEMENT",
+            "CONFIRMED", "EXPIRED",
+        ]
+        for s in order:
+            n = counts.get(s, 0)
+            color = status_color.get(s, "white")
+            ct.add_row(
+                f"[{color}]{s}[/{color}]",
+                str(n) if n > 0 else f"[dim]{n}[/dim]",
+            )
+        console.print(ct)
+        console.print()
+
+    intents = body.get("intents") or []
+    if not intents:
+        console.print(
+            "[dim]No intents to display (try without "
+            "--status filter).[/dim]"
+        )
+        return
+
+    table = Table(
+        title=(
+            "Intents"
+            + (f" (status={status})" if status else "")
+        ),
+    )
+    table.add_column("Intent", style="cyan")
+    table.add_column("User", overflow="fold")
+    table.add_column("Address", overflow="fold")
+    table.add_column("Expected USD", justify="right")
+    table.add_column("USDC In", justify="right")
+    table.add_column("Status")
+    table.add_column("Age")
+
+    import time as _time
+    now = _time.time()
+
+    for intent in intents:
+        intent_short = intent.get("intent_id", "")[:18]
+        user = intent.get("user_id") or "—"
+        addr = intent.get("destination_address") or ""
+        addr_short = (
+            f"{addr[:8]}..{addr[-6:]}" if len(addr) > 20 else addr
+        )
+        usd = intent.get("expected_usd", 0.0)
+        usdc = intent.get("usdc_received", 0.0)
+        st = intent.get("status", "?")
+        st_color = {
+            "INTENT_RECORDED": "cyan",
+            "PENDING_SETTLEMENT": "yellow",
+            "CONFIRMED": "green",
+            "EXPIRED": "red",
+        }.get(st, "white")
+        age_seconds = now - intent.get("created_at", now)
+        if age_seconds < 60:
+            age = f"{int(age_seconds)}s"
+        elif age_seconds < 3600:
+            age = f"{int(age_seconds / 60)}m"
+        else:
+            age = f"{age_seconds / 3600:.1f}h"
+        table.add_row(
+            intent_short, user, addr_short,
+            f"${usd:.2f}",
+            (
+                f"[green]${usdc:.2f}[/green]" if usdc > 0
+                else f"[dim]${usdc:.2f}[/dim]"
+            ),
+            f"[{st_color}]{st}[/{st_color}]",
+            age,
+        )
+    console.print(table)
+
+
 def _render_webhook_row(e: dict) -> str:
     success = e.get("success")
     # Escape brackets so rich doesn't interpret as markup tags
