@@ -280,21 +280,24 @@ def test_x_wallet_auth_jwt_is_es256():
     payload = pyjwt.decode(
         wallet_auth, options={"verify_signature": False},
     )
-    # Required CDP wallet-auth claims (sp854 spec)
-    assert payload["iss"] == "cdp"
-    assert payload["aud"] == ["cdp_service"]
-    assert payload["sub"] == "kid"  # api_key_name
-    assert isinstance(payload["uris"], list)  # array, not string
+    # Required CDP wallet-auth claims per canonical spec
+    # (docs.cdp.coinbase.com/api-reference/v2/authentication).
+    # Sp854b learning: extra claims (iss/sub/aud/exp/kid) trigger
+    # silent 401 — CDP enforces strict claim allow-list.
+    assert isinstance(payload["uris"], list)
     assert len(payload["uris"]) == 1
     assert payload["uris"][0].startswith("POST ")
-    assert "reqHash" in payload  # SHA-256 hex of body
+    assert "reqHash" in payload  # SHA-256 hex of canonical JSON
     assert "iat" in payload
-    assert "exp" in payload
+    assert "nbf" in payload
     assert "jti" in payload
-    # kid in header is the SHA-256 of the public key (CDP looks it
-    # up server-side to find the verification key)
-    assert "kid" in headers
-    assert len(headers["kid"]) == 64  # 32-byte SHA-256 hex
+    # These MUST be absent — Bearer-token-only claims:
+    assert "iss" not in payload
+    assert "sub" not in payload
+    assert "aud" not in payload
+    assert "exp" not in payload
+    # kid absent in wallet-auth header (Bearer-only)
+    assert "kid" not in headers
 
 
 def test_create_wallet_raises_when_no_wallet_secret():
@@ -413,9 +416,12 @@ def test_create_wallet_sends_bearer_jwt_and_returns_address():
     # Authorization header is a Bearer JWT
     auth = captured["headers"]["authorization"]
     assert auth.startswith("Bearer ey")  # JWT base64 prefix
-    # body contains user_id metadata
-    assert captured["body"]["metadata"]["user_id"] == "alice"
-    assert captured["body"]["metadata"]["email"] == "a@x.io"
+    # body is CDP-strict — only `name` field allowed. user_id +
+    # email correlation is done via the name string itself
+    # (sanitized to fit ^[A-Za-z0-9][A-Za-z0-9-]{0,34}[A-Za-z0-9]$).
+    assert set(captured["body"].keys()) == {"name"}
+    assert captured["body"]["name"].startswith("prsm-alice-")
+    assert "metadata" not in captured["body"]
     assert captured["path"] == "/platform/v2/evm/accounts"
 
 

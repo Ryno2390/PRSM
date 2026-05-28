@@ -240,67 +240,69 @@ class CdpWaaSBackend:
         )
 
     def _build_wallet_auth_jwt(
-        self, method: str, path: str, body_bytes: bytes,
+        self,
+        method: str,
+        path: str,
+        body_obj: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Build the X-Wallet-Auth JWT (sp854 — F21).
+        """Build the X-Wallet-Auth JWT (sp854 — F21, sp854b — F22).
 
         Signed with the operator's Wallet Secret (ECDSA P-256, ES256).
         Distinct from the Bearer Authorization JWT (Ed25519/EdDSA).
         Required by CDP v2 wallet-management endpoints.
 
-        JWT shape per CDP v2 wallet-auth spec:
-          header.kid    = SHA-256(uncompressed-public-key) hex
-          payload.iss   = "cdp"
-          payload.sub   = api key name (UUID)
-          payload.aud   = ["cdp_service"]
-          payload.uris  = ["METHOD host/path"]  (array!)
-          payload.reqHash = SHA-256(body) hex (only if body present)
+        JWT shape per CDP v2 wallet-auth spec
+        (docs.cdp.coinbase.com/api-reference/v2/authentication):
+
+          header:
+            alg: ES256
+            typ: JWT
+            (no kid — kid is Bearer-token only)
+
+          payload:
+            iat:    now (seconds)
+            nbf:    now
+            jti:    16-byte hex nonce
+            uris:   ["METHOD host/path"]
+            reqHash: SHA-256(canonical-sorted JSON) hex
+                     — only if body present
+            (no iss/sub/aud/exp — those are Bearer-token only;
+             docs explicitly state they're absent here)
+
+        ``reqHash`` covers canonically-sorted JSON, NOT the raw
+        body bytes — this is the subtle wire-format detail that
+        causes a 401 if missed (F22 root cause). JSON must be
+        json.dumps(..., sort_keys=True, separators=(',', ':')).
         """
         import hashlib
+        import json as _json
         import jwt as _jwt
-        from cryptography.hazmat.primitives.serialization import (
-            Encoding, PublicFormat,
-        )
         if self._wallet_key is None:
             raise RuntimeError(
                 "wallet_secret not configured — call requires "
                 "X-Wallet-Auth but COINBASE_CDP_WALLET_SECRET is "
                 "unset."
             )
-        # Derive kid from the wallet secret's public key. CDP looks
-        # this up server-side to find the right verification key.
-        pub_bytes = self._wallet_key.public_key().public_bytes(
-            encoding=Encoding.X962,
-            format=PublicFormat.UncompressedPoint,
-        )
-        kid = hashlib.sha256(pub_bytes).hexdigest()
-
         host = urlparse(self._base_url).netloc
         now = int(time.time())
-        headers = {
-            "alg": "ES256",
-            "typ": "JWT",
-            "kid": kid,
-        }
-        payload = {
-            "iss": "cdp",
-            "sub": self._api_key_name,
-            "aud": ["cdp_service"],
+        payload: Dict[str, Any] = {
             "iat": now,
             "nbf": now,
-            "exp": now + 60,
             "jti": secrets.token_hex(16),
             "uris": [f"{method} {host}{path}"],
         }
-        if body_bytes:
+        if body_obj is not None:
+            canonical = _json.dumps(
+                body_obj, sort_keys=True, separators=(",", ":"),
+            )
             payload["reqHash"] = hashlib.sha256(
-                body_bytes,
+                canonical.encode("utf-8"),
             ).hexdigest()
         return _jwt.encode(
             payload,
             self._wallet_key,
             algorithm="ES256",
-            headers=headers,
+            headers={"alg": "ES256", "typ": "JWT"},
         )
 
     def _post(
@@ -311,7 +313,12 @@ class CdpWaaSBackend:
         wallet_auth_required: bool = False,
     ) -> Dict[str, Any]:
         import json as _json
-        body_bytes = _json.dumps(body).encode("utf-8")
+        # Canonical-sorted JSON: matches what reqHash hashes so the
+        # bytes we send + the bytes we sign are byte-identical. CDP
+        # rejects mismatches with a generic 401 (F22 root cause).
+        body_bytes = _json.dumps(
+            body, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
         token = self._build_jwt("POST", path)
         headers = {
             "Authorization": f"Bearer {token}",
@@ -321,7 +328,7 @@ class CdpWaaSBackend:
         if wallet_auth_required:
             # Sp854: attach X-Wallet-Auth JWT for CDP v2 wallet ops.
             headers["X-Wallet-Auth"] = self._build_wallet_auth_jwt(
-                "POST", path, body_bytes,
+                "POST", path, body,
             )
         resp = self._client.post(
             f"{self._base_url}{path}",
@@ -334,24 +341,25 @@ class CdpWaaSBackend:
     def create_wallet(
         self, user_id: str, email: str,
     ) -> Dict[str, Any]:
-        """Create a smart-account on Base for this user.
+        """Create an EVM account on Base for this user.
 
         Returns dict shaped for CoinbaseWaaSClient.provision_wallet
         consumption: wallet_id, address, network.
+
+        CDP v2 body schema is strict — only `name` (2-36 alphanumeric
+        chars + hyphens, globally unique) and `accountPolicy` (UUID)
+        are accepted. Unknown fields cause silent 401 (F22 root
+        cause was likely the rejected `metadata` field).
         """
-        # CDP v2 EVM smart-account endpoint. The exact path and
-        # payload mirror CDP's "Create an EVM account" call;
-        # network is implied by the API surface (Base mainnet).
-        body = {
-            "name": f"prsm-{user_id}",
-            # Persona's reference-id pattern — useful for ops
-            # correlation if CDP exposes user-account lookups.
-            "metadata": {
-                "user_id": user_id,
-                "email": email,
-                "publisher": "prsm-foundation",
-            },
-        }
+        # Sanitize name to match the CDP regex
+        # ^[A-Za-z0-9][A-Za-z0-9-]{0,34}[A-Za-z0-9]$
+        import re as _re
+        safe_user_id = _re.sub(r"[^A-Za-z0-9-]", "-", user_id)[:30]
+        safe_user_id = safe_user_id.strip("-") or "user"
+        # Append short suffix for global uniqueness (CDP requires
+        # unique names across the project).
+        name = f"prsm-{safe_user_id}-{secrets.token_hex(3)}"
+        body = {"name": name}
         payload = self._post(
             "/platform/v2/evm/accounts", body,
             wallet_auth_required=True,
