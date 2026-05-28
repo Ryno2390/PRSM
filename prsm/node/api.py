@@ -2804,7 +2804,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # USDC: canonical Circle deployment on Base.
         # FTNS: PRSM's mainnet token from networks.py.
         from prsm.config.networks import get_network_config
-        net = get_network_config("base-mainnet")
+        net = get_network_config("mainnet")
         usdc_addr = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
         ftns_addr = net.ftns_token
         token_in_addr = (
@@ -3234,6 +3234,96 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             ),
             "wallet_count": len(client.list_wallets()),
         }
+
+    # Sp862 — live Base mainnet balance reader for WaaS wallets.
+    @app.get("/wallet/balance/{user_id}", tags=["wallet"])
+    async def get_wallet_balance_by_user(
+        user_id: str,
+    ) -> Dict[str, Any]:
+        """Live USDC + FTNS + native ETH balances for a WaaS user.
+
+        Resolves user_id → WaaS address, then reads live Base
+        mainnet balances via JSON-RPC. Uses BASE_RPC_URL when set
+        or the free public Base RPC otherwise.
+        """
+        waas = getattr(node, "_coinbase_waas_client", None)
+        if waas is None:
+            raise HTTPException(
+                status_code=503,
+                detail="WaaS client not initialized.",
+            )
+        record = waas.get_wallet(user_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no wallet for user_id={user_id!r}",
+            )
+        if not record.address:
+            return {
+                "user_id": user_id,
+                "address": None,
+                "status": "PENDING_COMMISSION",
+                "note": (
+                    "WaaS wallet has no address yet — provision "
+                    "first."
+                ),
+            }
+        from prsm.economy.web3.wallet_balance_reader import (
+            from_env as _wbr_from_env,
+        )
+        reader = _wbr_from_env()
+        try:
+            balances = reader.get_balances(record.address)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "wallet_balance_reader failed for %s: %s",
+                user_id, exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"Base RPC balance read failed: {exc}",
+            )
+        finally:
+            reader.close()
+        out = balances.to_dict()
+        out["user_id"] = user_id
+        out["wallet_id"] = record.wallet_id
+        out["network"] = record.network
+        return out
+
+    @app.get("/wallet/balance/by-address/{address}", tags=["wallet"])
+    async def get_wallet_balance_by_address(
+        address: str,
+    ) -> Dict[str, Any]:
+        """Live balances for an explicit address (not bound to a
+        WaaS user). Useful for operator-side observability of
+        non-WaaS wallets like Foundation Safe."""
+        if not address.startswith("0x") or len(address) != 42:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"address must be 0x + 40 hex chars (42 total)"
+                    f", got {address!r}"
+                ),
+            )
+        from prsm.economy.web3.wallet_balance_reader import (
+            from_env as _wbr_from_env,
+        )
+        reader = _wbr_from_env()
+        try:
+            balances = reader.get_balances(address)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "wallet_balance_reader failed for %s: %s",
+                address, exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"Base RPC balance read failed: {exc}",
+            )
+        finally:
+            reader.close()
+        return balances.to_dict()
 
     # Sp859 — Phase 5 readiness aggregator endpoint.
     @app.get("/wallet/phase5/status", tags=["wallet"])
