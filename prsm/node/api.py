@@ -2707,11 +2707,26 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         finally:
             onramp_client.close()
 
+        # Sp857 — record the funnel-entry event so the conversion
+        # tracker can sweep on-chain truth + flag CONFIRMED arrivals.
+        from prsm.economy.web3.onramp_funnel import OnrampFunnel
+        funnel = getattr(node, "_onramp_funnel", None)
+        if funnel is None:
+            funnel = OnrampFunnel()
+            setattr(node, "_onramp_funnel", funnel)
+        intent = funnel.record_intent(
+            user_id=body.destination_user_id,
+            destination_address=destination_address,
+            expected_usd=body.usd_amount,
+            session_token=minted["token"],
+        )
+
         return {
             "status": "SESSION_READY",
             "session_url": minted["session_url"],
             "session_token": minted["token"],
             "channel_id": minted["channel_id"],
+            "intent_id": intent.intent_id,
             "destination_address": destination_address,
             "usd_amount": body.usd_amount,
             "asset": "USDC",
@@ -2720,9 +2735,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "note": (
                 "Open session_url to complete USD → USDC purchase. "
                 "Token is single-use + 5-min expiry. USDC lands at "
-                "destination_address on Base. Aerodrome USDC→FTNS "
-                "swap is a separate step (gated on pool ceremony, "
-                "Vision gantt 2026-06-15)."
+                "destination_address on Base. Conversion tracked "
+                "via intent_id — sweep with GET /wallet/onramp/funnel."
+                " Aerodrome USDC→FTNS swap gated on pool ceremony "
+                "(Vision 2026-06-15)."
             ),
         }
 
@@ -3324,6 +3340,71 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         finally:
             reader.close()
         return balances.to_dict()
+
+    # Sp857 — onramp conversion funnel surfaces.
+    @app.get("/wallet/onramp/funnel", tags=["wallet"])
+    async def get_onramp_funnel(
+        status: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Funnel summary + intent list. ``status`` filters by
+        INTENT_RECORDED / PENDING_SETTLEMENT / CONFIRMED / EXPIRED."""
+        if limit <= 0 or limit > 10_000:
+            raise HTTPException(
+                status_code=422,
+                detail=f"limit must be in [1, 10000], got {limit}",
+            )
+        from prsm.economy.web3.onramp_funnel import OnrampFunnel
+        funnel = getattr(node, "_onramp_funnel", None)
+        if funnel is None:
+            funnel = OnrampFunnel()
+            setattr(node, "_onramp_funnel", funnel)
+        intents = funnel.list_intents(status=status)
+        return {
+            "summary": funnel.summary(),
+            "intents": [
+                i.to_dict() for i in intents[:limit]
+            ],
+            "limit": limit,
+            "filter_status": status,
+        }
+
+    @app.post("/wallet/onramp/sweep", tags=["wallet"])
+    async def post_onramp_sweep() -> Dict[str, Any]:
+        """Trigger an on-chain balance sweep across open intents.
+        Transitions PENDING_SETTLEMENT → CONFIRMED when USDC
+        arrives, and stale intents → EXPIRED after 24h.
+        """
+        from prsm.economy.web3.onramp_funnel import OnrampFunnel
+        from prsm.economy.web3.wallet_balance_reader import (
+            from_env as _wbr_from_env,
+        )
+        funnel = getattr(node, "_onramp_funnel", None)
+        if funnel is None:
+            funnel = OnrampFunnel()
+            setattr(node, "_onramp_funnel", funnel)
+        reader = _wbr_from_env()
+        try:
+            return funnel.sweep(balance_reader=reader)
+        finally:
+            reader.close()
+
+    @app.get(
+        "/wallet/onramp/funnel/{intent_id}", tags=["wallet"],
+    )
+    async def get_onramp_intent(intent_id: str) -> Dict[str, Any]:
+        from prsm.economy.web3.onramp_funnel import OnrampFunnel
+        funnel = getattr(node, "_onramp_funnel", None)
+        if funnel is None:
+            funnel = OnrampFunnel()
+            setattr(node, "_onramp_funnel", funnel)
+        rec = funnel.get_intent(intent_id)
+        if rec is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no intent for id={intent_id!r}",
+            )
+        return rec.to_dict()
 
     # Sp864 — fleet treasury aggregator: roll up balances across
     # every WaaS wallet.
