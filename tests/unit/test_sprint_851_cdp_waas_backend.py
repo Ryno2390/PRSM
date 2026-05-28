@@ -71,6 +71,25 @@ def _generate_test_pem() -> str:
     return pem
 
 
+def _generate_test_wallet_secret() -> str:
+    """Fresh ECDSA P-256 PKCS8 DER base64 — CDP v2 wallet secret
+    wire format. Never use real key."""
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ec import (
+        SECP256R1, generate_private_key,
+    )
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding, PrivateFormat, NoEncryption,
+    )
+    key = generate_private_key(SECP256R1())
+    der = key.private_bytes(
+        encoding=Encoding.DER,
+        format=PrivateFormat.PKCS8,
+        encryption_algorithm=NoEncryption(),
+    )
+    return base64.b64encode(der).decode("utf-8")
+
+
 def _mock_transport(handler):
     return httpx.Client(transport=httpx.MockTransport(handler))
 
@@ -158,6 +177,168 @@ def test_load_rejects_wrong_length_base64():
     assert "must be 32 or 64 bytes" in str(exc.value)
 
 
+def test_load_wallet_secret_accepts_p256_der_base64():
+    """CDP v2 Wallet Secret wire format: ECDSA P-256 PKCS8 DER,
+    base64-encoded, no PEM markers."""
+    from prsm.economy.web3.coinbase_waas_cdp_backend import (
+        _load_wallet_secret,
+    )
+    from cryptography.hazmat.primitives.asymmetric.ec import (
+        EllipticCurvePrivateKey,
+    )
+    secret = _generate_test_wallet_secret()
+    key = _load_wallet_secret(secret)
+    assert isinstance(key, EllipticCurvePrivateKey)
+
+
+def test_load_wallet_secret_rejects_placeholder():
+    from prsm.economy.web3.coinbase_waas_cdp_backend import (
+        _load_wallet_secret,
+    )
+    with pytest.raises(ValueError) as exc:
+        _load_wallet_secret("REPLACE_WITH_WALLET_SECRET")
+    assert "placeholder" in str(exc.value)
+
+
+def test_load_wallet_secret_rejects_ed25519():
+    """If operator pastes the API key (Ed25519) into the Wallet
+    Secret field, fail with a clear error rather than silently
+    half-working — saves debugging time."""
+    from prsm.economy.web3.coinbase_waas_cdp_backend import (
+        _load_wallet_secret,
+    )
+    # Build a base64 PKCS8 Ed25519 key (the wrong-format input)
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey,
+    )
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding, PrivateFormat, NoEncryption,
+    )
+    ed_key = Ed25519PrivateKey.generate()
+    der = ed_key.private_bytes(
+        encoding=Encoding.DER, format=PrivateFormat.PKCS8,
+        encryption_algorithm=NoEncryption(),
+    )
+    b64 = base64.b64encode(der).decode()
+    with pytest.raises(ValueError) as exc:
+        _load_wallet_secret(b64)
+    assert "ECDSA P-256" in str(exc.value)
+    assert "API key" in str(exc.value)  # hints at the gotcha
+
+
+def test_x_wallet_auth_header_attached_when_secret_present():
+    """sp854 closure: create_wallet must send the X-Wallet-Auth
+    header — without it CDP returns 400."""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(200, json={
+            "name": "ok", "address": "0x" + "11" * 20,
+        })
+
+    pem = _generate_test_pem()
+    backend = CdpWaaSBackend(
+        api_key_name="kid", api_key_private_pem=pem,
+        wallet_secret=_generate_test_wallet_secret(),
+        client=_mock_transport(handler),
+    )
+    backend.create_wallet("alice", "a@x.io")
+    assert "authorization" in captured["headers"]  # Bearer JWT
+    assert "x-wallet-auth" in captured["headers"]  # F21 fix
+    # X-Wallet-Auth is its own JWT, not Bearer-prefixed
+    wallet_auth = captured["headers"]["x-wallet-auth"]
+    assert not wallet_auth.startswith("Bearer ")
+    assert wallet_auth.startswith("ey")  # JWT base64
+
+
+def test_x_wallet_auth_jwt_is_es256():
+    """The X-Wallet-Auth JWT must be ES256 (ECDSA P-256), distinct
+    from the Bearer JWT's EdDSA. CDP's wallet-management endpoint
+    validates the algorithm header."""
+    import jwt as pyjwt
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(200, json={
+            "name": "ok", "address": "0x" + "11" * 20,
+        })
+
+    pem = _generate_test_pem()
+    backend = CdpWaaSBackend(
+        api_key_name="kid", api_key_private_pem=pem,
+        wallet_secret=_generate_test_wallet_secret(),
+        client=_mock_transport(handler),
+    )
+    backend.create_wallet("alice", "a@x.io")
+    wallet_auth = captured["headers"]["x-wallet-auth"]
+    headers = pyjwt.get_unverified_header(wallet_auth)
+    assert headers["alg"] == "ES256"
+    assert headers["typ"] == "JWT"
+    payload = pyjwt.decode(
+        wallet_auth, options={"verify_signature": False},
+    )
+    # Required CDP wallet-auth claims (sp854 spec)
+    assert payload["iss"] == "cdp"
+    assert payload["aud"] == ["cdp_service"]
+    assert payload["sub"] == "kid"  # api_key_name
+    assert isinstance(payload["uris"], list)  # array, not string
+    assert len(payload["uris"]) == 1
+    assert payload["uris"][0].startswith("POST ")
+    assert "reqHash" in payload  # SHA-256 hex of body
+    assert "iat" in payload
+    assert "exp" in payload
+    assert "jti" in payload
+    # kid in header is the SHA-256 of the public key (CDP looks it
+    # up server-side to find the verification key)
+    assert "kid" in headers
+    assert len(headers["kid"]) == 64  # 32-byte SHA-256 hex
+
+
+def test_create_wallet_raises_when_no_wallet_secret():
+    """Honest signal: API key alone isn't enough for write calls.
+    Surface the F21 gap clearly rather than hitting CDP and
+    getting a confusing 400."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})  # unreachable
+
+    pem = _generate_test_pem()
+    backend = CdpWaaSBackend(
+        api_key_name="kid", api_key_private_pem=pem,
+        wallet_secret=None,  # F21 surface
+        client=_mock_transport(handler),
+    )
+    with pytest.raises(RuntimeError) as exc:
+        backend.create_wallet("alice", "a@x.io")
+    assert "wallet_secret" in str(exc.value)
+
+
+def test_from_env_reads_wallet_secret(monkeypatch):
+    """COINBASE_CDP_WALLET_SECRET env var auto-loaded by from_env."""
+    pem = _generate_test_pem()
+    secret = _generate_test_wallet_secret()
+    monkeypatch.setenv("COINBASE_CDP_API_KEY_NAME", "kid")
+    monkeypatch.setenv("COINBASE_CDP_API_KEY_PRIVATE", pem)
+    monkeypatch.setenv("COINBASE_CDP_WALLET_SECRET", secret)
+    backend = cdp_waas_from_env()
+    assert backend is not None
+    assert backend._wallet_key is not None
+
+
+def test_from_env_wallet_secret_optional(monkeypatch):
+    """Backend constructs even without wallet secret — read-only
+    calls work; only create_wallet etc require it."""
+    pem = _generate_test_pem()
+    monkeypatch.setenv("COINBASE_CDP_API_KEY_NAME", "kid")
+    monkeypatch.setenv("COINBASE_CDP_API_KEY_PRIVATE", pem)
+    monkeypatch.delenv("COINBASE_CDP_WALLET_SECRET", raising=False)
+    backend = cdp_waas_from_env()
+    assert backend is not None
+    assert backend._wallet_key is None
+
+
 def test_load_tolerates_whitespace_in_base64():
     """Paste-mangled base64 with internal spaces/newlines is
     common — strip first."""
@@ -222,6 +403,7 @@ def test_create_wallet_sends_bearer_jwt_and_returns_address():
     backend = CdpWaaSBackend(
         api_key_name="kid_test",
         api_key_private_pem=pem,
+        wallet_secret=_generate_test_wallet_secret(),
         client=_mock_transport(handler),
     )
     result = backend.create_wallet("alice", "a@x.io")
@@ -251,6 +433,7 @@ def test_create_wallet_tolerates_data_envelope():
     backend = CdpWaaSBackend(
         api_key_name="kid",
         api_key_private_pem=pem,
+        wallet_secret=_generate_test_wallet_secret(),
         client=_mock_transport(handler),
     )
     r = backend.create_wallet("bob", "b@x.io")
@@ -264,6 +447,7 @@ def test_create_wallet_raises_when_no_address():
     pem = _generate_test_pem()
     backend = CdpWaaSBackend(
         api_key_name="kid", api_key_private_pem=pem,
+        wallet_secret=_generate_test_wallet_secret(),
         client=_mock_transport(handler),
     )
     with pytest.raises(RuntimeError) as exc:
@@ -278,6 +462,7 @@ def test_create_wallet_raises_on_http_401():
     pem = _generate_test_pem()
     backend = CdpWaaSBackend(
         api_key_name="kid", api_key_private_pem=pem,
+        wallet_secret=_generate_test_wallet_secret(),
         client=_mock_transport(handler),
     )
     with pytest.raises(httpx.HTTPStatusError):

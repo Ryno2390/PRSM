@@ -42,6 +42,73 @@ _CDP_TIMEOUT_SECONDS = 30.0
 _JWT_EXPIRY_SECONDS = 120
 
 
+def _load_wallet_secret(secret: str):
+    """Parse CDP v2 Wallet Secret — ECDSA P-256 PKCS8 DER base64.
+
+    The Wallet Secret authenticates the X-Wallet-Auth header attached
+    to /platform/v2/evm/* wallet-management calls. Distinct from the
+    Bearer JWT (signed with the Ed25519 API key) — CDP v2 uses TWO
+    separate signing identities:
+
+      Bearer Authorization   → API key (Ed25519 EdDSA)
+      X-Wallet-Auth header   → Wallet Secret (ECDSA P-256 ES256)
+
+    Operator generates the Wallet Secret via CDP dashboard
+    (Server Wallets section). The wire format is the PKCS8 DER body
+    base64-encoded with no PEM markers — typically ~180 chars.
+    """
+    if not secret or "REPLACE_WITH" in secret:
+        raise ValueError(
+            "COINBASE_CDP_WALLET_SECRET is empty or still a "
+            "placeholder — generate one via CDP dashboard "
+            "Server Wallets section."
+        )
+    stripped = secret.strip()
+    # Standard PEM block also accepted in case CDP ships it that way
+    if stripped.startswith("-----BEGIN"):
+        from cryptography.hazmat.primitives.serialization import (
+            load_pem_private_key,
+        )
+        try:
+            return load_pem_private_key(
+                stripped.encode("utf-8"), password=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(
+                f"Wallet Secret PEM parse failed: {exc}",
+            ) from exc
+    # Default path: base64 of PKCS8 DER
+    import base64
+    compact = "".join(stripped.split())
+    try:
+        raw = base64.b64decode(compact, validate=True)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(
+            f"Wallet Secret base64 decode failed: {exc}",
+        ) from exc
+    from cryptography.hazmat.primitives.serialization import (
+        load_der_private_key,
+    )
+    try:
+        key = load_der_private_key(raw, password=None)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(
+            f"Wallet Secret DER parse failed: {exc}",
+        ) from exc
+    # Must be EC (P-256) — Ed25519 would mean someone pasted the
+    # API key instead of the Wallet Secret.
+    from cryptography.hazmat.primitives.asymmetric.ec import (
+        EllipticCurvePrivateKey,
+    )
+    if not isinstance(key, EllipticCurvePrivateKey):
+        raise ValueError(
+            f"Wallet Secret must be ECDSA P-256, got "
+            f"{type(key).__name__}. (Did you paste the API key "
+            f"instead of the Wallet Secret?)"
+        )
+    return key
+
+
 def _load_ed25519_pem(pem: str):
     """Parse an Ed25519 private key in any format CDP issues.
 
@@ -116,6 +183,7 @@ class CdpWaaSBackend:
         api_key_name: str,
         api_key_private_pem: str,
         *,
+        wallet_secret: Optional[str] = None,
         base_url: str = _CDP_V2_BASE,
         client: Any = None,  # injected httpx.Client for tests
     ) -> None:
@@ -124,6 +192,13 @@ class CdpWaaSBackend:
         # Parse PEM eagerly — surfaces placeholder/malformed errors
         # at construction so from_env can detect + return None.
         self._private_key = _load_ed25519_pem(api_key_private_pem)
+        # Wallet Secret optional at construction — only needed for
+        # wallet-management calls (create_wallet etc). Read-only
+        # calls work with just the API key.
+        self._wallet_key = (
+            _load_wallet_secret(wallet_secret)
+            if wallet_secret else None
+        )
         self._api_key_name = api_key_name
         self._base_url = base_url.rstrip("/")
         if client is None:
@@ -164,18 +239,94 @@ class CdpWaaSBackend:
             headers=headers,
         )
 
+    def _build_wallet_auth_jwt(
+        self, method: str, path: str, body_bytes: bytes,
+    ) -> str:
+        """Build the X-Wallet-Auth JWT (sp854 — F21).
+
+        Signed with the operator's Wallet Secret (ECDSA P-256, ES256).
+        Distinct from the Bearer Authorization JWT (Ed25519/EdDSA).
+        Required by CDP v2 wallet-management endpoints.
+
+        JWT shape per CDP v2 wallet-auth spec:
+          header.kid    = SHA-256(uncompressed-public-key) hex
+          payload.iss   = "cdp"
+          payload.sub   = api key name (UUID)
+          payload.aud   = ["cdp_service"]
+          payload.uris  = ["METHOD host/path"]  (array!)
+          payload.reqHash = SHA-256(body) hex (only if body present)
+        """
+        import hashlib
+        import jwt as _jwt
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding, PublicFormat,
+        )
+        if self._wallet_key is None:
+            raise RuntimeError(
+                "wallet_secret not configured — call requires "
+                "X-Wallet-Auth but COINBASE_CDP_WALLET_SECRET is "
+                "unset."
+            )
+        # Derive kid from the wallet secret's public key. CDP looks
+        # this up server-side to find the right verification key.
+        pub_bytes = self._wallet_key.public_key().public_bytes(
+            encoding=Encoding.X962,
+            format=PublicFormat.UncompressedPoint,
+        )
+        kid = hashlib.sha256(pub_bytes).hexdigest()
+
+        host = urlparse(self._base_url).netloc
+        now = int(time.time())
+        headers = {
+            "alg": "ES256",
+            "typ": "JWT",
+            "kid": kid,
+        }
+        payload = {
+            "iss": "cdp",
+            "sub": self._api_key_name,
+            "aud": ["cdp_service"],
+            "iat": now,
+            "nbf": now,
+            "exp": now + 60,
+            "jti": secrets.token_hex(16),
+            "uris": [f"{method} {host}{path}"],
+        }
+        if body_bytes:
+            payload["reqHash"] = hashlib.sha256(
+                body_bytes,
+            ).hexdigest()
+        return _jwt.encode(
+            payload,
+            self._wallet_key,
+            algorithm="ES256",
+            headers=headers,
+        )
+
     def _post(
-        self, path: str, body: Dict[str, Any],
+        self,
+        path: str,
+        body: Dict[str, Any],
+        *,
+        wallet_auth_required: bool = False,
     ) -> Dict[str, Any]:
+        import json as _json
+        body_bytes = _json.dumps(body).encode("utf-8")
         token = self._build_jwt("POST", path)
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if wallet_auth_required:
+            # Sp854: attach X-Wallet-Auth JWT for CDP v2 wallet ops.
+            headers["X-Wallet-Auth"] = self._build_wallet_auth_jwt(
+                "POST", path, body_bytes,
+            )
         resp = self._client.post(
             f"{self._base_url}{path}",
-            json=body,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+            content=body_bytes,
+            headers=headers,
         )
         resp.raise_for_status()
         return resp.json()
@@ -201,7 +352,10 @@ class CdpWaaSBackend:
                 "publisher": "prsm-foundation",
             },
         }
-        payload = self._post("/platform/v2/evm/accounts", body)
+        payload = self._post(
+            "/platform/v2/evm/accounts", body,
+            wallet_auth_required=True,
+        )
         # Expected response: {"name": ..., "address": "0x...", ...}
         account = payload.get("data") or payload  # tolerate envelope
         address = account.get("address")
@@ -221,6 +375,7 @@ def from_env(
     *,
     api_key_name: Optional[str] = None,
     api_key_private_pem: Optional[str] = None,
+    wallet_secret: Optional[str] = None,
     client: Any = None,
 ) -> Optional["CdpWaaSBackend"]:
     """Construct a CdpWaaSBackend from env, or None when missing.
@@ -229,6 +384,11 @@ def from_env(
     placeholder (so CoinbaseWaaSClient.from_env() shows
     adapter_wired=False with the honest signal until the operator
     pastes the real PEM).
+
+    Wallet secret is optional — read-only calls work without it;
+    wallet-management calls (create_wallet etc) require it. When
+    unset, the backend constructs but raises if a wallet-management
+    call is attempted (honest signal F21 follow-on).
     """
     api_key_name = (
         api_key_name or os.environ.get("COINBASE_CDP_API_KEY_NAME")
@@ -237,12 +397,18 @@ def from_env(
         api_key_private_pem
         or os.environ.get("COINBASE_CDP_API_KEY_PRIVATE")
     )
+    wallet_secret = (
+        wallet_secret
+        or os.environ.get("COINBASE_CDP_WALLET_SECRET")
+        or None
+    )
     if not api_key_name or not api_key_private_pem:
         return None
     try:
         return CdpWaaSBackend(
             api_key_name=api_key_name,
             api_key_private_pem=api_key_private_pem,
+            wallet_secret=wallet_secret,
             client=client,
         )
     except ValueError as exc:
