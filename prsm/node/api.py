@@ -2821,6 +2821,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return {
             "commissioned": client.is_commissioned(),
+            "adapter_wired": client.adapter_wired(),
             "network": getattr(
                 client, "_network", "base-mainnet",
             ),
@@ -3715,6 +3716,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             )
         return {
             "commissioned": kyc.is_commissioned(),
+            "adapter_wired": kyc.adapter_wired(),
             "vendor": getattr(kyc, "_vendor", None),
             "supported_vendors": list(
                 getattr(kyc, "SUPPORTED_VENDORS", []),

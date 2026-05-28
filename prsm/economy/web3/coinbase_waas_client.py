@@ -147,6 +147,17 @@ class CoinbaseWaaSClient:
         even before plugging in the SDK backend."""
         return bool(self._api_key_name and self._api_key_private)
 
+    def adapter_wired(self) -> bool:
+        """True iff a CDP WaaS SDK backend has been injected.
+
+        Orthogonal to ``is_commissioned``. Sp848 surfaces this as a
+        second status flag so operators distinguish "env vars wired"
+        from "ready to execute provision_wallet()" — without this
+        signal, an env-commissioned-but-stubbed deployment looks
+        identical to a fully-wired one via /wallet/waas/status.
+        """
+        return self._backend is not None
+
     def provision_wallet(
         self, user_id: str, email: str,
     ) -> WaasWalletRecord:

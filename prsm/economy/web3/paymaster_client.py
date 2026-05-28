@@ -118,6 +118,15 @@ class PaymasterClient:
         """True iff both paymaster env keys are present."""
         return bool(self._endpoint and self._api_key)
 
+    def adapter_wired(self) -> bool:
+        """True iff a CDP paymaster SDK backend has been injected.
+
+        Orthogonal to ``is_commissioned`` — env vars present alone
+        leave sponsor_user_op short-circuiting to PENDING_COMMISSION.
+        Sp848 exposes both signals via spend_summary().
+        """
+        return self._backend is not None
+
     def sponsor_user_op(
         self,
         user_op: Dict[str, Any],
@@ -198,6 +207,7 @@ class PaymasterClient:
     def spend_summary(self) -> Dict[str, Any]:
         return {
             "commissioned": self.is_commissioned(),
+            "adapter_wired": self.adapter_wired(),
             "sponsorships": self._sponsorship_count,
             "total_sponsored_wei": self._total_sponsored_wei,
             "endpoint": self._endpoint,

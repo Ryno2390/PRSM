@@ -175,6 +175,16 @@ class KYCClient:
             and self._api_key
         )
 
+    def adapter_wired(self) -> bool:
+        """True iff a vendor SDK backend has been dependency-injected.
+
+        Orthogonal to ``is_commissioned`` — env vars can be present
+        without an adapter (PENDING_COMMISSION on initiate), and a
+        test harness can wire a backend without env vars. Sp848
+        exposes both signals so operators see honest readiness state.
+        """
+        return self._backend is not None
+
     def initiate(
         self, user_id: str, email: str, level: str,
     ) -> KYCRecord:
