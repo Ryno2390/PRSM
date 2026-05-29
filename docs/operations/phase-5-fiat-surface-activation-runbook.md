@@ -122,8 +122,14 @@ KYC_VENDOR=persona                       # or "onfido" | "plaid" | "mock"
 KYC_VENDOR_API_KEY=<persona-api-bearer-token>
 # unset → None; adapter returns PENDING_COMMISSION until key lands.
 PERSONA_TEMPLATE_ID=<persona-inquiry-template-id>
-# Required for initiate_session. unset → from_env() returns None; KYCClient
-#   falls back to PENDING_COMMISSION (adapter_wired=False for Persona).
+# BASE (Tier 1) inquiry template. Required for initiate_session. unset →
+#   from_env() returns None; KYCClient falls back to PENDING_COMMISSION
+#   (adapter_wired=False for Persona).
+PERSONA_ENHANCED_TEMPLATE_ID=<persona-enhanced-inquiry-template-id>
+# OPTIONAL (sp883). ENHANCED (Tier 2/3) template collecting proof-of-address
+#   + source-of-funds, for >$1k transaction limits. Routed when
+#   initiate(..., level="enhanced"). unset → enhanced inquiries fall back to
+#   the base template + a warning (proof-of-address NOT collected).
 PERSONA_WEBHOOK_SECRET=<persona-webhook-secret>
 # HMAC signing secret for inbound Persona webhook verification
 #   (t=<ts>,v1=<hmac-sha256> per sp283). unset → webhook handler rejects all

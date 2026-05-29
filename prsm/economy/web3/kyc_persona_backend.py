@@ -46,6 +46,7 @@ class PersonaHttpBackend:
         api_key: str,
         template_id: str,
         *,
+        enhanced_template_id: Optional[str] = None,
         base_url: str = _PERSONA_BASE_URL,
         api_version: str = _PERSONA_API_VERSION,
         client: Any = None,  # injected httpx.Client for tests
@@ -56,6 +57,11 @@ class PersonaHttpBackend:
             raise ValueError("template_id is required")
         self._api_key = api_key
         self._template_id = template_id
+        # Sp883 — separate Persona template for enhanced KYC (Tier
+        # 2/3: proof-of-address + source-of-funds). Optional: when
+        # unset, enhanced inquiries fall back to the base template
+        # + a warning rather than 500ing the user's upgrade attempt.
+        self._enhanced_template_id = enhanced_template_id or None
         self._base_url = base_url.rstrip("/")
         self._api_version = api_version
         if client is None:
@@ -91,11 +97,31 @@ class PersonaHttpBackend:
           - ``status``: KYC_STATUS_INITIATED (Persona returns the
             inquiry in "created" state; the webhook flips it later)
         """
+        # Sp883 — select the inquiry template by KYC level.
+        # enhanced → enhanced template (proof-of-address +
+        # source-of-funds); basic / anything else → base template.
+        # If enhanced is requested but no enhanced template is
+        # configured, fall back to base + warn (graceful degrade).
+        template_id = self._template_id
+        if level == "enhanced":
+            if self._enhanced_template_id:
+                template_id = self._enhanced_template_id
+            else:
+                logger.warning(
+                    "persona: enhanced KYC requested for user_id=%s "
+                    "but PERSONA_ENHANCED_TEMPLATE_ID is unset — "
+                    "falling back to the base template (proof-of-"
+                    "address / source-of-funds will NOT be "
+                    "collected). Create an enhanced inquiry template "
+                    "in Persona + set the env var to enable Tier 2/3.",
+                    user_id,
+                )
+
         # Step 1: create inquiry
         create_body = {
             "data": {
                 "attributes": {
-                    "inquiry-template-id": self._template_id,
+                    "inquiry-template-id": template_id,
                     "reference-id": user_id,
                     "fields": {"email-address": email},
                 }
@@ -152,6 +178,7 @@ def from_env(
     *,
     api_key: Optional[str] = None,
     template_id: Optional[str] = None,
+    enhanced_template_id: Optional[str] = None,
     client: Any = None,
 ) -> Optional["PersonaHttpBackend"]:
     """Construct a PersonaHttpBackend from env, or None when missing.
@@ -159,15 +186,26 @@ def from_env(
     Returns None (rather than raising) when ``KYC_VENDOR_API_KEY`` or
     ``PERSONA_TEMPLATE_ID`` are absent, so ``KYCClient.from_env()`` can
     gracefully fall back to the un-backed PENDING_COMMISSION pattern.
+
+    Sp883 — ``PERSONA_ENHANCED_TEMPLATE_ID`` is OPTIONAL: when set it
+    routes ``level="enhanced"`` inquiries (Tier 2/3) to a separate
+    proof-of-address / source-of-funds template. When unset, enhanced
+    inquiries fall back to the base template with a warning. The base
+    template remains required — enhanced is purely additive.
     """
     api_key = api_key or os.environ.get("KYC_VENDOR_API_KEY")
     template_id = (
         template_id or os.environ.get("PERSONA_TEMPLATE_ID")
+    )
+    enhanced_template_id = (
+        enhanced_template_id
+        or os.environ.get("PERSONA_ENHANCED_TEMPLATE_ID")
     )
     if not api_key or not template_id:
         return None
     return PersonaHttpBackend(
         api_key=api_key,
         template_id=template_id,
+        enhanced_template_id=enhanced_template_id,
         client=client,
     )
