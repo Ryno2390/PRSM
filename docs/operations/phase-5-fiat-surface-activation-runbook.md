@@ -170,6 +170,14 @@ PRSM_FUNNEL_AUTO_SWEEP_INTERVAL_S=300
 #   under 60 clamp to the 60s minimum (settlement takes minutes; faster is RPC
 #   waste). Non-numeric → logs a warning and disables (safe to typo).
 
+# ── Swap slippage ceiling (anti-sandwich, sp890) ──
+PRSM_SWAP_MAX_SLIPPAGE_BPS=1000
+# Max slippage on /wallet/swap/* (default 1000 bps = 10%). Requests
+#   above this → 422. slippage_bps=10000 (amountOutMin→0, accept-any-
+#   output sandwich) is ALWAYS rejected regardless of this ceiling.
+#   Raise ONLY for thin-liquidity launch conditions (e.g. the first
+#   swaps right after the Aerodrome pool seed).
+
 # ── KYC tier limits (rolling-window USD caps, sp285/884) ──
 PRSM_KYC_TIER_LIMIT_BASIC_USD=1000
 PRSM_KYC_TIER_LIMIT_ENHANCED_USD=10000

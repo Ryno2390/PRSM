@@ -2813,6 +2813,47 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     # SESSION_READY with the prepared swap envelope (router address,
     # routes, amount_out_min, deadline) once everything's wired —
     # the actual signed-tx submit via CDP WaaS is sp856-class.
+    # Sp890 — swap slippage ceiling (anti-sandwich). slippage_bps
+    # near 10000 zeroes out amountOutMin (the swap accepts ANY
+    # output = unbounded MEV/sandwich loss). Enforce a sane max:
+    # PRSM_SWAP_MAX_SLIPPAGE_BPS (default 1000 = 10%), raisable by
+    # operators for thin-liquidity launch conditions. 10000 is an
+    # ABSOLUTE reject regardless of the env ceiling (it always
+    # yields amountOutMin=0).
+    def _check_swap_slippage(slippage_bps: int) -> None:
+        if not (0 <= slippage_bps <= 10_000):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "slippage_bps must be in [0, 10000] (basis "
+                    "points; 100 = 1%)"
+                ),
+            )
+        max_raw = os.environ.get(
+            "PRSM_SWAP_MAX_SLIPPAGE_BPS", "",
+        ).strip()
+        max_slip = 1000
+        if max_raw:
+            try:
+                parsed = int(max_raw)
+                if parsed > 0:
+                    max_slip = parsed
+            except ValueError:
+                pass
+        # 10000 always rejected (amountOutMin would be 0 → accept
+        # any output); otherwise enforce the configured ceiling.
+        if slippage_bps >= 10_000 or slippage_bps > max_slip:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"slippage_bps={slippage_bps} exceeds the "
+                    f"maximum allowed ({min(max_slip, 9999)} bps). "
+                    "High slippage enables sandwich/MEV loss; raise "
+                    "PRSM_SWAP_MAX_SLIPPAGE_BPS only for thin-"
+                    "liquidity launch conditions."
+                ),
+            )
+
     class SwapQuoteRequest(BaseModel):
         amount_in: float  # whole-token units (USDC or FTNS)
         token_in: str  # "USDC" or "FTNS"
@@ -2843,14 +2884,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     f"{body.token_in!r}"
                 ),
             )
-        if not (0 <= body.slippage_bps <= 10_000):
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "slippage_bps must be in [0, 10000] (basis "
-                    "points; 100 = 1%)"
-                ),
-            )
+        _check_swap_slippage(body.slippage_bps)  # sp890 ceiling
         pool = getattr(node, "_aerodrome_client", None)
         if pool is None:
             raise HTTPException(
@@ -2969,6 +3003,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=400,
                 detail="amount_in must be > 0",
             )
+        _check_swap_slippage(body.slippage_bps)  # sp890 ceiling
         has_user = bool(body.from_user_id)
         has_addr = bool(body.from_address)
         if has_user and has_addr:

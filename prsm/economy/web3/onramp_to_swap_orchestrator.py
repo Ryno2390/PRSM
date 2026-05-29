@@ -96,9 +96,18 @@ def build_envelope_for_intent(
         return None
 
     # amount_out is in FTNS base units (18 decimals).
+    # Sp890 — clamp slippage to [0, 10000) and enforce
+    # amountOutMin >= 1 when amount_out > 0: a swap that accepts
+    # zero output is an unbounded sandwich. (The user-facing
+    # /wallet/swap/* endpoints reject high slippage outright;
+    # this is the belt-and-suspenders for the auto-orchestrator
+    # path where slippage_bps is operator/code-supplied.)
+    _slip = max(0, min(int(slippage_bps), 9999))
     amount_out_min_units = (
-        quote.amount_out * (10_000 - slippage_bps) // 10_000
+        quote.amount_out * (10_000 - _slip) // 10_000
     )
+    if quote.amount_out > 0 and amount_out_min_units < 1:
+        amount_out_min_units = 1
     amount_out_whole = quote.amount_out / (10 ** 18)
     deadline = int(_time.time()) + _DEFAULT_DEADLINE_SECONDS
 
