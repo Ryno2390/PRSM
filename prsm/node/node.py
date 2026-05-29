@@ -4541,6 +4541,80 @@ class PRSMNode:
                     "claim disabled this session): %s", exc,
                 )
 
+        # Sprint 878 — wire FunnelAutoSweepWorker into the daemon
+        # lifecycle. Periodically sweeps the onramp conversion
+        # funnel (sp857) with the same on_confirmed callback the
+        # manual /wallet/onramp/sweep endpoint uses — sp871
+        # envelope build + sp874 outbound completion notify. Opt-in
+        # via PRSM_FUNNEL_AUTO_SWEEP_INTERVAL_S; .start()
+        # short-circuits when unset (interval=0), so safe to always
+        # invoke.
+        self._funnel_auto_sweep_worker = None
+        try:
+            from prsm.node.funnel_auto_sweep import (
+                FunnelAutoSweepWorker,
+            )
+
+            def _do_sweep():
+                # Build the same callback chain the manual sweep
+                # endpoint uses. Imports deferred so unrelated
+                # daemon configs don't pay the cost.
+                from prsm.economy.web3.onramp_funnel import (
+                    OnrampFunnel,
+                )
+                from prsm.economy.web3.wallet_balance_reader import (
+                    from_env as _wbr_from_env,
+                )
+                from prsm.economy.web3.onramp_to_swap_orchestrator import (  # noqa: E501
+                    make_on_confirmed_callback,
+                )
+                from prsm.economy.web3.onramp_completion_notifier import (  # noqa: E501
+                    from_env as _notifier_from_env,
+                )
+                from prsm.config.networks import get_network_config
+
+                funnel = getattr(self, "_onramp_funnel", None)
+                if funnel is None:
+                    funnel = OnrampFunnel()
+                    self._onramp_funnel = funnel
+                reader = _wbr_from_env()
+                aero = getattr(self, "_aerodrome_client", None)
+                net = get_network_config("mainnet")
+                on_confirmed = None
+                notifier = _notifier_from_env()
+                if aero is not None and net.ftns_token:
+                    on_confirmed = make_on_confirmed_callback(
+                        funnel=funnel,
+                        aerodrome_client=aero,
+                        ftns_address=net.ftns_token,
+                        completion_notifier=notifier,
+                    )
+                try:
+                    return funnel.sweep(
+                        balance_reader=reader,
+                        on_confirmed=on_confirmed,
+                    )
+                finally:
+                    reader.close()
+                    notifier.close()
+
+            self._funnel_auto_sweep_worker = FunnelAutoSweepWorker(
+                sweep_fn=_do_sweep,
+            )
+            await self._funnel_auto_sweep_worker.start()
+            if self._funnel_auto_sweep_worker.config.enabled:
+                logger.info(
+                    "Sprint 878 — FunnelAutoSweepWorker started: "
+                    "interval=%ss",
+                    self._funnel_auto_sweep_worker
+                    .config.interval_seconds,
+                )
+        except Exception as exc:
+            logger.warning(
+                "FunnelAutoSweepWorker construction failed (auto-"
+                "sweep disabled this session): %s", exc,
+            )
+
         # Sprint 775 — wire PreemptionDetector into the daemon
         # lifecycle. resolve_detector_from_env() returns None when
         # PRSM_PREEMPTION_DETECTOR is unset (safe default for non-
@@ -4996,6 +5070,18 @@ class PRSMNode:
             except Exception as exc:
                 logger.warning(
                     "AutoClaimWorker stop raised: %s", exc,
+                )
+
+        # Sprint 878 — stop FunnelAutoSweepWorker. Safe to call
+        # even when None / never started.
+        if getattr(
+            self, "_funnel_auto_sweep_worker", None,
+        ) is not None:
+            try:
+                await self._funnel_auto_sweep_worker.stop()
+            except Exception as exc:
+                logger.warning(
+                    "FunnelAutoSweepWorker stop raised: %s", exc,
                 )
 
         # Sprint 775 — stop the PreemptionDetector polling loop +
