@@ -14,7 +14,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, AsyncIterator, List, Optional, Union
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -313,20 +315,32 @@ class TestStreamEndpointHappyPath:
             assert response.headers["x-accel-buffering"] == "no"
 
     def test_escrow_settled_on_success(self):
+        """Sprint 784 — on success the streaming settle path routes
+        through settle_inference_receipt (operator credited the cost,
+        payer refunded the remainder), replacing the pre-784 bare
+        release_escrow that paid the operator the entire budget. The
+        old assertion pinned that buggy full-budget release; this pins
+        the receipt-aware settle invocation."""
         escrow = _FakeEscrow()
         executor = _FakeStreamingExecutor(token_deltas=["ok"])
         client = _make_test_client(executor=executor, escrow=escrow)
-        with client.stream(
-            "POST", "/compute/inference/stream",
-            json={
-                "prompt": "x",
-                "model_id": "mock-llama-3-8b",
-                "budget_ftns": 1.0,
-            },
-        ) as response:
-            list(response.iter_bytes())
-        assert escrow.create_count == 1
-        assert escrow.release_count == 1
+        with patch(
+            "prsm.economy.credit_policy.settle_inference_receipt",
+            new=AsyncMock(
+                return_value=SimpleNamespace(should_slash=False),
+            ),
+        ) as settle:
+            with client.stream(
+                "POST", "/compute/inference/stream",
+                json={
+                    "prompt": "x",
+                    "model_id": "mock-llama-3-8b",
+                    "budget_ftns": 1.0,
+                },
+            ) as response:
+                list(response.iter_bytes())
+            assert escrow.create_count == 1
+            settle.assert_called_once()
         assert escrow.refund_count == 0
 
 

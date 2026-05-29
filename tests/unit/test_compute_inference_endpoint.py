@@ -1,7 +1,21 @@
 """Tests for POST /compute/inference endpoint (Phase 3.x.1 Task 5)."""
 
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+def _settle_spy():
+    """Spy for the sprint-784/785 receipt-aware settle path
+    (prsm.economy.credit_policy.settle_inference_receipt). Returns a
+    no-slash decision so the handler's `decision.should_slash` branch
+    is satisfied."""
+    return patch(
+        "prsm.economy.credit_policy.settle_inference_receipt",
+        new=AsyncMock(
+            return_value=SimpleNamespace(should_slash=False),
+        ),
+    )
 
 import pytest
 from fastapi.testclient import TestClient
@@ -191,11 +205,21 @@ class TestInferenceEscrowFlow:
         kwargs = mock_node._payment_escrow.create_escrow.call_args.kwargs
         assert kwargs["amount"] == 2.5
 
-    def test_escrow_released_on_success(self, client, mock_node):
-        client.post("/compute/inference", json={
-            "prompt": "x", "model_id": "mock-llama-3-8b", "budget_ftns": 1.0,
-        })
-        mock_node._payment_escrow.release_escrow.assert_called_once()
+    def test_escrow_settled_on_success(self, client, mock_node):
+        """Sprint 784/785 — on success the receipt-aware settle path
+        runs (settle_inference_receipt credits the operator the actual
+        cost + refunds the payer the remainder). This REPLACED the
+        pre-784 bare release_escrow, which paid the operator the entire
+        budget (1.0 for a 0.10 job) — a real payer over-charge. The old
+        test pinned that buggy full-budget release; this pins the fix."""
+        with _settle_spy() as settle:
+            r = client.post("/compute/inference", json={
+                "prompt": "x", "model_id": "mock-llama-3-8b",
+                "budget_ftns": 1.0,
+            })
+            assert r.status_code == 200
+            settle.assert_called_once()
+        # Success path settles via the receipt-aware route, not a refund.
         mock_node._payment_escrow.refund_escrow.assert_not_called()
 
     def test_escrow_refunded_on_unknown_model(self, client, mock_node):
@@ -229,15 +253,19 @@ class TestInferenceEscrowFlow:
         # (would have produced a receipt and caused billing leak)
 
     def test_escrow_uses_api_job_id(self, client, mock_node):
-        body = client.post("/compute/inference", json={
-            "prompt": "x", "model_id": "mock-llama-3-8b", "budget_ftns": 1.0,
-        }).json()
-        # Same job_id flows through escrow create + release + receipt
-        create_kwargs = mock_node._payment_escrow.create_escrow.call_args.kwargs
-        release_kwargs = mock_node._payment_escrow.release_escrow.call_args.kwargs
-        assert create_kwargs["job_id"] == body["job_id"]
-        assert release_kwargs["job_id"] == body["job_id"]
-        assert body["receipt"]["job_id"] == body["job_id"]
+        with _settle_spy() as settle:
+            body = client.post("/compute/inference", json={
+                "prompt": "x", "model_id": "mock-llama-3-8b",
+                "budget_ftns": 1.0,
+            }).json()
+            # Same job_id flows through escrow create + the receipt-
+            # aware settle + the receipt itself.
+            create_kwargs = (
+                mock_node._payment_escrow.create_escrow.call_args.kwargs
+            )
+            assert create_kwargs["job_id"] == body["job_id"]
+            assert settle.call_args.kwargs["job_id"] == body["job_id"]
+            assert body["receipt"]["job_id"] == body["job_id"]
 
 
 # ── Privacy budget tracking ─────────────────────────────────────────────────
@@ -380,13 +408,16 @@ class TestTask5Acceptance:
             assert key in receipt, f"receipt missing key: {key}"
 
     def test_escrow_integration(self, client, mock_node):
-        """Escrow create + release on success path; create + refund on failure path."""
+        """Escrow create + receipt-aware settle on success; create +
+        refund on failure (sprint-784/785 routing)."""
         # Success path
-        client.post("/compute/inference", json={
-            "prompt": "x", "model_id": "mock-llama-3-8b", "budget_ftns": 1.0,
-        })
-        assert mock_node._payment_escrow.create_escrow.call_count == 1
-        assert mock_node._payment_escrow.release_escrow.call_count == 1
+        with _settle_spy() as settle:
+            client.post("/compute/inference", json={
+                "prompt": "x", "model_id": "mock-llama-3-8b",
+                "budget_ftns": 1.0,
+            })
+            assert mock_node._payment_escrow.create_escrow.call_count == 1
+            assert settle.call_count == 1
         # Failure path
         mock_node._payment_escrow.reset_mock()
         client.post("/compute/inference", json={
