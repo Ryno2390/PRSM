@@ -49,6 +49,117 @@ class _AerodromeBackend(Protocol):
     ) -> Dict[str, Any]: ...
 
 
+# Aerodrome Pool function selectors (keccak4 of the signature).
+_SEL_TOKEN0 = "0x0dfe1681"        # token0()
+_SEL_TOKEN1 = "0xd21220a7"        # token1()
+_SEL_GET_RESERVES = "0x0902f1ac"  # getReserves() -> (r0, r1, ts)
+_SEL_STABLE = "0x22be3de1"        # stable() -> bool
+_SEL_TOTAL_SUPPLY = "0x18160ddd"  # totalSupply()
+
+_RPC_TIMEOUT_SECONDS = 15.0
+
+
+def _decode_uint256(result: Optional[str]) -> int:
+    if not result or result == "0x":
+        return 0
+    return int(result, 16)
+
+
+def _decode_address(result: Optional[str]) -> str:
+    """Last 20 bytes of a 32-byte word → 0x-prefixed address."""
+    if not result:
+        return ""
+    h = result[2:] if result.startswith("0x") else result
+    return "0x" + h[-40:]
+
+
+class AerodromeRpcBackend:
+    """Sprint 902 — real Base-RPC backend for pool reads.
+
+    Implements ``get_pool_state`` via JSON-RPC ``eth_call`` against the
+    Aerodrome Pool contract (token0/token1/getReserves/stable/
+    totalSupply) + ``eth_blockNumber``. Mirrors sp862's
+    WalletBalanceReader RPC pattern (httpx, 15s timeout). Read-only;
+    raises on transport/RPC error so AerodromeClient.get_pool_state can
+    fail-soft to None. ``fee_bps`` defaults to the Aerodrome volatile
+    convention (30) — exact fee is factory-governed and not load-bearing
+    for the constant-product quote.
+    """
+
+    def __init__(
+        self,
+        rpc_url: str,
+        *,
+        client: Any = None,
+        fee_bps: int = 30,
+    ) -> None:
+        self._rpc_url = rpc_url
+        self._fee_bps = fee_bps
+        if client is None:
+            import httpx
+            self._client = httpx.Client(timeout=_RPC_TIMEOUT_SECONDS)
+            self._owns_client = True
+        else:
+            self._client = client
+            self._owns_client = False
+        self._rpc_id = 0
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+
+    def _rpc_call(self, method: str, params: list) -> Any:
+        self._rpc_id += 1
+        resp = self._client.post(
+            self._rpc_url,
+            json={
+                "jsonrpc": "2.0", "id": self._rpc_id,
+                "method": method, "params": params,
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        if isinstance(payload, dict) and payload.get("error"):
+            raise RuntimeError(
+                f"Base RPC {method} error: {payload['error']!r}"
+            )
+        return payload.get("result")
+
+    def _call(self, pool_address: str, selector: str) -> Optional[str]:
+        return self._rpc_call("eth_call", [
+            {"to": pool_address, "data": selector}, "latest",
+        ])
+
+    def get_pool_state(self, pool_address: str) -> Dict[str, Any]:
+        token0 = _decode_address(self._call(pool_address, _SEL_TOKEN0))
+        token1 = _decode_address(self._call(pool_address, _SEL_TOKEN1))
+        reserves_raw = self._call(pool_address, _SEL_GET_RESERVES) or ""
+        h = reserves_raw[2:] if reserves_raw.startswith("0x") else reserves_raw
+        reserve0 = int(h[0:64], 16) if len(h) >= 64 else 0
+        reserve1 = int(h[64:128], 16) if len(h) >= 128 else 0
+        stable = _decode_uint256(
+            self._call(pool_address, _SEL_STABLE),
+        ) != 0
+        total_supply = _decode_uint256(
+            self._call(pool_address, _SEL_TOTAL_SUPPLY),
+        )
+        block_number = _decode_uint256(
+            self._rpc_call("eth_blockNumber", []),
+        )
+        return {
+            "pool_address": pool_address,
+            "token0": token0,
+            "token1": token1,
+            "reserve0": reserve0,
+            "reserve1": reserve1,
+            "stable": stable,
+            "fee_bps": self._fee_bps,
+            "total_supply": total_supply,
+            "block_number": block_number,
+        }
+
+
 @dataclass
 class AerodromePoolState:
     pool_address: str
@@ -100,6 +211,13 @@ class AerodromeClient:
             os.environ.get("AERODROME_USDC_FTNS_POOL_ADDRESS")
             or None
         )
+        # Sprint 902 — wire the real Base-RPC backend when an RPC URL
+        # is configured (and the caller didn't inject one), so live
+        # pool reads work the moment the seed ceremony populates the
+        # pool address. Pre-902 from_env left backend=None, so
+        # get_pool_state always returned None even on a live node.
+        if backend is None and rpc_url:
+            backend = AerodromeRpcBackend(rpc_url=rpc_url)
         return cls(
             rpc_url=rpc_url, pool_address=pool_address,
             backend=backend,
@@ -187,12 +305,17 @@ class AerodromeClient:
                 "not implemented in v1; volatile pools only."
             )
 
-        # Identify direction.
-        if token_in == state.token0:
+        # Identify direction. Sprint 902 — compare addresses
+        # case-insensitively: eth_call returns pool token addresses
+        # lowercase, while callers (the onramp→swap orchestrator) pass
+        # the EIP-55 checksummed constant, so `==` would spuriously
+        # report "token_in not in pool" on every live quote.
+        _ti = token_in.lower()
+        if _ti == state.token0.lower():
             reserve_in = state.reserve0
             reserve_out = state.reserve1
             token_out = state.token1
-        elif token_in == state.token1:
+        elif _ti == state.token1.lower():
             reserve_in = state.reserve1
             reserve_out = state.reserve0
             token_out = state.token0
