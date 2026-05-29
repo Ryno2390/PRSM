@@ -134,6 +134,19 @@ PERSONA_WEBHOOK_SECRET=<persona-webhook-secret>
 # HMAC signing secret for inbound Persona webhook verification
 #   (t=<ts>,v1=<hmac-sha256> per sp283). unset → webhook handler rejects all
 #   inbound POSTs (no_auth constraint).
+# Per-vendor webhook secrets — set the one matching KYC_VENDOR. The
+# canonical name comes from fiat_surface_health._vendor_secret_var():
+#   persona → PERSONA_WEBHOOK_SECRET
+#   onfido  → ONFIDO_WEBHOOK_TOKEN
+#   plaid   → PLAID_WEBHOOK_SECRET
+ONFIDO_WEBHOOK_TOKEN=<onfido-webhook-token>
+# HMAC token for inbound Onfido webhook verification (used when
+#   KYC_VENDOR=onfido). unset → Onfido webhooks rejected.
+PLAID_WEBHOOK_SECRET=<plaid-webhook-secret>
+# Verification secret for inbound Plaid webhooks (used when
+#   KYC_VENDOR=plaid). NOTE: Plaid signature verification is an
+#   honest-scope deferral (kyc_webhook_verifier returns False) — Plaid
+#   webhooks only pass with PRSM_KYC_WEBHOOK_VERIFY_DISABLED=1 (dev only).
 
 # ── Aerodrome (USDC↔FTNS pool quoter, sp279) ──
 BASE_RPC_URL=https://mainnet.base.org   # or Alchemy / Infura / QuickNode
@@ -148,6 +161,16 @@ PRSM_WAAS_STORE_DIR=/var/lib/prsm/waas-wallets
 # unset → ~/.prsm/waas-wallets. ":memory:" → no disk persistence.
 PRSM_KYC_STORE_DIR=/var/lib/prsm/kyc
 # unset → ~/.prsm/kyc-records. ":memory:" → in-memory only.
+PRSM_FIAT_COMPLIANCE_LOG_DIR=/var/lib/prsm/fiat-compliance
+# REQUIRED IN PRODUCTION. The FiatComplianceRing records every fiat-flow
+# event (onramp/offramp executes + KYC lifecycle) for AUSTRAC / FinCEN /
+# IRS reporting, which expect 5-7 YEAR retention. Unset → the ring still
+# operates but ONLY in a bounded in-memory buffer that is LOST on every
+# daemon restart — silently violating the retention requirement. The
+# sp286 startup health-check (check_fiat_surface_health) WARNs when this
+# is unset while fiat flows are active. Set it to a durable, backed-up
+# directory before accepting real-money traffic. PRSM_OPERATOR_JURISDICTION
+# tags each entry with the operator's reporting jurisdiction.
 PRSM_ONRAMP_FUNNEL_DIR=/var/lib/prsm/onramp-funnel
 # unset → ~/.prsm/onramp-funnel. ":memory:" → no cross-restart funnel
 #   observability.
@@ -197,9 +220,14 @@ PRSM_KYC_TIER_LIMIT_ENHANCED_USD=10000
 
 ```bash
 PRSM_KYC_WEBHOOK_VERIFY_DISABLED=1       # bypasses inbound webhook signature check
+PRSM_FIAT_HEALTH_CHECK_BYPASS=1          # demotes startup fiat-surface health ERRORs to INFO
 ```
 
-It exists for **test/dev environments only**. Setting it in a commissioned
+`PRSM_FIAT_HEALTH_CHECK_BYPASS` makes `check_fiat_surface_health` (sp285/286)
+downgrade every ERROR finding to INFO so a misconfigured node still boots —
+useful in test/dev, dangerous in production (it silences the very gates that
+catch an unsigned-webhook or missing-compliance-log misconfiguration). Both
+vars exist for **test/dev environments only**. Setting either in a commissioned
 environment turns off HMAC verification on inbound KYC vendor webhooks.
 
 **Sp888 — the webhook endpoint FAILS CLOSED.** `/wallet/kyc/webhook/{vendor}`
@@ -289,7 +317,7 @@ ops automation before activation.
 
 ## Step 5 — Smoke-test the canonical surfaces
 
-### 5a — Aerodrome swap quote (read-only, no spend)
+### 5a — Aerodrome quote (swap quote, read-only, no spend)
 
 ```bash
 curl -s -X POST "http://127.0.0.1:8000/wallet/swap/quote" -H "Content-Type: application/json" -d '{"usdc_amount": "100"}' | python3 -m json.tool
@@ -307,7 +335,7 @@ curl -s -X POST "http://127.0.0.1:8000/wallet/onramp/quote" -H "Content-Type: ap
 Returns the USD → USDC → FTNS artifact only. It does NOT initiate a swap or a
 fiat on-ramp (composer-only `PENDING_COMMISSION`).
 
-### 5c — WaaS wallet provisioning
+### 5c — Coinbase WaaS wallet provisioning
 
 ```bash
 curl -s -X POST "http://127.0.0.1:8000/wallet/waas/provision" -H "Content-Type: application/json" -d '{"user_id": "test-activation-001", "email": "ops@example.com"}' | python3 -m json.tool
@@ -326,7 +354,7 @@ Returns the KYC record dict (or 422 on validation error, 503 if the KYC client
 is not initialized). Check current vendor wiring with
 `curl -s http://127.0.0.1:8000/wallet/kyc/status`.
 
-### 5e — On-ramp execute (builds the Coinbase Pay widget URL)
+### 5e — Onramp full path: on-ramp execute (builds the Coinbase Pay widget URL)
 
 ```bash
 curl -s -X POST "http://127.0.0.1:8000/wallet/onramp/execute" -H "Content-Type: application/json" -d '{"user_id": "test-activation-001", "usd_amount": "1.00", "destination_address": "0x..."}' | python3 -m json.tool
