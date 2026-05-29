@@ -42,14 +42,21 @@ def test_parallax_env_registry_chain_stream_is_optional():
     assert "back-pressure" in desc.lower() or "sprint 713" in desc.lower()
 
 
-def test_parallax_env_registry_total_count_post_sprint_714():
-    """Pin: sprint 714 added `PRSM_CHAIN_STREAM_QUEUE_MAXSIZE` —
-    registry must now contain exactly 26 entries. If this count
-    changes, update the audit doc + parallax-readiness docstring
-    so operators know which env vars exist."""
+def test_parallax_env_registry_total_count():
+    """Pin the parallax-readiness env registry: a change to the count
+    means an operator-facing env var was added/removed and the audit
+    doc + readiness docstring should be updated to match. Also asserts
+    every entry is distinct (a duplicate name is always a bug).
+
+    History: sprint 714 → 26; sprint 765 (+AUTO_CLAIM_*) → 43; the
+    operator surface has since grown to 51 (live-verified distinct)."""
     from prsm.cli import _PARALLAX_ENV_REGISTRY
-    # Sprint 765 added PRSM_AUTO_CLAIM_THRESHOLD_FTNS + INTERVAL_S → 43.
-    assert len(_PARALLAX_ENV_REGISTRY) == 43, (
-        f"expected 43 vars post-sprint-765, got "
-        f"{len(_PARALLAX_ENV_REGISTRY)}"
+    names = [r[0] for r in _PARALLAX_ENV_REGISTRY]
+    assert len(names) == len(set(names)), (
+        f"duplicate env-registry names: "
+        f"{sorted(n for n in set(names) if names.count(n) > 1)}"
+    )
+    assert len(_PARALLAX_ENV_REGISTRY) == 51, (
+        f"expected 51 vars, got {len(_PARALLAX_ENV_REGISTRY)} — "
+        f"update this pin + the audit doc / readiness docstring"
     )

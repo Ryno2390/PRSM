@@ -38,7 +38,11 @@ from prsm.node.api import create_api_app
 def _make_uploaded(cid: str, size_bytes: int):
     """Mimic the shape of UploadedContent for the mock return."""
     return SimpleNamespace(
-        cid=cid,
+        # UploadedContent's field is `content_id` (not `cid`) — the
+        # shard endpoint reads uploaded.content_id (api.py sprint-532
+        # F45 fix). The mock previously used `cid`, so every shard
+        # publish raised AttributeError.
+        content_id=cid,
         filename=f"file-{cid}",
         size_bytes=size_bytes,
         content_hash="0xdeadbeef",

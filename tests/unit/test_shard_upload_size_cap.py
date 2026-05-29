@@ -53,7 +53,19 @@ def _post(node, content_bytes):
 
 class TestShardSizeCap:
     def test_default_100mb_rejects_101mb(self):
-        with patch.dict(os.environ, {}, clear=False):
+        # The global http_body_size_limit_middleware (sprint 742)
+        # caps ALL request bodies at PRSM_HTTP_MAX_BODY_BYTES
+        # (default 1 MiB) BEFORE any endpoint runs, so a 101MB body is
+        # intercepted globally before the shard endpoint's own cap. To
+        # exercise the shard-specific cap in isolation, raise the
+        # global cap above the request size. (Operators wanting large
+        # shard uploads must likewise raise PRSM_HTTP_MAX_BODY_BYTES —
+        # documented in the activation runbook.)
+        with patch.dict(
+            os.environ,
+            {"PRSM_HTTP_MAX_BODY_BYTES": str(512 * 1024 * 1024)},
+            clear=False,
+        ):
             os.environ.pop("PRSM_MAX_SHARD_UPLOAD_BYTES", None)
             big = b"x" * (101 * 1024 * 1024)
             resp = _post(_node(), big)
