@@ -160,7 +160,10 @@ class OnrampFunnel:
                     Path.home() / ".prsm" / "onramp-funnel"
                 )
         else:
-            self._persist_dir = persist_dir
+            # Accept a str OR a Path (mirror the env branch, which
+            # wraps in Path) so callers passing a plain string don't
+            # hit AttributeError on .mkdir below.
+            self._persist_dir = Path(persist_dir)
         if self._persist_dir is not None:
             self._persist_dir.mkdir(parents=True, exist_ok=True)
             self._load_from_disk()

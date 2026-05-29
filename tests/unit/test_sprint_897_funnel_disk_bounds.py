@@ -157,6 +157,21 @@ def test_sweep_prunes_old_terminal_intents(tmp_path):
 
 # ── Regression: normal record/sweep behavior intact ──────────
 
+def test_persist_dir_accepts_str(tmp_path):
+    """Regression: an explicit persist_dir passed as a plain str (not
+    pathlib.Path) must work — the env branch wraps in Path, the
+    explicit branch must too. Surfaced by the sp897 integration smoke."""
+    funnel = OnrampFunnel(persist_dir=str(tmp_path / "as_str"))
+    rec = funnel.record_intent(
+        user_id="alice",
+        destination_address="0x" + "33" * 20,
+        expected_usd=10.0,
+        session_token="tok",
+    )
+    assert funnel.get_intent(rec.intent_id) is not None
+    assert (tmp_path / "as_str" / f"{rec.intent_id}.json").exists()
+
+
 def test_record_and_sweep_still_work(tmp_path):
     funnel = OnrampFunnel(persist_dir=tmp_path)
     rec = funnel.record_intent(
