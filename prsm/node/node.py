@@ -2700,18 +2700,51 @@ class PRSMNode:
             )
             self._fiat_compliance_ring = None
 
-        # Sprint 284 — webhook replay defense ring. Bounded
-        # in-memory set of recently-seen signatures; second
-        # occurrence of the same signature → 409. Survives
-        # process lifetime only (intentionally — restart
-        # = fresh replay window, matching the timestamp
-        # tolerance window).
+        # Sprint 284 — webhook replay defense ring. Bounded set of
+        # recently-seen signatures; second occurrence of the same
+        # signature → 409.
+        #
+        # Sp893 — the ring is now PERSISTENT across restarts. The
+        # sp284 "restart = fresh replay window" rationale only held
+        # for Persona (which carries a `t=` timestamp → the 300s
+        # freshness window is a second layer). ONFIDO carries no
+        # timestamp, so the ring is its ONLY replay defense; an
+        # in-memory-only ring let a captured Onfido webhook be
+        # replayed across any restart. Persist dir defaults to
+        # ~/.prsm/kyc-webhook-replay/ (env override
+        # PRSM_KYC_WEBHOOK_REPLAY_DIR; ":memory:" opts back into the
+        # old in-memory-only behavior). Disk bounded by FIFO cap +
+        # PRSM_KYC_WEBHOOK_REPLAY_RETENTION_SEC time window.
         try:
             from prsm.economy.web3.webhook_replay_defense import (
                 WebhookReplayRing,
             )
-            self._kyc_webhook_replay_ring = WebhookReplayRing()
-            logger.info("KYC webhook replay ring wired")
+            _replay_dir_raw = os.environ.get(
+                "PRSM_KYC_WEBHOOK_REPLAY_DIR",
+            )
+            if _replay_dir_raw == ":memory:":
+                _replay_persist_dir = None
+            elif _replay_dir_raw:
+                _replay_persist_dir = Path(_replay_dir_raw)
+            else:
+                _replay_persist_dir = (
+                    Path.home() / ".prsm" / "kyc-webhook-replay"
+                )
+            try:
+                _replay_retention = int(os.environ.get(
+                    "PRSM_KYC_WEBHOOK_REPLAY_RETENTION_SEC", "86400",
+                ))
+            except (ValueError, TypeError):
+                _replay_retention = 86400
+            self._kyc_webhook_replay_ring = WebhookReplayRing(
+                persist_dir=_replay_persist_dir,
+                retention_sec=_replay_retention,
+            )
+            logger.info(
+                "KYC webhook replay ring wired (persist=%s, "
+                "retention=%ds)",
+                _replay_persist_dir or ":memory:", _replay_retention,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "WebhookReplayRing construction failed: %s — "

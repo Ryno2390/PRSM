@@ -687,7 +687,16 @@ These are the audit-trail surface for AUSTRAC/FinCEN/IRS retention.
 - Composer-only invariant: sprint-280 R-2026-05-08-1 (every fiat write flows
   through a composer, never a raw client)
 - Inbound webhook signature verification: sp283 (HMAC-SHA256; Persona/Onfido/Plaid)
-- Replay protection: sp284 (timestamp window + signature-hash dedup ring)
+- Replay protection: sp284 (timestamp window + signature-hash dedup ring);
+  sp893 — the dedup ring is now PERSISTENT across daemon restarts. This matters
+  most for Onfido, whose signatures carry no timestamp, so the ring is its ONLY
+  replay defense; an in-memory-only ring let a captured Onfido webhook be
+  replayed across the next restart. Persist dir defaults to
+  `~/.prsm/kyc-webhook-replay/`; set `PRSM_KYC_WEBHOOK_REPLAY_DIR=:memory:` to
+  opt back into in-memory-only, or to a custom path. Disk is bounded by a FIFO
+  count cap AND `PRSM_KYC_WEBHOOK_REPLAY_RETENTION_SEC` (default 86400 = 24h;
+  expired tokens are dropped on reload). Raise the retention for a stricter
+  Onfido replay-rejection horizon.
 - Tier-rolling-total enforcement: sp285 (FinCEN MSB defaults; rolling 24h)
 - Audit ring: sp285 (`prsm/economy/web3/fiat_compliance_ring.py`)
 - Startup health check: sp285 (`prsm/economy/web3/fiat_surface_health.py`)
