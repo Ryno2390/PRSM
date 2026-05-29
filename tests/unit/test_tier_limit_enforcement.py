@@ -11,10 +11,13 @@ Tier limits (defaults, tunable via env):
   enhanced — $10,000 / 24h (proof of address + source of funds
                               required to unlock)
 
-Computation: per-user rolling sum of usd_amount across all
-fiat-surface kinds (onramp + offramp + executes) within the
-window. Gasless transfers excluded (FTNS-denominated; not
-fiat-side). KYC events excluded (zero USD).
+Computation: per-user rolling sum of usd_amount across SETTLED
+fiat-execute kinds (onramp_execute + offramp_execute) within the
+window. Sp885 correction: quotes are NON-binding price checks and
+do NOT count toward the limit (counting them let a user exhaust
+their cap by price-shopping; and executes — the real settled
+volume — recorded nothing). Gasless transfers excluded (FTNS-
+denominated). KYC events excluded (zero USD).
 
 New response fields on /wallet/onramp/quote +
 /wallet/offramp/quote:
@@ -95,16 +98,17 @@ def test_total_usd_zero_for_unknown_user():
 
 
 def test_total_usd_sums_recent_events():
+    # Sp885: counts EXECUTES (settled volume), not quotes.
     r = FiatComplianceRing()
     now = time.time()
     r.record(
-        kind="onramp_quote", user_id="alice",
-        usd_amount=100.0, ftns_amount=100.0, status="OK",
+        kind="onramp_execute", user_id="alice",
+        usd_amount=100.0, ftns_amount=100.0, status="CONFIRMED",
         timestamp=now - 100,
     )
     r.record(
-        kind="offramp_quote", user_id="alice",
-        usd_amount=50.0, ftns_amount=50.0, status="OK",
+        kind="offramp_execute", user_id="alice",
+        usd_amount=50.0, ftns_amount=50.0, status="CONFIRMED",
         timestamp=now - 50,
     )
     assert r.total_usd_for_user("alice") == 150.0
@@ -115,14 +119,14 @@ def test_total_usd_window_excludes_old_events():
     now = time.time()
     # 25h ago — outside default 24h window
     r.record(
-        kind="onramp_quote", user_id="alice",
-        usd_amount=1000.0, ftns_amount=1000.0, status="OK",
+        kind="onramp_execute", user_id="alice",
+        usd_amount=1000.0, ftns_amount=1000.0, status="CONFIRMED",
         timestamp=now - 25 * 3600,
     )
     # 1h ago — inside window
     r.record(
-        kind="onramp_quote", user_id="alice",
-        usd_amount=100.0, ftns_amount=100.0, status="OK",
+        kind="onramp_execute", user_id="alice",
+        usd_amount=100.0, ftns_amount=100.0, status="CONFIRMED",
         timestamp=now - 3600,
     )
     assert r.total_usd_for_user("alice") == 100.0
@@ -132,17 +136,35 @@ def test_total_usd_filters_by_user():
     r = FiatComplianceRing()
     now = time.time()
     r.record(
-        kind="onramp_quote", user_id="alice",
-        usd_amount=100.0, ftns_amount=100.0, status="OK",
+        kind="onramp_execute", user_id="alice",
+        usd_amount=100.0, ftns_amount=100.0, status="CONFIRMED",
         timestamp=now,
     )
     r.record(
-        kind="onramp_quote", user_id="bob",
-        usd_amount=500.0, ftns_amount=500.0, status="OK",
+        kind="onramp_execute", user_id="bob",
+        usd_amount=500.0, ftns_amount=500.0, status="CONFIRMED",
         timestamp=now,
     )
     assert r.total_usd_for_user("alice") == 100.0
     assert r.total_usd_for_user("bob") == 500.0
+
+
+def test_total_usd_quotes_do_not_count_sp885():
+    """Sp885 regression: non-binding quotes must NOT burn the limit
+    (the bug this sprint fixed — they previously did)."""
+    r = FiatComplianceRing()
+    now = time.time()
+    r.record(
+        kind="onramp_quote", user_id="alice",
+        usd_amount=900.0, ftns_amount=900.0, status="OK",
+        timestamp=now,
+    )
+    r.record(
+        kind="offramp_quote", user_id="alice",
+        usd_amount=900.0, ftns_amount=900.0, status="OK",
+        timestamp=now,
+    )
+    assert r.total_usd_for_user("alice") == 0.0
 
 
 def test_total_usd_excludes_gasless_kinds():
@@ -180,8 +202,8 @@ def test_total_usd_custom_window():
     r = FiatComplianceRing()
     now = time.time()
     r.record(
-        kind="onramp_quote", user_id="alice",
-        usd_amount=100.0, ftns_amount=100.0, status="OK",
+        kind="onramp_execute", user_id="alice",
+        usd_amount=100.0, ftns_amount=100.0, status="CONFIRMED",
         timestamp=now - 2 * 3600,  # 2h ago
     )
     # 24h window: included
@@ -284,9 +306,9 @@ def test_onramp_verified_basic_pushed_over_by_rolling():
     waas, kyc = _verified_user(level="basic")
     now = time.time()
     r.record(
-        kind="onramp_quote", user_id="alice",
+        kind="onramp_execute", user_id="alice",
         usd_amount=900.0, ftns_amount=900.0,
-        status="OK", timestamp=now - 100,
+        status="CONFIRMED", timestamp=now - 100,
     )
     resp = _client(ring=r, waas=waas, kyc=kyc).post(
         "/wallet/onramp/quote",
@@ -440,15 +462,15 @@ def test_rolling_total_combines_onramp_and_offramp():
     r = FiatComplianceRing()
     waas, kyc = _verified_user(level="basic")
     now = time.time()
-    # User already onramped $700 + offramped $200 today
+    # User already onramped $700 + offramped $200 today (settled)
     r.record(
-        kind="onramp_quote", user_id="alice",
-        usd_amount=700.0, ftns_amount=700.0, status="OK",
+        kind="onramp_execute", user_id="alice",
+        usd_amount=700.0, ftns_amount=700.0, status="CONFIRMED",
         timestamp=now - 1000,
     )
     r.record(
-        kind="offramp_quote", user_id="alice",
-        usd_amount=200.0, ftns_amount=200.0, status="OK",
+        kind="offramp_execute", user_id="alice",
+        usd_amount=200.0, ftns_amount=200.0, status="CONFIRMED",
         timestamp=now - 500,
     )
     # Requesting $200 more → 700+200+200 = $1100 > $1000 limit

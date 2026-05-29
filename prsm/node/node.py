@@ -4580,15 +4580,21 @@ class PRSMNode:
                 reader = _wbr_from_env()
                 aero = getattr(self, "_aerodrome_client", None)
                 net = get_network_config("mainnet")
-                on_confirmed = None
                 notifier = _notifier_from_env()
-                if aero is not None and net.ftns_token:
-                    on_confirmed = make_on_confirmed_callback(
-                        funnel=funnel,
-                        aerodrome_client=aero,
-                        ftns_address=net.ftns_token,
-                        completion_notifier=notifier,
-                    )
+                # Sp885 — always build the callback (NOT gated on
+                # aero): envelope build is None-safe when Aerodrome
+                # is unwired, but the compliance-ring record (tier
+                # limit) + completion webhook MUST fire on every
+                # CONFIRMED regardless of pool status.
+                on_confirmed = make_on_confirmed_callback(
+                    funnel=funnel,
+                    aerodrome_client=aero,
+                    ftns_address=net.ftns_token or "",
+                    completion_notifier=notifier,
+                    compliance_ring=getattr(
+                        self, "_fiat_compliance_ring", None,
+                    ),
+                )
                 try:
                     return funnel.sweep(
                         balance_reader=reader,

@@ -216,14 +216,23 @@ class FiatComplianceRing:
     def count(self) -> int:
         return len(self._entries)
 
-    # Sprint 285 — sum USD volume per user over a rolling
-    # window. Backs the tier-limit-enforcement check on
-    # onramp/offramp quote endpoints. Gasless transfers +
-    # KYC events excluded (gasless is FTNS-denominated; KYC
-    # is zero-amount metadata).
+    # Sprint 285 / 885 — sum SETTLED fiat USD volume per user over
+    # a rolling window. Backs the tier-limit enforcement on
+    # onramp/execute (sp884).
+    #
+    # Sp885 correction: count only EXECUTES, NOT quotes. Quotes are
+    # non-binding price checks ("nothing has moved on-chain or via
+    # fiat rails") — counting them let a user exhaust their tier
+    # limit by price-shopping without transacting, AND executes
+    # (the real settled volume) recorded nothing, so the rolling
+    # total counted the wrong event entirely. Regulatory limits
+    # (FinCEN MSB) are on transacted volume, so settled executes
+    # are the correct denominator. Quotes are still recorded for
+    # the audit trail (compliance export / summary_by_kind) — they
+    # just don't burn the limit. Gasless (FTNS-denominated) + KYC
+    # (zero-amount) remain excluded.
     _FIAT_USD_KINDS = frozenset({
-        "onramp_quote", "onramp_execute",
-        "offramp_quote", "offramp_execute",
+        "onramp_execute", "offramp_execute",
     })
 
     def total_usd_for_user(

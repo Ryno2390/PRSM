@@ -151,6 +151,7 @@ def make_on_confirmed_callback(
     ftns_address: str,
     slippage_bps: int = _DEFAULT_SLIPPAGE_BPS,
     completion_notifier: Any = None,
+    compliance_ring: Any = None,
 ):
     """Factory that returns a callable suitable for OnrampFunnel
     .sweep(on_confirmed=...).
@@ -159,6 +160,9 @@ def make_on_confirmed_callback(
       - Builds the swap envelope (None-safe if pool not seeded yet)
       - Attaches to the intent's swap_envelope field
       - Persists the updated intent to disk via funnel._persist
+      - Sp885: records onramp_execute to the compliance ring with
+        the ACTUAL usdc_received, so the sp884 tier-limit rolling
+        total reflects settled volume (no-op when ring not wired)
       - Sp874: fires the outbound completion webhook (no-op when
         notifier isn't configured)
     """
@@ -185,6 +189,28 @@ def make_on_confirmed_callback(
                 "for intent %s — envelope deferred",
                 intent.intent_id,
             )
+        # Sp885 — record settled onramp volume so the sp884 tier
+        # rolling total accumulates against the user's limit. Uses
+        # the ACTUAL usdc_received (not expected_usd). Fail-soft:
+        # a ring error must not undo the CONFIRMED transition.
+        if compliance_ring is not None:
+            try:
+                compliance_ring.record(
+                    kind="onramp_execute",
+                    user_id=intent.user_id or "",
+                    usd_amount=float(
+                        getattr(intent, "usdc_received", 0.0) or 0.0
+                    ),
+                    ftns_amount=0.0,
+                    status="CONFIRMED",
+                    address=intent.destination_address,
+                    metadata={"intent_id": intent.intent_id},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "sp885: compliance ring record failed for "
+                    "intent %s: %s", intent.intent_id, exc,
+                )
         # Sp874 — fire outbound completion webhook (fail-soft).
         if completion_notifier is not None:
             try:

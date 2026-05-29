@@ -3468,15 +3468,22 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         )
         aero = getattr(node, "_aerodrome_client", None)
         net = get_network_config("mainnet")
-        on_confirmed = None
         notifier = _notifier_from_env()
-        if aero is not None and net.ftns_token:
-            on_confirmed = make_on_confirmed_callback(
-                funnel=funnel,
-                aerodrome_client=aero,
-                ftns_address=net.ftns_token,
-                completion_notifier=notifier,
-            )
+        # Sp885 — always build the callback (NOT gated on aero):
+        # the swap-envelope build needs Aerodrome (None-safe inside
+        # build_envelope_for_intent — deferred when unwired), but
+        # the compliance-ring record (settled volume → tier limit)
+        # and the completion webhook MUST fire on every CONFIRMED
+        # regardless of pool status.
+        on_confirmed = make_on_confirmed_callback(
+            funnel=funnel,
+            aerodrome_client=aero,
+            ftns_address=net.ftns_token or "",
+            completion_notifier=notifier,
+            compliance_ring=getattr(
+                node, "_fiat_compliance_ring", None,
+            ),
+        )
         try:
             return funnel.sweep(
                 balance_reader=reader,
