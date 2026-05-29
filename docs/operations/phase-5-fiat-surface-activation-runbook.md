@@ -169,6 +169,20 @@ PRSM_FUNNEL_AUTO_SWEEP_INTERVAL_S=300
 # Float seconds. unset/empty → auto-sweep DISABLED (interval=0.0). Values
 #   under 60 clamp to the 60s minimum (settlement takes minutes; faster is RPC
 #   waste). Non-numeric → logs a warning and disables (safe to typo).
+
+# ── KYC tier limits (rolling-window USD caps, sp285/884) ──
+PRSM_KYC_TIER_LIMIT_BASIC_USD=1000
+PRSM_KYC_TIER_LIMIT_ENHANCED_USD=10000
+# Per-tier rolling-window USD ceilings. Defaults: basic $1,000, enhanced
+#   $10,000 (FinCEN MSB convention). The tier is read from the user's KYC
+#   record level (basic|enhanced — see PERSONA_ENHANCED_TEMPLATE_ID); the
+#   rolling total comes from the sp282 compliance ring. ENFORCED on
+#   /wallet/onramp/execute (sp884): an unverified user → 403 kyc_required;
+#   a verified user whose requested + rolling total would exceed their tier
+#   limit → 403 tier_limit_exceeded (basic users get an upgrade-to-enhanced
+#   hint). The onramp/offramp QUOTES surface these as advisory flags only.
+#   A raw destination_address (no PRSM identity) is NOT gated — operator
+#   responsibility.
 ```
 
 **DO NOT** set this in production:

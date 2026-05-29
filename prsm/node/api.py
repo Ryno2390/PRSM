@@ -2632,6 +2632,70 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             )
 
+        # Sp884 — ENFORCE KYC + tier limits before minting a
+        # real-money onramp session. The quote endpoint surfaces
+        # kyc_required + tier_limit_exceeded as ADVISORY flags;
+        # execute must BLOCK so a caller cannot skip the quote and
+        # over-transact on an unverified / over-limit account. Only
+        # the destination_user_id path is gated — a raw
+        # destination_address has no PRSM identity to enforce against
+        # (documented operator responsibility, mirroring the quote).
+        if has_user_id:
+            _kyc = getattr(node, "_kyc_client", None)
+            if _kyc is not None:
+                _rec = _kyc.get_status(body.destination_user_id)
+                if _rec is None or _rec.status != "VERIFIED":
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "error": "kyc_required",
+                            "kyc_status": (
+                                _rec.status if _rec
+                                else "NOT_STARTED"
+                            ),
+                            "kyc_session_url": (
+                                _rec.session_url if _rec else None
+                            ),
+                            "message": (
+                                "Complete KYC verification before "
+                                "onramping. Initiate via POST "
+                                "/wallet/kyc/initiate."
+                            ),
+                        },
+                    )
+                _tier = _tier_check(
+                    user_id=body.destination_user_id,
+                    requested_usd=float(body.usd_amount),
+                    kyc_status=_rec.status,
+                )
+                if _tier["tier_limit_exceeded"]:
+                    _lvl = _tier["tier_level"]
+                    _upgrade = (
+                        "Complete enhanced KYC (Tier 2) to raise "
+                        "your limit: POST /wallet/kyc/initiate with "
+                        "level=enhanced."
+                        if _lvl == "basic"
+                        else "Contact support to raise your limit."
+                    )
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "error": "tier_limit_exceeded",
+                            "tier_level": _lvl,
+                            "tier_limit_usd": _tier["tier_limit_usd"],
+                            "tier_limit_remaining_usd": _tier[
+                                "tier_limit_remaining_usd"
+                            ],
+                            "requested_usd": float(body.usd_amount),
+                            "message": (
+                                f"This onramp would exceed your "
+                                f"{_lvl}-tier limit of "
+                                f"${_tier['tier_limit_usd']:.2f}. "
+                                + _upgrade
+                            ),
+                        },
+                    )
+
         destination_address: Optional[str] = body.destination_address
         if has_user_id:
             waas = getattr(node, "_coinbase_waas_client", None)
