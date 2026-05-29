@@ -4641,9 +4641,40 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         )
         verify_disabled = disable_raw in {"1", "true", "yes"}
 
-        # Enforce verification iff a secret is configured AND
-        # the disable flag isn't set. Operators who haven't yet
-        # wired secrets keep sprint-280 pass-through behavior.
+        # Sp888 — FAIL CLOSED. This endpoint is the ONLY writer that
+        # can mint a VERIFIED KYC record (→ auto-provision + raised
+        # tier limits). The pre-sp888 behavior processed UNSIGNED
+        # webhooks when no secret was configured ("keep operators
+        # unblocked") — a fail-open authentication hole: anyone who
+        # could reach the endpoint could forge inquiry.approved and
+        # bypass KYC entirely. Now a webhook is accepted ONLY when
+        # the signature verifies (secret set) OR the operator has
+        # EXPLICITLY opted into the dev/test bypass. No secret + no
+        # explicit bypass → refuse.
+        if not verify_disabled and not secret:
+            logger.warning(
+                "KYC webhook REFUSED (vendor=%s, client=%s): no "
+                "%s configured. Refusing to process an unsigned "
+                "compliance webhook (fail-closed, sp888).",
+                _vendor_lower,
+                request.client.host if request.client else "?",
+                secret_env or "<vendor>_WEBHOOK_SECRET",
+            )
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "KYC webhook verification is not configured. "
+                    f"Set {secret_env or 'the vendor webhook secret'}"
+                    " to enable signature verification, or "
+                    "PRSM_KYC_WEBHOOK_VERIFY_DISABLED=1 for dev/test."
+                    " Refusing to process an unsigned compliance "
+                    "webhook."
+                ),
+            )
+
+        # Enforce verification iff a secret is configured AND the
+        # disable flag isn't set. (verify_disabled → explicit
+        # dev/test bypass, handled by the fail-closed guard above.)
         if secret and not verify_disabled:
             ok, reason = KYCWebhookVerifier.verify(
                 vendor=_vendor_lower,

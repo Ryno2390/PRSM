@@ -78,11 +78,13 @@ def _onfido_header(body_bytes, token):
 # ── No secret configured: bypass (preserves sprint-280) ──
 
 
-def test_webhook_no_secret_bypasses(monkeypatch):
-    """When PERSONA_WEBHOOK_SECRET is unset, sprint-280's
-    behavior is preserved — the webhook updates state without
-    signature check. This is a deliberate v1 default to keep
-    existing operators unblocked while they wire secrets."""
+def test_webhook_no_secret_fails_closed(monkeypatch):
+    """Sp888 — FAIL CLOSED. When no webhook secret is configured AND
+    the explicit dev-bypass flag is not set, the endpoint REFUSES
+    (503) rather than processing an unsigned webhook. This closes
+    the pre-sp888 fail-open hole where anyone could forge
+    inquiry.approved to mint VERIFIED status when an operator hadn't
+    wired the secret. (Previously this returned 200 — the bug.)"""
     monkeypatch.delenv("PERSONA_WEBHOOK_SECRET", raising=False)
     monkeypatch.delenv("ONFIDO_WEBHOOK_TOKEN", raising=False)
     monkeypatch.delenv(
@@ -94,7 +96,25 @@ def test_webhook_no_secret_bypasses(monkeypatch):
         "/wallet/kyc/webhook/persona",
         json={"user_id": "alice", "status": "VERIFIED"},
     )
+    assert resp.status_code == 503
+    # The unsigned webhook must NOT have mutated KYC state.
+    assert kyc.is_verified("alice") is False
+
+
+def test_webhook_no_secret_but_explicit_bypass_accepts(monkeypatch):
+    """The dev/test escape hatch still works: with
+    PRSM_KYC_WEBHOOK_VERIFY_DISABLED=1 set, an unsigned webhook is
+    accepted (for local dev where no real vendor secret exists)."""
+    monkeypatch.delenv("PERSONA_WEBHOOK_SECRET", raising=False)
+    monkeypatch.setenv("PRSM_KYC_WEBHOOK_VERIFY_DISABLED", "1")
+    kyc = _commissioned_kyc(vendor="persona")
+    _seed_alice(kyc)
+    resp = _client(kyc).post(
+        "/wallet/kyc/webhook/persona",
+        json={"user_id": "alice", "status": "VERIFIED"},
+    )
     assert resp.status_code == 200
+    assert kyc.is_verified("alice") is True
 
 
 # ── Persona secret configured: enforcement on ────────────

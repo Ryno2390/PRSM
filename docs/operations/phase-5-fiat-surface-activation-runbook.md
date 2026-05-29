@@ -194,6 +194,14 @@ PRSM_KYC_WEBHOOK_VERIFY_DISABLED=1       # bypasses inbound webhook signature ch
 It exists for **test/dev environments only**. Setting it in a commissioned
 environment turns off HMAC verification on inbound KYC vendor webhooks.
 
+**Sp888 — the webhook endpoint FAILS CLOSED.** `/wallet/kyc/webhook/{vendor}`
+is the only writer that can mint a `VERIFIED` KYC record (→ auto-provision +
+raised tier limits). It accepts a webhook ONLY when the signature verifies
+(the vendor secret is set) OR `PRSM_KYC_WEBHOOK_VERIFY_DISABLED=1` is
+explicitly set. With neither, it returns **503** and refuses to process the
+unsigned webhook. In production you MUST set `PERSONA_WEBHOOK_SECRET` (or the
+vendor equivalent) — there is no silent unsigned pass-through.
+
 ---
 
 ## Step 2 — Create persistence directories

@@ -6,8 +6,10 @@ commission delegates to the configured vendor backend.
 """
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from prsm.economy.web3.kyc_client import (
@@ -207,6 +209,18 @@ def test_status_supported_vendors_listed():
 
 
 # ── POST /wallet/kyc/webhook/{vendor} ────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _kyc_webhook_dev_bypass(monkeypatch):
+    """Sp888 — the webhook endpoint now FAILS CLOSED on unsigned
+    input. These tests exercise body-parsing / state-transition
+    logic (not signature auth), so they use the explicit dev/test
+    bypass (the correct pattern: prod requires a secret, dev sets
+    this flag). Signature-verification behavior is covered by
+    test_kyc_webhook_signature_integration.py."""
+    monkeypatch.setenv("PRSM_KYC_WEBHOOK_VERIFY_DISABLED", "1")
+    yield
 
 
 def test_webhook_503_when_unwired():

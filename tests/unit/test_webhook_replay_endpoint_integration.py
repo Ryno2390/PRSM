@@ -326,11 +326,16 @@ def test_replay_does_not_mutate_state(monkeypatch):
 # ── Bypass paths preserved ───────────────────────────────
 
 
-def test_no_secret_bypasses_replay_defense(monkeypatch):
-    """When secret is unset, sprint-280 pass-through is
-    preserved including no replay defense — operators wiring
-    secrets is the gate for both defenses."""
+def test_no_secret_fails_closed(monkeypatch):
+    """Sp888 — with no secret AND no explicit dev-bypass, the
+    endpoint FAILS CLOSED (503). Pre-sp888 this passed through
+    unsigned (200, no replay defense) — the fail-open hole. Now
+    an operator must either configure the secret (enabling both
+    signature + replay defense) or set the explicit dev-bypass."""
     monkeypatch.delenv("PERSONA_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv(
+        "PRSM_KYC_WEBHOOK_VERIFY_DISABLED", raising=False,
+    )
     kyc = _commissioned_kyc("persona")
     _seed_alice(kyc)
     cli = _client(kyc)
@@ -338,11 +343,9 @@ def test_no_secret_bypasses_replay_defense(monkeypatch):
     r1 = cli.post(
         "/wallet/kyc/webhook/persona", json=payload,
     )
-    r2 = cli.post(
-        "/wallet/kyc/webhook/persona", json=payload,
-    )
-    assert r1.status_code == 200
-    assert r2.status_code == 200  # NOT 409
+    assert r1.status_code == 503
+    # Unsigned webhook must not have mutated KYC state.
+    assert kyc.is_verified("alice") is False
 
 
 def test_disable_flag_bypasses_replay_defense(monkeypatch):
