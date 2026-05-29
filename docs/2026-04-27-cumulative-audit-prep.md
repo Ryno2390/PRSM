@@ -3358,7 +3358,7 @@ When future events fire (CDP commission, Aerodrome pool seed, fleet kill-switch 
 
 **Auditor reading path.**
 
-1. **Module entry point.** `prsm/economy/web3/formal_invariants.py` — the spec layer + runtime probe. `INVARIANT_REGISTRY` is the canonical PUBLIC commitment. 7 contracts / 20 invariants pinned.
+1. **Module entry point.** `prsm/economy/web3/formal_invariants.py` — the spec layer + runtime probe. `INVARIANT_REGISTRY` is the canonical PUBLIC commitment. 7 contracts / 20 invariants pinned as of this sprint-364 snapshot. *(Current state, post sprints 365/378: 22 invariants — 21 CRITICAL + 1 MEDIUM — across the same 7 contracts; symbolic lane grown to 13 spec files / 81 halmos proofs / 16 of 22 mirrored. See `docs/PRSM_Testing.md` for the live counts.)*
 2. **Symbolic lane.** `contracts/symbolic-proofs/README.md` for the lane structure + invocation pattern + current proofs table. Each `.t.sol` file has a `STRUCTURAL EQUIVALENCE` block in its header naming the canonical source lines mirrored.
 3. **Python bridge.** `prsm/economy/web3/halmos_runner.py` + `tests/unit/test_halmos_runner.py` — fail-soft subprocess invocation + parser. `SYMBOLIC_PROOF_CATALOG` is the cross-reference table from spec-contract name to runtime invariants.
 4. **Unified endpoint surface.** `prsm/node/api.py` — 5 endpoints in the `/admin/formal-verification/*` family (3 runtime + 2 symbolic, sprint 364). `prsm/mcp_server.py` — `prsm_formal_verification` MCP tool with 5 actions.

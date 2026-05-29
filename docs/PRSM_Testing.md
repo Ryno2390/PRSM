@@ -330,8 +330,8 @@ journey. Each step should be live-verifiable on a single node.
 | EmissionController | (Phase 8) | ✅ | EPOCH_DURATION_SECONDS chain-8453 4yr enforcement |
 | CompensationDistributor | (Phase 8) | ✅ | |
 | StorageSlashing + KeyDistribution | (Phase 7-storage) | ✅ | Sole-owned by Foundation Safe |
-| Formal-invariants harness (7 contracts, 20 CRITICAL invariants) | runtime probe | ✅ | Sprint 357-364 |
-| Halmos symbolic-execution lane (5 specs, 28 proofs, 16/20 invariants) | `contracts/symbolic-proofs/` | ✅ | Sprint 360-364 |
+| Formal-invariants harness (7 contracts, 22 invariants: 21 CRITICAL + 1 MEDIUM) | runtime probe | ✅ | Sprint 357-378 |
+| Halmos symbolic-execution lane (13 specs, 81 proofs, 16/22 invariants mirrored) | `contracts/symbolic-proofs/` | ✅ | Sprint 360-378 |
 | `/admin/formal-verification/*` endpoint family | REST | ✅ | Sprint 364 |
 | `prsm_formal_verification` MCP | MCP | ✅ | Sprint 364 |
 
@@ -488,9 +488,9 @@ Every operator-facing feature should have REST + CLI + MCP coverage
 
 | Feature | Surface | Status | Sprint | Notes |
 |---------|---------|--------|--------|-------|
-| Runtime invariants probe (7 contracts, 20 invariants) | `/admin/formal-verification/check?contract=X` | ✅ | 302-359, 443 | Live: INV-RD-3 (Foundation Safe owns RoyaltyDistributor v2) PASS against mainnet; harness fail-soft on missing-selector skips |
-| Invariants registry (full list) | `/admin/formal-verification/invariants` | ✅ | 443 | Live: returns all 20 invariants with severity / spec_text / kind / selector / expected |
-| Halmos symbolic-execution lane (5 specs, 28 proofs) | `/admin/formal-verification/symbolic` | ✅ | 360-364, 443 | Live: endpoint lists 5 specs with mirrors_runtime_contract + runtime_invariants linkage |
+| Runtime invariants probe (7 contracts, 22 invariants) | `/admin/formal-verification/check?contract=X` | ✅ | 302-378, 443 | Live: INV-RD-3 (Foundation Safe owns RoyaltyDistributor v2) PASS against mainnet; harness fail-soft on missing-selector skips |
+| Invariants registry (full list) | `/admin/formal-verification/invariants` | ✅ | 443 | Live: returns all 22 invariants (21 CRITICAL + 1 MEDIUM) with severity / spec_text / kind / selector / expected |
+| Halmos symbolic-execution lane (13 specs, 81 proofs) | `/admin/formal-verification/symbolic` | ✅ | 360-378, 443 | Live: endpoint lists specs with mirrors_runtime_contract + runtime_invariants linkage |
 | `@pytest.mark.requires_halmos` CI marker | conftest | ✅ | 366 | |
 | Halmos streaming-inference extension | `SpeculationRollbackMathSpec` | ✅ | 367 | First off-chain Python algorithm |
 | Halmos H1 bounded iterator | `ChunkStreamingBoundsSpec` | ✅ | 368 | |
