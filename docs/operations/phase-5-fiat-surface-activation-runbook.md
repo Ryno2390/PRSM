@@ -701,7 +701,14 @@ These are the audit-trail surface for AUSTRAC/FinCEN/IRS retention.
 - Audit ring: sp285 (`prsm/economy/web3/fiat_compliance_ring.py`)
 - Startup health check: sp285 (`prsm/economy/web3/fiat_surface_health.py`)
 - Readiness aggregator: sp848/859 (`prsm/economy/web3/phase5_status.py`)
-- On-ramp funnel: sp857 (`prsm/economy/web3/onramp_funnel.py`)
+- On-ramp funnel: sp857 (`prsm/economy/web3/onramp_funnel.py`); sp897 —
+  persistence is BOUNDED. Terminal intents (CONFIRMED/EXPIRED) older than
+  `PRSM_ONRAMP_FUNNEL_RETENTION_SEC` (default 2592000 = 30d) are pruned on
+  load + after each sweep + their JSON file deleted; a hard count cap
+  `PRSM_ONRAMP_FUNNEL_MAX_INTENTS` (default 50000) drops oldest-by-created.
+  Stops the unbounded per-intent file growth that otherwise slows daemon
+  startup (the load-time glob) on a long-running node. Long-term conversion
+  analytics live in the compliance ring + sp872 CSV export, not the funnel.
 - On-ramp→swap orchestrator: sp871 (`prsm/economy/web3/onramp_to_swap_orchestrator.py`)
 - Completion notifier: sp874 (`prsm/economy/web3/onramp_completion_notifier.py`)
 - Auto-sweep worker: sp878 (`prsm/node/funnel_auto_sweep.py`)

@@ -57,6 +57,20 @@ STATUS_PENDING_SETTLEMENT = "PENDING_SETTLEMENT"
 STATUS_CONFIRMED = "CONFIRMED"
 STATUS_EXPIRED = "EXPIRED"
 
+_TERMINAL_STATUSES = frozenset({STATUS_CONFIRMED, STATUS_EXPIRED})
+
+# Sp897 — bound the persistence (sp887 unbounded-disk finding). The
+# funnel writes one JSON file per intent and globs them ALL on each
+# restart; without bounds a long-running node grows disk monotonically
+# and its startup degrades linearly with lifetime intent count.
+# TERMINAL intents (CONFIRMED/EXPIRED) older than retention are pruned
+# (their file deleted); a hard count cap drops oldest-by-created when
+# exceeded. 30 days >> the 24h sweep-expiry window, so active intents
+# are never age-pruned (anything still active is genuinely recent).
+# Long-term analytics live in the compliance ring + sp872 CSV export.
+_DEFAULT_RETENTION_SEC = 2_592_000  # 30 days
+_DEFAULT_MAX_INTENTS = 50_000
+
 
 @dataclass
 class OnrampIntent:
@@ -109,8 +123,32 @@ class OnrampFunnel:
         self,
         *,
         persist_dir: Optional[Path] = None,
+        retention_sec: Optional[int] = None,
+        max_intents: Optional[int] = None,
+        now: Optional[float] = None,
     ) -> None:
         self._records: Dict[str, OnrampIntent] = {}
+        # Sp897 — persistence bounds (env-overridable).
+        if retention_sec is not None:
+            self._retention_sec = retention_sec
+        else:
+            try:
+                self._retention_sec = int(os.environ.get(
+                    "PRSM_ONRAMP_FUNNEL_RETENTION_SEC",
+                    str(_DEFAULT_RETENTION_SEC),
+                ))
+            except (ValueError, TypeError):
+                self._retention_sec = _DEFAULT_RETENTION_SEC
+        if max_intents is not None:
+            self._max_intents = max_intents
+        else:
+            try:
+                self._max_intents = int(os.environ.get(
+                    "PRSM_ONRAMP_FUNNEL_MAX_INTENTS",
+                    str(_DEFAULT_MAX_INTENTS),
+                ))
+            except (ValueError, TypeError):
+                self._max_intents = _DEFAULT_MAX_INTENTS
         if persist_dir is None:
             persist_raw = os.environ.get("PRSM_ONRAMP_FUNNEL_DIR")
             if persist_raw == ":memory:":
@@ -126,6 +164,9 @@ class OnrampFunnel:
         if self._persist_dir is not None:
             self._persist_dir.mkdir(parents=True, exist_ok=True)
             self._load_from_disk()
+        # Sp897 — prune on load so a restart shrinks an over-grown
+        # corpus (and the next restart's glob stays fast).
+        self._prune(now if now is not None else time.time())
 
     def _load_from_disk(self) -> None:
         if self._persist_dir is None:
@@ -145,6 +186,50 @@ class OnrampFunnel:
             return
         path = self._persist_dir / f"{rec.intent_id}.json"
         path.write_text(json.dumps(rec.to_dict(), indent=2))
+
+    # ── Sp897 — bounded persistence ──────────────────────────
+
+    def _terminal_ts(self, rec: OnrampIntent) -> float:
+        """The timestamp a terminal record reached its terminal state
+        (for age-out). Falls back to created_at for legacy records
+        that predate the timestamp fields."""
+        if rec.status == STATUS_CONFIRMED:
+            return rec.confirmed_at or rec.created_at
+        if rec.status == STATUS_EXPIRED:
+            return rec.expired_at or rec.created_at
+        return rec.created_at
+
+    def _delete_record(self, intent_id: str) -> None:
+        self._records.pop(intent_id, None)
+        if self._persist_dir is not None:
+            try:
+                (self._persist_dir / f"{intent_id}.json").unlink()
+            except OSError:
+                pass
+
+    def _prune(self, now: float) -> None:
+        """Bound the corpus: age out terminal records past retention,
+        then enforce the hard count cap (oldest-by-created first).
+        Active intents are never age-pruned (retention >> the 24h
+        sweep-expiry, so anything still active is recent)."""
+        # 1. Age-prune terminal records.
+        cutoff = now - self._retention_sec
+        stale = [
+            iid for iid, rec in self._records.items()
+            if rec.status in _TERMINAL_STATUSES
+            and self._terminal_ts(rec) < cutoff
+        ]
+        for iid in stale:
+            self._delete_record(iid)
+        # 2. Count cap — drop the oldest by created_at.
+        overflow = len(self._records) - self._max_intents
+        if overflow > 0:
+            ordered = sorted(
+                self._records.values(),
+                key=lambda r: r.created_at,
+            )
+            for rec in ordered[:overflow]:
+                self._delete_record(rec.intent_id)
 
     def record_intent(
         self,
@@ -167,6 +252,10 @@ class OnrampFunnel:
         )
         self._records[intent_id] = rec
         self._persist(rec)
+        # Sp897 — keep disk bounded even on a node that never restarts
+        # and never sweeps. Cheap: only prunes when over the cap.
+        if len(self._records) > self._max_intents:
+            self._prune(time.time())
         return rec
 
     def list_intents(
@@ -185,6 +274,7 @@ class OnrampFunnel:
     def sweep(
         self, *, balance_reader: Any,
         on_confirmed: Optional[Any] = None,
+        now: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Periodic sweep: check on-chain USDC balance against
         each open intent. Transitions:
@@ -198,7 +288,7 @@ class OnrampFunnel:
 
         Returns summary {checked, confirmed_new, expired_new}.
         """
-        now = time.time()
+        now = now if now is not None else time.time()
         checked = 0
         confirmed_new = 0
         expired_new = 0
@@ -265,6 +355,9 @@ class OnrampFunnel:
                 if rec.status == STATUS_INTENT_RECORDED:
                     rec.status = STATUS_PENDING_SETTLEMENT
             self._persist(rec)
+        # Sp897 — prune after the sweep so a long-running node (no
+        # restart) keeps disk bounded continuously.
+        self._prune(now)
         return {
             "checked": checked,
             "confirmed_new": confirmed_new,
