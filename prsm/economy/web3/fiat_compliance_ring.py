@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 import uuid
@@ -144,6 +145,20 @@ class FiatComplianceRing:
             raise ValueError(
                 f"kind must be one of {sorted(_VALID_KINDS)}, "
                 f"got {kind!r}"
+            )
+        # Sp889 — reject non-finite amounts FIRST. `NaN < 0` and
+        # `inf < 0` are both False, so the negative-guard below
+        # would let them through — and a single NaN poisons
+        # total_usd_for_user (sum → NaN), making the sp884 tier
+        # check `(NaN + requested) > limit` always False and thus
+        # permanently disabling tier enforcement for that user.
+        if not math.isfinite(usd_amount):
+            raise ValueError(
+                f"usd_amount must be finite, got {usd_amount}"
+            )
+        if not math.isfinite(ftns_amount):
+            raise ValueError(
+                f"ftns_amount must be finite, got {ftns_amount}"
             )
         if usd_amount < 0:
             raise ValueError(
