@@ -147,10 +147,27 @@ class FunnelAutoSweepWorker:
 
     async def _run_one_sweep(self) -> Optional[dict]:
         """One sweep iteration. sweep_fn may be sync or async;
-        we handle both so the node can pass either."""
-        result = self._sweep_fn()
-        if asyncio.iscoroutine(result):
-            result = await result
+        we handle both so the node can pass either.
+
+        Sp894 — a SYNCHRONOUS sweep_fn (the node's `_do_sweep`
+        closure) runs OnrampFunnel.sweep → sp862 balance reader →
+        blocking Base RPC (httpx, 15s timeout) for EACH open intent.
+        Running it inline would block the daemon's event loop for up
+        to N×3×15s, stalling every concurrent request — a daemon-wide
+        liveness DoS if an RPC hangs near its timeout. So a sync
+        sweep_fn is offloaded to the default thread-pool executor;
+        the loop stays responsive while the sweep blocks in a thread.
+        An ASYNC sweep_fn yields on its own I/O, so it's awaited
+        cooperatively on the loop (offloading it would defeat that).
+        """
+        if asyncio.iscoroutinefunction(self._sweep_fn):
+            result = await self._sweep_fn()
+        else:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, self._sweep_fn)
+            # Defensive: a plain-def fn that returns a coroutine.
+            if asyncio.iscoroutine(result):
+                result = await result
         self.sweeps_run += 1
         self.last_sweep_at = time.time()
         if isinstance(result, dict):
