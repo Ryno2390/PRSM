@@ -25,6 +25,7 @@ import json
 import logging
 import math
 import os
+import threading
 import time
 import uuid
 from collections import deque
@@ -103,6 +104,15 @@ class FiatComplianceRing:
             maxlen=max_entries,
         )
         self._by_id: Dict[str, FiatComplianceEntry] = {}
+        # Sp896 — the ring is shared between the asyncio event loop
+        # (tier check on /wallet/onramp/execute reads it) and the
+        # sp894 auto-sweep WORKER THREAD (sp885 records onramp_execute
+        # on every CONFIRMED intent). Concurrent deque append + iterate
+        # raises "deque mutated during iteration", so all access to
+        # _entries / _by_id is serialized through this mutex. Readers
+        # snapshot under the lock then iterate the snapshot lock-free
+        # to keep the hot-path hold short.
+        self._lock = threading.Lock()
         self._persist_dir: Optional[Path] = (
             Path(persist_dir) if persist_dir is not None else None
         )
@@ -189,15 +199,20 @@ class FiatComplianceRing:
             ),
             metadata=metadata or {},
         )
-        self._entries.append(entry)
-        self._by_id[entry.entry_id] = entry
+        with self._lock:
+            self._entries.append(entry)
+            self._by_id[entry.entry_id] = entry
+        # Disk write outside the lock: it's a per-entry independent
+        # file (entry_id.json), so it can't race another writer, and
+        # keeping I/O out of the mutex avoids serializing the hot path.
         self._write_to_disk(entry)
         return entry
 
     def get(
         self, entry_id: str,
     ) -> Optional[FiatComplianceEntry]:
-        return self._by_id.get(entry_id)
+        with self._lock:
+            return self._by_id.get(entry_id)
 
     def recent(
         self,
@@ -220,7 +235,8 @@ class FiatComplianceRing:
                 f"kind must be one of {sorted(_VALID_KINDS)}, "
                 f"got {kind!r}"
             )
-        snap = list(self._entries)
+        with self._lock:  # Sp896 — snapshot under lock, then iterate.
+            snap = list(self._entries)
         snap.reverse()
         if kind:
             snap = [e for e in snap if e.kind == kind]
@@ -229,7 +245,8 @@ class FiatComplianceRing:
         return snap[offset:offset + limit]
 
     def count(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
     # Sprint 285 / 885 — sum SETTLED fiat USD volume per user over
     # a rolling window. Backs the tier-limit enforcement on
@@ -263,7 +280,9 @@ class FiatComplianceRing:
             return 0.0
         cutoff = time.time() - window_sec
         total = 0.0
-        for e in self._entries:
+        with self._lock:  # Sp896 — snapshot, then sum lock-free.
+            snap = list(self._entries)
+        for e in snap:
             if e.user_id != user_id:
                 continue
             if e.kind not in self._FIAT_USD_KINDS:
@@ -277,7 +296,9 @@ class FiatComplianceRing:
         """Aggregate count + total USD volume per kind. Empty
         ring → empty dict."""
         out: Dict[str, Dict[str, float]] = {}
-        for e in self._entries:
+        with self._lock:  # Sp896 — snapshot, then aggregate lock-free.
+            snap = list(self._entries)
+        for e in snap:
             bucket = out.setdefault(
                 e.kind, {"count": 0, "total_usd": 0.0},
             )
