@@ -2270,6 +2270,32 @@ class ContentUploader:
         if not content_id or not accessor_id:
             return
 
+        # Sp899 — idempotency. _handle_gossip dispatches subscriber
+        # callbacks WITHOUT dedup, and a re-broadcast / digest-replay /
+        # multi-path gossip re-fires this handler with a fresh
+        # envelope, so without a guard both Case 1 (record_access) and
+        # Case 2 (source royalty) re-credit on every delivery —
+        # counterfeit FTNS from redundant access events. Atomically
+        # CLAIM the access nonce on the local ledger (the sp898
+        # record_nonce primitive: seen_nonces PRIMARY KEY → INSERT OR
+        # IGNORE is the serialization point) so each access event
+        # credits AT MOST ONCE on this node. The nonce is namespaced so
+        # it can't collide with FTNS-transaction nonces in the same
+        # table. Legacy events without an explicit access_nonce fall
+        # back to a stable derived key. Fail-open only if the ledger
+        # itself errors (don't silently drop legitimate royalties).
+        access_nonce = data.get("access_nonce") or (
+            f"{content_id}:{accessor_id}:{data.get('timestamp', '')}"
+        )
+        try:
+            claimed = await self.ledger.record_nonce(
+                f"content_access:{access_nonce}", origin,
+            )
+        except Exception:  # noqa: BLE001
+            claimed = True
+        if not claimed:
+            return
+
         # Case 1: We are the direct creator and have a local record
         if creator_id == self.identity.node_id and content_id in self.uploaded_content:
             await self.record_access(content_id, accessor_id)

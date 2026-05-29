@@ -609,6 +609,9 @@ class ContentProvider:
                     "royalty_rate": resolved.get("royalty_rate", 0.01),
                     "parent_cids": resolved.get("parent_cids", []),
                     "timestamp": time.time(),
+                    # Sp899 — unique per-access id so receivers credit
+                    # this access event at most once (replay-safe).
+                    "access_nonce": uuid.uuid4().hex,
                 })
             except Exception as exc:
                 logger.warning(
@@ -1087,6 +1090,7 @@ class ContentProvider:
                 "royalty_rate": record.royalty_rate,
                 "parent_cids": record.parent_cids,
                 "timestamp": time.time(),
+                "access_nonce": uuid.uuid4().hex,  # sp899 replay-safe
             })
         except Exception as exc:
             logger.warning(
@@ -1143,6 +1147,7 @@ class ContentProvider:
                 "royalty_rate": resolved.get("royalty_rate", 0.01),
                 "parent_cids": resolved.get("parent_cids", []),
                 "timestamp": time.time(),
+                "access_nonce": uuid.uuid4().hex,  # sp899 replay-safe
             })
         except Exception as exc:
             logger.warning(
