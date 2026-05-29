@@ -13000,6 +13000,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         require_dp = bool(
             body.get("require_dp_noise", False),
         )
+        # Sprint 900 — expose the verifier's activation-DP-trace +
+        # topology-rotation integrity gates over HTTP (the library
+        # supported them; the endpoint never surfaced them).
+        require_dp_trace = bool(
+            body.get("require_activation_dp_trace", False),
+        )
+        require_topology = bool(
+            body.get("require_topology_rotation", False),
+        )
 
         # Reconstruct InferenceReceipt from JSON payload.
         # Fields containing bytes are base64-encoded on the
@@ -13020,6 +13029,32 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "settler_signature_b64", "",
                 ) or b""
             )
+            # Sprint 900 — reconstruct the §7 capstone fields. The
+            # default-wrapped live executor (make_rpc_chain_executor
+            # wraps TopologyAware + ActivationDP by default) populates
+            # activation_noise_trace + topology_assignment on EVERY
+            # non-NONE-tier receipt, and signing_payload() folds their
+            # hashes into the signed bytes. Dropping them here made the
+            # reconstructed receipt's signing_payload diverge from what
+            # was signed → signature_valid=False on honest private-tier
+            # receipts, breaking the §7 independent-verification promise
+            # for exactly the receipts it's meant to cover.
+            _ant = receipt_payload.get("activation_noise_trace")
+            if isinstance(_ant, dict):
+                from prsm.compute.inference.activation_dp import (
+                    ActivationNoiseTrace,
+                )
+                _ant = ActivationNoiseTrace.from_dict(_ant)
+            elif _ant is not None:
+                _ant = None  # malformed → treat as absent
+            _topo = receipt_payload.get("topology_assignment")
+            if isinstance(_topo, dict):
+                from prsm.compute.inference.topology_rotation import (
+                    TopologyAssignment,
+                )
+                _topo = TopologyAssignment.from_dict(_topo)
+            elif _topo is not None:
+                _topo = None
             receipt = InferenceReceipt(
                 job_id=receipt_payload["job_id"],
                 request_id=receipt_payload["request_id"],
@@ -13050,6 +13085,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 settler_node_id=receipt_payload.get(
                     "settler_node_id", "",
                 ),
+                activation_noise_trace=_ant,
+                topology_assignment=_topo,
             )
         except (KeyError, ValueError, TypeError) as exc:
             raise HTTPException(
@@ -13063,6 +13100,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             receipt,
             require_hardware_attestation=require_hw,
             require_dp_noise=require_dp,
+            require_activation_dp_trace=require_dp_trace,
+            require_topology_rotation=require_topology,
             public_key_b64=public_key_b64,
         )
         return result.to_dict()

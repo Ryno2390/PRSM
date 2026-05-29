@@ -105,6 +105,107 @@ def _client():
     )
 
 
+# ── Sprint 900 — endpoint must verify the §7 capstone fields ──
+
+
+def test_endpoint_verifies_receipt_with_privacy_fields():
+    """The verify endpoint must validate receipts that carry
+    activation_noise_trace + topology_assignment — which the
+    default-wrapped live executor (make_rpc_chain_executor wraps
+    TopologyAware + ActivationDP by default) emits on EVERY non-NONE
+    privacy-tier receipt. Pre-sp900 the endpoint dropped both fields
+    when reconstructing the InferenceReceipt, so signing_payload()
+    differed from what was signed → signature_valid=False on
+    perfectly honest STANDARD/HIGH/MAXIMUM-tier receipts. That breaks
+    the §7 "anyone can independently verify" promise for exactly the
+    private-tier receipts the promise is about."""
+    from prsm.compute.inference.activation_dp import (
+        ActivationNoiseTrace,
+    )
+    from prsm.compute.inference.topology_rotation import (
+        TopologyAssignment,
+    )
+
+    identity = generate_node_identity("verifier-privacy-fields")
+    trace = ActivationNoiseTrace(
+        per_stage_epsilon=[4.0, 4.0], total_epsilon_spent=8.0,
+        clip_norm=1.0, stage_count=2, tier="standard",
+    )
+    topo = TopologyAssignment(
+        positions={(0, 0): "nodeA", (1, 0): "nodeB"},
+        stage_count=2, slots_per_stage=1,
+    )
+    att = (
+        SOFTWARE_TEE_ATTESTATION_PREFIX
+        + hashlib.sha384(b"sw-tee:j").digest()
+    )
+    receipt = InferenceReceipt(
+        job_id="infer-job-priv",
+        request_id="req-priv",
+        model_id="mock-llama-3-8b",
+        content_tier=ContentTier.A,
+        privacy_tier=PrivacyLevel.STANDARD,
+        epsilon_spent=8.0,
+        tee_type=TEEType.SOFTWARE,
+        tee_attestation=att,
+        output_hash=hashlib.sha256(b"out").digest(),
+        duration_seconds=0.1,
+        cost_ftns="0.01",
+        settler_signature=b"\x00" * 64,
+        settler_node_id="",
+        activation_noise_trace=trace,
+        topology_assignment=topo,
+    )
+    receipt = sign_receipt(receipt, identity)
+    pub_b64 = base64.b64encode(
+        identity.public_key_bytes
+    ).decode("ascii")
+
+    payload = _receipt_to_payload(receipt)
+    payload["activation_noise_trace"] = trace.to_dict()
+    payload["topology_assignment"] = topo.to_dict()
+
+    resp = _client().post(
+        "/compute/receipt/verify",
+        json={"receipt": payload, "public_key_b64": pub_b64},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["signature_valid"] is True, body
+    # Sprint 900 — the now-exposed integrity gates must pass for a
+    # receipt that genuinely carries a valid DP trace + topology.
+    resp2 = _client().post(
+        "/compute/receipt/verify",
+        json={
+            "receipt": payload,
+            "public_key_b64": pub_b64,
+            "require_activation_dp_trace": True,
+            "require_topology_rotation": True,
+        },
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["ok"] is True, resp2.json()
+
+
+def test_endpoint_require_dp_trace_fails_when_absent():
+    """With require_activation_dp_trace=True, a receipt that carries
+    NO trace (NONE tier) must be rejected (ok=False) — proving the
+    newly-exposed gate actually gates."""
+    receipt, identity, pub_b64 = _signed_receipt(
+        privacy_tier=PrivacyLevel.NONE,
+    )
+    resp = _client().post(
+        "/compute/receipt/verify",
+        json={
+            "receipt": _receipt_to_payload(receipt),
+            "public_key_b64": pub_b64,
+            "require_activation_dp_trace": True,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is False
+
+
 # ── HTTP: happy path ─────────────────────────────────────
 
 
