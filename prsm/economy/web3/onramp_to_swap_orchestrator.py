@@ -77,8 +77,23 @@ def build_envelope_for_intent(
     if usdc_received <= 0:
         return None
 
-    # USDC has 6 decimals — convert whole-token amount to base units.
-    amount_in_units = int(usdc_received * (10 ** 6))
+    # Sp895 — amount_in is the EXACT on-chain USDC base units. The
+    # funnel persists the authoritative integer (usdc_received_units,
+    # from bal.usdc_units at the CONFIRMED transition); use it
+    # directly. Computing `int(usdc_received * 1e6)` from the float
+    # whole-token amount round-trips through float64 (units → /1e6 →
+    # ×1e6 → int) and loses a base unit for ~1.2% of values (e.g.
+    # 8_000_001 → 8.000001 → 8_000_000), making the swap under-spend
+    # the received dust. Fall back to the float-derived value only
+    # for legacy records that predate the units field.
+    usdc_received_units = int(
+        getattr(intent, "usdc_received_units", 0) or 0,
+    )
+    if usdc_received_units > 0:
+        amount_in_units = usdc_received_units
+    else:
+        # USDC has 6 decimals — convert whole-token to base units.
+        amount_in_units = int(usdc_received * (10 ** 6))
 
     try:
         quote = aerodrome_client.quote_swap(
