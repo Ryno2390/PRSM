@@ -537,13 +537,23 @@ class LocalLedger:
         )
         return await cursor.fetchone() is not None
 
-    async def record_nonce(self, nonce: str, origin: str) -> None:
-        """Record a transaction nonce to prevent replay."""
-        await self._db.execute(
+    async def record_nonce(self, nonce: str, origin: str) -> bool:
+        """Atomically CLAIM a transaction nonce. Returns True if THIS
+        call inserted the nonce (i.e. won the claim), False if it was
+        already present (replay or a concurrent duplicate).
+
+        Sp898 — `seen_nonces.nonce` is a PRIMARY KEY, so this
+        `INSERT OR IGNORE` is the serialization point: of N concurrent
+        handlers processing the same gossiped transaction, exactly one
+        gets rowcount==1 and may proceed to credit; the rest get False.
+        This is the gate that closes the cross-node double-credit
+        window (callers that ignore the return value are unaffected)."""
+        cursor = await self._db.execute(
             "INSERT OR IGNORE INTO seen_nonces (nonce, origin, seen_at) VALUES (?, ?, ?)",
             (nonce, origin, time.time()),
         )
         await self._db.commit()
+        return cursor.rowcount == 1
 
     async def get_recent_tx_ids(self, wallet_id: str, limit: int = 50) -> List[str]:
         """Get recent transaction IDs for reconciliation."""

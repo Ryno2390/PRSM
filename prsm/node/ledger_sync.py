@@ -179,8 +179,22 @@ class LedgerSync:
             self._txs_rejected += 1
             return
 
-        # Record the nonce
-        await self.ledger.record_nonce(nonce, origin)
+        # Sp898 — atomically CLAIM the nonce (the seen_nonces PRIMARY
+        # KEY makes INSERT OR IGNORE the serialization point). Of N
+        # concurrent handlers processing the SAME gossiped transaction
+        # (gossip floods the same signed tx via multiple peers),
+        # exactly one wins the claim and proceeds to credit; the rest
+        # get claimed=False and stop here. Without this, both pass the
+        # has_seen_nonce + has_transaction checks (check-then-act
+        # across awaits) and BOTH credit → cross-node double-credit.
+        # The has_seen_nonce check above remains a cheap fast-path.
+        claimed = await self.ledger.record_nonce(nonce, origin)
+        if not claimed:
+            logger.debug(
+                f"Rejected concurrent/replay nonce {nonce[:12]}..."
+            )
+            self._txs_rejected += 1
+            return
         self._txs_received += 1
 
         # Apply the transaction locally if we are the recipient

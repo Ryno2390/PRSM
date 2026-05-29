@@ -1557,13 +1557,22 @@ class DAGLedger:
         amount: float,
         tx_type: TransactionType,
         description: str = "",
+        signature: Optional[str] = None,
+        public_key: Optional[str] = None,
     ) -> DAGTransaction:
+        # Sp898 — accept signature/public_key for parity with debit()
+        # and LocalLedger.credit(). ledger_sync._on_ftns_transaction
+        # calls credit(..., signature=...) when applying an incoming
+        # cross-node transfer; without these params the DAG backend
+        # raised TypeError on every remote credit.
         return await self.submit_transaction(
             tx_type=tx_type,
             amount=amount,
             from_wallet=None,
             to_wallet=wallet_id,
             description=description,
+            signature=signature,
+            public_key=public_key,
         )
     
     async def debit(
@@ -1632,13 +1641,29 @@ class DAGLedger:
     async def has_seen_nonce(self, nonce: str) -> bool:
         cursor = await self._db.execute("SELECT 1 FROM seen_nonces WHERE nonce = ?", (nonce,))
         return await cursor.fetchone() is not None
-    
-    async def record_nonce(self, nonce: str, origin: str) -> None:
-        await self._db.execute(
+
+    async def has_transaction(self, tx_id: str) -> bool:
+        """Sp898 — whether a transaction with this id is already in the
+        DAG. Required by ledger_sync's incoming-transfer dedup path
+        (`_on_ftns_transaction`); without it the DAG backend raised
+        AttributeError on every incoming cross-node transfer. Parity
+        with LocalLedger.has_transaction."""
+        cursor = await self._db.execute(
+            "SELECT 1 FROM dag_transactions WHERE tx_id = ?", (tx_id,)
+        )
+        return await cursor.fetchone() is not None
+
+    async def record_nonce(self, nonce: str, origin: str) -> bool:
+        """Atomically claim a nonce. Returns True if THIS call inserted
+        it (won the claim), False if already present. Sp898 — mirrors
+        LocalLedger.record_nonce so ledger_sync's double-credit gate
+        works identically whichever ledger backend is wired."""
+        cursor = await self._db.execute(
             "INSERT OR IGNORE INTO seen_nonces (nonce, origin, seen_at) VALUES (?, ?, ?)",
             (nonce, origin, time.time()),
         )
         await self._db.commit()
+        return cursor.rowcount == 1
 
 
 class DAGLedgerAdapter:
@@ -1723,8 +1748,10 @@ class DAGLedgerAdapter:
     async def has_seen_nonce(self, nonce: str) -> bool:
         return await self._dag.has_seen_nonce(nonce)
         
-    async def record_nonce(self, nonce: str, origin: str) -> None:
-        await self._dag.record_nonce(nonce, origin)
+    async def record_nonce(self, nonce: str, origin: str) -> bool:
+        # Sp898 — propagate the atomic-claim bool so ledger_sync's
+        # double-credit gate works on the DAG backend too.
+        return await self._dag.record_nonce(nonce, origin)
         
     async def get_recent_tx_ids(self, wallet_id: str, limit: int = 50) -> List[str]:
         history = await self._dag.get_transaction_history(wallet_id, limit)
