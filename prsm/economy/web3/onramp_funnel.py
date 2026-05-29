@@ -224,6 +224,16 @@ class OnrampFunnel:
                 rec.usdc_received = bal.usdc
                 rec.usdc_received_units = bal.usdc_units
                 confirmed_new += 1
+                # Sp891 — PERSIST the CONFIRMED transition BEFORE
+                # firing the callback. The callback (sp885 compliance
+                # record + sp874 webhook) must fire AT MOST ONCE per
+                # intent. Persisting first means any concurrent
+                # sweeper or post-crash reload observes CONFIRMED and
+                # skips this intent (guard above) rather than
+                # re-confirming + double-firing — which would
+                # double-count settled volume against the sp884 tier
+                # limit and duplicate the downstream webhook.
+                self._persist(rec)
                 # Sp871 — fire optional callback on confirm.
                 # Fail-soft: a misbehaving callback (e.g., pool
                 # not yet seeded → swap-envelope build raises)
@@ -237,6 +247,12 @@ class OnrampFunnel:
                             "callback raised for intent %s: %s",
                             rec.intent_id, exc,
                         )
+                    else:
+                        # Persist again so any callback-applied
+                        # mutations (e.g. sp871 swap_envelope) land.
+                        self._persist(rec)
+                # Already persisted above; skip the tail persist.
+                continue
             elif (
                 now - rec.created_at > _EXPIRY_SECONDS
             ):
