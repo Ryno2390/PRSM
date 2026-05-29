@@ -210,6 +210,17 @@ explicitly set. With neither, it returns **503** and refuses to process the
 unsigned webhook. In production you MUST set `PERSONA_WEBHOOK_SECRET` (or the
 vendor equivalent) — there is no silent unsigned pass-through.
 
+**Sp892 — the webhook is EXEMPT from `PRSM_NODE_API_KEY` auth.**
+`/wallet/kyc/webhook/{vendor}` is called by the vendor (Persona),
+which cannot hold your node API key — it authenticates via its HMAC
+signature instead. The auth middleware carves the webhook prefix
+out of node-API-key enforcement (`SIGNATURE_AUTHENTICATED_PREFIXES`)
+so the vendor can reach it even when the rest of `/wallet/*` is
+key-protected. Every other `/wallet/*` + `/admin/*` endpoint still
+requires the node API key when set. (Without this carve-out the
+middleware would 401 the vendor before the signature check — the
+whole KYC flow would silently break in production.)
+
 ---
 
 ## Step 2 — Create persistence directories

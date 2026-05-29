@@ -25,6 +25,22 @@ PUBLIC_ENDPOINTS: Set[str] = {
 }
 
 # Endpoints that require auth (when PRSM_NODE_API_KEY is set).
+# Sprint 892 — paths that authenticate via their OWN mechanism
+# (HMAC signature) and MUST be reachable by EXTERNAL callers that
+# do not hold the operator's PRSM_NODE_API_KEY. The KYC vendor
+# webhook is called by Persona/Onfido/Plaid and verified by its
+# per-request signature (sp283 + sp888 fail-closed). It lives under
+# the `/wallet/` protected prefix, so without this carve-out the
+# node-API-key middleware would 401 the vendor BEFORE its signature
+# check runs — breaking the entire KYC→VERIFIED→auto-provision loop
+# in production (where the API key is set). Exempting it here does
+# NOT weaken security: the endpoint still enforces signature auth
+# (no secret → 503, bad signature → 401). Checked BEFORE the
+# protected-prefix enforcement.
+SIGNATURE_AUTHENTICATED_PREFIXES = [
+    "/wallet/kyc/webhook/",
+]
+
 PROTECTED_PREFIXES = [
     "/settler/",
     "/content/upload",
@@ -105,6 +121,17 @@ class NodeAuthMiddleware(BaseHTTPMiddleware):
 
         # Public endpoints always allowed
         if path in PUBLIC_ENDPOINTS:
+            return await call_next(request)
+
+        # Sp892 — signature-authenticated endpoints (vendor webhooks)
+        # are exempt from node-API-key auth: external callers can't
+        # hold the operator's key, and the endpoint enforces its own
+        # HMAC signature auth. Checked BEFORE protected-prefix
+        # enforcement so the /wallet/ prefix doesn't block them.
+        if any(
+            path.startswith(prefix)
+            for prefix in SIGNATURE_AUTHENTICATED_PREFIXES
+        ):
             return await call_next(request)
 
         # Check if this is a protected endpoint
