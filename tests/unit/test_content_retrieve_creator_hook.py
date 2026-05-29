@@ -70,6 +70,16 @@ def _client(
     node._content_filter_store = None
     node.content_provider = _FakeContentProvider()
     node.content_index = _FakeContentIndex(creator_addr)
+    # Sprint 494 added a fallback in the retrieve hook: when the
+    # content_index yields no creator_eth_address, it reads the LOCAL
+    # uploaded_content record. With a bare MagicMock node,
+    # `uploaded_content.get(cid)` returns a truthy mock whose
+    # `.creator_eth_address` is also truthy — which silently defeats
+    # the "creator unknown" cases (and any other test relying on the
+    # index being the only creator source). Use a real empty dict so
+    # the fallback finds nothing and creator resolution reflects only
+    # what the test wired into content_index.
+    node.content_uploader.uploaded_content = {}
     return TestClient(
         create_api_app(node, enable_security=False),
         raise_server_exceptions=False,
