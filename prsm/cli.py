@@ -2422,6 +2422,122 @@ def node_aerodrome_ceremony(
         "[yellow]AERODROME_USDC_FTNS_POOL_ADDRESS[/yellow] in "
         "operator env to the resulting pool address"
     )
+    console.print(
+        "  6. Verify go-live: [yellow]prsm node aerodrome-go-live"
+        "[/yellow] — confirms the pool is seeded + the onramp→swap "
+        "path is live, and prepares the first real swap envelope"
+    )
+
+
+# Sp901 — `prsm node aerodrome-go-live` post-seed verification harness.
+# The final step of the ceremony lifecycle: confirm the seed actually
+# worked + the fiat→FTNS swap path is live before opening the taps.
+@node.command("aerodrome-go-live")
+@click.option(
+    "--network", type=click.Choice(["mainnet", "sepolia"]),
+    default="mainnet",
+    help="Target network — default mainnet",
+)
+@click.option(
+    "--probe-usd", default=1.0, type=float,
+    help="Probe swap size in whole USDC for the path check (default 1)",
+)
+@click.option(
+    "--expected-seed-usdc", default=None, type=float,
+    help="Optional: declared USDC seed (whole tokens) to cross-check "
+         "reserves (mismatch → WARN, not a block)",
+)
+@click.option(
+    "--expected-seed-ftns", default=None, type=float,
+    help="Optional: declared FTNS seed (whole tokens) to cross-check",
+)
+@click.option(
+    "--slippage-bps", default=100, type=int,
+    help="Slippage tolerance for the prepared envelope (default 100)",
+)
+@click.option(
+    "--output-json", "-j", type=click.Path(), default=None,
+    help="Write the full report (incl. prepared swap envelope) here",
+)
+def node_aerodrome_go_live(
+    network: str,
+    probe_usd: float,
+    expected_seed_usdc: Optional[float],
+    expected_seed_ftns: Optional[float],
+    slippage_bps: int,
+    output_json: Optional[str],
+):
+    """Verify the Aerodrome pool is live + ready for fiat→FTNS.
+
+    Run this the instant the seed ceremony executes and you've set
+    AERODROME_USDC_FTNS_POOL_ADDRESS (+ BASE_RPC_URL). It confirms the
+    pool is configured, seeded (non-zero reserves), holds the USDC/FTNS
+    pair, is volatile, reports the opening price, quotes a live swap,
+    and builds the full onramp→swap envelope end-to-end. On success it
+    prepares the exact executable first-swap envelope. Read-only — no
+    money moves.
+    """
+    import json as _json
+    from prsm.economy.web3.aerodrome_client import AerodromeClient
+    from prsm.economy.web3.aerodrome_pool_ceremony import (
+        MAINNET_CONFIG, SEPOLIA_CONFIG,
+    )
+    from prsm.economy.web3.go_live_verification import (
+        run_go_live_verification,
+    )
+
+    cfg = MAINNET_CONFIG if network == "mainnet" else SEPOLIA_CONFIG
+    client = AerodromeClient.from_env()
+    exp_usdc = (
+        int(expected_seed_usdc * 10 ** 6)
+        if expected_seed_usdc else None
+    )
+    exp_ftns = (
+        int(expected_seed_ftns * 10 ** 18)
+        if expected_seed_ftns else None
+    )
+    report = run_go_live_verification(
+        client, cfg,
+        probe_usdc_units=int(probe_usd * 10 ** 6),
+        expected_usdc_units=exp_usdc,
+        expected_ftns_units=exp_ftns,
+        slippage_bps=slippage_bps,
+    )
+
+    _glyph = {
+        "PASS": "[green]✓[/green]", "FAIL": "[red]✗[/red]",
+        "WARN": "[yellow]![/yellow]", "INFO": "[dim]·[/dim]",
+    }
+    console.print()
+    console.print(f"[bold]Aerodrome go-live verification ({network})[/bold]")
+    for f in report.findings:
+        console.print(
+            f"  {_glyph.get(f.status, '?')} "
+            f"[bold]{f.check}[/bold]: {f.detail}"
+        )
+    console.print()
+    if report.go:
+        console.print(
+            "[bold green]GO[/bold green] — pool is seeded + the "
+            "onramp→swap path is live."
+        )
+        if report.prepared_envelope is not None:
+            console.print(
+                "[dim]Prepared first-swap envelope is in the report "
+                "JSON (--output-json) for submission.[/dim]"
+            )
+    else:
+        console.print(
+            "[bold red]NO-GO[/bold red] — resolve the ✗ findings above "
+            "before opening the fiat→FTNS path. (Pre-ceremony, "
+            "pool_configured FAIL is expected.)"
+        )
+
+    if output_json:
+        with open(output_json, "w") as fh:
+            _json.dump(report.to_dict(), fh, indent=2)
+        console.print(f"[green]Report written to {output_json}[/green]")
+    sys.exit(0 if report.go else 1)
 
 
 # Sp873 — `prsm node compliance-export` terminal export of sp872's
