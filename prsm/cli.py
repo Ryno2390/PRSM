@@ -2228,8 +2228,9 @@ def node_onramp_notifications(
     help="Target network — default mainnet; use sepolia for rehearsal",
 )
 @click.option(
-    "--foundation-safe", required=True, type=str,
-    help="Foundation Safe address (0x...)",
+    "--seeder-safe", required=True, type=str,
+    help="Seeding entity's Safe address (0x...) — Prismatica or an "
+         "independent third party. Option A: NOT the Foundation Safe.",
 )
 @click.option(
     "--seed-usdc", required=True, type=float,
@@ -2257,7 +2258,7 @@ def node_onramp_notifications(
 )
 def node_aerodrome_ceremony(
     network: str,
-    foundation_safe: str,
+    seeder_safe: str,
     seed_usdc: float,
     seed_ftns: float,
     slippage_bps: int,
@@ -2281,11 +2282,11 @@ def node_aerodrome_ceremony(
         build_ceremony_batch, build_runbook_markdown,
     )
 
-    if not foundation_safe.startswith("0x") or len(
-        foundation_safe,
+    if not seeder_safe.startswith("0x") or len(
+        seeder_safe,
     ) != 42:
         console.print(
-            f"[red]foundation_safe must be 0x + 40 hex chars[/red]"
+            f"[red]seeder_safe must be 0x + 40 hex chars[/red]"
         )
         sys.exit(2)
     if seed_usdc <= 0 or seed_ftns <= 0:
@@ -2315,7 +2316,7 @@ def node_aerodrome_ceremony(
         f"  Network:           [{net_color}]{network}[/{net_color}] "
         f"(chain_id {config.chain_id})"
     )
-    console.print(f"  Foundation Safe:   {foundation_safe}")
+    console.print(f"  Seeding Safe:      {seeder_safe}")
     console.print(
         f"  Seed USDC:         {seed_usdc:.6f} "
         f"({seed_usdc_units} base units, 6 decimals)"
@@ -2346,7 +2347,7 @@ def node_aerodrome_ceremony(
     try:
         batch = build_ceremony_batch(
             network=config,
-            foundation_safe=foundation_safe,
+            seeder_safe=seeder_safe,
             seed_usdc_units=seed_usdc_units,
             seed_ftns_units=seed_ftns_units,
             slippage_bps=slippage_bps,
@@ -2354,7 +2355,7 @@ def node_aerodrome_ceremony(
         )
         runbook = build_runbook_markdown(
             network=config,
-            foundation_safe=foundation_safe,
+            seeder_safe=seeder_safe,
             seed_usdc_units=seed_usdc_units,
             seed_ftns_units=seed_ftns_units,
             slippage_bps=slippage_bps,
@@ -2391,7 +2392,7 @@ def node_aerodrome_ceremony(
         console.print(
             "[dim]Example:[/dim]\n"
             "[dim]  prsm node aerodrome-ceremony "
-            "--network sepolia --foundation-safe 0x... "
+            "--network sepolia --seeder-safe 0x... "
             "--seed-usdc 1 --seed-ftns 1 "
             "-j /tmp/sepolia-batch.json "
             "-r /tmp/sepolia-runbook.md[/dim]"
@@ -2410,7 +2411,7 @@ def node_aerodrome_ceremony(
     )
     console.print(
         "  3. Upload batch JSON: wallet.safe.global → "
-        f"connect to {foundation_safe[:8]}... → Apps → "
+        f"connect to seeding Safe {seeder_safe[:8]}... → Apps → "
         "Transaction Builder → Load from JSON"
     )
     console.print(

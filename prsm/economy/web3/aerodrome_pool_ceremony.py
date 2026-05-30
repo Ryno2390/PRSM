@@ -111,6 +111,34 @@ SEPOLIA_CONFIG = CeremonyNetworkConfig(
 )
 
 
+# Sprint 903 — Option-A guard. Per PRSM_Tokenomics.md §9.2 / §10
+# invariant #9, the PRSM Foundation does NOT seed AMM pools, provide
+# liquidity, or sell FTNS — the pool is seeded by the operating entity
+# (Prismatica) or an independent third party. These are the known
+# Foundation Safe / treasury addresses that must never be the ceremony
+# seeder. Compared case-insensitively.
+_KNOWN_FOUNDATION_SAFES = frozenset({
+    "0x91b0e6f85a371d82de94ed13a3812d9f5a4e5791",  # mainnet Foundation Safe
+    "0xccac7b21695de068979b1ca47b0cfbd328654220",  # sepolia/testnet foundation addr
+})
+
+
+def _assert_seeder_not_foundation(seeder_safe: str) -> None:
+    """Refuse to build a seed ceremony whose executor is a known
+    Foundation Safe. Option A (this session): the Foundation must not
+    provide pool liquidity — the seeding entity is Prismatica or an
+    independent third party."""
+    if (seeder_safe or "").strip().lower() in _KNOWN_FOUNDATION_SAFES:
+        raise ValueError(
+            f"seeder_safe {seeder_safe!r} is a known PRSM Foundation "
+            "Safe. Per Option A (PRSM_Tokenomics.md §9.2 / §10 #9) the "
+            "Foundation does not seed AMM pools or provide liquidity — "
+            "seed from the operating entity (Prismatica) or an "
+            "independent third party. Transfer the FTNS to that "
+            "entity's Safe first, then run the ceremony from it."
+        )
+
+
 # ── ABI encoding helpers ─────────────────────────────────────
 
 def _padded_address(addr: str) -> bytes:
@@ -166,7 +194,7 @@ def encode_add_liquidity_calldata(
 def build_ceremony_batch(
     *,
     network: CeremonyNetworkConfig,
-    foundation_safe: str,
+    seeder_safe: str,
     seed_usdc_units: int,    # base units, 6 decimals
     seed_ftns_units: int,    # base units, 18 decimals
     slippage_bps: int = 100,  # 1% default
@@ -176,9 +204,16 @@ def build_ceremony_batch(
     """Build the canonical Safe-Transaction-Builder JSON for the
     3-tx ceremony batch.
 
+    ``seeder_safe`` is the Safe that EXECUTES the seed and receives the
+    LP position. Under Option A (PRSM_Tokenomics.md §9.2 / §10 #9) this
+    is the operating entity (Prismatica) or an independent third party
+    — NOT the PRSM Foundation Safe, which must not provide pool
+    liquidity. Building with a known Foundation Safe raises ValueError.
+
     Returns a dict suitable for `json.dumps` then upload via Safe
     UI → Transaction Builder → "Load from JSON".
     """
+    _assert_seeder_not_foundation(seeder_safe)
     if seed_usdc_units <= 0 or seed_ftns_units <= 0:
         raise ValueError("seed amounts must be > 0")
     if not (0 <= slippage_bps <= 10_000):
@@ -222,7 +257,7 @@ def build_ceremony_batch(
         amount_a_desired=amount_a, amount_b_desired=amount_b,
         amount_a_min=amount_a_min,
         amount_b_min=amount_b_min,
-        to=foundation_safe, deadline=deadline,
+        to=seeder_safe, deadline=deadline,
     )
 
     return {
@@ -232,15 +267,16 @@ def build_ceremony_batch(
         "meta": {
             "name": f"PRSM Aerodrome USDC↔FTNS Seed ({network.name})",
             "description": (
-                f"Sp875 ceremony — Foundation Safe seeds Aerodrome "
-                f"USDC↔FTNS volatile pool with "
+                f"Sp875/903 ceremony — seeding entity (Option A: NOT "
+                f"the Foundation Safe) seeds Aerodrome USDC↔FTNS "
+                f"volatile pool with "
                 f"{seed_usdc_units / 10**6:.6f} USDC + "
                 f"{seed_ftns_units / 10**18:.6f} FTNS. "
                 f"slippage_bps={slippage_bps}, "
                 f"deadline=+{deadline_seconds}s."
             ),
             "txBuilderVersion": "1.16.5",
-            "createdFromSafeAddress": foundation_safe,
+            "createdFromSafeAddress": seeder_safe,
         },
         "transactions": [
             {
@@ -265,17 +301,20 @@ def build_ceremony_batch(
 def build_runbook_markdown(
     *,
     network: CeremonyNetworkConfig,
-    foundation_safe: str,
+    seeder_safe: str,
     seed_usdc_units: int,
     seed_ftns_units: int,
     slippage_bps: int = 100,
 ) -> str:
     """Generate the co-signer runbook as markdown.
 
-    Operator distributes to hardware-wallet co-signers BEFORE the
-    ceremony so they can verify each transaction byte-for-byte
-    independently.
+    ``seeder_safe`` is the operating-entity (Prismatica) or
+    independent-third-party Safe that seeds the pool — NOT the PRSM
+    Foundation Safe (Option A; see build_ceremony_batch). Operator
+    distributes to hardware-wallet co-signers BEFORE the ceremony so
+    they can verify each transaction byte-for-byte independently.
     """
+    _assert_seeder_not_foundation(seeder_safe)
     usdc_whole = seed_usdc_units / 10**6
     ftns_whole = seed_ftns_units / 10**18
     opening_price = (
@@ -288,7 +327,12 @@ def build_runbook_markdown(
         "## Ceremony Summary",
         "",
         f"- **Network**: {network.name} (chain_id {network.chain_id})",
-        f"- **Foundation Safe**: `{foundation_safe}`",
+        f"- **Seeding Safe (operating entity / Prismatica — NOT the "
+        f"Foundation)**: `{seeder_safe}`",
+        "- **Option A**: the PRSM Foundation does NOT seed this pool, "
+        "provide liquidity, or sell FTNS (PRSM_Tokenomics.md §9.2 / "
+        "§10 #9). The FTNS must be transferred from the Foundation "
+        "treasury to the seeding entity's Safe BEFORE this ceremony.",
         f"- **USDC seed**: {usdc_whole:.6f} USDC "
         f"({seed_usdc_units} base units, 6 decimals)",
         f"- **FTNS seed**: {ftns_whole:.6f} FTNS "
@@ -303,10 +347,12 @@ def build_runbook_markdown(
         "",
         "## Pre-Flight Checks (Co-Signers MUST verify before signing)",
         "",
-        f"1. Foundation Safe address matches `{foundation_safe}` "
-        "on the Safe UI",
-        f"2. Foundation Safe currently holds AT LEAST "
-        f"{usdc_whole:.6f} USDC + {ftns_whole:.6f} FTNS",
+        f"1. Seeding Safe address matches `{seeder_safe}` "
+        "on the Safe UI (this is the operating entity's Safe, NOT the "
+        "Foundation Safe)",
+        f"2. Seeding Safe currently holds AT LEAST "
+        f"{usdc_whole:.6f} USDC + {ftns_whole:.6f} FTNS "
+        "(FTNS transferred from the Foundation treasury beforehand)",
         f"3. USDC contract address is `{network.usdc_address}` — "
         "verify on basescan.org against canonical Circle deployment",
         f"4. FTNS contract address is `{network.ftns_address}` — "
@@ -331,14 +377,14 @@ def build_runbook_markdown(
         "",
         f"**Tx 3**: `Router.addLiquidity(...)` — seeds the pool",
         f"   - Mints LP tokens to the Safe representing the "
-        "Foundation's share of the pool",
+        "seeding entity's share of the pool",
         f"   - Deadline: +1h from ceremony start (regenerate "
         "JSON close to ceremony time)",
         "",
         "## Execution Steps",
         "",
-        "1. Open https://wallet.safe.global → connect to Foundation "
-        "Safe",
+        "1. Open https://wallet.safe.global → connect to the Seeding "
+        "Safe (operating entity, NOT the Foundation Safe)",
         "2. Apps tab → Transaction Builder",
         "3. **Load from JSON** → upload `ceremony-batch.json` "
         "(generated by this module)",
@@ -389,7 +435,7 @@ def build_runbook_markdown(
         ")",
         "batch = build_ceremony_batch(",
         "    network=SEPOLIA_CONFIG,",
-        "    foundation_safe='<your sepolia test safe>',",
+        "    seeder_safe='<your sepolia test safe — NOT the Foundation>',",
         "    seed_usdc_units=1_000_000,  # 1 USDC",
         "    seed_ftns_units=1 * 10**18,  # 1 FTNS",
         ")",

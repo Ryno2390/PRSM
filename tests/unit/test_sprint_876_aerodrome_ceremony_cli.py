@@ -9,7 +9,7 @@ from click.testing import CliRunner
 from prsm.cli import node_aerodrome_ceremony
 
 
-_SAFE = "0xCCAc7b21695De068979b1ca47B0cfBD328654220"
+_SAFE = "0x" + "11" * 20  # non-Foundation seeding Safe (Option A)
 
 
 # ── Validation ───────────────────────────────────────────────
@@ -20,12 +20,12 @@ def test_rejects_invalid_safe_address():
         node_aerodrome_ceremony,
         [
             "--network", "sepolia",
-            "--foundation-safe", "notanaddr",
+            "--seeder-safe", "notanaddr",
             "--seed-usdc", "1", "--seed-ftns", "1",
         ],
     )
     assert result.exit_code == 2
-    assert "foundation_safe" in result.output
+    assert "seeder_safe" in result.output
 
 
 def test_rejects_zero_seed_amount():
@@ -34,7 +34,7 @@ def test_rejects_zero_seed_amount():
         node_aerodrome_ceremony,
         [
             "--network", "sepolia",
-            "--foundation-safe", _SAFE,
+            "--seeder-safe", _SAFE,
             "--seed-usdc", "0", "--seed-ftns", "1",
         ],
     )
@@ -50,7 +50,7 @@ def test_exits_1_when_no_outputs_specified():
         node_aerodrome_ceremony,
         [
             "--network", "sepolia",
-            "--foundation-safe", _SAFE,
+            "--seeder-safe", _SAFE,
             "--seed-usdc", "1", "--seed-ftns", "1",
         ],
     )
@@ -70,7 +70,7 @@ def test_json_output_writes_safe_tx_builder_format(tmp_path):
         node_aerodrome_ceremony,
         [
             "--network", "sepolia",
-            "--foundation-safe", _SAFE,
+            "--seeder-safe", _SAFE,
             "--seed-usdc", "50000", "--seed-ftns", "50000",
             "--output-json", str(out),
         ],
@@ -90,7 +90,7 @@ def test_mainnet_batch_chain_id_8453(tmp_path):
         node_aerodrome_ceremony,
         [
             "--network", "mainnet",
-            "--foundation-safe", _SAFE,
+            "--seeder-safe", _SAFE,
             "--seed-usdc", "1", "--seed-ftns", "1",
             "--output-json", str(out),
         ],
@@ -106,7 +106,7 @@ def test_mainnet_run_shows_real_money_warning():
         node_aerodrome_ceremony,
         [
             "--network", "mainnet",
-            "--foundation-safe", _SAFE,
+            "--seeder-safe", _SAFE,
             "--seed-usdc", "50000", "--seed-ftns", "50000",
         ],
     )
@@ -124,7 +124,7 @@ def test_runbook_output_writes_markdown(tmp_path):
         node_aerodrome_ceremony,
         [
             "--network", "sepolia",
-            "--foundation-safe", _SAFE,
+            "--seeder-safe", _SAFE,
             "--seed-usdc", "1", "--seed-ftns", "1",
             "--output-runbook", str(out),
         ],
@@ -143,7 +143,7 @@ def test_both_outputs_can_be_written_together(tmp_path):
         node_aerodrome_ceremony,
         [
             "--network", "sepolia",
-            "--foundation-safe", _SAFE,
+            "--seeder-safe", _SAFE,
             "--seed-usdc", "1", "--seed-ftns", "1",
             "-j", str(out_j), "-r", str(out_r),
         ],
@@ -164,7 +164,7 @@ def test_summary_shows_opening_price(tmp_path):
         node_aerodrome_ceremony,
         [
             "--network", "sepolia",
-            "--foundation-safe", _SAFE,
+            "--seeder-safe", _SAFE,
             # $10/FTNS opening
             "--seed-usdc", "50000", "--seed-ftns", "5000",
             "-j", str(out),
@@ -181,7 +181,7 @@ def test_custom_slippage_passed_through(tmp_path):
         node_aerodrome_ceremony,
         [
             "--network", "sepolia",
-            "--foundation-safe", _SAFE,
+            "--seeder-safe", _SAFE,
             "--seed-usdc", "1", "--seed-ftns", "1",
             "--slippage-bps", "500",
             "-j", str(out),
@@ -201,7 +201,7 @@ def test_next_steps_shown_after_successful_output(tmp_path):
         node_aerodrome_ceremony,
         [
             "--network", "sepolia",
-            "--foundation-safe", _SAFE,
+            "--seeder-safe", _SAFE,
             "--seed-usdc", "1", "--seed-ftns", "1",
             "-j", str(out),
         ],

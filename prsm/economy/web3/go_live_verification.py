@@ -1,7 +1,7 @@
 """Sprint 901 — Aerodrome pool go-live verification harness.
 
 The final step of the pool-seed ceremony lifecycle (sp875/876 ship the
-tx-batch builder + runbook; the Foundation Safe multi-sig executes it).
+tx-batch builder + runbook; the seeding entity (Prismatica) multi-sig executes it — Option A: NOT the Foundation).
 This module VERIFIES the seed actually worked and the fiat→FTNS swap
 path is live — the missing go/no-go gate between "we signed the seed
 tx" and "users can buy FTNS with fiat".

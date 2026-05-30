@@ -139,7 +139,7 @@ def test_batch_three_transactions():
     """USDC.approve + FTNS.approve + Router.addLiquidity."""
     batch = build_ceremony_batch(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=50_000 * 10**6,  # 50k USDC
         seed_ftns_units=50_000 * 10**18,  # 50k FTNS
     )
@@ -149,7 +149,7 @@ def test_batch_three_transactions():
 def test_batch_tx1_targets_usdc():
     batch = build_ceremony_batch(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=1_000_000,
         seed_ftns_units=10**18,
     )
@@ -160,7 +160,7 @@ def test_batch_tx1_targets_usdc():
 def test_batch_tx2_targets_ftns():
     batch = build_ceremony_batch(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=1_000_000,
         seed_ftns_units=10**18,
     )
@@ -171,7 +171,7 @@ def test_batch_tx2_targets_ftns():
 def test_batch_tx3_targets_router():
     batch = build_ceremony_batch(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=1_000_000,
         seed_ftns_units=10**18,
     )
@@ -184,13 +184,13 @@ def test_batch_tx3_targets_router():
 def test_batch_chain_id_matches_network():
     mainnet = build_ceremony_batch(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=1, seed_ftns_units=1,
     )
     assert mainnet["chainId"] == "8453"
     sepolia = build_ceremony_batch(
         network=SEPOLIA_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=1, seed_ftns_units=1,
     )
     assert sepolia["chainId"] == "84532"
@@ -201,7 +201,7 @@ def test_batch_meta_includes_seed_details():
     co-signers see the ceremony intent in the Safe UI."""
     batch = build_ceremony_batch(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=50_000 * 10**6,
         seed_ftns_units=50_000 * 10**18,
         slippage_bps=200,
@@ -216,13 +216,13 @@ def test_batch_rejects_zero_seed_amount():
     with pytest.raises(ValueError):
         build_ceremony_batch(
             network=MAINNET_CONFIG,
-            foundation_safe="0x" + "ab" * 20,
+            seeder_safe="0x" + "ab" * 20,
             seed_usdc_units=0, seed_ftns_units=10**18,
         )
     with pytest.raises(ValueError):
         build_ceremony_batch(
             network=MAINNET_CONFIG,
-            foundation_safe="0x" + "ab" * 20,
+            seeder_safe="0x" + "ab" * 20,
             seed_usdc_units=10**6, seed_ftns_units=0,
         )
 
@@ -231,14 +231,14 @@ def test_batch_rejects_out_of_range_slippage():
     with pytest.raises(ValueError):
         build_ceremony_batch(
             network=MAINNET_CONFIG,
-            foundation_safe="0x" + "ab" * 20,
+            seeder_safe="0x" + "ab" * 20,
             seed_usdc_units=10**6, seed_ftns_units=10**18,
             slippage_bps=-1,
         )
     with pytest.raises(ValueError):
         build_ceremony_batch(
             network=MAINNET_CONFIG,
-            foundation_safe="0x" + "ab" * 20,
+            seeder_safe="0x" + "ab" * 20,
             seed_usdc_units=10**6, seed_ftns_units=10**18,
             slippage_bps=10_001,
         )
@@ -251,7 +251,7 @@ def test_batch_slippage_math_in_addliquidity():
     price moves between sign + execute."""
     batch = build_ceremony_batch(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=10**6, seed_ftns_units=10**18,
         slippage_bps=500,  # 5%
     )
@@ -276,7 +276,7 @@ def test_batch_json_serializable():
     """Operator must be able to json.dumps() + paste into Safe UI."""
     batch = build_ceremony_batch(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=10**6, seed_ftns_units=10**18,
     )
     serialized = json.dumps(batch, indent=2)
@@ -293,7 +293,7 @@ def test_runbook_includes_canonical_addresses():
     verbatim."""
     runbook = build_runbook_markdown(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=50_000 * 10**6,
         seed_ftns_units=50_000 * 10**18,
     )
@@ -309,7 +309,7 @@ def test_runbook_includes_opening_price():
     see what the ceremony will set."""
     runbook = build_runbook_markdown(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=50_000 * 10**6,   # 50k USDC
         seed_ftns_units=5_000 * 10**18,   # 5k FTNS → $10/FTNS
     )
@@ -321,7 +321,7 @@ def test_runbook_includes_sepolia_rehearsal_pointer():
     risk-reduction step. The whole point of sp875."""
     runbook = build_runbook_markdown(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=10**6, seed_ftns_units=10**18,
     )
     assert "Sepolia" in runbook
@@ -331,7 +331,7 @@ def test_runbook_includes_sepolia_rehearsal_pointer():
 def test_runbook_describes_3_transactions():
     runbook = build_runbook_markdown(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=10**6, seed_ftns_units=10**18,
     )
     assert "Tx 1" in runbook
@@ -344,7 +344,7 @@ def test_runbook_includes_post_ceremony_env_wiring():
     AERODROME_USDC_FTNS_POOL_ADDRESS. Runbook surfaces this."""
     runbook = build_runbook_markdown(
         network=MAINNET_CONFIG,
-        foundation_safe="0x" + "ab" * 20,
+        seeder_safe="0x" + "ab" * 20,
         seed_usdc_units=10**6, seed_ftns_units=10**18,
     )
     assert "AERODROME_USDC_FTNS_POOL_ADDRESS" in runbook
