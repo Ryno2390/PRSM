@@ -1398,6 +1398,19 @@ def pytest_configure(config):
 
 def pytest_collection_modifyitems(config, items):
     """Modify test collection to add markers based on test names"""
+    import os as _os
+    # e2e tests are marked as REQUIRING live P2P infrastructure (their node
+    # fixtures bind real ports + stand up daemons). Without infra they hang
+    # until the per-test timeout, so gate them behind an explicit opt-in
+    # (PRSM_RUN_E2E=1). Default unit runs skip them cleanly instead of
+    # hanging/erroring. Run them with: PRSM_RUN_E2E=1 pytest tests/e2e/.
+    _run_e2e = _os.environ.get("PRSM_RUN_E2E", "").strip() not in ("", "0", "false", "False")
+    _skip_e2e = pytest.mark.skip(reason="e2e requires live P2P infra; set PRSM_RUN_E2E=1 to run")
+    if not _run_e2e:
+        for item in items:
+            if "e2e" in item.keywords or "/e2e/" in item.nodeid:
+                item.add_marker(_skip_e2e)
+
     for item in items:
         # Add markers based on test/file names
         if "integration" in item.nodeid:

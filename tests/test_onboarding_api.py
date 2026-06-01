@@ -137,8 +137,11 @@ class TestOnboardingNetwork:
         resp = client.get("/onboarding/network", headers={"Accept": "application/json"})
         assert resp.status_code == 200
         data = resp.json()
-        assert "ipfs_status" in data
+        # Native-storage migration (2026-05-07) replaced IPFS — the network
+        # config no longer carries an `ipfs_status` field. Assert the
+        # current contract: a current_config block (bootstrap/ports).
         assert "current_config" in data
+        assert "bootstrap_nodes" in data["current_config"]
 
     def test_network_post_redirects(self):
         """POST should redirect to identity step."""

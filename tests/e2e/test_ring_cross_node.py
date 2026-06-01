@@ -61,20 +61,22 @@ def temp_data_dir():
 
 @pytest.fixture
 def mock_ipfs():
-    """Mock IPFS client for testing without a running daemon."""
-    with patch("prsm.node.storage_provider.StorageProvider._check_ipfs") as mock_detect:
+    """Mock the native ContentStore layer (post-2026-05-07 migration; the
+    old IPFS patch targets _check_ipfs / _ipfs_add / _ipfs_cat were
+    removed). _publish_content returns a cid string, not (cid, size)."""
+    with patch("prsm.node.storage_provider.StorageProvider._check_content_store", new_callable=AsyncMock) as mock_detect:
         mock_detect.return_value = True
         with patch("prsm.node.storage_provider.StorageProvider.pin_content") as mock_pin:
             mock_pin.return_value = True
             with patch("prsm.node.storage_provider.StorageProvider.verify_pin") as mock_verify:
                 mock_verify.return_value = True
-                with patch("prsm.node.content_uploader.ContentUploader._ipfs_add") as mock_add:
+                with patch("prsm.node.content_uploader.ContentUploader._publish_content", new_callable=AsyncMock) as mock_add:
                     _cid_counter = {"n": 0}
                     def _unique_cid(*args, **kwargs):
                         _cid_counter["n"] += 1
-                        return (f"QmTestCID{_cid_counter['n']:012d}", 1024)
+                        return f"QmTestCID{_cid_counter['n']:012d}"
                     mock_add.side_effect = _unique_cid
-                    with patch("prsm.node.content_provider.ContentProvider._ipfs_cat") as mock_cat:
+                    with patch("prsm.node.content_provider.ContentProvider._fetch_local", new_callable=AsyncMock) as mock_cat:
                         mock_cat.return_value = b"Test content"
                         yield
 
