@@ -24,7 +24,7 @@ These three deployed parameters are now pinned by runtime formal invariants — 
 - `docs/2026-04-23-prsm-policy-jurisdiction-1.md` — **PRSM-POLICY-JURISDICTION-1**, Foundation boundary subsidiary policy codifying anti-operational commitments.
 
 **Archived dependencies (see `docs/archive/research/` for full rationale):**
-- `archive/research/2026-04-21-prsm-economic-model-cis-silicon.md` — **PRSM-ECON-WP-1**, the CIS-priced economic model. Archived 2026-04-24 alongside the CIS-1 source docs because its bottom-up methodology is chip-unit-economics-driven. A successor economic model priced around Prismatica's six-stream core business (see `Prismatica_Vision.md` §2-3: commons curation, T3/T4 compute, FTNS treasury, protocol-native VC fund, commissioned datasets, domain models) remains to be drafted.
+- **PRSM-ECON-WP-1**, the CIS-priced economic model — **removed from the public repo** (2026-06-01). It was investor-facing Prismatica valuation material (enterprise value priced bottom-up from CIS chip-unit economics), which belongs on the private Prismatica surface, not the public PRSM repo; it was also superseded (its chip-unit methodology no longer applies). Any successor economic model lives in Prismatica's private materials.
 
 **Source material consolidated by this document:**
 - `PRSM_Tokenomics.md` (external vault, 701 lines) — detailed design + mathematical models.

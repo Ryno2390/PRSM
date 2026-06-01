@@ -147,7 +147,6 @@ Partner-handoff-ready items as of 2026-04-24.
 | [`archive/research/README.md`](./archive/research/README.md) | — | Archive index explaining deferred-research rationale (2026-04-24) |
 | [`archive/research/2026-04-21-prsm-cis-1-confidential-inference-silicon.md`](./archive/research/2026-04-21-prsm-cis-1-confidential-inference-silicon.md) | **PRSM-CIS-1** (deferred) | Confidential inference silicon standard — drafted as active standard in April 2026, reclassified as deferred research 2026-04-24 per canonical Vision docs (Prismatica's day-1 business is not chip design). If revived, re-enters via §9 ratification path. |
 | [`archive/research/2026-04-19-confidential-inference-silicon-standard.md`](./archive/research/2026-04-19-confidential-inference-silicon-standard.md) | — | Predecessor CIS-1 draft (also deferred) |
-| [`archive/research/2026-04-21-prsm-economic-model-cis-silicon.md`](./archive/research/2026-04-21-prsm-economic-model-cis-silicon.md) | **PRSM-ECON-WP-1** (archived) | CIS-priced economic model — archived 2026-04-24 alongside CIS-1 source docs. Bottom-up thesis relies on chip-unit economics that no longer apply. A successor paper priced around Prismatica's six-stream core business (per `Prismatica_Vision.md` §2-3) remains to be drafted. |
 
 ### 4.3 Historical
 
