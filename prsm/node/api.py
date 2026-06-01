@@ -4997,9 +4997,36 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 ),
             }
 
+        from prsm.economy.web3.provenance_registry import OnChainPendingError
+        from fastapi.responses import JSONResponse
         try:
             tx_hash, transfer_status = client.claim()
+        except OnChainPendingError as exc:
+            # sp915 — broadcast SUCCEEDED but the receipt is unconfirmed; the
+            # claim tx is in the mempool. Do NOT flatten to a 502 that invites
+            # a re-claim — the second claim() would race the first and revert
+            # ZeroClaim once it settles, burning gas. Surface a distinct 202
+            # carrying tx_hash so the operator reconciles via the receipt.
+            logger.warning(
+                "RoyaltyDistributorClient.claim PENDING (tx=%s); do not "
+                "re-claim, reconcile via tx_hash",
+                getattr(exc, "tx_hash", None),
+            )
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "PENDING",
+                    "tx_hash": getattr(exc, "tx_hash", None),
+                    "claimable_ftns": claimable_ftns,
+                    "detail": (
+                        "claim() broadcast OK but UNCONFIRMED; do NOT "
+                        "re-claim — reconcile via tx_hash."
+                    ),
+                },
+            )
         except Exception as exc:  # noqa: BLE001
+            # BroadcastFailedError / OnChainRevertedError land here too — both
+            # are safe to retry (chain saw nothing / rolled back atomically).
             logger.warning(
                 "RoyaltyDistributorClient.claim raised: %s", exc,
             )
@@ -10212,10 +10239,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "address from networks.py (sprint 144)."
                 ),
             )
+        from prsm.economy.web3.provenance_registry import OnChainPendingError
+        from fastapi.responses import JSONResponse
         try:
             tx_hash, status = client.pull_and_distribute()
+        except OnChainPendingError as exc:
+            # sp915 — broadcast SUCCEEDED but the receipt is unconfirmed; the
+            # distribution tx is in the mempool. Do NOT flatten to a 502 that
+            # invites a re-trigger (the re-broadcast races/reverts + burns
+            # gas). Surface a distinct 202 carrying tx_hash for reconciliation.
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "PENDING",
+                    "tx_hash": getattr(exc, "tx_hash", None),
+                    "detail": (
+                        "pull_and_distribute broadcast OK but UNCONFIRMED; "
+                        "do NOT re-trigger — reconcile via tx_hash."
+                    ),
+                },
+            )
         except Exception as exc:  # noqa: BLE001
-            # Sprint 536 F65 fix: detect "insufficient funds for gas"
+            # BroadcastFailedError / OnChainRevertedError land here too — both
+            # are safe to retry. Sprint 536 F65 fix: detect "insufficient
+            # funds for gas"
             # specifically + return 402 (Payment Required) with
             # actionable top-up guidance. Other exceptions stay 502
             # but with cleaner message — strip Web3 internal dict
@@ -10277,9 +10324,31 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     "address from networks.py (sprint 144)."
                 ),
             )
+        from prsm.economy.web3.provenance_registry import OnChainPendingError
+        from fastapi.responses import JSONResponse
         try:
             tx_hash, status = client.record_heartbeat()
+        except OnChainPendingError as exc:
+            # sp915 — broadcast SUCCEEDED but the receipt is unconfirmed
+            # (wait_for_transaction_receipt timed out); the tx is in the
+            # mempool and will likely confirm. Do NOT flatten to a 502 that
+            # invites a re-trigger — the re-broadcast races/reverts and burns
+            # gas. Surface a distinct 202 carrying tx_hash so the operator
+            # reconciles via the receipt instead of re-sending.
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "PENDING",
+                    "tx_hash": getattr(exc, "tx_hash", None),
+                    "detail": (
+                        "Heartbeat broadcast OK but UNCONFIRMED; do NOT "
+                        "re-trigger — reconcile via tx_hash."
+                    ),
+                },
+            )
         except Exception as exc:  # noqa: BLE001
+            # BroadcastFailedError / OnChainRevertedError land here too — both
+            # are safe to retry (chain saw nothing / rolled back atomically).
             raise HTTPException(
                 status_code=502,
                 detail=f"record_heartbeat raised: {exc}",

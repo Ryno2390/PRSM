@@ -5683,6 +5683,14 @@ async def handle_prsm_distribution_trigger(
                 f"  Detail: {detail}"
             )
         return f"Distribution trigger failed.\n  Detail: {detail}"
+    if result.get("status") == "PENDING":
+        # sp915 — broadcast OK but receipt unconfirmed. Do NOT re-trigger.
+        return (
+            f"pull_and_distribute broadcast but UNCONFIRMED — do NOT re-trigger.\n"
+            f"  tx_hash: {result.get('tx_hash')}\n"
+            f"  {result.get('detail', 'Reconcile via tx_hash; do not re-trigger.')}\n"
+            f"  Use prsm_distribution_history to confirm the tx lands."
+        )
     return (
         f"pull_and_distribute submitted on-chain.\n"
         f"  tx_hash: {result['tx_hash']}\n"
@@ -5712,6 +5720,13 @@ async def handle_prsm_heartbeat_trigger(
                 f"  Detail: {detail}"
             )
         return f"Heartbeat trigger failed.\n  Detail: {detail}"
+    if result.get("status") == "PENDING":
+        # sp915 — broadcast OK but receipt unconfirmed. Do NOT re-trigger.
+        return (
+            f"Heartbeat broadcast but UNCONFIRMED — do NOT re-trigger.\n"
+            f"  tx_hash: {result.get('tx_hash')}\n"
+            f"  {result.get('detail', 'Reconcile via tx_hash; do not re-trigger.')}"
+        )
     return (
         f"Heartbeat recorded on-chain.\n"
         f"  tx_hash: {result['tx_hash']}\n"
@@ -13459,6 +13474,15 @@ async def handle_prsm_royalty_claim(arguments: Dict[str, Any]) -> str:
             f"  Tx hash:      {result['tx_hash']}\n"
             f"  Status:       EXECUTED  "
             f"({result.get('transfer_status', 'OK')})"
+        )
+    if status == "PENDING":
+        # sp915 — claim broadcast OK but receipt unconfirmed. Do NOT re-claim.
+        return (
+            f"PRSM Royalty Claim (PENDING)\n"
+            f"  Claimable:    {claimable:.6f} FTNS\n"
+            f"  Tx hash:      {result.get('tx_hash')}\n"
+            f"  Status:       PENDING — broadcast OK but UNCONFIRMED.\n"
+            f"  Do NOT re-claim; reconcile via tx_hash."
         )
     return f"Royalty claim returned unknown status: {status}"
 

@@ -3891,6 +3891,18 @@ def _node_admin_trigger(*, api_port: int, path: str, label: str):
             f"[dim]{detail}[/dim]"
         )
         sys.exit(1)
+    if resp.status_code == 202:
+        # sp915 — broadcast SUCCEEDED but the receipt is unconfirmed. NOT a
+        # failure: re-triggering would race/revert + burn gas. Render the
+        # pending signal + tx_hash and exit 0 so the operator reconciles.
+        body = resp.json()
+        console.print(
+            f"[yellow]{label} broadcast but UNCONFIRMED — do NOT "
+            f"re-trigger.[/yellow]\n"
+            f"  tx_hash: {body.get('tx_hash', '?')}\n"
+            f"  [dim]{body.get('detail', 'Reconcile via tx_hash.')}[/dim]"
+        )
+        return
     if resp.status_code != 200:
         console.print(
             f"[red]{path} returned {resp.status_code}[/red]: "
@@ -3992,6 +4004,17 @@ def node_claim_royalty(api_port, execute):
         )
         sys.exit(1)
 
+    if resp.status_code == 202:
+        # sp915 — claim broadcast SUCCEEDED but unconfirmed. Re-claiming
+        # would race the first tx + revert ZeroClaim. Render pending + exit 0.
+        body = resp.json()
+        console.print(
+            f"[yellow]Royalty claim broadcast but UNCONFIRMED — do NOT "
+            f"re-claim.[/yellow]\n"
+            f"  tx_hash: {body.get('tx_hash', '?')}\n"
+            f"  [dim]{body.get('detail', 'Reconcile via tx_hash.')}[/dim]"
+        )
+        return
     if resp.status_code != 200:
         console.print(
             f"[red]/wallet/royalty/claim returned "
