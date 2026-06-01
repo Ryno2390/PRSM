@@ -255,6 +255,26 @@ class DAGLedger:
         self._wallet_locks: Dict[str, "asyncio.Lock"] = {}
         self._wallet_locks_guard: Optional["asyncio.Lock"] = None
 
+        # sp910 — CONNECTION-WIDE write lock. The per-wallet lock above is
+        # insufficient: the SAVEPOINT balance_check is connection-GLOBAL, so
+        # a COMMIT from ANY other wallet's write (a parallel debit, a
+        # credit-only submit, or record_nonce) on this shared aiosqlite
+        # connection RELEASES an in-flight savepoint mid-debit. The debit's
+        # UPDATE then commits as part of the foreign txn, but the original
+        # submit_transaction's `RELEASE SAVEPOINT` raises "no such
+        # savepoint" → it returns an error AFTER the money already moved →
+        # silent no-refund loss on /wallet/withdraw. Serializing ALL
+        # connection writes through one lock closes the interleave window.
+        # (Lazy-created in _get_write_lock to bind to the running loop.)
+        self._write_lock: Optional["asyncio.Lock"] = None
+
+    def _get_write_lock(self) -> "asyncio.Lock":
+        """sp910 — the connection-wide write lock (lazy, loop-bound)."""
+        import asyncio as _asyncio
+        if self._write_lock is None:
+            self._write_lock = _asyncio.Lock()
+        return self._write_lock
+
     def _get_wallet_lock(self, wallet_id: str) -> "asyncio.Lock":
         """Sprint 487 (F25) — return the per-wallet asyncio.Lock.
         Lazy-creates on first use. The guard lock prevents a race
@@ -1188,17 +1208,18 @@ class DAGLedger:
         balance_version = None
         atomic_check_in_progress = False
 
-        # Sprint 487 (F25) — per-wallet serialization. The
-        # SAVEPOINT balance_check name is shared across coroutines
-        # on the same connection; without this lock, concurrent
-        # submits on the same wallet step on each other's savepoint
-        # → "no such savepoint" errors return 500. Take the lock
-        # ONLY for the duration of the savepoint+update window so
-        # different wallets still race in parallel.
-        wallet_lock = None
-        if from_wallet:
-            wallet_lock = self._get_wallet_lock(from_wallet)
-            await wallet_lock.acquire()
+        # sp910 — CONNECTION-WIDE write lock (supersedes the sprint-487
+        # per-wallet lock). The SAVEPOINT balance_check is connection-
+        # global, so a foreign COMMIT (from ANY wallet's write — incl. a
+        # credit-only submit with no from_wallet, or record_nonce) would
+        # release this submit's savepoint mid-debit and silently commit a
+        # half-finished debit (→ no-refund loss on /wallet/withdraw).
+        # Serializing every connection write through one lock — held from
+        # before the savepoint through the final commit — eliminates the
+        # interleave. Acquired ALWAYS (credit-only included: its commit can
+        # destroy a concurrent debit's savepoint just as easily).
+        write_lock = self._get_write_lock()
+        await write_lock.acquire()
 
         try:
             # Create wallets if they don't exist
@@ -1394,10 +1415,10 @@ class DAGLedger:
                 await self._rollback_balance_check()
             raise
         finally:
-            # Sprint 487 (F25) — release the per-wallet lock
-            # taken before entering the savepoint window.
-            if wallet_lock is not None and wallet_lock.locked():
-                wallet_lock.release()
+            # sp910 — release the connection-wide write lock taken before
+            # the savepoint window (held through the final commit).
+            if write_lock.locked():
+                write_lock.release()
 
     async def _update_weights(self, new_tx: DAGTransaction) -> None:
         """Update cumulative weights and confirmation levels for approved transactions."""
@@ -1658,12 +1679,16 @@ class DAGLedger:
         it (won the claim), False if already present. Sp898 — mirrors
         LocalLedger.record_nonce so ledger_sync's double-credit gate
         works identically whichever ledger backend is wired."""
-        cursor = await self._db.execute(
-            "INSERT OR IGNORE INTO seen_nonces (nonce, origin, seen_at) VALUES (?, ?, ?)",
-            (nonce, origin, time.time()),
-        )
-        await self._db.commit()
-        return cursor.rowcount == 1
+        # sp910 — serialize under the connection-wide write lock: this
+        # commit would otherwise release a concurrent submit_transaction's
+        # in-flight balance_check savepoint on the shared connection.
+        async with self._get_write_lock():
+            cursor = await self._db.execute(
+                "INSERT OR IGNORE INTO seen_nonces (nonce, origin, seen_at) VALUES (?, ?, ?)",
+                (nonce, origin, time.time()),
+            )
+            await self._db.commit()
+            return cursor.rowcount == 1
 
 
 class DAGLedgerAdapter:
