@@ -1,6 +1,10 @@
 # Governance system-mint durable idempotency — design scope
 
-**Status:** Scoping / RFC (decision-forcing). No implementation yet.
+**Status:** IMPLEMENTED — **Design A** shipped as sprint 912
+(`prsm/economy/governance/token_distribution.py` +
+`prsm/economy/tokenomics/database_ftns_service.py`,
+`tests/unit/test_sprint_912_governance_mint_idempotency.py`). The RFC below
+is retained as the design record.
 **Date:** 2026-06-01
 **Trigger:** The money-path adversarial review's remaining (deferred) item.
 Sprint 908 closed the *critical* part (the self-select-`CORE_TEAM` authz

@@ -187,7 +187,29 @@ class GovernanceTokenDistributor:
                     if existing.is_active:
                         self.logger.warning("User already has active governance participation", user_id=user_id)
                         return existing
-                
+
+                # sp912 — DURABLE activation idempotency. The in-memory guard
+                # above is empty after a daemon restart; consult the persisted
+                # mint so a re-activation does NOT re-mint the full tier
+                # allocation (COMMUNITY 1k … CORE_TEAM 100k FTNS).
+                activation_key = f"gov-activate:{user_id}"
+                existing_tx = await self.ftns_service.find_confirmed_transaction(
+                    activation_key, "governance_activation",
+                )
+                if existing_tx is not None:
+                    self.logger.warning(
+                        "Governance activation already minted (durable); idempotent no-op",
+                        user_id=user_id,
+                    )
+                    rebuilt = self.governance_activations.get(user_id) or GovernanceActivation(
+                        participant_user_id=user_id,
+                        participant_tier=self.participant_tiers.get(user_id, participant_tier),
+                        initial_token_allocation=Decimal(str(existing_tx.amount)),
+                    )
+                    self.governance_activations[user_id] = rebuilt
+                    self.participant_tiers.setdefault(user_id, rebuilt.participant_tier)
+                    return rebuilt
+
                 # Validate user eligibility
                 if not await self._validate_governance_eligibility(
                     user_id, participant_tier, self_service=self_service,
@@ -215,7 +237,7 @@ class GovernanceTokenDistributor:
                     amount=initial_allocation,
                     transaction_type="governance_activation",
                     description=f"Initial governance token allocation for {participant_tier.value}",
-                    reference_id=str(distribution.distribution_id)
+                    reference_id=activation_key
                 )
                 
                 # Create governance activation record
@@ -299,10 +321,40 @@ class GovernanceTokenDistributor:
         """
         try:
             async with self._distribution_lock:
+                # sp912 — DURABLE idempotency. A deterministic reference_id
+                # anchors "have I already rewarded this logical contribution?";
+                # a retry (or a post-restart replay) of the same
+                # (user, type, reference) must NOT mint again. Checked under
+                # the lock so same-process concurrency is also serialized.
+                reference_key = (
+                    f"gov-contrib:{user_id}:{contribution_type.value}:{contribution_reference}"
+                )
+                existing_tx = await self.ftns_service.find_confirmed_transaction(
+                    reference_key, "contribution_reward",
+                )
+                if existing_tx is not None:
+                    self.logger.info(
+                        "Contribution reward already distributed; idempotent no-op",
+                        user_id=user_id,
+                        contribution_type=contribution_type.value,
+                        contribution_reference=contribution_reference,
+                    )
+                    return await self._create_token_distribution(
+                        recipient_user_id=user_id,
+                        distribution_type=DistributionType.CONTRIBUTION_REWARD,
+                        amount=Decimal(str(existing_tx.amount)),
+                        contribution_type=contribution_type,
+                        contribution_reference=contribution_reference,
+                        metadata={
+                            "idempotent_replay": True,
+                            "reference_key": reference_key,
+                        },
+                    )
+
                 # Calculate reward amount
                 base_amount = custom_amount or self.contribution_rewards[contribution_type]
                 reward_amount = base_amount * Decimal(str(quality_multiplier))
-                
+
                 # Create distribution record
                 distribution = await self._create_token_distribution(
                     recipient_user_id=user_id,
@@ -316,15 +368,16 @@ class GovernanceTokenDistributor:
                         "final_amount": str(reward_amount)
                     }
                 )
-                
-                # Distribute tokens
+
+                # Distribute tokens (reference_id = the deterministic key so a
+                # future retry finds this confirmed mint and short-circuits).
                 await self.ftns_service.create_transaction(
                     from_user_id=None,  # System mint
                     to_user_id=user_id,
                     amount=reward_amount,
                     transaction_type="contribution_reward",
                     description=f"Reward for {contribution_type.value}: {contribution_reference}",
-                    reference_id=str(distribution.distribution_id)
+                    reference_id=reference_key
                 )
                 
                 # Check for tier upgrade eligibility

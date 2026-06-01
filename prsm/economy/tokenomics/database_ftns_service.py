@@ -297,7 +297,15 @@ class DatabaseFTNSService:
             Created transaction
         """
         session = await self._get_session()
-        
+
+        # Accept either a TransactionType enum or a raw string. Several
+        # callers (e.g. the governance system-mint paths) pass descriptive
+        # strings like "contribution_reward"/"governance_activation" that are
+        # not TransactionType members; without this normalization
+        # `transaction_type.value` would raise AttributeError and the mint
+        # would never persist (sp912).
+        tx_type = transaction_type.value if hasattr(transaction_type, "value") else str(transaction_type)
+
         try:
             # Get wallets
             to_wallet = await self.get_or_create_wallet(to_user_id)
@@ -317,7 +325,7 @@ class DatabaseFTNSService:
                 from_wallet_id=from_wallet.wallet_id if from_wallet else None,
                 to_wallet_id=to_wallet.wallet_id,
                 amount=amount,
-                transaction_type=transaction_type.value,
+                transaction_type=tx_type,
                 status=TransactionStatus.PENDING.value,
                 description=description,
                 context_units=context_units,
@@ -349,13 +357,13 @@ class DatabaseFTNSService:
                 "transaction",
                 "info",
                 from_wallet.wallet_id if from_wallet else None,
-                f"Transaction {transaction_type.value}: {amount} FTNS",
+                f"Transaction {tx_type}: {amount} FTNS",
                 {
                     "transaction_id": str(transaction.transaction_id),
                     "from_user": from_user_id,
                     "to_user": to_user_id,
                     "amount": str(amount),
-                    "type": transaction_type.value
+                    "type": tx_type
                 }
             )
             
@@ -370,6 +378,40 @@ class DatabaseFTNSService:
             await session.rollback()
             logger.error(f"Error creating transaction: {str(e)}")
             raise
+
+    async def find_confirmed_transaction(
+        self,
+        reference_id: str,
+        transaction_type,
+    ) -> Optional[FTNSTransaction]:
+        """Durable idempotency lookup for system mints (sp912).
+
+        Returns the existing CONFIRMED transaction carrying this
+        ``(reference_id, transaction_type)``, or ``None``. System-mint callers
+        (the governance contribution-reward / activation paths) consult this
+        BEFORE minting so a node restart or a logical retry that replays the
+        same deterministic ``reference_id`` is an idempotent no-op instead of a
+        double-mint. ``reference_id`` is indexed, so this is a single indexed
+        lookup.
+
+        Accepts a ``TransactionType`` enum or a raw string (the column stores
+        the string value).
+        """
+        if not reference_id:
+            return None
+
+        tx_type = transaction_type.value if hasattr(transaction_type, "value") else str(transaction_type)
+        session = await self._get_session()
+        result = await session.execute(
+            select(FTNSTransaction)
+            .where(
+                FTNSTransaction.reference_id == reference_id,
+                FTNSTransaction.transaction_type == tx_type,
+                FTNSTransaction.status == TransactionStatus.CONFIRMED.value,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def transfer_tokens(
         self,
