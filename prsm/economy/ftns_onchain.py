@@ -1285,8 +1285,27 @@ class OnChainFTNSLedger:
                 return tx_record
 
             except Exception as e:
+                # sp914 — distinguish NEVER-BROADCAST (safe to retry/refund)
+                # from BROADCAST-BUT-UNCONFIRMED. If we already have a tx_hash,
+                # `send_raw_transaction` SUCCEEDED and the tx is in the mempool
+                # (this except is almost always `wait_for_transaction_receipt`
+                # timing out on a congested Base). Returning None here made
+                # callers treat an in-flight tx as a clean failure → withdraw
+                # refunded the off-chain debit (DOUBLE-PAY when the tx later
+                # confirmed) and batch-settlement silently DROPPED the owed
+                # payout. Surface it as "pending" instead; only a tx that was
+                # never broadcast (no tx_hash) returns None.
+                if getattr(tx_record, "tx_hash", ""):
+                    tx_record.status = "pending"
+                    logger.warning(
+                        f"FTNS transfer broadcast but unconfirmed "
+                        f"(receipt wait failed: {e}); tx={tx_record.tx_hash[:16]}… "
+                        f"is pending — NOT a clean failure"
+                    )
+                    await self._update_tx_status(tx_record)
+                    return tx_record
                 tx_record.status = "rejected"
-                logger.error(f"FTNS transfer failed: {e}")
+                logger.error(f"FTNS transfer failed (never broadcast): {e}")
                 self._transactions.append(tx_record)
                 await self._record_tx(tx_record)
                 return None

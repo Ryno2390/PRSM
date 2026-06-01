@@ -2245,9 +2245,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                     f"refunded. debit_tx_id={debit_tx.tx_id}"
                 ),
             )
-        # Success path
+        # Success path. sp914 — report the on-chain ledger's ACTUAL status:
+        # a broadcast that succeeded but is still unconfirmed comes back as
+        # "pending" (not None), so we must NOT claim "confirmed" for it. The
+        # off-chain debit is intentionally NOT refunded for a pending tx — it
+        # is in the mempool and refunding would double-pay once it confirms.
         return {
-            "status": "confirmed",
+            "status": getattr(tx_record, "status", "confirmed") or "confirmed",
             "wallet_id": wallet_id,
             "amount_ftns": body.amount_ftns,
             "to_eth_address": to_addr,

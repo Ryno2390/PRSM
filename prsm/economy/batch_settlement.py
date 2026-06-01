@@ -30,6 +30,7 @@ Settlement modes:
 import asyncio
 import logging
 import time
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
@@ -245,7 +246,27 @@ class BatchSettlementManager:
             f"(saved {result.settled_count - result.net_transfers} gas txs)"
         )
 
-        # Execute net transfers
+        # Execute net transfers.
+        # sp914 — a transfer that was NEVER broadcast (transfer() returns None,
+        # or raises) must be RE-QUEUED, not silently dropped: the queue was
+        # already cleared above, so without re-queue the owed on-chain payout
+        # is lost forever and the payee is never paid. A transfer that WAS
+        # broadcast but is unconfirmed ("pending", carries a real tx_hash) must
+        # NOT be re-queued — it is in the mempool and a retry would DOUBLE-PAY.
+        # A reverted ("rejected") transfer is a deterministic on-chain failure;
+        # re-queuing would loop, so it is surfaced as an error instead.
+        requeue: List[PendingTransfer] = []
+
+        def _mark_requeue(from_addr: str, to_addr: str, net_amount: float) -> None:
+            requeue.append(PendingTransfer(
+                tx_id=f"requeue-{uuid.uuid4().hex[:12]}",
+                from_wallet=from_addr,
+                to_wallet=to_addr,
+                amount=net_amount,
+                job_id=f"requeue-{int(time.time())}",
+                description="re-queued: on-chain transfer never broadcast (sp914)",
+            ))
+
         for (from_addr, to_addr), net_amount in net_amounts.items():
             if net_amount <= 0:
                 continue
@@ -255,23 +276,53 @@ class BatchSettlementManager:
                     to_address=to_addr,
                     amount_ftns=net_amount,
                 )
-                if tx_record and tx_record.status == "confirmed":
-                    result.tx_hashes.append(tx_record.tx_hash)
-                    logger.info(
-                        f"BatchSettlement: {net_amount:.6f} FTNS → {to_addr[:12]}… "
-                        f"confirmed (tx: {tx_record.tx_hash[:16]}…)"
-                    )
-                elif tx_record and tx_record.status == "rejected":
-                    result.errors.append(
-                        f"Rejected: {net_amount:.6f} → {to_addr[:12]}"
-                    )
-                else:
-                    result.errors.append(
-                        f"No receipt: {net_amount:.6f} → {to_addr[:12]}"
-                    )
             except Exception as e:
-                result.errors.append(f"{to_addr[:12]}: {e}")
-                logger.error(f"BatchSettlement: transfer to {to_addr[:12]}… failed: {e}")
+                # An unexpected raise means we cannot confirm a broadcast →
+                # treat as never-sent and re-queue for a safe retry.
+                result.errors.append(f"{to_addr[:12]}: {e} (re-queued)")
+                logger.error(f"BatchSettlement: transfer to {to_addr[:12]}… raised: {e}")
+                _mark_requeue(from_addr, to_addr, net_amount)
+                continue
+
+            status = getattr(tx_record, "status", None) if tx_record else None
+            if tx_record and status == "confirmed":
+                result.tx_hashes.append(tx_record.tx_hash)
+                logger.info(
+                    f"BatchSettlement: {net_amount:.6f} FTNS → {to_addr[:12]}… "
+                    f"confirmed (tx: {tx_record.tx_hash[:16]}…)"
+                )
+            elif tx_record and status == "pending":
+                # Broadcast succeeded but unconfirmed — in-flight. Surface the
+                # real tx_hash for reconciliation; do NOT re-queue (double-pay).
+                result.tx_hashes.append(tx_record.tx_hash)
+                result.errors.append(
+                    f"Pending (unconfirmed, not re-queued): {net_amount:.6f} → "
+                    f"{to_addr[:12]} tx={(tx_record.tx_hash or '')[:16]}"
+                )
+                logger.warning(
+                    f"BatchSettlement: {net_amount:.6f} FTNS → {to_addr[:12]}… "
+                    f"broadcast but UNCONFIRMED — left for reconciliation, NOT re-queued"
+                )
+            elif tx_record and status == "rejected":
+                result.errors.append(
+                    f"Rejected (reverted on-chain): {net_amount:.6f} → {to_addr[:12]}"
+                )
+            else:
+                # tx_record is None → never broadcast → safe to retry.
+                result.errors.append(
+                    f"Never broadcast (re-queued): {net_amount:.6f} → {to_addr[:12]}"
+                )
+                _mark_requeue(from_addr, to_addr, net_amount)
+
+        # Re-queue never-broadcast transfers under the lock so the next flush
+        # retries them (the owed payout is preserved, not dropped).
+        if requeue:
+            async with self._lock:
+                self._queue.extend(requeue)
+            logger.warning(
+                f"BatchSettlement: re-queued {len(requeue)} never-broadcast "
+                f"transfer(s) for retry"
+            )
 
         result.duration_seconds = time.time() - start
         self._last_flush_at = time.time()
