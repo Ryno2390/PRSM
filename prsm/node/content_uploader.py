@@ -51,7 +51,7 @@ from prsm.node.gossip import (
     GossipProtocol,
 )
 from prsm.node.transport import WebSocketTransport
-from prsm.node.identity import NodeIdentity
+from prsm.node.identity import NodeIdentity, verify_signature
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.storage.erasure import ErasureError
 from prsm.storage.models import ShardManifest
@@ -2261,10 +2261,39 @@ class ContentUploader:
         if origin == self.identity.node_id:
             return  # Already processed locally
 
+        # sp909 — AUTHENTICATE before crediting any royalty. This handler
+        # mints FTNS (Case 1 record_access, Case 2 source royalty) off a
+        # gossip event; an unsigned/forged event must NEVER cause a credit.
+        # Mirrors ledger_sync._on_ftns_transaction: require an ed25519
+        # signature over the canonical payload, verified against the
+        # origin's public key. (Note: a valid signature proves the event
+        # is authentic + accountable to an origin; it does NOT by itself
+        # prove the access/payment happened — proof-of-payment-backed
+        # royalties are a documented architectural follow-on. Combined with
+        # the Case-2 rate clamp below + the per-(origin,nonce) idempotency,
+        # this closes the unauthenticated-mint + rate-inflation holes.)
+        signature = data.get("signature", "")
+        origin_public_key = data.get("origin_public_key", "")
+        if not signature or not origin_public_key:
+            return
+        canonical = {
+            k: v for k, v in data.items()
+            if k not in ("signature", "origin_public_key")
+        }
+        if not verify_signature(
+            origin_public_key,
+            json.dumps(canonical, sort_keys=True).encode(),
+            signature,
+        ):
+            logger.warning(
+                f"Rejected content-access royalty from {origin[:12]}...: "
+                f"bad/absent signature"
+            )
+            return
+
         content_id = data.get("content_id", "")
         accessor_id = data.get("accessor_id", "")
         creator_id = data.get("creator_id", "")
-        royalty_rate = data.get("royalty_rate", DEFAULT_ROYALTY_RATE)
         parent_cids = data.get("parent_cids", [])
 
         if not content_id or not accessor_id:
@@ -2288,8 +2317,11 @@ class ContentUploader:
             f"{content_id}:{accessor_id}:{data.get('timestamp', '')}"
         )
         try:
+            # sp909 — key the claim on (origin, nonce) so a forged origin
+            # replaying another node's nonce cannot pre-claim/grief, and
+            # each (origin, event) credits at most once.
             claimed = await self.ledger.record_nonce(
-                f"content_access:{access_nonce}", origin,
+                f"content_access:{origin}:{access_nonce}", origin,
             )
         except Exception:  # noqa: BLE001
             claimed = True
@@ -2308,10 +2340,22 @@ class ContentUploader:
                 if pcid in self.uploaded_content
             ]
             if my_parent_cids:
-                source_pool = royalty_rate * SOURCE_CREATOR_SHARE
-                # Count total parents to split evenly
-                per_parent = source_pool / len(parent_cids)
-                source_royalty = per_parent * len(my_parent_cids)
+                # sp909 — CLAMP the rate to THIS node's OWN stored
+                # royalty_rate for each of its parent contents. Do NOT
+                # trust data["royalty_rate"]: it is attacker-supplied gossip
+                # and was previously used directly, letting a forged event
+                # inflate the source royalty arbitrarily. Each my-parent's
+                # share is computed from its own rate, split evenly across
+                # the total parent count.
+                n_total = len(parent_cids)
+                per_parent_share = {
+                    pcid: (
+                        self.uploaded_content[pcid].royalty_rate
+                        * SOURCE_CREATOR_SHARE / n_total
+                    )
+                    for pcid in my_parent_cids
+                }
+                source_royalty = sum(per_parent_share.values())
                 try:
                     await self.ledger.credit(
                         wallet_id=self.identity.node_id,
@@ -2320,7 +2364,7 @@ class ContentUploader:
                         description=f"Source royalty for derivative {content_id[:12]}... ({len(my_parent_cids)} parent(s))",
                     )
                     for pcid in my_parent_cids:
-                        self.uploaded_content[pcid].total_royalties += per_parent
+                        self.uploaded_content[pcid].total_royalties += per_parent_share[pcid]
                     logger.info(f"Source royalty earned: {source_royalty:.4f} FTNS for derivative {content_id[:12]}...")
                 except Exception as e:
                     logger.error(f"Source royalty credit failed: {e}")

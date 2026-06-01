@@ -13,7 +13,9 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 from decimal import Decimal
 
 from prsm.node.content_uploader import ContentUploader, UploadedContent
+from prsm.node.content_provider import sign_content_access_event
 from prsm.node.local_ledger import TransactionType
+from prsm.node.identity import generate_node_identity
 
 
 class TestRoyaltyPipeline:
@@ -245,20 +247,24 @@ class TestRoyaltyPipeline:
             mock_service_instance.transfer_tokens_atomic = AsyncMock(return_value=mock_transfer_result)
             MockAtomicFTNSService.return_value = mock_service_instance
 
-            # Create gossip message data
-            gossip_data = {
+            # Create gossip message data — sp909: must be SIGNED, and the
+            # rate is clamped to our OWN source content rate (0.05), not the
+            # gossiped 0.10, so a forged event can't inflate the payout.
+            origin_id = generate_node_identity()
+            gossip_data = sign_content_access_event({
                 "content_id": derivative_cid,
                 "accessor_id": accessor_id,
                 "creator_id": creator_id,
-                "royalty_rate": royalty_rate,
+                "royalty_rate": royalty_rate,  # gossiped 0.10 — should be IGNORED
                 "parent_cids": [source_cid],  # Our content is a parent
-            }
+                "access_nonce": "evt-src-1",
+            }, origin_id)
 
             # Execute _on_content_access (origin is different from our node)
             await content_uploader._on_content_access(
                 subtype="content_access",
                 data=gossip_data,
-                origin=creator_id
+                origin=origin_id.node_id,
             )
 
             # Verify platform FTNS transfer was called for source royalty
@@ -266,8 +272,9 @@ class TestRoyaltyPipeline:
             transfer_call = mock_service_instance.transfer_tokens_atomic.call_args
             assert transfer_call[1]["from_user_id"] == accessor_id
             assert transfer_call[1]["to_user_id"] == content_uploader.identity.node_id
-            # Source pool is 25% of royalty rate
-            expected_amount = royalty_rate * 0.25
+            # Source pool is 25% of the OWN source-content rate (0.05),
+            # NOT the gossiped 0.10 — sp909 clamp prevents rate inflation.
+            expected_amount = 0.05 * 0.25
             assert float(transfer_call[1]["amount"]) == pytest.approx(expected_amount, rel=1e-3)
 
     @pytest.mark.asyncio

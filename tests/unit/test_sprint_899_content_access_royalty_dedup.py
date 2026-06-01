@@ -33,7 +33,13 @@ from prsm.node.content_uploader import (
     UploadedContent,
     SOURCE_CREATOR_SHARE,
 )
+from prsm.node.content_provider import sign_content_access_event
 from prsm.node.local_ledger import LocalLedger
+from prsm.node.identity import generate_node_identity
+
+# sp909 — content-access events must now be SIGNED to pass _on_content_access
+# authentication. A single origin identity signs all events in this module.
+_ORIGIN = generate_node_identity()
 
 
 async def _uploader_with_real_ledger(node_id="creator_node"):
@@ -64,16 +70,19 @@ def _own_parent(node_id, cid="parentA"):
     )
 
 
-def _access_event(nonce="evt-1"):
-    return {
+def _access_event(nonce="evt-1", *, include_nonce=True):
+    ev = {
         "content_id": "deriv1",
         "accessor_id": "accessor",
         "creator_id": "someone_else",
         "royalty_rate": 0.04,
         "parent_cids": ["parentA"],
         "timestamp": 123.0,
-        "access_nonce": nonce,
     }
+    if include_nonce:
+        ev["access_nonce"] = nonce
+    # sp909 — sign so the event passes _on_content_access authentication.
+    return sign_content_access_event(ev, _ORIGIN)
 
 
 # source_royalty = royalty_rate * SOURCE_CREATOR_SHARE * (mine/total)
@@ -88,8 +97,8 @@ async def test_replayed_access_event_credits_royalty_once():
     up.uploaded_content = {"parentA": _own_parent("creator_node")}
 
     data = _access_event()
-    await up._on_content_access("content_access", data, "origin_x")
-    await up._on_content_access("content_access", data, "origin_x")  # replay
+    await up._on_content_access("content_access", data, _ORIGIN.node_id)
+    await up._on_content_access("content_access", data, _ORIGIN.node_id)  # replay
 
     bal = await ledger.get_balance("creator_node")
     assert bal == pytest.approx(_EXPECTED), (
@@ -103,7 +112,7 @@ async def test_many_replays_credit_once():
     up.uploaded_content = {"parentA": _own_parent("creator_node")}
     data = _access_event()
     for _ in range(6):
-        await up._on_content_access("content_access", data, "origin_x")
+        await up._on_content_access("content_access", data, _ORIGIN.node_id)
     assert await ledger.get_balance("creator_node") == pytest.approx(
         _EXPECTED,
     )
@@ -117,10 +126,10 @@ async def test_distinct_access_events_each_credit():
     up.uploaded_content = {"parentA": _own_parent("creator_node")}
 
     await up._on_content_access(
-        "content_access", _access_event("evt-1"), "origin_x",
+        "content_access", _access_event("evt-1"), _ORIGIN.node_id,
     )
     await up._on_content_access(
-        "content_access", _access_event("evt-2"), "origin_x",
+        "content_access", _access_event("evt-2"), _ORIGIN.node_id,
     )
     bal = await ledger.get_balance("creator_node")
     assert bal == pytest.approx(2 * _EXPECTED)
@@ -133,10 +142,9 @@ async def test_legacy_event_without_nonce_dedups_on_derived_key():
     up, ledger = await _uploader_with_real_ledger()
     up.uploaded_content = {"parentA": _own_parent("creator_node")}
 
-    legacy = _access_event()
-    legacy.pop("access_nonce")  # pre-sp899 shape
-    await up._on_content_access("content_access", legacy, "origin_x")
-    await up._on_content_access("content_access", legacy, "origin_x")
+    legacy = _access_event(include_nonce=False)  # pre-sp899 shape, signed
+    await up._on_content_access("content_access", legacy, _ORIGIN.node_id)
+    await up._on_content_access("content_access", legacy, _ORIGIN.node_id)
     assert await ledger.get_balance("creator_node") == pytest.approx(
         _EXPECTED,
     )

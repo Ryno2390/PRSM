@@ -22,6 +22,7 @@ Message Types:
 import asyncio
 import base64
 import hashlib
+import json
 import logging
 import time
 import uuid
@@ -32,6 +33,33 @@ from typing import Any, Dict, List, Optional, Set
 from prsm.node.transport import MSG_DIRECT, P2PMessage, PeerConnection, WebSocketTransport
 from prsm.node.gossip import GOSSIP_CONTENT_ADVERTISE, GOSSIP_CONTENT_ACCESS, GossipProtocol
 from prsm.node.identity import NodeIdentity
+
+
+def sign_content_access_event(payload: Dict[str, Any], identity: NodeIdentity) -> Dict[str, Any]:
+    """sp909 — sign a GOSSIP_CONTENT_ACCESS payload so subscribers can
+    AUTHENTICATE it before crediting royalties (mirrors
+    ledger_sync.broadcast_transaction). The signature covers the canonical
+    (sorted-JSON) payload excluding the signature fields themselves;
+    `_on_content_access` rebuilds the same canonical and verifies via
+    verify_signature(origin_public_key, canonical, signature).
+
+    Also reconciles the publisher/subscriber key: emits BOTH `cid` (legacy
+    consumers) and `content_id` (what the subscriber reads) set to the same
+    value, so the royalty path is no longer silently dead.
+    """
+    base = dict(payload)
+    if "cid" in base and "content_id" not in base:
+        base["content_id"] = base["cid"]
+    canonical = {
+        k: v for k, v in base.items()
+        if k not in ("signature", "origin_public_key")
+    }
+    signature = identity.sign(json.dumps(canonical, sort_keys=True).encode())
+    return {
+        **canonical,
+        "signature": signature,
+        "origin_public_key": identity.public_key_b64,
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -602,7 +630,7 @@ class ContentProvider:
             # legacy uploader implementation.
             try:
                 resolved = self._resolve_payment_metadata(content_info)
-                await self.gossip.publish(GOSSIP_CONTENT_ACCESS, {
+                await self.gossip.publish(GOSSIP_CONTENT_ACCESS, sign_content_access_event({
                     "cid": cid,
                     "accessor_id": peer.peer_id,
                     "creator_id": resolved.get("creator_id", ""),
@@ -612,7 +640,7 @@ class ContentProvider:
                     # Sp899 — unique per-access id so receivers credit
                     # this access event at most once (replay-safe).
                     "access_nonce": uuid.uuid4().hex,
-                })
+                }, self.identity))
             except Exception as exc:
                 logger.warning(
                     f"GOSSIP_CONTENT_ACCESS publish failed for "
@@ -1083,7 +1111,7 @@ class ContentProvider:
         # fires regardless of whether the payment call above succeeded
         # or fell back to local, matching the inline serve path.
         try:
-            await self.gossip.publish(GOSSIP_CONTENT_ACCESS, {
+            await self.gossip.publish(GOSSIP_CONTENT_ACCESS, sign_content_access_event({
                 "cid": cid,
                 "accessor_id": peer.peer_id,
                 "creator_id": record.creator_id,
@@ -1091,7 +1119,7 @@ class ContentProvider:
                 "parent_cids": record.parent_cids,
                 "timestamp": time.time(),
                 "access_nonce": uuid.uuid4().hex,  # sp899 replay-safe
-            })
+            }, self.identity))
         except Exception as exc:
             logger.warning(
                 f"GOSSIP_CONTENT_ACCESS publish failed for replica serve "
@@ -1140,7 +1168,7 @@ class ContentProvider:
             content_metadata=resolved,
         )
         try:
-            await self.gossip.publish(GOSSIP_CONTENT_ACCESS, {
+            await self.gossip.publish(GOSSIP_CONTENT_ACCESS, sign_content_access_event({
                 "cid": cid,
                 "accessor_id": accessor_id,
                 "creator_id": resolved.get("creator_id", ""),
@@ -1148,7 +1176,7 @@ class ContentProvider:
                 "parent_cids": resolved.get("parent_cids", []),
                 "timestamp": time.time(),
                 "access_nonce": uuid.uuid4().hex,  # sp899 replay-safe
-            })
+            }, self.identity))
         except Exception as exc:
             logger.warning(
                 f"GOSSIP_CONTENT_ACCESS publish failed for "
