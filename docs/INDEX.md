@@ -77,7 +77,7 @@ Phases ordered by number. Each row: design/plan doc + status + any follow-on run
 | [`2026-04-22-phase6-p2p-hardening-design-plan.md`](./2026-04-22-phase6-p2p-hardening-design-plan.md) | Phase 6 design + TDD plan | `phase6-merge-ready-20260422` |
 | [`2026-04-22-phase6-task2-bootstrap-ops-runbook.md`](./2026-04-22-phase6-task2-bootstrap-ops-runbook.md) (**PHASE6-TASK2-BOOTSTRAP-OPS-1**) | Foundation bootstrap-node ops runbook | Partner-handoff ready |
 | [`2026-04-22-phase6-task4-dht-tuning-plan.md`](./2026-04-22-phase6-task4-dht-tuning-plan.md) (**PHASE6-TASK4-DHT-TUNING-1**) | DHT parameter-sweep measurement plan | Partner-handoff ready |
-| [`BOOTSTRAP_DEPLOYMENT_GUIDE.md`](./BOOTSTRAP_DEPLOYMENT_GUIDE.md) | Operator-facing bootstrap reference | Reference |
+| [`BOOTSTRAP_DEPLOYMENT_GUIDE.md`](operations/BOOTSTRAP_DEPLOYMENT_GUIDE.md) | Operator-facing bootstrap reference | Reference |
 
 ### Phase 7 — verification triad (compute-side)
 
@@ -167,7 +167,7 @@ Public-facing collateral that remains in this repo:
 |---|---|
 | [`2026-04-22-session-summary-engineering-sprint.md`](./2026-04-22-session-summary-engineering-sprint.md) | 2026-04-22 engineering-sprint changelog (Phase 4/5/6/7-storage/8 sprint) |
 | *Economic model white paper moved 2026-04-24 to [`archive/research/`](./archive/research/)* — the v1 paper was CIS-priced; a successor paper around Prismatica's six-stream business remains to be drafted |
-| [`SCIENCE_FIRST_MEDIA_KIT.md`](./SCIENCE_FIRST_MEDIA_KIT.md) | Science-first framing media kit |
+| [`SCIENCE_FIRST_MEDIA_KIT.md`](archive/SCIENCE_FIRST_MEDIA_KIT.md) | Science-first framing media kit |
 
 ---
 
@@ -180,9 +180,9 @@ Public-facing collateral that remains in this repo:
 | [`GETTING_STARTED.md`](./GETTING_STARTED.md) | Top-of-funnel setup |
 | [`quickstart.md`](./quickstart.md) | Quickstart guide |
 | [`MACOS_SETUP.md`](./MACOS_SETUP.md) | macOS-specific setup |
-| [`SECURE_SETUP.md`](./SECURE_SETUP.md) | Secure setup for production-adjacent dev |
+| [`SECURE_SETUP.md`](operations/SECURE_SETUP.md) | Secure setup for production-adjacent dev |
 | [`CONTRIBUTOR_ONBOARDING.md`](./CONTRIBUTOR_ONBOARDING.md) | Contributor journey |
-| [`CONTRIBUTOR_SYSTEM_SUMMARY.md`](./CONTRIBUTOR_SYSTEM_SUMMARY.md) | Contribution-system overview |
+| [`CONTRIBUTOR_SYSTEM_SUMMARY.md`](archive/CONTRIBUTOR_SYSTEM_SUMMARY.md) | Contribution-system overview |
 | [`CURATED_GOOD_FIRST_ISSUES.md`](./CURATED_GOOD_FIRST_ISSUES.md) | Starter issues |
 | [`PARTICIPANT_GUIDE.md`](./PARTICIPANT_GUIDE.md) | End-user participant guide |
 
@@ -195,7 +195,7 @@ Public-facing collateral that remains in this repo:
 | [`libp2p-transport-design.md`](./libp2p-transport-design.md) | libp2p transport design |
 | [`libp2p-compute-storage-wiring.md`](./libp2p-compute-storage-wiring.md) | libp2p-to-compute/storage wiring |
 | [`native-storage-design.md`](./native-storage-design.md) | Native storage design |
-| [`SOVEREIGN_EDGE_AI_SPEC.md`](./SOVEREIGN_EDGE_AI_SPEC.md) | Sovereign-edge AI architectural spec |
+| [`SOVEREIGN_EDGE_AI_SPEC.md`](archive/SOVEREIGN_EDGE_AI_SPEC.md) | Sovereign-edge AI architectural spec |
 | [`ai-integration.md`](./ai-integration.md) | AI integration patterns |
 
 ### 6.3 API / CLI / SDK
@@ -206,7 +206,6 @@ Public-facing collateral that remains in this repo:
 | [`API_VERSIONING_GUIDE.md`](./API_VERSIONING_GUIDE.md) | API versioning policy |
 | [`CLI_REFERENCE.md`](./CLI_REFERENCE.md) | CLI reference |
 | [`SDK_DEVELOPER_GUIDE.md`](./SDK_DEVELOPER_GUIDE.md) | SDK developer guide |
-| [`SDK_DOCUMENTATION_ENHANCEMENTS.md`](./SDK_DOCUMENTATION_ENHANCEMENTS.md) | SDK docs backlog |
 | [`FTNS_API_DOCUMENTATION.md`](./FTNS_API_DOCUMENTATION.md) | FTNS API reference |
 
 ### 6.4 Development + operations

@@ -322,7 +322,7 @@ See [Deployment Guide](deploy/production/DEPLOYMENT_GUIDE.md) for full instructi
 |----------|------------|
 | [Getting Started](docs/GETTING_STARTED.md) | Install → configure → first query in 5 minutes |
 | [Technology Choices](docs/TECH_CHOICES.md) | Why Ethereum + Base — chain-choice rationale |
-| [Sovereign-Edge AI Spec](docs/SOVEREIGN_EDGE_AI_SPEC.md) | Phase 1 architecture (Rings 1-6) |
+| [Sovereign-Edge AI Spec](docs/archive/SOVEREIGN_EDGE_AI_SPEC.md) | Phase 1 architecture (Rings 1-6) |
 | [Confidential Compute Spec](docs/CONFIDENTIAL_COMPUTE_SPEC.md) | Phase 2 architecture (Rings 7-10) |
 | [Audit-Gap Roadmap](docs/2026-04-10-audit-gap-roadmap.md) | Master roadmap — phase status + scope + planning-artifact pointers |
 | [Implementation Status](docs/IMPLEMENTATION_STATUS.md) | Subsystem status and test coverage |

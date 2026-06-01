@@ -13,7 +13,7 @@
 > - [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — local development troubleshooting
 > - [`TROUBLESHOOTING_GUIDE.md`](TROUBLESHOOTING_GUIDE.md) — production / containerized-deployment troubleshooting (companion to this manual)
 > - [`SECURITY_HARDENING.md`](SECURITY_HARDENING.md) + [`SECURITY_HARDENING_CHECKLIST.md`](SECURITY_HARDENING_CHECKLIST.md) + [`SECURITY_CONFIGURATION_AUDIT.md`](SECURITY_CONFIGURATION_AUDIT.md) — security suite
-> - [`BOOTSTRAP_DEPLOYMENT_GUIDE.md`](BOOTSTRAP_DEPLOYMENT_GUIDE.md) — bootstrap-node deploy
+> - [`BOOTSTRAP_DEPLOYMENT_GUIDE.md`](operations/BOOTSTRAP_DEPLOYMENT_GUIDE.md) — bootstrap-node deploy
 > - [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) — master roadmap; Phase 1 on-chain ops + Phase 6 P2P hardening change operational surface
 > - [`2026-04-11-phase1.3-sepolia-bakein-log.md`](2026-04-11-phase1.3-sepolia-bakein-log.md) — live bake-in operations log as of April 2026
 >

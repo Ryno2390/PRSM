@@ -109,7 +109,7 @@ Third-party LLM (Claude / GPT / local) calls prsm_analyze via MCP
 | Bootstrap node | `wss://bootstrap1.prsm-network.com:8765` |
 | FTNS live token (Base mainnet) | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` |
 | Docker compose (bootstrap) | `docker/docker-compose.bootstrap.yml` |
-| Deployment guide | [`docs/BOOTSTRAP_DEPLOYMENT_GUIDE.md`](BOOTSTRAP_DEPLOYMENT_GUIDE.md) |
+| Deployment guide | [`docs/BOOTSTRAP_DEPLOYMENT_GUIDE.md`](operations/BOOTSTRAP_DEPLOYMENT_GUIDE.md) |
 | Operator guide | [`docs/OPERATOR_GUIDE.md`](OPERATOR_GUIDE.md) |
 
 ---

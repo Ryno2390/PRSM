@@ -184,7 +184,7 @@ PRSM is built as 10 concentric "Capability Rings":
 | 9 | The Mind | Training pipeline (traces → JSONL export) |
 | 10 | The Fortress | Security audit + integrity |
 
-Each ring wraps and enriches the ones inside it. See [`SOVEREIGN_EDGE_AI_SPEC.md`](SOVEREIGN_EDGE_AI_SPEC.md) for details.
+Each ring wraps and enriches the ones inside it. See [`SOVEREIGN_EDGE_AI_SPEC.md`](archive/SOVEREIGN_EDGE_AI_SPEC.md) for details.
 
 > **Terminology note:** "Rings 1-10" is pre-v1.6 numbering for shipped work. Current active planning uses **Phase 1-8** numbering. See [`glossary.md`](glossary.md) for the disambiguation, and [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) for the current phase plan.
 
@@ -257,7 +257,7 @@ curl http://localhost:8000/status
 ## Next Steps
 
 - [Quickstart Guide](quickstart.md) — more detailed cross-node walkthrough
-- [Sovereign-Edge AI Spec](SOVEREIGN_EDGE_AI_SPEC.md) — architecture details
+- [Sovereign-Edge AI Spec](archive/SOVEREIGN_EDGE_AI_SPEC.md) — architecture details
 - [Confidential Compute Spec](CONFIDENTIAL_COMPUTE_SPEC.md) — privacy architecture
 - [AI Integration Guide](ai-integration.md) — connecting AI assistants via MCP
 - [Configuration Reference](configuration.md) — full config options

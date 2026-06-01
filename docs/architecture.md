@@ -23,7 +23,7 @@ PRSM is built as ten concentric capability rings. Each ring wraps and enriches t
 | 9 | **The Mind** | NWTN training pipeline — collects execution traces to fine-tune a future NWTN LLM | `prsm/compute/nwtn/training/` |
 | 10 | **The Fortress** | Integrity verification, privacy budget tracking, hash-chained audit logs | `prsm/compute/security/` |
 
-See [`docs/SOVEREIGN_EDGE_AI_SPEC.md`](SOVEREIGN_EDGE_AI_SPEC.md) for the original Rings 1-6 design and [`docs/CONFIDENTIAL_COMPUTE_SPEC.md`](CONFIDENTIAL_COMPUTE_SPEC.md) for Rings 7-10.
+See [`docs/SOVEREIGN_EDGE_AI_SPEC.md`](archive/SOVEREIGN_EDGE_AI_SPEC.md) for the original Rings 1-6 design and [`docs/CONFIDENTIAL_COMPUTE_SPEC.md`](CONFIDENTIAL_COMPUTE_SPEC.md) for Rings 7-10.
 
 ---
 
