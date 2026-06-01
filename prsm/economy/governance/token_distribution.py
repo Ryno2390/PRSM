@@ -21,6 +21,8 @@ from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID, uuid4
 from enum import Enum
 
+from pydantic import Field
+
 # Set precision for governance calculations
 getcontext().prec = 18
 
@@ -68,7 +70,13 @@ class GovernanceParticipantTier(str, Enum):
 
 class TokenDistribution(PRSMBaseModel):
     """Record of token distribution for governance"""
-    distribution_id: UUID = uuid4()
+    # sp908 — MUST be default_factory: a bare `= uuid4()` / `= datetime.now()`
+    # default is evaluated ONCE at class-definition time, so every instance
+    # shared the SAME id/timestamp. That broke the audit trail AND collapsed
+    # the `self.distributions` dict to a single entry (each distribution
+    # overwrote the last), and made reference_id=str(distribution_id) a
+    # constant — defeating any reference-based idempotency.
+    distribution_id: UUID = Field(default_factory=uuid4)
     recipient_user_id: str
     distribution_type: DistributionType
     amount: Decimal
@@ -76,13 +84,13 @@ class TokenDistribution(PRSMBaseModel):
     contribution_reference: Optional[str] = None
     vesting_schedule: Optional[Dict[str, Any]] = None
     unlock_date: Optional[datetime] = None
-    distributed_at: datetime = datetime.now(timezone.utc)
+    distributed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: Dict[str, Any] = {}
 
 
 class GovernanceActivation(PRSMBaseModel):
     """Governance system activation record"""
-    activation_id: UUID = uuid4()
+    activation_id: UUID = Field(default_factory=uuid4)  # sp908: per-instance, see TokenDistribution
     participant_user_id: str
     participant_tier: GovernanceParticipantTier
     initial_token_allocation: Decimal
@@ -90,7 +98,7 @@ class GovernanceActivation(PRSMBaseModel):
     voting_power: Decimal = Decimal('0')
     council_memberships: List[str] = []
     delegation_relationships: List[str] = []
-    activated_at: datetime = datetime.now(timezone.utc)
+    activated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     is_active: bool = True
 
 
@@ -156,7 +164,9 @@ class GovernanceTokenDistributor:
         self,
         user_id: str,
         participant_tier: GovernanceParticipantTier,
-        council_nominations: List[str] = None
+        council_nominations: List[str] = None,
+        *,
+        self_service: bool = True,
     ) -> GovernanceActivation:
         """
         Activate governance participation for a user with initial token distribution
@@ -179,7 +189,9 @@ class GovernanceTokenDistributor:
                         return existing
                 
                 # Validate user eligibility
-                if not await self._validate_governance_eligibility(user_id, participant_tier):
+                if not await self._validate_governance_eligibility(
+                    user_id, participant_tier, self_service=self_service,
+                ):
                     raise ValueError("User not eligible for governance participation")
                 
                 # Calculate initial token allocation
@@ -606,22 +618,47 @@ class GovernanceTokenDistributor:
     
     # === Private Helper Methods ===
     
-    async def _validate_governance_eligibility(self, user_id: str, tier: GovernanceParticipantTier) -> bool:
-        """Validate user eligibility for governance participation"""
+    async def _validate_governance_eligibility(
+        self,
+        user_id: str,
+        tier: GovernanceParticipantTier,
+        *,
+        self_service: bool = True,
+    ) -> bool:
+        """Validate user eligibility for governance participation.
+
+        sp908 SECURITY FIX: a SELF-SERVICE activation (the default; the
+        public POST /governance/activate path where a user activates
+        themselves) may ONLY grant the COMMUNITY tier. Previously this
+        method was a literal `pass` for higher tiers and returned True for
+        ANY requested tier — so any authenticated user could self-select
+        CORE_TEAM and mint 100,000 FTNS (COMMUNITY is 1,000) by putting
+        `participant_tier: core_team` in the request body. Tier elevation
+        (CONTRIBUTOR..CORE_TEAM) must come from an AUTHORIZED system flow
+        (early-adopter program, admin grant) that passes self_service=False,
+        not from the requester's own body. A real per-tier reputation/role
+        check for the authorized path is a follow-on; until then,
+        self_service callers are hard-capped at COMMUNITY.
+        """
         try:
             # Check if user exists in auth system
             user = await auth_manager.get_user_by_id(user_id)
             if not user:
                 return False
-            
-            # Check minimum requirements based on tier
-            if tier in [GovernanceParticipantTier.EXPERT, GovernanceParticipantTier.DELEGATE, 
-                       GovernanceParticipantTier.COUNCIL_MEMBER]:
-                # Would implement reputation/contribution checks here
-                pass
-            
+
+            # Self-service callers cannot grant themselves a tier above
+            # COMMUNITY — that would be self-authorized minting.
+            if self_service and tier != GovernanceParticipantTier.COMMUNITY:
+                self.logger.warning(
+                    "Rejected self-service governance activation above "
+                    "COMMUNITY tier (self-elevation attempt)",
+                    user_id=user_id,
+                    requested_tier=tier.value,
+                )
+                return False
+
             return True
-            
+
         except Exception:
             return False
     

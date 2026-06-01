@@ -205,9 +205,12 @@ class EarlyAdopterProgram:
             # Activate governance participation with bonus
             if tier_config["governance_bonus"] > 0:
                 governance_tier = self._map_to_governance_tier(adopter_tier)
+                # sp908: authorized system program (early-adopter bonus),
+                # NOT user self-service — may grant an elevated tier.
                 await self.governance_distributor.activate_governance_participation(
                     user_id=user_id,
-                    participant_tier=governance_tier
+                    participant_tier=governance_tier,
+                    self_service=False,
                 )
             
             # Update program statistics
