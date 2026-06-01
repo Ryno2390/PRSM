@@ -83,7 +83,7 @@ async def upload_dataset(client, filepath: str):
     with open(filepath, "rb") as f:
         data = f.read()
 
-    # Upload to IPFS
+    # Upload to PRSM native storage (ContentStore)
     result = await client.storage.upload_bytes(
         data=data,
         filename=filepath.split("/")[-1],
@@ -93,7 +93,7 @@ async def upload_dataset(client, filepath: str):
     )
 
     print(f"Uploaded: {result.cid}")
-    print(f"Gateway URL: {result.gateway_url}")
+    # Retrieve later by CID via the node's ContentStore (no IPFS gateway URL)
 
     return result
 ```
@@ -514,28 +514,28 @@ Enterprise users can request higher limits. Contact support@prsm.ai.
 
 ## Examples Repository
 
-See `sdks/python/examples/` for production-ready patterns:
+The Python SDK ships in-repo at `prsm/sdk/` (`from prsm.sdk.client import PRSMClient`). Runnable example scripts are currently available for the JavaScript SDK under `sdks/javascript/examples/`:
 
 | Example | Description |
 |---------|-------------|
-| `basic_usage.py` | Getting started with the SDK |
-| `streaming.py` | Real-time response streaming |
-| `storage_upload.py` | Publish data with royalty tracking |
-| `tools.py` | MCP tool execution |
-| `cost_management.py` | Budget control and cost tracking |
-| `production/fastapi_integration.py` | FastAPI backend integration |
-| `production/docker_deployment.py` | Container deployment examples |
+| `basic-usage.js` | Getting started with the SDK |
+| `streaming.js` | Real-time response streaming |
+| `marketplace.js` | Publish data with royalty tracking |
+| `tools.js` | MCP tool execution |
+| `typescript-usage.ts` | TypeScript usage patterns |
+| `react-example.jsx` | React frontend integration |
+| `frameworks/` | Framework integration examples |
 
 ### Running Examples
 
 ```bash
-cd sdks/python/examples
+cd sdks/javascript/examples
 
 # Set API key
 export PRSM_API_KEY="your_key"
 
 # Run example
-python basic_usage.py
+node basic-usage.js
 ```
 
 ---

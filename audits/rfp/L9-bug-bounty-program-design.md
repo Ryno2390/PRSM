@@ -58,7 +58,9 @@ audit RFP. So this doc is the design + go-live spec, not an RFP.
    remediated.
 5. ⏳ L5 ML supply-chain audit complete + remediated.
 6. ⏳ Phase 1.3 v2 RoyaltyDistributor redeploy complete (HIGH-1
-   burn fix + Pausable + D-04 pull-payment).
+   fix: Ownable2Step + totalClaimable accumulator + recoverStranded;
+   Pausable + D-04 pull-payment). No burn — the split is
+   creator / network-fee / serving-node.
 
 **Why these gates:** if a researcher submits a finding that's already
 known to the audit layers, we pay them for re-finding what we already
@@ -82,7 +84,7 @@ sprint 2026-07-07 to 2026-08-04 + 2-week safety margin).
 | `EscrowPool.sol` | (deployed at L4-clear) | Per-requester escrow |
 | `StakeBond.sol` | (deployed at L4-clear) | Provider stake |
 | `BatchSettlementRegistry.sol` | (deployed at L4-clear) | Receipt commit + challenge |
-| `RoyaltyDistributor.sol` v2 | (redeployed Week 2) | Pull-payment + burn |
+| `RoyaltyDistributor.sol` v2 | `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e` | Pull-payment; creator/network-fee/node split (no burn) |
 | `FTNSTokenSimple.sol` | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` | UUPS proxy |
 | `EmissionController.sol` | (deployed at L4-clear) | Halving emission |
 | `CompensationDistributor.sol` | (deployed at L4-clear) | Pull-based reward distributor |
@@ -166,7 +168,7 @@ ML pipeline (L5 scope) is better served by direct disclosure to
 | `prsm/compute/chain_rpc/` | RPC, handoff tokens, layer stage servers |
 | `prsm/compute/streaming/` | Autoregressive + sharded + speculation runners |
 | `prsm/compute/manifest_dht/` | Manifest DHT |
-| Bootstrap node (`bootstrap1.prsm-network.com:8765`) | Limited — DDoS scenarios are L6f scope |
+| Bootstrap node (`bootstrap-us.prsm-network.com:8765`) | Limited — DDoS scenarios are L6f scope |
 | Web/SDK / `ai-concierge` | If deployed publicly |
 
 ### 5.3 Severity & payouts

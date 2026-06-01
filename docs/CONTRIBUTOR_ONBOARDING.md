@@ -188,7 +188,7 @@ git checkout -b feature/issue-456-sdk-examples
 ```
 
 #### 3. **Make Your Changes**
-- Follow the [coding standards](CODING_STANDARDS.md)
+- Follow the [coding standards](development/CODING_STANDARDS.md)
 - Write tests for new functionality
 - Update documentation as needed
 - Keep commits small and focused
@@ -217,7 +217,7 @@ cd docs && make html
 ## 📚 Learning Resources
 
 ### 🎓 **PRSM-Specific Learning**
-- [Architecture Overview](ARCHITECTURE.md)
+- [Architecture Overview](architecture.md)
 - [API Documentation](https://docs.prsm.ai)
 - [Research Papers](https://prsm.ai/research)
 - [Video Tutorials](https://youtube.com/prsm-ai)
@@ -326,7 +326,7 @@ graph TD
 
 ## 🌍 Code of Conduct
 
-We are committed to providing a welcoming and inclusive environment for all contributors. Please read our [Code of Conduct](CODE_OF_CONDUCT.md) and help us maintain a positive community.
+We are committed to providing a welcoming and inclusive environment for all contributors. Please read our [Code of Conduct](../CODE_OF_CONDUCT.md) and help us maintain a positive community.
 
 ### ✅ **Expected Behavior**
 - Be respectful and inclusive

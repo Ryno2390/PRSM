@@ -71,9 +71,9 @@ prsm compute quote "EV adoption trends" --shards 5 --tier t2
 prsm compute run --query "What is the capital of France?" --budget 0.01
 ```
 
-**Check yield estimate (what would I earn as a provider?):**
+**Check earnings estimate (what would I earn as a provider?):**
 ```bash
-prsm ftns yield-estimate --hours 8 --stake 1000
+prsm ftns yield-estimate --hours 8
 ```
 
 ## Interactive Setup (Alternative)
@@ -206,14 +206,14 @@ Revenue split: **80% to you** (data owner), 15% to compute providers, 5% to netw
 Check what you'd earn:
 
 ```bash
-prsm ftns yield-estimate --hours 20 --stake 1000
+prsm ftns yield-estimate --hours 20
 ```
 
-Staking tiers:
-- **Casual** (0 FTNS): 1.0x base rate
-- **Pledged** (100 FTNS): 1.25x boost
-- **Dedicated** (1,000 FTNS): 1.5x boost
-- **Sentinel** (10,000 FTNS): 2.0x boost + aggregator eligibility
+Staking is **utility-only** — locking FTNS buys service discounts and dispatch priority (and, at the top tier, aggregator eligibility). It does **not** pay token yield/APY:
+- **Casual** (0 FTNS): no lock
+- **Pledged** (100 FTNS): service discount + dispatch priority
+- **Dedicated** (1,000 FTNS): larger discount + higher dispatch priority
+- **Sentinel** (10,000 FTNS): maximum discount + dispatch priority + aggregator eligibility
 
 ## Skill Packages
 

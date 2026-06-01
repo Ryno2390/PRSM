@@ -2,11 +2,23 @@
 
 **Version**: 1.0  
 **Last Updated**: 2025-07-10  
-**Status**: Production Ready  
+**Status**: SUPERSEDED DRAFT — does NOT describe deployed v1 tokenomics  
+
+> **⚠️ Superseded design.** This document describes an early appreciation-targeting
+> economic model (dynamic supply adjustment, demurrage/anti-hoarding, earning
+> multipliers) that was **dropped** before mainnet. The deployed v1 tokenomics is
+> "HALVING-TO-CAP": a fixed Bitcoin-style emission (~31.5M FTNS/yr opening at 1 FTNS/sec,
+> halving every 4 years toward zero), a 1B FTNS hard cap (900M emission + 100M genesis,
+> ~352M asymptotic supply), and **no** burn-on-use, **no** demurrage, and **no** dynamic
+> supply adjustment. Emission is split 50/30/20 (creator / operator / grant) via the
+> on-chain CompensationDistributor. Staking is **utility-only** (lock-based service
+> discounts + dispatch priority) with **no** token yield. The APIs below (DynamicSupplyController,
+> AntiHoardingEngine, earning-multiplier tiers) are NOT part of the deployed system; see
+> `PRSM_Tokenomics.md` for the canonical live model.
 
 ## 🎯 Overview
 
-This document provides comprehensive API documentation for the PRSM FTNS (Fungible Tokens for Node Support) tokenomics system. The FTNS system implements a complete token economy with advanced features including contribution tracking, dynamic supply adjustment, anti-hoarding mechanisms, and emergency circuit breakers.
+This document provides API documentation for an early, superseded PRSM FTNS (Fungible Tokens for Node Support) tokenomics design that featured contribution tracking, dynamic supply adjustment, anti-hoarding mechanisms, and emergency circuit breakers. As noted above, the dynamic-supply / anti-hoarding / earning-multiplier features were dropped before mainnet and are NOT part of the deployed v1 (HALVING-TO-CAP) system.
 
 ## 📚 Table of Contents
 
@@ -53,8 +65,14 @@ This document provides comprehensive API documentation for the PRSM FTNS (Fungib
 
 ## Phase 1: Contributor Status API
 
+> **⚠️ Superseded earning model — not in deployed v1.** The earning-multiplier tiers below
+> (None 0.0x / Basic 1.0x / Active 1.3x / Power 1.6x) are NOT how the live network
+> compensates contributors. Deployed emission is split 50/30/20 (creator / operator / grant)
+> via the on-chain CompensationDistributor — there are no per-contributor earning multipliers.
+> This section is retained for historical reference only.
+
 ### Overview
-The Contributor Status system tracks user contributions and manages earning multipliers based on contribution quality and frequency.
+The (superseded) Contributor Status design tracked user contributions and managed earning multipliers based on contribution quality and frequency. The multiplier model was never deployed.
 
 ### Contributor Tiers
 
@@ -162,8 +180,12 @@ class ContributorStatus:
 
 ## Phase 2: Dynamic Supply API
 
+> **⚠️ Superseded — not in deployed v1.** Dynamic supply adjustment was dropped before
+> mainnet. Deployed FTNS uses a fixed halving-to-cap emission (no appreciation targeting,
+> no supply adjustment). This section is retained for historical reference only.
+
 ### Overview
-The Dynamic Supply system automatically adjusts FTNS token supply to maintain target appreciation rates (50% initially, approaching 2% annually).
+The (superseded) Dynamic Supply design automatically adjusted FTNS token supply to target appreciation rates. It was never deployed; the live system has no appreciation target and no supply adjustment.
 
 ### API Endpoints
 
@@ -247,8 +269,12 @@ class CurrentRatesInfo:
 
 ## Phase 3: Anti-Hoarding API
 
+> **⚠️ Superseded — not in deployed v1.** Demurrage fees and velocity tracking were
+> dropped before mainnet. Deployed FTNS has no demurrage and no anti-hoarding mechanism.
+> This section is retained for historical reference only.
+
 ### Overview
-The Anti-Hoarding system implements demurrage fees and velocity tracking to encourage active token circulation rather than passive holding.
+The (superseded) Anti-Hoarding design implemented demurrage fees and velocity tracking to encourage active token circulation. It was never deployed.
 
 ### API Endpoints
 

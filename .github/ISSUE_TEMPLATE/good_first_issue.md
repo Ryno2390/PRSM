@@ -69,6 +69,6 @@ Welcome! This issue has been identified as a great way to get started with contr
 - [How to contribute to open source](https://opensource.guide/how-to-contribute/)
 - [PRSM Contributing Guide](../../CONTRIBUTING.md)
 - [Code of Conduct](../../CODE_OF_CONDUCT.md)
-- [Development Setup Guide](../../docs/DEVELOPMENT_SETUP.md)
+- [Development Setup Guide](../../docs/GETTING_STARTED.md)
 
 **Ready to start?** Comment below to let us know you're working on this issue!

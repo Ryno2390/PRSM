@@ -43,7 +43,7 @@ Per Vision §6 the aggregator MUST be drawn from the T2+ stake pool
 | `MarketplaceOrchestrator` tier gating | ✅ live (Phase 7 Task 5) | T1/T2/T3/T4 hardware-tier classification |
 | `EmbeddingDHT` content lookup | ✅ live (T4.9.next4 keystone unblock — 2026-05-07) | enumerates which nodes hold which shards |
 | `dp_noise.py` Laplace + Gaussian | ✅ live (`prsm/compute/tee/dp_noise.py`) | privacy-budget-bounded noise application |
-| `RoyaltyDistributor` v1 mainnet | ✅ live (Base mainnet 0x3E82…D6c2) | enforced split — settlement layer |
+| `RoyaltyDistributor` v2 mainnet | ✅ live (Base mainnet 0xfEa9aeB9…df7e; v1 0x3E82…D6c2 retained for legacy claimable only) | enforced split — settlement layer |
 
 The aggregator-selector consumes these and produces a single
 selection. It does NOT itself enforce slashing or stake — it routes

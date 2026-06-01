@@ -258,8 +258,8 @@ The auditor will additionally have access to:
 - Full repository: https://github.com/Ryno2390/PRSM
 - Python test suite (~283 unit + 2 E2E passing pre-L5; counts may
   change during engagement)
-- Live testnet: bootstrap1.prsm-network.com:8765 (DigitalOcean
-  droplet) for adversarial-relay scenarios
+- Live testnet: bootstrap-us.prsm-network.com:8765 (DigitalOcean
+  droplet, 159.203.129.218) for adversarial-relay scenarios
 
 ---
 

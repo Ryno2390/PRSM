@@ -500,8 +500,8 @@ curl http://localhost:8000/api/v1/web3/status \
 # Check wallet balance
 python scripts/test_web3_integration.py
 
-# Verify network connectivity
-curl https://polygon-rpc.com
+# Verify network connectivity (Base mainnet, chain 8453)
+curl https://mainnet.base.org
 ```
 
 **Solutions**:
@@ -523,8 +523,8 @@ curl https://polygon-rpc.com
 curl http://localhost:8000/api/v1/web3/transactions/TX_HASH \
   -H "Authorization: Bearer TOKEN"
 
-# Monitor gas prices
-curl https://gasstation-mainnet.matic.network/
+# Monitor gas prices (Base mainnet, chain 8453)
+curl -s -X POST https://mainnet.base.org -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_gasPrice","params":[],"id":1}'
 ```
 
 **Solutions**:
@@ -891,9 +891,9 @@ For critical production issues:
 
 ## Document Information
 
-**Version**: 1.0  
-**Last Updated**: June 11, 2025  
-**Next Review**: July 11, 2025  
+**Version**: 1.1  
+**Last Updated**: 2026-06-01 (Web3 RPC/gas references migrated from Polygon to Base mainnet, chain 8453)  
+**Review Cadence**: quarterly; next review due 2026-09-01  
 **Owner**: PRSM Support Team  
 **Contact**: support@prsm-network.com  
 

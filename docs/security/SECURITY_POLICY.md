@@ -24,8 +24,10 @@ This document outlines the security policy for the Protocol for Research, Storag
 
 | Version | Supported | Security Updates | End of Life |
 |---------|-----------|------------------|-------------|
-| 0.1.x | ✅ Active | Yes | TBD |
-| 0.0.x | ❌ End of Life | No | 2025-01-01 |
+| 1.7.x | ✅ Active (current, live on Base mainnet) | Yes | TBD |
+| 1.6.x | ✅ Maintenance | Critical/high only | TBD |
+| ≤ 1.5.x | ❌ End of Life | No | superseded |
+| 0.x | ❌ End of Life | No | superseded |
 
 ### Version Support Policy
 
@@ -122,10 +124,10 @@ Include:
 
 #### Option 2: PGP Encrypted Email
 
-For sensitive reports, use PGP encryption:
-
-**PGP Key ID:** `0xPRSMSEC2025`  
-**Fingerprint:** `Available at https://prsm-network.com/security/pgp`
+For sensitive reports, PGP encryption support is planned but **not yet live** — a
+published PGP key ID and fingerprint will be added here once the security mailbox
+key is provisioned. Until then, email the security address directly (above) and
+request a secure channel.
 
 #### Option 3: Security Portal
 
@@ -159,16 +161,22 @@ We follow responsible disclosure:
 
 ### Bug Bounty Program
 
-We offer rewards for valid security reports:
+> **Status: not yet launched.** A formal bug-bounty program is planned but is
+> **not currently live** — there is no active payout budget or program terms
+> yet. The tiers below are an *illustrative proposal* for the future program,
+> not a current reward commitment. Valid reports are still welcomed and credited
+> via the responsible-disclosure process above.
 
-| Severity | Reward |
-|----------|--------|
+Proposed (future) reward tiers:
+
+| Severity | Proposed Reward |
+|----------|-----------------|
 | P0 Critical | $5,000 - $10,000 |
 | P1 High | $1,000 - $5,000 |
 | P2 Medium | $500 - $1,000 |
 | P3 Low | $100 - $500 |
 
-*Rewards are subject to our bug bounty program terms and conditions.*
+*Rewards will be subject to the program's terms and conditions once it launches.*
 
 ---
 
@@ -361,35 +369,44 @@ export VAULT_ADDR=https://vault.example.com
 
 ## Compliance
 
-### SOC 2 Type II
+> **Status note:** The tables below track the *technical controls* PRSM has built
+> toward each framework. They do **not** assert formal certification. PRSM is
+> **not** SOC 2, ISO 27001, or GDPR *certified/attested* — those require an
+> external audit that has not yet been performed. "Control in place" means the
+> engineering control exists and is exercised; it is not a certification claim.
 
-| Control | Status | Evidence |
-|---------|--------|----------|
-| Access Control | ✅ Implemented | RBAC, MFA |
-| Encryption | ✅ Implemented | AES-256, TLS 1.2+ |
-| Audit Logging | ✅ Implemented | Comprehensive logs |
-| Incident Response | ✅ Implemented | Runbook, escalation |
-| Change Management | ✅ Implemented | CI/CD, approvals |
+### SOC 2 Type II (controls — not certified)
 
-### GDPR
+| Control | Control Status | Evidence |
+|---------|----------------|----------|
+| Access Control | 🟢 Control in place | RBAC, MFA |
+| Encryption | 🟢 Control in place | AES-256, TLS 1.2+ |
+| Audit Logging | 🟢 Control in place | Comprehensive logs |
+| Incident Response | 🟢 Control in place | Runbook, escalation |
+| Change Management | 🟢 Control in place | CI/CD, approvals |
+| External SOC 2 attestation | 🟡 Not yet attested | Audit not performed |
 
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| Data Minimization | ✅ Implemented | Collect only necessary data |
-| Right to Access | ✅ Implemented | User data export |
-| Right to Erasure | ✅ Implemented | User data deletion |
-| Data Portability | ✅ Implemented | Standard export formats |
-| Privacy by Design | ✅ Implemented | Built into architecture |
+### GDPR (controls — not formally assessed)
 
-### ISO 27001
+| Requirement | Control Status | Implementation |
+|-------------|----------------|----------------|
+| Data Minimization | 🟢 Control in place | Collect only necessary data |
+| Right to Access | 🟢 Control in place | User data export |
+| Right to Erasure | 🟢 Control in place | User data deletion |
+| Data Portability | 🟢 Control in place | Standard export formats |
+| Privacy by Design | 🟢 Control in place | Built into architecture |
+| Formal DPIA / compliance assessment | 🟡 Not yet completed | Pending |
 
-| Control | Status | Evidence |
-|---------|--------|----------|
-| Information Security Policy | ✅ Implemented | This document |
-| Access Control | ✅ Implemented | RBAC, MFA |
-| Cryptography | ✅ Implemented | AES-256, TLS |
-| Operations Security | ✅ Implemented | Logging, monitoring |
-| Communications Security | ✅ Implemented | Network security |
+### ISO 27001 (controls — not certified)
+
+| Control | Control Status | Evidence |
+|---------|----------------|----------|
+| Information Security Policy | 🟢 Control in place | This document |
+| Access Control | 🟢 Control in place | RBAC, MFA |
+| Cryptography | 🟢 Control in place | AES-256, TLS |
+| Operations Security | 🟢 Control in place | Logging, monitoring |
+| Communications Security | 🟢 Control in place | Network security |
+| ISO 27001 certification | 🟡 Not yet certified | Audit not performed |
 
 ---
 
@@ -413,11 +430,10 @@ export VAULT_ADDR=https://vault.example.com
 
 ### PGP Key
 
-```
------BEGIN PGP PUBLIC KEY BLOCK-----
-[PGP key would be here in production]
------END PGP PUBLIC KEY BLOCK-----
-```
+A published PGP public key for encrypted security reports is **not yet
+provisioned**. This section will be populated with the key block once the
+security mailbox key is generated. Until then, contact the security address to
+arrange a secure channel.
 
 ---
 

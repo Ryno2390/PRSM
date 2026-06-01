@@ -52,7 +52,7 @@ This manual provides comprehensive operational procedures for running PRSM (**Pr
 - **Application Servers**: 3+ PRSM API instances
 - **Database**: PostgreSQL 15+ with streaming replication
 - **Cache**: Redis Cluster (3+ nodes)
-- **Storage**: IPFS cluster with multiple gateways
+- **Storage**: native PRSM `ContentStore` (BitTorrent distribution layer) — IPFS/Kubo was removed in the native-storage migration (2026-05-07)
 - **Monitoring**: Prometheus + Grafana + Alertmanager
 - **Container Orchestration**: Kubernetes 1.25+
 
@@ -75,9 +75,9 @@ This manual provides comprehensive operational procedures for running PRSM (**Pr
          │                       │                       │
          ▼                       ▼                       ▼
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Redis Cluster  │    │  IPFS Cluster   │    │  Alertmanager   │
-│  (Cache/Queue)  │    │ (Distributed    │    │ (Notifications) │
-│                 │    │  Storage)       │    │                 │
+│  Redis Cluster  │    │  ContentStore   │    │  Alertmanager   │
+│  (Cache/Queue)  │    │ (Native storage │    │ (Notifications) │
+│                 │    │  + BitTorrent)  │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
@@ -85,7 +85,7 @@ This manual provides comprehensive operational procedures for running PRSM (**Pr
 
 1. **PostgreSQL** - Primary database (critical)
 2. **Redis** - Caching and queuing (critical)
-3. **IPFS** - Distributed storage (critical)
+3. **ContentStore** - Native distributed storage (BitTorrent layer; replaced IPFS in the 2026-05-07 native-storage migration) (critical)
 4. **Prometheus** - Metrics collection (important)
 5. **External APIs** - Model providers (degraded operation possible)
 
@@ -273,7 +273,7 @@ Configured by [`AlertManager.setup_collaboration_rules()`](prsm/core/monitoring/
 #### Daily Backups (Automated)
 - **Database**: Full backup at 2 AM UTC
 - **Redis**: Snapshot at 3 AM UTC
-- **IPFS**: Incremental backup at 4 AM UTC
+- **ContentStore**: Incremental backup at 4 AM UTC (native BitTorrent storage layer; replaced IPFS in the 2026-05-07 migration)
 - **Configuration**: Daily configuration export
 
 #### Weekly Backups
@@ -511,7 +511,7 @@ kubectl set image deployment/prsm-api prsm-api=prsm:latest -n prsm-production
 
 #### Storage Growth
 - Track database growth rate (typical: 10-20% monthly)
-- Monitor IPFS storage consumption
+- Monitor ContentStore (native storage) consumption
 - Plan for model training data requirements
 
 #### Network Utilization
@@ -579,27 +579,30 @@ kubectl exec -n prsm-production deployment/postgres -- \
 - Identify and kill long-running queries
 - Scale database resources
 
-#### IPFS Synchronization Issues
+#### ContentStore (native storage) Issues
+
+> IPFS/Kubo was removed in the 2026-05-07 native-storage migration. Content
+> distribution now runs on PRSM's native `ContentStore` (BitTorrent layer).
+> The legacy `ipfs` CLI commands no longer apply.
 
 **Symptoms**: Content not found, slow retrieval
 **Diagnosis**:
 ```bash
-# Check IPFS peers
-kubectl exec -n prsm-production deployment/ipfs -- ipfs swarm peers | wc -l
+# Storage stats + pinned-content health (operator daemon)
+prsm node storage-stats
 
-# Check IPFS connectivity
-kubectl exec -n prsm-production deployment/ipfs -- ipfs id
+# Peer connectivity for the BitTorrent distribution layer
+prsm node peers
 
-# Monitor IPFS performance
-kubectl exec -n prsm-production deployment/ipfs -- \
-  ipfs stats repo
+# Per-content provider reputation / availability
+curl -s localhost:8000/storage/provider-reputations
 ```
 
 **Solutions**:
-- Restart IPFS node
-- Clear IPFS cache
-- Check network connectivity
-- Add more IPFS gateway nodes
+- Restart the PRSM node daemon (re-announces pinned content to the swarm)
+- Verify peer connectivity (`prsm node peers`) and bootstrap reachability
+- Re-pin or re-seed under-replicated content
+- Add more storage providers to improve replication/availability
 
 ### Log Analysis Procedures
 
@@ -733,7 +736,7 @@ kubectl exec -n prsm-production deployment/postgres -- \
 ---
 
 *This document is part of the PRSM production documentation suite. For additional information, see:*
-- [Administrator Guide](ADMINISTRATOR_GUIDE.md) (verify existence — may be historical)
+- Administrator Guide (not yet written)
 - [API Documentation](API_REFERENCE.md)
 - [Troubleshooting Guide (Production)](TROUBLESHOOTING_GUIDE.md) — direct companion to this manual
 - [Troubleshooting (Local Dev)](TROUBLESHOOTING.md) — for T1/T2/T3 node operators

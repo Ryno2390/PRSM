@@ -10,8 +10,9 @@ Get from zero to cross-node compute in 10 minutes. This guide walks you through 
 - **Operating System**: macOS, Linux, or Windows with WSL
 
 **Optional**:
-- **IPFS (Kubo)**: Required for storage features. Install from [docs.ipfs.tech](https://docs.ipfs.tech/install/)
 - **API Keys**: OpenAI or Anthropic keys for real AI inference (mock responses work without them)
+
+Storage uses PRSM's native content store (ContentStore + BitTorrent layer) — no external daemon required. IPFS is no longer a dependency (the native-storage migration completed 2026-05-07).
 
 ## Install
 
@@ -318,21 +319,6 @@ prsm node start --no-dashboard --api-port 8001 --p2p-port 9002
 
 This is expected for first-time setup. The node runs in mock mode. To enable real inference, see [Enable Real AI Inference](#enable-real-ai-inference).
 
-### `IPFS not detected`
-
-IPFS is optional and only required for storage features. The node works without it. To enable:
-
-```bash
-# Install IPFS (macOS)
-brew install ipfs
-
-# Start the IPFS daemon
-ipfs daemon &
-
-# Verify connection
-ipfs id
-```
-
 ### `Bootstrap connection failed`
 
 If you see `DEGRADED local mode`, the node couldn't reach bootstrap peers. This is normal for:
@@ -361,7 +347,7 @@ If depleted, you can:
 - **SDK Documentation**: Python SDK for programmatic access — see [`sdks/`](../sdks/)
 - **Contributor Onboarding**: Join development at [`docs/CONTRIBUTOR_ONBOARDING.md`](CONTRIBUTOR_ONBOARDING.md)
 - **Architecture Guide**: Deep dive into PRSM internals at [`docs/DEVELOPMENT_GUIDE.md`](DEVELOPMENT_GUIDE.md)
-- **Examples Cookbook**: Common patterns and recipes at [`docs/EXAMPLES_COOKBOOK.md`](EXAMPLES_COOKBOOK.md)
+- **Examples Cookbook**: Common patterns and recipes (see the SDK examples under `sdks/`)
 
 ## CLI Reference
 
@@ -400,7 +386,7 @@ When your node is running, these endpoints are available:
 | `/peers` | GET | Connected and known peers |
 | `/compute/submit` | POST | Submit a compute job |
 | `/compute/job/{id}` | GET | Get job status and results |
-| `/content/upload` | POST | Upload content to IPFS |
+| `/content/upload` | POST | Upload content to native storage |
 | `/content/search` | GET | Search content index |
 
 Interactive API documentation is available at `http://localhost:8000/docs` when the node is running.

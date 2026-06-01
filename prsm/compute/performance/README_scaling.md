@@ -37,7 +37,7 @@ The PRSM Scaling Test Controller provides comprehensive environmental controls f
 
 ### 1. Basic Usage
 ```python
-from prsm.performance.scaling_test_controller import ScalingTestController
+from prsm.compute.performance.scaling_test_controller import ScalingTestController
 
 # Create controller
 controller = ScalingTestController()
@@ -49,13 +49,13 @@ result = await controller.run_scaling_demo()
 ### 2. Command Line Usage
 ```bash
 # Quick demo (3 node scales, ~1 minute)
-python prsm/performance/scaling_test_controller.py
+python prsm/compute/performance/scaling_test_controller.py
 
 # Comprehensive suite (12 configurations, ~30 minutes)
-python prsm/performance/scaling_test_controller.py comprehensive
+python prsm/compute/performance/scaling_test_controller.py comprehensive
 
 # Quick test for validation
-python test_scaling_demo.py
+python tests/test_scaling_demo.py
 ```
 
 ## 📋 Scaling Test Configurations
@@ -311,7 +311,7 @@ The scaling test controller integrates seamlessly with the Streamlit dashboard:
 
 ```python
 # Add scaling results to dashboard
-from prsm.dashboard.performance_dashboard import PerformanceDashboard
+from prsm.interface.dashboard.performance_dashboard import PerformanceDashboard
 
 dashboard = PerformanceDashboard()
 dashboard.load_scaling_results(result)
@@ -334,9 +334,9 @@ dashboard.load_scaling_results(result)
 
 ## 🔗 Related Documentation
 - [Performance Benchmarking](./README.md)
-- [Streamlit Dashboard](../dashboard/README.md)
-- [Post-Quantum Cryptography](../../PRSM_ui_mockup/README.md)
-- [PRSM Architecture](../../README.md)
+- [Streamlit Dashboard](../../interface/dashboard/README.md)
+- Post-Quantum Cryptography
+- [PRSM Architecture](../../../README.md)
 
 ## 📄 License
 This scaling test controller is part of the PRSM project and follows the same licensing terms.

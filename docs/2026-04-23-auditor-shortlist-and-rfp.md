@@ -13,7 +13,7 @@ The original 2026-04-23 RFP draft referenced "Foundation multi-sig is provisione
 
 - Foundation Safe (2-of-3): `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` on Base mainnet — viewable on Basescan + Safe Wallet UI
 - ProvenanceRegistry: `0xdF470BFa9eF310B196801D5105468515d0069915` — Basescan-verified ABI
-- RoyaltyDistributor: `0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2` — Basescan-verified ABI
+- RoyaltyDistributor: canonical is **v2** `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e` — Basescan-verified ABI. (v1 `0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2` retained for legacy claimable only; audit the v2 contract.)
 - 2% network fee permanently routed to Foundation Safe via immutable constructor arg
 - All 3 hardware signers (Ledger + Trezor + OneKey) proven able to sign Safe transactions end-to-end pre-deploy via Phase 4.2 + 4.3 round-trip tests
 - Latest cumulative audit-prep tag: `cumulative-audit-prep-20260504-h` (commit `dadfb5f8`)

@@ -13,7 +13,7 @@ includes live treasury infrastructure on Base mainnet:
 |----------|---------|------|
 | Foundation Safe (2-of-3 Gnosis Safe) | `0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791` | Treasury custodian |
 | ProvenanceRegistry | `0xdF470BFa9eF310B196801D5105468515d0069915` | Content registration |
-| RoyaltyDistributor | `0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2` | Payment-split executor |
+| RoyaltyDistributor v2 (canonical) | `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e` | Payment-split executor |
 | FTNSTokenSimple | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` | Native protocol token |
 
 Off-chain we protect: bootstrap and relay nodes, the inference pipeline
@@ -73,9 +73,12 @@ For findings with **active exploitation** OR **>50% TVL at imminent risk**:
 
 The 90-day window does **not** apply to actively-exploited bugs.
 
-## Pre-mainnet (current state)
+## Current disclosure state (live mainnet + pre-deploy audit-bundle)
 
-Until `audits/AUDIT_PLAN.md` Gate B clears (audit-bundle stack + Phase 8
+PRSM is live on Base mainnet (chain 8453); the Phase 1.3 treasury
+contracts above are deployed and the full disclosure policy applies to
+them. The audit-bundle stack remains pre-deploy. Until
+`audits/AUDIT_PLAN.md` Gate B clears (audit-bundle stack + Phase 8
 contracts + L4 contest + L3 specialist crypto audit), the disclosure model is:
 
 - Findings on **live mainnet contracts** (Phase 1.3 Task 8): full 90-day
@@ -121,7 +124,7 @@ reports receive acknowledgment but no bounty.
 - Off-chain Python services in `prsm/inference/`, `prsm/chain_rpc/`,
   `prsm/streaming/`, `prsm/node/`, `prsm/storage/`.
 - The bootstrap node infrastructure
-  (`wss://bootstrap1.prsm-network.com:8765`).
+  (`wss://bootstrap-us.prsm-network.com:8765`).
 - The on-chain monitoring + alert routing
   (`ops/monitoring/forta-bots/`).
 - Foundation Safe operational security — phishing surface targeting signers,

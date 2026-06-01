@@ -238,9 +238,9 @@ Open your browser to: http://localhost:8501
 - Statistical analysis with NumPy
 
 ## 🔗 Related Documentation
-- [Performance Benchmarking Guide](../performance/README.md)
-- [PRSM Architecture Overview](../../README.md)
-- [Post-Quantum Cryptography](../../PRSM_ui_mockup/README.md)
+- [Performance Benchmarking Guide](../../compute/performance/README.md)
+- [PRSM Architecture Overview](../../../docs/ARCHITECTURE.md)
+- Post-Quantum Cryptography
 
 ## 📄 License
 This dashboard is part of the PRSM project and follows the same licensing terms.

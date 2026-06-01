@@ -36,9 +36,12 @@ prsm compute quote "EV trends" --shards 5 --tier t2
 ## FTNS Tokens
 
 ```bash
-prsm ftns yield-estimate                        # Default estimate
-prsm ftns yield-estimate --hours 20 --stake 1000  # Custom estimate
+prsm ftns balance                    # Show your FTNS token balance
+prsm ftns transfer --to <user> --amount 50.0      # Transfer FTNS to another user
 ```
+
+> Staking is utility-only (lock-based service discounts + dispatch priority);
+> it confers NO token yield/APY. See `docs/FTNS_API_DOCUMENTATION.md`.
 
 ## Storage / Data Publishing
 

@@ -4,6 +4,15 @@
 **Tip at write:** `fb94c480` (`query-orchestrator-core-merge-ready-20260507`)
 **Author:** post-sprint cap
 
+> **Status update (historical):** The "What's NOT done" / "What blocks
+> production wiring" sections below capture the state at write-time
+> (2026-05-08 morning). The production wiring shipped the same day —
+> `node.py` now builds the orchestrator (`agent_forge =
+> self._build_query_orchestrator_or_none()`, no longer hard-coded
+> `None`) and `BROKEN_TOOLS_HIDDEN` is now empty (the MCP tools were
+> unhidden). Read the remainder as a point-in-time assessment, not the
+> current blocker list.
+
 ---
 
 ## What's done

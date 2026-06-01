@@ -877,7 +877,7 @@ Hi NCC Group team,
 I'm Ryne Schultz, founder of the PRSM Foundation. PRSM operates a
 decentralized research / storage / modeling protocol on Base
 mainnet, with a live bootstrap node at
-`wss://bootstrap1.prsm-network.com:8765` (DigitalOcean droplet).
+`wss://bootstrap-us.prsm-network.com:8765` (DigitalOcean droplet).
 
 We're seeking a network/infrastructure pen-test covering:
 
@@ -918,7 +918,7 @@ Hi Bishop Fox team,
 
 I'm Ryne Schultz, founder of the PRSM Foundation. PRSM operates a
 decentralized protocol on Base mainnet with a live bootstrap node at
-`wss://bootstrap1.prsm-network.com:8765`.
+`wss://bootstrap-us.prsm-network.com:8765`.
 
 We're seeking a network/infrastructure pen-test covering bootstrap-
 node availability, DHT poisoning resistance, storage-layer
@@ -952,7 +952,7 @@ Hi Doyensec team,
 
 I'm Ryne Schultz, founder of the PRSM Foundation. PRSM operates a
 decentralized protocol on Base mainnet with a live bootstrap node at
-`wss://bootstrap1.prsm-network.com:8765`.
+`wss://bootstrap-us.prsm-network.com:8765`.
 
 We're seeking a network/infrastructure pen-test covering bootstrap-
 node DDoS resilience, transport-layer adapter security (Direct +

@@ -232,8 +232,8 @@ These apply to every team the lead spawns, regardless of pattern:
 5. **Plan-approval is mandatory for:**
    - Any `contracts/` edit destined for mainnet
    - Any `.gitignore`, `settings.json`, or CI-workflow change
-   - Any tokenomics parameter (supply cap, halving schedule, burn %,
-     staking yield) change
+   - Any tokenomics parameter (supply cap, halving schedule, emission
+     distribution split) change
    - Any deploy script or environment-variable rotation
    - Any deletion of historical docs (archive instead of delete)
 6. **Never skip commit hooks** (`--no-verify`, `--no-gpg-sign`). If a hook
@@ -409,15 +409,14 @@ use `requesting-code-review` / `receiving-code-review`. Explicit references
 in the spawn prompt make the skill invocation more reliable than relying on
 the teammate to notice them.
 
-## Current context (2026-04-17)
+## Current context (2026-06-01)
 
-- Phase 1.3 Sepolia bake-in: Day 6 of 7. Exit-criteria evaluation
-  **2026-04-19 (Sunday)**. Do not spin up agent teams for the bake-in itself
-  — it's a cron job.
-- Next phase kickoff: **Phase 2 remote compute dispatch** (post-bake-in,
-  assuming exit criteria pass). Plan doc:
-  `docs/2026-04-12-phase2-remote-compute-plan.md`. Suggested pattern: Phase
-  Kickoff (above). Reference R7 addendum for compression-related work items.
+- PRSM is **LIVE on Base mainnet** (chain 8453). The Phase 1.3 bake-in is
+  complete and contracts are deployed. Do not spin up agent teams for routine
+  bake-in / monitoring — those are cron jobs.
+- Phase kickoffs: use the **Phase Kickoff** pattern (above) per the master
+  roadmap. Plan doc: `docs/2026-04-12-phase2-remote-compute-plan.md`.
+  Reference R7 addendum for compression-related work items.
 - Research-track items (R1-R7) are deferred. Do not spin up teams for them
   until their named promotion triggers fire.
 

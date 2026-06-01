@@ -7,7 +7,7 @@ This guide establishes consistent documentation standards for the PRSM project t
 ## Documentation Types & Organization
 
 ### 1. **Primary Documentation**
-- `README.md` - Project overview, investment status, technical highlights
+- `README.md` - Project overview, technical highlights
 - `docs/quickstart.md` - Getting started guide with step-by-step instructions
 - `docs/API_REFERENCE.md` - Complete API documentation with examples
 - `CONTRIBUTING.md` - Comprehensive contribution guidelines
@@ -121,7 +121,7 @@ Content-Type: application/json
 
 #### Internal Links
 - Use relative paths: `[Quick Start](../quickstart.md)`
-- Use descriptive link text: `[API Authentication Guide](API_AUTHENTICATION.md)`
+- Use descriptive link text: `[API Reference Guide](../API_REFERENCE.md)`
 - Avoid "click here" or generic phrases
 
 #### External Links
@@ -193,13 +193,12 @@ Links to related documentation
 ### README Structure Pattern
 1. **Status badges** - Current state and key metrics
 2. **Production readiness** - Enterprise features and validation
-3. **Investment/business context** - Funding status and opportunity
-4. **Technical overview** - What the project does
-5. **Problem statement** - Why it exists
-6. **Solution approach** - How it works
-7. **Key features** - What it provides
-8. **Getting started** - Quick setup
-9. **Documentation links** - Where to learn more
+3. **Technical overview** - What the project does
+4. **Problem statement** - Why it exists
+5. **Solution approach** - How it works
+6. **Key features** - What it provides
+7. **Getting started** - Quick setup
+8. **Documentation links** - Where to learn more
 
 ### API Documentation Pattern
 1. **Overview** - Purpose and base information
@@ -358,8 +357,8 @@ Use emojis consistently for visual navigation:
 ## Document Maintenance
 
 **Version**: 1.0  
-**Last Updated**: July 2025  
-**Next Review**: January 2026  
+**Last Updated**: June 2026  
+**Next Review**: December 2026  
 **Maintainer**: PRSM Documentation Team  
 
 **Related Documentation:**

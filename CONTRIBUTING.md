@@ -483,9 +483,10 @@ async def test_two_nodes():
 asyncio.run(test_two_nodes())
 ```
 
-## 🎯 Current Priority Areas (2025)
+## 🎯 Current Priority Areas
 
-We're currently in **Series A Development Phase** with focus on production-ready infrastructure. High-priority contribution areas include:
+PRSM is live on Base mainnet, with focus on production-ready P2P
+infrastructure. High-priority contribution areas include:
 
 ### **1. Performance Optimization**
 - **Bottleneck identification** in agent coordination
@@ -499,10 +500,10 @@ We're currently in **Series A Development Phase** with focus on production-ready
 - **Response format standardization** for better integration
 - **Parameter validation** and type checking improvements
 
-### **3. Series A Infrastructure**
-- **Enterprise security** SOC2 Type II compliance and certification
-- **Multi-cloud deployment** AWS/GCP/Azure production readiness
-- **Performance validation** sub-2s response times and 99.9% uptime
+### **3. P2P Infrastructure**
+- **Node hardening** reliability under hostile network conditions
+- **Multi-region bootstrap** expansion beyond the current single-region host
+- **Storage layer** native ContentStore replication and proofs
 - **Economic model validation** FTNS tokenomics and marketplace testing
 
 ### **4. Community & Documentation**
@@ -510,12 +511,6 @@ We're currently in **Series A Development Phase** with focus on production-ready
 - **Research use case examples** in specific domains
 - **API reference** completion and improvement
 - **Video tutorials** and interactive examples
-
-### **5. Hybrid Architecture Development**
-- **System 1 + System 2 integration** transformer and world model coordination
-- **SOC learning mechanisms** subject-object-concept knowledge representation
-- **Collective intelligence** experimental sharing and Bayesian updating
-- **Automated research operations** genuine scientific reasoning capabilities
 
 ## 🔬 Research Collaboration Opportunities
 

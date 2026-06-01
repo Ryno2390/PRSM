@@ -196,8 +196,8 @@ The following 6 curated good first issues are ready for immediate deployment:
 ## 📞 **Getting Started**
 
 ### **For New Contributors**
-1. **Read**: [Contributor Onboarding Guide](CONTRIBUTOR_ONBOARDING.md)
-2. **Choose**: Pick an issue from [Curated Good First Issues](CURATED_GOOD_FIRST_ISSUES.md)
+1. **Read**: [Contributor Onboarding Guide](../CONTRIBUTOR_ONBOARDING.md)
+2. **Choose**: Pick an issue from [Curated Good First Issues](../CURATED_GOOD_FIRST_ISSUES.md)
 3. **Setup**: Follow the development environment setup
 4. **Connect**: Join Discord and introduce yourself
 5. **Contribute**: Claim an issue and start contributing!

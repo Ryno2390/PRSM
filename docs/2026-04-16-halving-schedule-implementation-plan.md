@@ -44,8 +44,8 @@ Effective immediately upon foundation formation, the halving schedule is applied
 The operational policy does *not* apply to:
 
 - **User-to-user payments.** When a user pays a creator for content access, or pays a node operator for compute, those payments flow per the on-chain royalty/compensation contracts at rates not subject to the halving. The halving applies only to the foundation's own compensation distributions.
-- **Protocol fees and burn.** The 2% network fee and 20% burn operate per existing contract logic, unaffected by halving.
-- **Staking yield.** Staking rewards derive from the 2% network fee pool per §5.3 and are unaffected by halving.
+- **Off-chain payment splits.** The RevenueSplitEngine payment splits (e.g. compute-job 80/15/5 data-owner/compute/treasury; content-access 2/8/90 treasury/creator/serving-node) operate per existing logic, unaffected by halving. Note: the deployed v1 HALVING-TO-CAP tokenomics has NO burn-on-use (the 20% burn was dropped; `burnFrom` exists for the bridge only).
+- **Staking.** Staking in the deployed v1 model is UTILITY-ONLY (lock-based service discounts + dispatch priority) with NO token yield/APY, so there is no staking-yield stream for the halving to affect.
 
 ### 2.3 Trust implications
 

@@ -7,7 +7,7 @@ The PRSM Performance Validation Framework is a comprehensive suite of tools for 
 ## 🎯 Key Components
 
 ### 1. 📊 Comprehensive Benchmark Suite
-**File**: `comprehensive_performance_benchmark.py`
+**File**: `benchmark_orchestrator.py`
 - **Multiple Benchmark Types**: Consensus scaling, network throughput, post-quantum overhead, latency distribution, stress tests
 - **Network Condition Simulation**: LAN, WAN, intercontinental, poor connectivity
 - **Real Performance Measurement**: Replaced all simulated delays with actual timing
@@ -21,7 +21,7 @@ The PRSM Performance Validation Framework is a comprehensive suite of tools for 
 - **Load Profile Management**: Light to extreme resource allocation testing
 
 ### 3. 📈 Streamlit Performance Dashboard
-**File**: `prsm/dashboard/performance_dashboard.py`
+**File**: `prsm/interface/dashboard/performance_dashboard.py`
 - **Real-time Visualization**: Live benchmark execution and monitoring
 - **Interactive Analysis**: Plotly-based charts with drill-down capabilities  
 - **Historical Tracking**: Performance trends and regression detection
@@ -63,12 +63,12 @@ pip install -r prsm/dashboard/requirements.txt
 ### Run Complete Validation
 ```bash
 # Comprehensive performance validation (recommended)
-python prsm/performance/integrated_performance_monitor.py
+python prsm/compute/performance/integrated_performance_monitor.py
 
 # Individual component testing
-python comprehensive_performance_benchmark.py
-python test_scaling_demo.py
-python prsm/performance/benchmark_comparator.py
+python prsm/compute/performance/benchmark_orchestrator.py
+python tests/test_scaling_demo.py
+python prsm/compute/performance/benchmark_comparator.py
 ```
 
 ### Launch Performance Dashboard
@@ -80,9 +80,13 @@ python run_dashboard.py
 
 ## 📊 Performance Results
 
-### Current PRSM Performance Characteristics
+### Example Validation Output (AI-review-era baseline)
 
-**Latest Comprehensive Validation Results:**
+> ⚠️ The figures below are an early **AI-review-era** baseline run, retained only to
+> illustrate the report format. They are **not** a current measurement of the
+> live-on-Base PRSM network. Re-run the suite for up-to-date numbers.
+
+**Sample Comprehensive Validation Results:**
 - **Overall Performance Score**: 29.6/100 (Grade: D)
 - **Throughput**: 1.07 ops/sec (needs improvement)
 - **Latency**: 238ms average (optimization required)
@@ -228,33 +232,33 @@ Real-time Dashboard ← Report Generation ← Historical Data
 
 ### Dashboard Integration
 ```python
-from prsm.dashboard.performance_dashboard import PerformanceDashboard
+from prsm.interface.dashboard.performance_dashboard import PerformanceDashboard
 dashboard = PerformanceDashboard()
 dashboard.run_dashboard()
 ```
 
 ### Automated Monitoring
 ```python
-from prsm.performance.integrated_performance_monitor import IntegratedPerformanceMonitor
+from prsm.compute.performance.integrated_performance_monitor import IntegratedPerformanceMonitor
 monitor = IntegratedPerformanceMonitor()
 await monitor.continuous_monitoring(interval_minutes=60)
 ```
 
 ### Custom Benchmarks
 ```python
-from comprehensive_performance_benchmark import PerformanceBenchmarkSuite, BenchmarkConfig
-suite = PerformanceBenchmarkSuite()
-config = BenchmarkConfig(...)
-result = await suite.run_benchmark(config)
+from prsm.compute.performance.benchmark_orchestrator import BenchmarkOrchestrator, BenchmarkScenario
+orchestrator = BenchmarkOrchestrator()
+scenario = BenchmarkScenario(...)
+result = await orchestrator.run_scenario(scenario)
 ```
 
 ## 📚 Documentation
 
 ### Component Documentation
 - [Scaling Test Controller](./README_scaling.md)
-- [Dashboard Usage Guide](../dashboard/README.md)
-- [Post-Quantum Cryptography](../../PRSM_ui_mockup/README.md)
-- [PRSM Architecture](../../README.md)
+- [Dashboard Usage Guide](../../interface/dashboard/README.md)
+- Post-Quantum Cryptography
+- [PRSM Architecture](../../../README.md)
 
 ### API Reference
 - **Benchmark Suite API**: Configuration and execution methods

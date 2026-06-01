@@ -16,8 +16,8 @@ This guide provides security hardening recommendations and implementation guidel
 ## Quick Reference
 
 For detailed implementation status and current control inventory, see the companion checklist and audit documents linked above. Legacy cross-references:
-- **[Security Hardening Report](../prsm/security/SECURITY_HARDENING_REPORT.md)** — referenced from legacy docs; verify existence before relying on
-- **[Security Framework](../security/README.md)** — referenced from legacy docs; verify existence before relying on
+- **[Security Hardening Report](../prsm/core/security/SECURITY_HARDENING_REPORT.md)** — in-repo report at `prsm/core/security/`
+- **[Security Framework](security/README.md)** — in-repo security framework at `docs/security/`
 
 ## Security Hardening Checklist
 
@@ -68,10 +68,10 @@ For detailed implementation status and current control inventory, see the compan
 ### Production Deployment
 For production deployment security hardening:
 
-1. **Review Security Framework**: Start with the [Security Framework](../security/README.md)
-2. **Check Current Status**: Review the [Security Hardening Report](../prsm/security/SECURITY_HARDENING_REPORT.md)
+1. **Review Security Framework**: Start with the [Security Framework](security/README.md)
+2. **Check Current Status**: Review the [Security Hardening Report](../prsm/core/security/SECURITY_HARDENING_REPORT.md)
 3. **Follow Operations Manual**: Use the [Production Operations Manual](PRODUCTION_OPERATIONS_MANUAL.md)
-4. **Implement Monitoring**: Set up monitoring per [Performance Metrics](PERFORMANCE_METRICS.md)
+4. **Implement Monitoring**: Set up monitoring per the Production Operations Manual's Monitoring & Alerting section
 
 ### Development Environment
 For development environment security:
@@ -133,7 +133,7 @@ For development environment security:
 For security-related questions or issues:
 
 - **Security Team**: security@prsm-network.com
-- **Documentation**: [Security Framework](../security/README.md)
+- **Documentation**: [Security Framework](security/README.md)
 - **Emergency**: Follow incident response procedures
 - **Community**: GitHub security discussions
 

@@ -20,7 +20,7 @@ The README quickstart (lines ~37-49) shows installation commands but doesn't sho
 2. Claude routes to PRSM via MCP
 3. PRSM returns a result
 
-The example doesn't need to be runnable end-to-end (mainnet pending) — it needs to communicate the **shape** of the user experience.
+The example doesn't need to be runnable end-to-end — it needs to communicate the **shape** of the user experience.
 
 **Files to modify:**
 - `README.md` — add new "Your First Query" subsection after Quick Start
@@ -185,7 +185,7 @@ New users run into a variety of setup issues (Python version, missing dependenci
 **Checks to implement** (start with these 8; expand as you go):
 1. Python version ≥ 3.10
 2. `prsm-network` package installed and version matches expected
-3. Bootstrap node reachable (TCP connect to `bootstrap1.prsm-network.com:8765`)
+3. Bootstrap node reachable (TCP connect to `bootstrap-us.prsm-network.com:8765`)
 4. Configured RPC URL responds to `eth_chainId`
 5. Hardware benchmark completes without error
 6. Local node directory exists and has correct permissions
@@ -267,7 +267,7 @@ A single dedicated contributor can clear all 10 in 4-6 weeks of part-time work. 
 When ready to post these on GitHub:
 
 - [ ] Apply labels: `good first issue`, `help wanted`, plus relevant component label
-- [ ] Set milestone if appropriate (e.g., `pre-mainnet polish`, `community-launch`)
+- [ ] Set milestone if appropriate (e.g., `mainnet polish`, `community-launch`)
 - [ ] Add `mentor` field with the founder's GitHub username (`@Ryno2390`) until others are designated
 - [ ] Cross-post a single Discord message in `#general` and `#dev` listing all 10 with links
 - [ ] Update `README.md` "Contributing" section to mention "10 good-first-issues live — pick one and ping in Discord"

@@ -1,6 +1,6 @@
 # RoyaltyDistributor settlement pattern — push vs. pull
 
-**Status:** Memo for council consideration — no resolution proposed yet.
+**Status:** Memo for council consideration — no resolution proposed yet. **SUPERSEDED:** the mainnet `RoyaltyDistributor` was subsequently redeployed to v2 `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e` (canonical as of the A-08 ceremony 2026-05-09). The v1 address `0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2` discussed below is retained only for legacy claimable balances. This memo records the decision point as of 2026-05-06; addresses below are historical.
 **Issued:** 2026-05-06
 **Author:** Ryne Schultz, Founder
 **Subject:** Recommendation that the council formally accept the current Base mainnet `RoyaltyDistributor` push-payment behavior as the production policy, with a 90-day re-evaluation trigger, rather than redeploying to the Sepolia pull-payment variant.

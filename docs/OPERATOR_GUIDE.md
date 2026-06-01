@@ -58,7 +58,7 @@ INITIAL_ADMIN_PASSWORD=<secure-password>
 # P2P Network — production bootstrap is hosted on DigitalOcean.
 # `prsm/node/bootstrap.py:_DEFAULT_BOOTSTRAP` already points at this; you
 # only need to set this env var if you want to override or pin secondaries.
-P2P_BOOTSTRAP_NODES=wss://bootstrap1.prsm-network.com:8765
+P2P_BOOTSTRAP_NODES=wss://bootstrap-us.prsm-network.com:8765
 ```
 
 ### Step 3: Launch
@@ -286,7 +286,7 @@ PRSM is live on **Base mainnet** as of 2026-05-04 (treasury / provenance) and 20
 | FTNSTokenSimple | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` | Basescan |
 | Foundation Safe (2-of-3) | `0x91b0...5791` | Basescan |
 | ProvenanceRegistry V2 | `0xe0cedDA354f99526c7fbb9b9651e12aDB2180dbf` | Basescan |
-| RoyaltyDistributor | `0x3E82...D6c2` | Basescan |
+| RoyaltyDistributor (v2, canonical) | `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e` | Basescan |
 | EmissionController + CompensationDistributor + StorageSlashing + KeyDistribution + audit-bundle (BSR / EscrowPool / StakeBond / Ed25519Verifier) | see `prsm/config/networks.py` MAINNET block | Basescan |
 
 The Foundation Safe is sole owner of every contract above. Operator nodes hold no admin keys — see "On-chain Keypairs" below.
@@ -902,7 +902,7 @@ curl http://localhost:8000/health
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
 | Node won't connect to bootstrap | Firewall blocking port 8765 | `sudo ufw allow 8765/tcp` |
-| Bootstrap WSS handshake fails | Operator pinned legacy `prsm.io` host | Update `P2P_BOOTSTRAP_NODES` to `wss://bootstrap1.prsm-network.com:8765` |
+| Bootstrap WSS handshake fails | Operator pinned legacy `prsm.io` host | Update `P2P_BOOTSTRAP_NODES` to `wss://bootstrap-us.prsm-network.com:8765` |
 | Native content-store fails to write | Permissions on `~/.prsm/content_store/` | `chmod -R u+rwX ~/.prsm/content_store/` |
 | "JWT secret too short" | SECRET_KEY missing or weak | Generate: `openssl rand -hex 32` |
 | FTNS balance stuck | Database locked | Restart node; check for orphaned SQLite WAL |
@@ -1070,7 +1070,7 @@ LOG_LEVEL=DEBUG
 SECRET_KEY=<32+ character random string>
 DATABASE_URL=postgresql://prsm:${POSTGRES_PASSWORD}@db:5432/prsm
 REDIS_URL=redis://redis:6379
-P2P_BOOTSTRAP_NODES=wss://bootstrap1.prsm-network.com:8765
+P2P_BOOTSTRAP_NODES=wss://bootstrap-us.prsm-network.com:8765
 RATE_LIMIT_REQUESTS=100
 RATE_LIMIT_WINDOW=60
 LOG_LEVEL=INFO

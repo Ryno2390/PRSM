@@ -96,9 +96,11 @@ focus time on what's NEW.
 - CRIT-1 (C-INT-01): adversarial slashing via unbound `signingMessage` —
   fixed by binding `signingMessageHash` in `ReceiptLeaf` struct
 - HIGH-1 (A-01): RoyaltyDistributor split deviates from PRSM-TOK-1 §8.1 —
-  pending v2 redeploy in Week 2 (RoyaltyDistributor v1 is currently on
-  mainnet without burn; v2 will add burn + Pausable + the D-04 pull-
-  payment refactor)
+  remediated by v2 redeploy (canonical RoyaltyDistributor v2
+  `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e`), which adds Pausable + the
+  D-04 pull-payment refactor. (The 20% burn-on-use was subsequently dropped
+  from the design; v2 has no burn-on-use — `burnFrom` exists for the bridge
+  only.)
 - HIGH-2 (A-02 / D-01): slash-evasion race when
   `unbondDelay < challengeWindow` — closed via cross-contract invariant in
   `StakeBond.requestUnbond`
@@ -145,8 +147,10 @@ fix holds.)
    intentionally centralized at v1; transition to DAO is roadmap, not
    in-scope.
 4. **`RoyaltyDistributor` v1 mainnet deploy uses push-payment.** v2
-   redeploy is queued for Week 2 with the D-04 pull-payment fix.
-   Contest-time source is v2.
+   redeploy ships the D-04 pull-payment fix (live canonical v2 is
+   `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e`; the originally-planned
+   20% burn-on-use was dropped — v2 has no burn-on-use). Contest-time
+   source is v2.
 5. **`EmissionController` halving uses right-shift.** Intentional;
    constant-time + gas-cheap.
 6. **No timelock on the remaining mutable governance setters.** D-03 is

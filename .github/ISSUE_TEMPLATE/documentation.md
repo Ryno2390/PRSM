@@ -183,7 +183,7 @@ Great documentation is crucial for:
 ### 👋 New to Contributing?
 Documentation is a fantastic way to start contributing to open source! Check out:
 - [Contributing Guide](../../CONTRIBUTING.md)
-- [Documentation Style Guide](../../docs/STYLE_GUIDE.md)
+- [Documentation Style Guide](../../docs/development/DOCUMENTATION_STYLE_GUIDE.md)
 - [Good First Issues](../../labels/good%20first%20issue)
 
 **Ready to help?** Comment below and we'll help you get started!

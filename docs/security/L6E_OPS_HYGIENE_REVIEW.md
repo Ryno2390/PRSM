@@ -80,7 +80,7 @@ cd ops/monitoring/forta-bots && npm run smoke-test
   (Slither + Aderyn fast tier; Mythril slow tier).
 - Forta bot uptime + alert-volume statistics for the quarter.
 - Bootstrap-node uptime + TLS-cert expiry for
-  `bootstrap1.prsm-network.com:8765`.
+  `bootstrap-us.prsm-network.com:8765` (renamed from `bootstrap1.prsm-network.com` on 2026-05-19).
 
 ---
 
@@ -203,7 +203,7 @@ follow-up commit or task before the review is signed off.
 
 ### 4.9 Bootstrap + infrastructure
 
-- [ ] `bootstrap1.prsm-network.com:8765` TLS cert ≥ 30 days from
+- [ ] `bootstrap-us.prsm-network.com:8765` TLS cert ≥ 30 days from
       expiry. Renewal automation status verified.
 - [ ] DigitalOcean droplet patches current. SSH-key inventory matches
       authorized list.

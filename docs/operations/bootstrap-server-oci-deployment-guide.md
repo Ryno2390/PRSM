@@ -17,7 +17,7 @@
 ### 1.1 Accounts you need
 
 - **OCI tenancy** (free tier — requires credit card for identity verification, never billed within limits)
-- **DNS control** for `prsm-network.com` (Cloudflare / Namecheap / wherever bootstrap1's DNS lives — verify by `dig bootstrap1.prsm-network.com NS` first)
+- **DNS control** for `prsm-network.com` (Cloudflare / Namecheap / wherever the US bootstrap's DNS lives — verify by `dig bootstrap-us.prsm-network.com NS` first)
 - **GitHub SSH key** on the OCI instance, OR (simpler) `git clone https://github.com/...` over HTTPS
 
 ### 1.2 Regions to pick
@@ -35,9 +35,9 @@ OCI Always Free has these regions that match the target geography:
 
 Option (b) is simpler. Pick your home region as the one that matters more (probably EU given the European compute scarcity discussion in Vision §11), then provision the APAC instance from the same tenancy.
 
-### 1.3 Reference: bootstrap1 (the precedent)
+### 1.3 Reference: the US bootstrap (the precedent)
 
-The existing US bootstrap is at `wss://bootstrap1.prsm-network.com:8765`, hosted on a DigitalOcean Droplet. Operationally, EU + APAC mirror that shape: same `prsm.bootstrap.server` process, same port 8765, same TLS posture. The cloud provider differs (OCI vs DO) but the wire protocol does not — operators reach all three the same way.
+The existing US bootstrap is at `wss://bootstrap-us.prsm-network.com:8765` (159.203.129.218; renamed from `bootstrap1.prsm-network.com` on 2026-05-19), hosted on a DigitalOcean Droplet. Operationally, EU + APAC mirror that shape: same `prsm.bootstrap.server` process, same port 8765, same TLS posture. The cloud provider differs (OCI vs DO) but the wire protocol does not — operators reach all three the same way.
 
 ---
 
@@ -308,7 +308,7 @@ sudo tail -f /var/log/prsm-bootstrap.log
 prsm node bootstrap-test
 # Expect (after this guide ships EU online):
 #   PRSM Bootstrap Fleet Probe — ✓ all healthy (3/3 reachable)
-#   ✓ bootstrap1.prsm-network.com:8765    TCP ✓  TLS ✓  WSS ✓   42ms
+#   ✓ bootstrap-us.prsm-network.com:8765   TCP ✓  TLS ✓  WSS ✓   42ms
 #   ✓ bootstrap-eu.prsm-network.com:8765  TCP ✓  TLS ✓  WSS ✓   88ms
 #   ✓ bootstrap-apac.prsm-network.com:8765 TCP ✓  TLS ✓  WSS ✓ 150ms
 ```
@@ -576,7 +576,7 @@ OCI Always Free pool is 4 ARM Ampere A1 cores + 24 GB RAM across all your instan
 
 1. **Bump OCI instance shape within Always Free** — go to 2 OCPU + 12 GB on each, still free if you stay under 4 cores total
 2. **Migrate to OCI paid tier same shape** — minor cost (~$10/mo per instance)
-3. **Migrate to DigitalOcean Droplet matching bootstrap1's shape** — change DNS A record, the rest of the protocol doesn't care
+3. **Migrate to DigitalOcean Droplet matching the US bootstrap's shape** — change DNS A record, the rest of the protocol doesn't care
 4. **Hybrid: keep OCI for free EU/APAC, add a third DO bootstrap for redundancy** — sprint 375 fallback list scales to N
 
 ---
@@ -612,7 +612,7 @@ Both EU + APAC bootstrap droplets are live, but the deployment path differed fro
 
 | Region | Provider | Hostname | Public IP | Notes |
 |---|---|---|---|---|
-| US | DigitalOcean | `bootstrap1.prsm-network.com` | (pre-existing) | Live pre-2026-05-14 |
+| US | DigitalOcean | `bootstrap-us.prsm-network.com` | `159.203.129.218` | Live pre-2026-05-14; renamed from `bootstrap1.prsm-network.com` on 2026-05-19 |
 | EU | **AWS Frankfurt** `eu-central-1` | `bootstrap-eu.prsm-network.com` | `54.93.164.206` | OCI Frankfurt path abandoned after 106 capacity-out attempts; AWS Frankfurt worked first try |
 | APAC | **AWS Tokyo** `ap-northeast-1` | `bootstrap-apac.prsm-network.com` | `54.248.20.193` | Originally OCI ap-tokyo planned; pivoted to AWS for cross-provider failure-mode diversity |
 

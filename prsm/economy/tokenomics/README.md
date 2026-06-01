@@ -4,7 +4,7 @@ FTNS (Fungible Tokens for Node Support) is PRSM's economic primitive — the tok
 
 ## Core principle
 
-FTNS is **minted at contribution time**. There is no pre-mine, no ICO, and no foundation reserve to dump. New nodes receive a 100 FTNS welcome grant; all other supply enters circulation as settlement payouts when queries are served.
+FTNS supply follows the deployed v1 **HALVING-TO-CAP** schedule. Emission opens at ~31.5M FTNS/yr (1 FTNS/sec) and halves every 4 years toward zero, capped at a 900M emission ceiling. Combined with the 100M genesis allocation, that is a **1B FTNS MAX_SUPPLY hard cap** (~352M asymptotic circulating supply). There is no ICO. Emission is distributed to contributors via the on-chain `CompensationDistributor` (`0xa9551F5a3AeAB39cc8315AcD8caC2886Bd04f244`) on a **50/30/20 split** (creator / operator / grant). There is **no burn-on-use** — the `burnFrom` entrypoint exists for the fiat bridge only.
 
 ## Token facts
 
@@ -12,8 +12,8 @@ FTNS is **minted at contribution time**. There is no pre-mine, no ICO, and no fo
 |---|---|
 | Symbol | FTNS |
 | Decimals | 18 |
-| Live contract | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` (Base mainnet) |
-| Testnet | `0xd979c096BE297F4C3a85175774Bc38C22b95E6a4` (Ethereum Sepolia) |
+| Live contract | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` (Base mainnet, chain 8453 — LIVE) |
+| Max supply | 1B FTNS hard cap (900M emission ceiling + 100M genesis); ~352M asymptotic |
 | Fiat bridge | Chronos (`prsm/compute/chronos/`) — FTNS ↔ USD/USDT |
 
 ## Revenue split (80 / 15 / 5)
@@ -38,18 +38,18 @@ PRSM's pricing is **not** a token-per-token LLM model. It uses a hybrid menu:
 
 Use `prsm compute quote "query"` to get a free cost estimate before committing FTNS. The quote path runs the Ring 3/4 planner without executing anything.
 
-## Staking tiers
+## Staking (utility-only)
 
-Providers can stake FTNS to boost their yield rate:
+Staking is **utility-only**: a lock-based stake confers service discounts and dispatch priority — there is **no token yield, APY, or yield multiplier**. The deployed v1 emission split has no staker-yield pool to fund a return from; staking buys priority access, not income. Benefits scale with the lock commitment:
 
-| Tier | Stake | Yield boost |
-|------|-------|-------------|
-| Casual | 0 FTNS | 1.0× |
-| Pledged | 100 FTNS | 1.25× |
-| Dedicated | 1,000 FTNS | 1.5× |
-| Sentinel | 10,000 FTNS | 2.0× + aggregator fees |
+| Lock | Service discount | Dispatch priority |
+|------|------------------|-------------------|
+| None / 0 days | — | — |
+| 30 days | 2% | +0.10 |
+| 90 days | 5% | +0.25 |
+| 365 days | 10% | +0.50 |
 
-`staking_manager.py` enforces stake locks and slashing for misbehavior.
+`staking_manager.py` enforces the utility-benefit lock and slashing for misbehavior.
 
 ## Key modules
 
@@ -58,7 +58,7 @@ Providers can stake FTNS to boost their yield rate:
 | `atomic_ftns_service.py` | Atomic ledger operations with DAG signatures |
 | `database_ftns_service.py` | Persistent ledger backed by SQLAlchemy |
 | `ftns_service.py` | High-level FTNS API used by the rest of the codebase |
-| `contributor_manager.py` | Tracks contributor status and yield multipliers |
+| `contributor_manager.py` | Tracks contributor status and emission-share eligibility |
 | `dynamic_supply_controller.py` | Algorithmic supply adjustments under governance |
 | `anti_hoarding_engine.py` | Circulation health checks |
 | `emergency_protocols.py` | Governance-gated emergency halts |
@@ -70,9 +70,9 @@ Providers can stake FTNS to boost their yield rate:
 ## CLI
 
 ```bash
-prsm ftns yield-estimate --hours 8 --stake 1000   # Monthly earnings estimate
-prsm ftns balance                                 # Check your balance
-prsm node benchmark                               # See your hardware tier
+prsm node earnings              # This node's emission/royalty earnings dashboard
+prsm node wallet-balance        # Live Base mainnet FTNS + USDC + ETH balances
+prsm node benchmark             # See your hardware tier
 ```
 
 See [`docs/FTNS_API_DOCUMENTATION.md`](../../../docs/FTNS_API_DOCUMENTATION.md) for the full FTNS API reference.

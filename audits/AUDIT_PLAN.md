@@ -404,7 +404,7 @@ ceremonies, and rotates signers.
   `docs/PRODUCTION_OPERATIONS_MANUAL.md` (kubectl, deploys, etc.).
 
 **L6f — Network infrastructure pen-test (🔴 pending):**
-- Bootstrap-node availability: DDoS resilience of `wss://bootstrap1.prsm-network.com:8765`
+- Bootstrap-node availability: DDoS resilience of `wss://bootstrap-us.prsm-network.com:8765`
   and any subsequent bootstrap nodes the Foundation operates.
 - Transport-layer adapter security: Direct/SOCKS adapter robustness under
   hostile network conditions (R9 Phase 6.2 surface).

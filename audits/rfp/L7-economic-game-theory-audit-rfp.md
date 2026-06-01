@@ -22,8 +22,9 @@ or **token-engineering academic group** to perform an adversarial
 review of:
 
 - FTNS emission schedule (halving + supply cap dynamics)
-- Network-fee + royalty split (creator / treasury / serving node /
-  burn)
+- Network-fee + royalty split (creator / treasury / serving node)
+  — note: burn-on-use was DROPPED; the deployed token has no
+  burn-on-use (burnFrom exists for the bridge only)
 - StakeBond slashing economics (70/30 challenger/Foundation split,
   100% self-slash protection)
 - POL (Protocol-Owned Liquidity) parameterization
@@ -52,8 +53,10 @@ non-trivial ways:
    (Akash, Render, IO.NET) than to AMM economics.
 
 2. **Slashing-backed quality assurance.** StakeBond + the challenge
-   path mean providers post collateral that gets burned (slashed)
-   on adversarial behavior. The economic question is whether the
+   path mean providers post collateral that gets slashed (redistributed
+   per the 70/30 challenger/Foundation split — this is distinct from
+   token burn-on-use, which was dropped) on adversarial behavior.
+   The economic question is whether the
    slash amount + bounty split create *correct incentives at
    equilibrium* — not just whether the math works on paper.
 
@@ -109,7 +112,7 @@ if scope fit better.
 | Topic | Focus |
 |-------|-------|
 | **FTNS emission schedule** | Halving cadence, supply cap, mint authorization (EmissionController + FTNSTokenSimple) |
-| **Network fee + royalty split** | 2% network fee, creator royalty rate (per content), serving-node share, burn (HIGH-1 v2 redeploy) |
+| **Network fee + royalty split** | 2% network fee, creator royalty rate (per content), serving-node share (burn-on-use was DROPPED — the v2 redeploy corrected the split but added no burn) |
 | **StakeBond slashing economics** | 50/100% slash rates per tier, 70/30 challenger/Foundation split, 100%-to-Foundation on self-slash |
 | **Challenge incentives** | Whether 70% bounty incentivizes honest challengers without creating griefing economics |
 | **POL parameterization** | Per Q4 ratification: intervention thresholds, max-per-window, kill-switch params |
@@ -147,8 +150,9 @@ if scope fit better.
    tokenomics spec under realistic adoption curves?
 
 4. **Wash-trade economics** — the L2 audit's HIGH-1 finding pinned
-   a 10× wash-trade arbitrage gap (resolves with the v2 burn fix).
-   Validate the post-fix economics.
+   a 10× wash-trade arbitrage gap (resolved by the v2 RoyaltyDistributor
+   redeploy's corrected split, NOT by burn — the originally-planned
+   burn-on-use was dropped). Validate the post-fix economics.
 
 5. **Foundation revenue runway** — at what network-volume threshold
    does the 2% fee cover Foundation operating costs (audit budget,

@@ -3,7 +3,7 @@
 > **Created:** 2026-04-10
 > **Last updated:** 2026-04-16
 > **Source:** Audit performed on PRSM v1.7.0 codebase against the meganode-bootstrap product plan
-> **Status:** Phase 1 in Sepolia bake-in (Day 5 of 7 as of 2026-04-16; mainnet deploy imminent). Phase 2 design + implementation plan complete; execution pending Phase 1 ship. Phase 3 (marketplace) + Phase 3.1 (batch settlement) shipped; three Phase 3.x follow-ons (MCP completion / liquidity / operator toolkit) scoped in PRSM-PHASE3-STATUS-1. Phase 4+ research track (R1-R7) tracked as parallel workstream. Phase 7 scope expanded to include content confidentiality tiers B/C. Phase 8 added for on-chain halving schedule enforcement. Hybrid tokenomics legal/governance workstream running on independent cadence.
+> **Status:** Phase 1 LIVE on Base mainnet (RoyaltyDistributor v2 `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e`, EmissionController `0x13A0D76895c196B795b94fe843F76B6e145AeaAE`, CompensationDistributor `0xa9551F5a3AeAB39cc8315AcD8caC2886Bd04f244` all deployed; the Sepolia bake-in framing below is the historical 2026-04-16 state). Phase 2 design + implementation plan complete; execution pending Phase 1 ship. Phase 3 (marketplace) + Phase 3.1 (batch settlement) shipped; three Phase 3.x follow-ons (MCP completion / liquidity / operator toolkit) scoped in PRSM-PHASE3-STATUS-1. Phase 4+ research track (R1-R7) tracked as parallel workstream. Phase 7 scope expanded to include content confidentiality tiers B/C. Phase 8 added for on-chain halving schedule enforcement. Hybrid tokenomics legal/governance workstream running on independent cadence.
 
 ## Goal
 
@@ -16,20 +16,20 @@ Close the seven gaps that today block PRSM from supporting the planned business 
 |---|---|---|
 | 1 | P2P mesh (libp2p) | 🟡 Prototype — NAT/bootstrap unproven (→ Phase 6) |
 | 2 | FTNS token on Base | ✅ **Live** at `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` |
-| 3 | Provenance royalty system | 🟢 **Testnet deployed + source-verified; Sepolia bake-in Day 5/7; mainnet imminent** (Phase 1) |
+| 3 | Provenance royalty system | ✅ **Live on Base mainnet** — RoyaltyDistributor v2 `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e` (Phase 1) |
 | 4 | Marketplace | 🟠 Scaffold — no order book, no matching (→ Phase 3) |
 | 5 | Storage nodes | ✅ Production (erasure coding / slashing / content confidentiality tiers B+C → Phase 7) |
 | 6 | Compute nodes | 🟡 Production locally; remote dispatch design + implementation plan complete (→ Phase 2 execution) |
 | 7 | Wallet / onboarding | 🟡 Raw Ed25519 keys, no Coinbase Wallet SDK (→ Phase 4) |
 | 8 | Fiat on-ramp | 🟡 Stripe/PayPal code exists, no keys, no KYC (→ Phase 5) |
 
-**Foundation is solid post-v1.6/1.7 cleanup.** Phase 1 gap is closing now; economic rails become real at mainnet deploy.
+**Foundation is solid post-v1.6/1.7 cleanup.** Phase 1 has shipped to Base mainnet; the economic rails are live.
 
 ## Phasing Principle
 
 Phases ordered by how much each gap blocks the meganode bootstrap story:
 
-1. Without on-chain royalties, "trustless royalty distribution" is a lie. → **Phase 1** (in bake-in)
+1. Without on-chain royalties, "trustless royalty distribution" is a lie. → **Phase 1** (live on Base mainnet)
 2. Without remote compute dispatch, the compute mesh is a single-machine demo. → **Phase 2** (design+plan complete)
 3. Without a marketplace, supply and demand cannot find each other. → **Phase 3** (preplanning)
 4. Without consumer wallet onboarding, FTNS demand growth is gated by crypto-native users. → **Phase 4**
@@ -44,7 +44,7 @@ Each phase ships independently. Each phase produces working, demonstrable softwa
 
 ## Phase 1 — On-Chain Provenance & Royalty Distribution
 
-**Status: in Sepolia bake-in Day 5 of 7 as of 2026-04-16. Mainnet deploy imminent post-bake-in.**
+**Status: LIVE on Base mainnet.** RoyaltyDistributor v2 (`0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e`) is the canonical deployed contract. (The Sepolia bake-in narrative below records the historical 2026-04-16 pre-mainnet state.)
 
 **Why first:** Meganode pitch = "earn FTNS by curating data others use." Pre-Phase-1, royalty splits were computed in a local SQLite ledger and a node operator could rewrite history. Smart contracts on Base move the source of truth on-chain, making royalties verifiable by anyone.
 

@@ -11,9 +11,9 @@
 > **Some details were reconsidered in v1.6.0 (2026-04-09).** In particular, Ring 5 "Agent Forge" was re-scoped during the v1.6.0 scope alignment: PRSM no longer runs an LLM-backed internal "agent architect" — reasoning happens in third-party LLMs (local or via OAuth/API), and PRSM's Ring 5 now refers to the WASM mobile agent runtime that third-party LLMs dispatch via MCP tools.
 >
 > For the **current** architecture, see:
-> - [`docs/architecture.md`](architecture.md) — current 10-Ring architecture and query flow
-> - [`docs/IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) — current subsystem status
-> - [`docs/2026-04-09-v1.6-scope-alignment-design.md`](2026-04-09-v1.6-scope-alignment-design.md) — the scope narrowing design
+> - [`docs/architecture.md`](../architecture.md) — current 10-Ring architecture and query flow
+> - [`docs/IMPLEMENTATION_STATUS.md`](../IMPLEMENTATION_STATUS.md) — current subsystem status
+> - [`docs/2026-04-09-v1.6-scope-alignment-design.md`](../2026-04-09-v1.6-scope-alignment-design.md) — the scope narrowing design
 >
 > The rest of this document is preserved as-written for historical accuracy.
 

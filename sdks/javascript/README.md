@@ -13,9 +13,9 @@ Official JavaScript/TypeScript SDK for **PRSM — a P2P infrastructure protocol 
 - **Real-time WebSocket** — live job progress updates and streaming results
 - **Error Handling** — robust error handling with automatic retry logic
 - **Authentication** — JWT tokens, API keys, and secure session management
-- **FTNS Integration** — balance checks, transfers, yield estimation
+- **FTNS Integration** — balance checks, transfers, earnings estimation
 - **Storage / ContentStore** — upload content with royalty tracking, download by CID
-- **MCP Tool Surface** — drive the same 16 tools that third-party LLMs use
+- **MCP Tool Surface** — drive the same 18 tools that third-party LLMs use
 - **Cross-platform** — Node.js, browsers, React Native
 
 PRSM itself does not host models — reasoning happens in your LLM of choice. The SDK drives PRSM's compute dispatch, storage, and FTNS settlement layers.

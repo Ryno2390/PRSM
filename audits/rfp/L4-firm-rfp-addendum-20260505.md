@@ -51,8 +51,9 @@ remediated and committed:**
 - **HIGH-1 (A-01) RoyaltyDistributor split** — needs v2 redeploy in
   Week 2 (the deployed v1 has a fixable on-chain bug; non-Ownable +
   non-upgradeable means redeploy is the only fix). v2 source is
-  ready and includes burn (HIGH-1) + Pausable (HIGH-3-deferred) +
-  pull-payment (D-04).
+  ready and includes the corrected split (HIGH-1) + Pausable (HIGH-3-deferred) +
+  pull-payment (D-04). (Note: the originally-planned burn-on-use was
+  subsequently DROPPED; the deployed v2 has no burn-on-use.)
 - **CRIT-2 (B-FTNS-1) FTNS admin = hot key** — operational handoff
   to Foundation Safe pending; not a code change. Addressed by a
   ceremony in Week 2 alongside the v2 redeploy.
@@ -163,7 +164,7 @@ Firms can verify Foundation operational readiness on Basescan:
 
 - **Foundation Safe (2-of-3):** [`0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791`](https://basescan.org/address/0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791)
 - **ProvenanceRegistry:** [`0xdF470BFa9eF310B196801D5105468515d0069915`](https://basescan.org/address/0xdF470BFa9eF310B196801D5105468515d0069915)
-- **RoyaltyDistributor v1:** [`0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2`](https://basescan.org/address/0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2)
+- **RoyaltyDistributor v1 (legacy, retained for legacy claimable only):** [`0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2`](https://basescan.org/address/0x3E8201B2cdC09bB1095Fc63c6DF1673fA9A4D6c2) — the canonical live RoyaltyDistributor is now v2 [`0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e`](https://basescan.org/address/0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e)
 - **FTNSTokenSimple v1:** [`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5)
 
 The audit-bundle stack itself (Phase 3.1 + 7 + 7.1 + 7-storage) is

@@ -884,7 +884,7 @@ Content-Type: application/json
 }
 ```
 
-Stakes FTNS tokens for the node's identity.
+Stakes FTNS tokens for the node's identity. Staking is utility-only — it confers lock-based service discounts + dispatch priority and accrues **NO token yield/APY** (sprint 904). Reward fields below are retained for schema stability and always report `0.0`.
 
 **Request Body**:
 | Field | Type | Required | Default | Description |
@@ -972,7 +972,7 @@ Returns comprehensive staking information for the node's identity.
       "stake_type": "general",
       "status": "active",
       "staked_at": "2025-06-11T12:00:00Z",
-      "rewards_earned": 5.0,
+      "rewards_earned": 0.0,
       "rewards_claimed": 0.0
     }
   ],
@@ -986,8 +986,8 @@ Returns comprehensive staking information for the node's identity.
       "status": "pending"
     }
   ],
-  "total_rewards_earned": 25.0,
-  "total_rewards_claimed": 10.0
+  "total_rewards_earned": 0.0,
+  "total_rewards_claimed": 0.0
 }
 ```
 
@@ -1001,7 +1001,7 @@ Returns comprehensive staking information for the node's identity.
 POST /staking/claim-rewards?stake_id=stake_abc123
 ```
 
-Claims accumulated staking rewards.
+Retained for schema stability. Staking accrues **NO token yield** (sprint 904), so this endpoint always returns zero claimed.
 
 **Query Parameters**:
 | Parameter | Type | Required | Description |
@@ -1012,8 +1012,8 @@ Claims accumulated staking rewards.
 ```json
 {
   "user_id": "node_abc123",
-  "total_rewards_claimed": 15.0,
-  "stakes_processed": 3
+  "total_rewards_claimed": 0.0,
+  "stakes_processed": 0
 }
 ```
 
@@ -1045,7 +1045,7 @@ Returns details of a specific stake.
   "stake_type": "general",
   "status": "active",
   "staked_at": "2025-06-11T12:00:00Z",
-  "rewards_earned": 5.0,
+  "rewards_earned": 0.0,
   "rewards_claimed": 0.0,
   "last_reward_calculation": "2025-06-11T12:00:00Z",
   "lock_reason": null,
@@ -1160,7 +1160,7 @@ Cancels a pending unstake request and restores tokens to active staking.
 
 ### Node Bridge Endpoints
 
-The Bridge enables FTNS token transfers between the local PRSM network and external blockchain networks (e.g., Polygon).
+The Bridge enables FTNS token transfers between the local PRSM network and external blockchain networks. PRSM's FTNS token is deployed on Base mainnet (chain ID 8453).
 
 #### Bridge Deposit
 ```http
@@ -1170,7 +1170,7 @@ Content-Type: application/json
 {
   "amount": 100.0,
   "chain_address": "0x742d35cc6bf4532c95a0e96a7bdc86c0b3e11888",
-  "destination_chain": 137
+  "destination_chain": 8453
 }
 ```
 
@@ -1181,7 +1181,7 @@ Deposits FTNS tokens from local balance to external chain.
 |-------|------|----------|---------|-------------|
 | amount | float | Yes | - | Amount of FTNS to deposit (must be > 0) |
 | chain_address | string | Yes | - | Destination on-chain address |
-| destination_chain | integer | No | 137 | Destination chain ID (137 = Polygon mainnet) |
+| destination_chain | integer | No | 8453 | Destination chain ID (8453 = Base mainnet) |
 
 **Response**:
 ```json
@@ -1194,7 +1194,7 @@ Deposits FTNS tokens from local balance to external chain.
     "chain_address": "0x742d35...",
     "amount": "100000000000000000000",
     "source_chain": 0,
-    "destination_chain": 137,
+    "destination_chain": 8453,
     "status": "pending",
     "source_tx_hash": null,
     "destination_tx_hash": null,
@@ -1222,7 +1222,7 @@ Content-Type: application/json
 {
   "amount": 50.0,
   "chain_address": "0x742d35cc6bf4532c95a0e96a7bdc86c0b3e11888",
-  "source_chain": 137
+  "source_chain": 8453
 }
 ```
 
@@ -1233,7 +1233,7 @@ Withdraws FTNS tokens from external chain to local balance.
 |-------|------|----------|---------|-------------|
 | amount | float | Yes | - | Amount of FTNS to withdraw (must be > 0) |
 | chain_address | string | Yes | - | Source on-chain address |
-| source_chain | integer | No | 137 | Source chain ID (137 = Polygon mainnet) |
+| source_chain | integer | No | 8453 | Source chain ID (8453 = Base mainnet) |
 
 **Response**:
 ```json
@@ -1245,7 +1245,7 @@ Withdraws FTNS tokens from external chain to local balance.
     "user_id": "node_abc123",
     "chain_address": "0x742d35...",
     "amount": "50000000000000000000",
-    "source_chain": 137,
+    "source_chain": 8453,
     "destination_chain": 0,
     "status": "pending",
     "source_tx_hash": "0xabc123...",
@@ -1323,7 +1323,7 @@ Returns status of a specific bridge transaction.
     "chain_address": "0x742d35...",
     "amount": "100000000000000000000",
     "source_chain": 0,
-    "destination_chain": 137,
+    "destination_chain": 8453,
     "status": "completed",
     "source_tx_hash": "0xdef456...",
     "destination_tx_hash": "0xabc123...",
@@ -1618,7 +1618,7 @@ Authorization: Bearer <token>
     "available_tokens": 750.50
   },
   "wallet_address": "0x742d35cc6bf4532c95a0e96a7bdc86c0b3e11888",
-  "network": "polygon",
+  "network": "base",
   "last_updated": "2025-06-11T12:00:00Z"
 }
 ```
@@ -1794,10 +1794,10 @@ X-RateLimit-Window: 3600
 
 | Endpoint | Limit | Window |
 |----------|-------|--------|
-| `/api/v1/nwtn/query` | 100 requests | 1 hour |
-| `/api/v1/models/train` | 5 requests | 1 hour |
+| `/compute/submit` | 100 requests | 1 hour |
+| `/content/upload` | 100 requests | 1 hour |
 | `/api/v1/auth/login` | 5 attempts | 15 minutes |
-| `/api/v1/marketplace/*` | 1000 requests | 1 hour |
+| `/content/search` | 1000 requests | 1 hour |
 | General API | 10000 requests | 1 hour |
 
 ### Rate Limit Response
@@ -1813,79 +1813,80 @@ X-RateLimit-Window: 3600
 
 ## SDK Examples
 
+> Note: the legacy `client.nwtn.*` / `client.marketplace.*` Platform-API
+> calls were removed in v1.6.0. The examples below target the live Node API.
+
 ### Python SDK
 ```python
-from prsm_sdk import PRSMClient
+import httpx
 
-# Initialize client
-client = PRSMClient(
-    api_key="your_api_key",
-    base_url="https://api.prsm-network.com"
+base_url = "http://localhost:8000"  # a running `prsm node start`
+headers = {"X-API-Key": "your_api_key"}
+
+# Submit a compute job
+resp = httpx.post(
+    f"{base_url}/compute/submit",
+    json={
+        "job_type": "inference",
+        "payload": {"model": "llama-7b", "prompt": "Analyze protein folding"},
+        "ftns_budget": 10.0,
+    },
+    headers=headers,
 )
+job_id = resp.json()["job_id"]
+print(f"Job ID: {job_id}")
 
-# Submit research query
-response = client.nwtn.submit_query(
-    query="Analyze protein folding mechanisms",
-    domain="biochemistry",
-    max_iterations=3
-)
-
-print(f"Session ID: {response.session_id}")
-
-# Monitor progress
-for update in client.nwtn.watch_session(response.session_id):
-    print(f"Progress: {update.progress}%")
-    if update.status == "completed":
-        print(f"Results: {update.results}")
-        break
+# Poll job status
+status = httpx.get(f"{base_url}/compute/job/{job_id}", headers=headers).json()
+print(f"Status: {status['status']}")
+if status["status"] == "completed":
+    print(f"Result: {status['result']}")
 ```
 
 ### JavaScript SDK
 ```javascript
-import { PRSMClient } from '@prsm/sdk';
+const baseUrl = 'http://localhost:8000'; // a running `prsm node start`
+const headers = { 'X-API-Key': 'your_api_key', 'Content-Type': 'application/json' };
 
-const client = new PRSMClient({
-  apiKey: 'your_api_key',
-  baseUrl: 'https://api.prsm-network.com'
+// Submit a compute job
+const resp = await fetch(`${baseUrl}/compute/submit`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({
+    job_type: 'inference',
+    payload: { model: 'llama-7b', prompt: 'Analyze protein folding' },
+    ftns_budget: 10.0,
+  }),
 });
+const { job_id } = await resp.json();
+console.log(`Job ID: ${job_id}`);
 
-// Submit research query
-const response = await client.nwtn.submitQuery({
-  query: 'Analyze protein folding mechanisms',
-  domain: 'biochemistry',
-  maxIterations: 3
-});
-
-console.log(`Session ID: ${response.sessionId}`);
-
-// WebSocket for real-time updates
-const ws = client.createWebSocket();
-ws.subscribe('session_updates', response.sessionId, (update) => {
-  console.log(`Progress: ${update.progress}%`);
-  if (update.status === 'completed') {
-    console.log('Results:', update.results);
-  }
-});
+// Poll job status
+const status = await (await fetch(`${baseUrl}/compute/job/${job_id}`, { headers })).json();
+console.log(`Status: ${status.status}`);
+if (status.status === 'completed') {
+  console.log('Result:', status.result);
+}
 ```
 
 ### cURL Examples
 
-#### Submit Query
+#### Submit Compute Job
 ```bash
-curl -X POST "https://api.prsm-network.com/api/v1/nwtn/query" \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+curl -X POST "http://localhost:8000/compute/submit" \
+  -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "Analyze climate change impacts",
-    "domain": "environmental_science",
-    "max_iterations": 5
+    "job_type": "inference",
+    "payload": {"model": "llama-7b", "prompt": "Analyze climate change impacts"},
+    "ftns_budget": 5.0
   }'
 ```
 
-#### Check Session Status
+#### Check Job Status
 ```bash
-curl -X GET "https://api.prsm-network.com/api/v1/nwtn/sessions/sess_abc123" \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+curl -X GET "http://localhost:8000/compute/job/job_abc123" \
+  -H "X-API-Key: YOUR_API_KEY"
 ```
 
 #### Get FTNS Balance

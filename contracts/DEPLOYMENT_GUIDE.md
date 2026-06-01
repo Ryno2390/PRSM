@@ -35,7 +35,13 @@
 
 ---
 
-Complete guide for deploying FTNS smart contracts to Polygon Mumbai testnet.
+> **Historical content below (deprecated — see notice above).** The
+> following procedure targeted Polygon Mumbai testnet, which shut down
+> 2024-04 and is no longer used. PRSM contracts are live on Base mainnet;
+> current deploy paths are linked in the stale-content notice above. The
+> text below is retained for historical context only.
+
+Complete guide for deploying FTNS smart contracts to Polygon Mumbai testnet (historical — deprecated).
 
 ## 🚀 Quick Deployment (5 minutes)
 

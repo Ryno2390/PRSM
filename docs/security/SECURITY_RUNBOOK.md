@@ -1,12 +1,21 @@
 # PRSM Security Runbook
 
 **Version:** 1.0  
-**Last Updated:** 2025-06-30  
+**Last Reviewed:** June 2026  
 **Status:** Active
 
 ## Overview
 
 This runbook provides step-by-step procedures for handling security incidents in the PRSM project. It is designed for use by the security team, operations team, and on-call engineers.
+
+> **Tooling note:** The `python -m prsm.security.*` commands referenced below
+> (`scanner`, `pentest`, `audit_checklist`, `secrets`, `env_config`) ship in the
+> repo under `prsm/security/` and are runnable today. The shell helpers shown as
+> `./scripts/security/*.sh` (e.g. `notify-incident-team.sh`, `isolate-systems.sh`,
+> `preserve-evidence.sh`) are **illustrative process steps**, not committed
+> scripts — they describe *what* to do at each phase. Treat those `.sh`
+> invocations as placeholders for your environment's actual runbook automation
+> (or perform the step manually) until the `scripts/security/` toolkit is added.
 
 ## Table of Contents
 

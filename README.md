@@ -212,14 +212,16 @@ prsm ftns yield-estimate --hours 8 --stake 1000   # Monthly earnings estimate
 prsm node start                                # Start earning
 ```
 
-**Staking tiers:**
+**Staking is utility-only** — locking FTNS confers a network-fee
+discount and dispatch-priority boost. It pays **no token yield, APY, or
+emission multiplier**. Benefits scale with lock duration:
 
-| Tier | Stake | Yield Boost |
-|------|-------|-------------|
-| Casual | 0 FTNS | 1.0x |
-| Pledged | 100 FTNS | 1.25x |
-| Dedicated | 1,000 FTNS | 1.5x |
-| Sentinel | 10,000 FTNS | 2.0x + aggregator fees |
+| Lock period | Network-fee discount | Dispatch-priority boost |
+|-------------|----------------------|-------------------------|
+| No lock | 0% | none |
+| 30 days | 2% | +10% |
+| 90 days | 5% | +25% |
+| 365 days | 10% | +50% |
 
 ---
 
@@ -239,7 +241,7 @@ See [Confidential Compute Spec](docs/CONFIDENTIAL_COMPUTE_SPEC.md) for details.
 
 ## Built on Ethereum + Base
 
-PRSM's smart contracts target **Base**, an Ethereum Layer 2 operated by Coinbase. The FTNS token is implemented as a standard ERC-20 (`FTNSTokenSimple.sol`) deployed to **Base Sepolia testnet**. Mainnet deploy is hardware-gated pending multi-sig quorum; the Foundation's 2-of-3 Safe on Base mainnet is the deployer of record for Phase 1.3 contracts (FTNSToken + ProvenanceRegistry + RoyaltyDistributor).
+PRSM's smart contracts target **Base**, an Ethereum Layer 2 operated by Coinbase. The FTNS token is implemented as a standard ERC-20 (`FTNSTokenSimple.sol`) and is **live on Base mainnet (chain 8453)** at `0x5276a3756C85f2E9e46f6D34386167a209aa16e5`. The Foundation's 2-of-3 Safe on Base mainnet (`0x91b0e6F85A371D82De94eD13A3812d9f5A4E5791`) is the deployer of record for the full contract suite (FTNSToken + ProvenanceRegistry + RoyaltyDistributor v2 `0xfEa9aeB99e02FDb799E2Df3C9195Dc4e5323df7e` + EmissionController + CompensationDistributor).
 
 **Why Ethereum:**
 
@@ -304,10 +306,10 @@ See [Deployment Guide](deploy/production/DEPLOYMENT_GUIDE.md) for full instructi
 | Metric | Value |
 |--------|-------|
 | Version | 1.7.0 |
-| MCP Tools | 16 |
+| MCP Tools | 18 |
 | SDKs | Python, JavaScript, Go |
-| FTNS Token | Base Sepolia testnet (mainnet deploy hardware-gated) |
-| Bootstrap | `wss://bootstrap1.prsm-network.com:8765` (NYC3 droplet, single-region today; Europe + Asia expansion planned) |
+| FTNS Token | Live on Base mainnet (chain 8453) — `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` |
+| Bootstrap | `wss://bootstrap-us.prsm-network.com:8765` (159.203.129.218, NYC3 droplet, single-region today; Europe + Asia expansion planned) |
 | License | MIT |
 
 ---

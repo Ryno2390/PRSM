@@ -119,17 +119,17 @@ Overall, the SDKs are well-designed and provide a solid foundation for developer
 
 The project is well-documented for new contributors. The root directory contains essential files for getting started:
 
--   [`CONTRIBUTING.md`](./CONTRIBUTING.md): Provides guidelines for contributing to the project.
--   [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md): Outlines the code of conduct for the community.
--   [`README.md`](./README.md): Offers a general overview of the project.
--   [`SECURITY.md`](./SECURITY.md): Details the project's security policies.
+-   [`CONTRIBUTING.md`](../../CONTRIBUTING.md): Provides guidelines for contributing to the project.
+-   [`CODE_OF_CONDUCT.md`](../../CODE_OF_CONDUCT.md): Outlines the code of conduct for the community.
+-   [`README.md`](../../README.md): Offers a general overview of the project.
+-   [`SECURITY.md`](../../SECURITY.md): Details the project's security policies.
 
 ### Development Documentation
 
 The [`/docs/development/`](./docs/development/) directory includes the following documents to guide developers:
 
--   [`CODING_STANDARDS.md`](./docs/development/CODING_STANDARDS.md): Defines the coding standards to ensure code consistency and quality.
--   [`DOCUMENTATION_STYLE_GUIDE.md`](./docs/development/DOCUMENTATION_STYLE_GUIDE.md): Provides a style guide for writing documentation.
+-   [`CODING_STANDARDS.md`](../development/CODING_STANDARDS.md): Defines the coding standards to ensure code consistency and quality.
+-   [`DOCUMENTATION_STYLE_GUIDE.md`](../development/DOCUMENTATION_STYLE_GUIDE.md): Provides a style guide for writing documentation.
 
 ### Development and Setup Scripts
 

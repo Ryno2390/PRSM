@@ -90,7 +90,7 @@ When a PRSM node starts, it connects to bootstrap peers to join the network. The
 
 ### Current bootstrap deployment state (as of 2026-04-24)
 
-Current production state: a single bootstrap droplet in NYC3. The domain names `bootstrap1.prsm-network.com`, `fallback1.prsm-network.com`, and `fallback2.prsm-network.com` **all presently resolve to the same droplet IP** (`159.203.129.218`). The fallback names are DNS slots reserved for future multi-region droplets (Europe + Asia deployments planned post-funding per Prismatica's operating-cost model); today they do not provide independent redundancy.
+Current production state: a single bootstrap droplet in NYC3. The domain names `bootstrap-us.prsm-network.com` (renamed from `bootstrap1.prsm-network.com` on 2026-05-19), `fallback1.prsm-network.com`, and `fallback2.prsm-network.com` **all presently resolve to the same droplet IP** (`159.203.129.218`). The fallback names are DNS slots reserved for future multi-region droplets (Europe + Asia deployments planned post-funding per Prismatica's operating-cost model); today they do not provide independent redundancy.
 
 **What this means for you as a new node operator:**
 
@@ -102,7 +102,7 @@ Current production state: a single bootstrap droplet in NYC3. The domain names `
 
 | Setting | Default | Description |
 |---|---|---|
-| `bootstrap_nodes` | `["wss://bootstrap1.prsm-network.com:8765"]` | Primary bootstrap peers (tried first) — currently a single NYC3 droplet |
+| `bootstrap_nodes` | `["wss://bootstrap-us.prsm-network.com:8765"]` | Primary bootstrap peers (tried first) — currently a single NYC3 droplet |
 | `bootstrap_fallback_enabled` | `true` | Enable/disable trusted fallback peers |
 | `bootstrap_fallback_nodes` | `["wss://fallback1.prsm-network.com", "wss://fallback2.prsm-network.com"]` | Fallback peer DNS slots (tried after all primaries fail). **Today these resolve to the same NYC3 droplet**; they become real redundancy when additional droplets deploy. |
 | `bootstrap_validate_addresses` | `true` | Reject malformed bootstrap addresses before connection attempts |

@@ -3132,7 +3132,7 @@ When future events fire (CDP commission, Aerodrome pool seed, fleet kill-switch 
 
 **Trust seams.**
 
-1. Bootstrap-relay liveness depends on a **single canonical bootstrap host** (`wss://bootstrap1.prsm-network.com:8765`). DO Droplet operator availability is currently a single point of failure for new-node onboarding; running mesh nodes are unaffected. Multi-bootstrap fallback is honest-scope.
+1. Bootstrap-relay liveness depends on a **single canonical bootstrap host** (`wss://bootstrap-us.prsm-network.com:8765`, `159.203.129.218` — renamed from `bootstrap1.prsm-network.com` on 2026-05-19). DO Droplet operator availability is currently a single point of failure for new-node onboarding; running mesh nodes are unaffected. Multi-bootstrap fallback is honest-scope.
 2. Capability tags are **operator-self-asserted via libp2p gossip envelope**. A malicious operator can claim arbitrary tiers (`compute=Tier-A` while running stub backend). Real verification belongs at the §7.13 Tier C structural-deny + §7.20 EmissionController stake-weighting layers, not at the discovery surface. The seam is named here so an auditor knows the deny-path lives elsewhere.
 3. Stale-peer sweep uses **local clock skew** for `last_seen` arithmetic — operators with badly-skewed system clocks may either over-evict (clock-fast) or under-evict (clock-slow). NTP is the operator-discipline expectation.
 4. The 5-counter telemetry is **observability not enforcement** — observing reconnect_count > 100 doesn't trigger any automatic remediation. Operators must alert + intervene. (Auto-quarantine is honest-scope.)

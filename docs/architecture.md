@@ -66,7 +66,7 @@ Privacy is enforced structurally — not by policy.
 
 ## FTNS Economics
 
-FTNS (Fungible Tokens for Node Support) is the protocol's economic primitive. It is **minted at contribution time** — there is no pre-mine, no ICO, and no foundation reserve to dump. New nodes receive a 100 FTNS welcome grant.
+FTNS (Fungible Tokens for Node Support) is the protocol's economic primitive. Supply follows a **Bitcoin-style halving-to-cap** schedule: a 100M-FTNS genesis allocation plus a 900M-FTNS emission cap give a hard `MAX_SUPPLY` of 1,000,000,000 FTNS. Emission opens at ~31.5M FTNS/yr (1 FTNS/sec) and halves every 4 years toward zero, so circulating supply asymptotes around ~352M. Emission is minted to contributors over time via the `EmissionController` — there is no ICO. Staking is utility-only (lock-based service discounts + dispatch priority); it carries no token yield, APY, or multiplier.
 
 - **Data providers** earn 80% of each query against their content (Ring 4 `ContentStore` + royalty pipeline).
 - **Compute providers** earn 15% of each query they execute (Ring 1 sandbox + Ring 2 dispatch).

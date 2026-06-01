@@ -46,7 +46,7 @@ This template is for problems running and maintaining a PRSM node — peer disco
 - [ ] VPS / dedicated server
 
 **Bootstrap node configuration:**
-- [ ] Default (`bootstrap1.prsm-network.com:8765`)
+- [ ] Default (`bootstrap-us.prsm-network.com:8765`)
 - [ ] Custom: _______
 
 ### 🐛 Issue Category
@@ -59,7 +59,7 @@ This template is for problems running and maintaining a PRSM node — peer disco
 - [ ] Compute job dispatch errors
 - [ ] Marketplace listing not appearing
 - [ ] On-chain registration / role grant errors
-- [ ] Sepolia testnet specific
+- [ ] Base mainnet specific (chain 8453)
 - [ ] Other: _______
 
 ### 🔄 Steps to Reproduce

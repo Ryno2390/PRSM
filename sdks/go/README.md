@@ -7,7 +7,7 @@ The Go SDK provides:
 - FTNS balance checks, transfers, and yield estimation
 - ContentStore upload/download with royalty tracking
 - WebSocket streaming for long-running compute jobs
-- MCP tool surface (the same 16 tools third-party LLMs use)
+- MCP tool surface (the same 18 tools third-party LLMs use)
 
 PRSM itself does not host models — reasoning happens in your LLM of choice. The SDK drives PRSM's compute dispatch, storage, and FTNS settlement layers.
 

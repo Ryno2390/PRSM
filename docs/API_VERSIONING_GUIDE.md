@@ -1,5 +1,14 @@
 # PRSM API Versioning & Migration Guide
 
+> **Scope note (current as of 2026-06-01):** The multi-version lifecycle,
+> content-negotiation headers, `/api/migration/*` endpoints, and the
+> `client.marketplace.*` / `/api/v1/marketplace/resources` examples below
+> describe the **legacy Platform API, which was removed in v1.6.0**. The
+> current PRSM surface is **Node-API-only** with simple URL-based `v1`
+> versioning (`{base_url}/api/v1/{endpoint}`) — see `docs/API_REFERENCE.md`.
+> Treat the per-version dates, planned-v2.0 roadmap, and migration tooling
+> in this document as historical, not as supported capabilities.
+
 ## Table of Contents
 - [Overview](#overview)
 - [Version Strategy](#version-strategy)
@@ -30,11 +39,15 @@ PRSM API versions follow semantic versioning: `MAJOR.MINOR.PATCH`
 
 ### Current Versions
 
+> Historical (Platform API, removed in v1.6.0). The current Node API is served
+> at a single `v1` path; the multi-version table below is retained for context
+> and does not reflect supported versions.
+
 | Version | Status | Release Date | End of Life | Description |
 |---------|--------|--------------|-------------|-------------|
-| **v1.0** | ✅ Active | Jan 15, 2024 | TBD | Initial stable release |
-| **v1.1** | ✅ Active | Apr 1, 2024 | TBD | Enhanced features and improvements |
-| **v2.0** | 🚧 Planned | Jul 1, 2024 | - | Major architectural improvements |
+| **v1.0** | Historical | Jan 15, 2024 | Removed in v1.6.0 | Initial stable release |
+| **v1.1** | Historical | Apr 1, 2024 | Removed in v1.6.0 | Enhanced features and improvements |
+| **v2.0** | Never shipped | — | — | Proposed architectural improvements (not built) |
 
 ### Compatibility Promise
 

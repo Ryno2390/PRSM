@@ -6,10 +6,16 @@ This directory contains security tools, audit reports, and documentation for the
 
 ```
 security/
-├── README.md                    # This file
-├── audit-reports/              # Generated security audit reports
-├── policies/                   # Security policies and guidelines
-└── tools/                      # Security analysis tools
+├── README.md                              # This file
+├── SECURITY_POLICY.md                     # Security policy and guidelines
+├── SECURITY_RUNBOOK.md                    # Incident-response runbook
+├── EXPLOIT_RESPONSE_PLAYBOOK.md           # Exploit response playbook (+ 2026-05 annex)
+├── KEY_ROTATION_RUNBOOK.md                # Key rotation procedures
+├── INSIDER_THREAT_AND_COLLUSION_POLICY.md # Insider-threat policy
+├── L6E_OPS_HYGIENE_REVIEW.md              # L6E ops-hygiene review
+├── L6E-reviews/                           # L6E security reviews
+├── audit/                                 # Audit working files
+└── audit-reports/                         # Generated security audit reports
 ```
 
 ## 🛡️ Security Audit System
@@ -95,12 +101,16 @@ workflow_dispatch:
 
 ### Known Vulnerabilities
 
-As of the last audit, the following vulnerabilities are tracked:
+The current tracked-vulnerability list is whatever the latest `pip-audit` /
+`scripts/security-audit.py` run reports — run the audit (see below) for the
+authoritative, up-to-date set. The entry below is a **point-in-time snapshot**
+retained as an example of how findings are recorded; it is not necessarily the
+current state.
 
-1. **torch 2.7.1** (GHSA-887c-mr87-cxwp)
+1. **torch 2.7.1** (GHSA-887c-mr87-cxwp) — *snapshot, mid-2025*
    - **Severity**: Medium
    - **Impact**: Local denial of service in `torch.nn.functional.ctc_loss`
-   - **Status**: No fix available yet
+   - **Status (at time of snapshot)**: No fix available yet
    - **Mitigation**: Monitor for PyTorch updates
 
 ### Security Metrics
@@ -242,5 +252,5 @@ For security-related issues, please follow responsible disclosure:
 
 ---
 
-**Last Updated**: July 2, 2025  
-**Next Review**: August 1, 2025
+**Last Reviewed**: June 2026  
+**Review Cadence**: This framework doc is reviewed alongside each periodic security audit; dependency scans run on every push/PR plus a weekly schedule (see above).
