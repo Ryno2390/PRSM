@@ -109,6 +109,15 @@ class BatchSettlementManager:
         self._last_flush_at: float = 0.0
         self._settlement_history: List[SettlementResult] = []
 
+        # sp917 — in-flight (broadcast-but-unconfirmed) settlement transfers
+        # awaiting receipt reconciliation. Each entry:
+        # {from_addr, to_addr, amount, tx_hash, attempts}. A reverted tx is
+        # re-queued; a confirmed one is dropped; an ambiguous never-confirming
+        # one is dropped after _max_reconcile_attempts WITHOUT auto-requeue.
+        self._in_flight: List[Dict[str, Any]] = []
+        self._max_reconcile_attempts = 20
+        self._max_in_flight = 1000
+
         # Background task
         self._flush_task: Optional[asyncio.Task] = None
         self._running = False
@@ -225,6 +234,10 @@ class BatchSettlementManager:
         start = time.time()
         result = SettlementResult()
 
+        # sp917 — reconcile any prior in-flight settlement txs FIRST: a reverted
+        # one is re-queued here, so it is then broadcast in this same flush.
+        await self.reconcile_in_flight()
+
         async with self._lock:
             if not self._queue:
                 return result
@@ -294,7 +307,12 @@ class BatchSettlementManager:
             elif tx_record and status == "pending":
                 # Broadcast succeeded but unconfirmed — in-flight. Surface the
                 # real tx_hash for reconciliation; do NOT re-queue (double-pay).
+                # sp917 — track it so reconcile_in_flight() re-queues the owed
+                # payout if it ultimately reverts (was a silent drop before).
                 result.tx_hashes.append(tx_record.tx_hash)
+                self._track_in_flight(
+                    from_addr, to_addr, net_amount, tx_record.tx_hash,
+                )
                 result.errors.append(
                     f"Pending (unconfirmed, not re-queued): {net_amount:.6f} → "
                     f"{to_addr[:12]} tx={(tx_record.tx_hash or '')[:16]}"
@@ -334,6 +352,108 @@ class BatchSettlementManager:
             self._settlement_history = self._settlement_history[-100:]
 
         return result
+
+    # ── In-flight reconciliation (sp917) ───────────────────────
+
+    def _track_in_flight(
+        self, from_addr: str, to_addr: str, amount: float, tx_hash: str,
+    ) -> None:
+        """Record a broadcast-but-unconfirmed settlement transfer so
+        reconcile_in_flight() can re-queue it if it ultimately reverts."""
+        self._in_flight.append({
+            "from_addr": from_addr,
+            "to_addr": to_addr,
+            "amount": float(amount),
+            "tx_hash": tx_hash,
+            "attempts": 0,
+        })
+        if len(self._in_flight) > self._max_in_flight:
+            # Bound the tracker (defensive — entries normally drain as they
+            # resolve). Drop the oldest.
+            self._in_flight = self._in_flight[-self._max_in_flight:]
+
+    async def reconcile_in_flight(self) -> Dict[str, int]:
+        """Poll each in-flight settlement tx receipt and resolve it.
+
+        confirmed → drop (the on-chain settlement landed);
+        reverted  → RE-QUEUE the owed payout + drop (an ERC-20 transfer revert
+                    is atomic — no tokens moved — so a re-queue cannot
+                    double-pay; without this the payout was silently dropped);
+        no receipt → keep for the next tick; after _max_reconcile_attempts the
+                    tx is AMBIGUOUS (may still land) so it is dropped WITHOUT
+                    auto-requeue (re-queuing a tx that could still confirm would
+                    double-pay) and surfaced for manual operator reconciliation.
+        """
+        if not self._in_flight:
+            return {"confirmed": 0, "reverted": 0, "still_pending": 0,
+                    "abandoned": 0}
+
+        w3 = getattr(self._ftns_ledger, "w3", None)
+        loop = asyncio.get_running_loop()
+        confirmed = reverted = still_pending = abandoned = 0
+        survivors: List[Dict[str, Any]] = []
+        requeue: List[PendingTransfer] = []
+
+        for entry in self._in_flight:
+            tx_hash = entry.get("tx_hash") or ""
+            receipt = None
+            polled = False
+            if w3 is not None and tx_hash:
+                h = tx_hash if tx_hash.startswith("0x") else "0x" + tx_hash
+                try:
+                    receipt = await loop.run_in_executor(
+                        None, lambda hh=h: w3.eth.get_transaction_receipt(hh),
+                    )
+                    polled = True
+                except Exception as exc:  # noqa: BLE001 — transient RPC; keep
+                    logger.debug(
+                        "BatchSettlement reconcile: receipt poll for %s "
+                        "failed: %s", tx_hash[:18], exc,
+                    )
+            if polled and receipt is not None:
+                if receipt.get("status") == 1:
+                    confirmed += 1
+                    continue   # landed — drop from in-flight
+                # status 0 → reverted atomically → re-queue the owed payout
+                reverted += 1
+                requeue.append(PendingTransfer(
+                    tx_id=f"requeue-{uuid.uuid4().hex[:12]}",
+                    from_wallet=entry["from_addr"],
+                    to_wallet=entry["to_addr"],
+                    amount=entry["amount"],
+                    job_id=f"requeue-{int(time.time())}",
+                    description=(
+                        "re-queued: batch settlement tx reverted on-chain "
+                        "(sp917)"
+                    ),
+                ))
+                continue
+            # No receipt (still pending or RPC error) → keep + bump attempts.
+            entry["attempts"] = entry.get("attempts", 0) + 1
+            if entry["attempts"] >= self._max_reconcile_attempts:
+                abandoned += 1
+                logger.warning(
+                    "BatchSettlement reconcile: tx %s unconfirmed after %d "
+                    "attempts — DROPPING from in-flight tracking (NOT "
+                    "auto-requeued; it may still land — operator must "
+                    "reconcile manually). %.6f FTNS → %s",
+                    tx_hash[:18], entry["attempts"], entry["amount"],
+                    entry["to_addr"][:12],
+                )
+                continue
+            still_pending += 1
+            survivors.append(entry)
+
+        self._in_flight = survivors
+        if requeue:
+            async with self._lock:
+                self._queue.extend(requeue)
+            logger.warning(
+                "BatchSettlement reconcile: re-queued %d reverted settlement "
+                "transfer(s) for retry", len(requeue),
+            )
+        return {"confirmed": confirmed, "reverted": reverted,
+                "still_pending": still_pending, "abandoned": abandoned}
 
     # ── Netting ────────────────────────────────────────────────
 
@@ -386,7 +506,9 @@ class BatchSettlementManager:
         while self._running:
             try:
                 await asyncio.sleep(self.flush_interval)
-                if self._queue:
+                # sp917 — also flush when in-flight txs await reconciliation,
+                # so a reverted settlement is re-queued even with an empty queue.
+                if self._queue or self._in_flight:
                     await self.flush()
             except asyncio.CancelledError:
                 break
