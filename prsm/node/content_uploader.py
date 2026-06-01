@@ -1185,6 +1185,23 @@ class ContentUploader:
 
         return self._fingerprint_index.compute(content, kind, filename=filename)
 
+    @staticmethod
+    def _canonical_creator_eth_address(existing, new_eth):
+        """sp919 — FIRST-CREATOR-WINS on the on-chain royalty-routing address.
+
+        ``uploaded_content[cid]`` routes royalties on retrieve via
+        ``creator_eth_address``. Two concurrent identical-content uploads (same
+        SHA-256 → same cid) on a multi-tenant node would otherwise race and
+        last-writer-wins could reassign that payout address to a different
+        creator (violating sp441 canonical-creator + misrouting money). Once a
+        record for this cid carries a payout address, that ORIGINAL address is
+        canonical and a later identical upload cannot change it. If no prior
+        record (or it had no address), the new address is used (don't drop a
+        real address)."""
+        if existing is not None and getattr(existing, "creator_eth_address", None):
+            return existing.creator_eth_address
+        return new_eth
+
     async def upload(
         self,
         content: bytes,
@@ -1488,6 +1505,14 @@ class ContentUploader:
             provenance_hash=provenance_hash_hex,
             provenance_tx_hash=provenance_tx_hash,
             creator_eth_address=creator_eth_address,
+        )
+        # sp919 — first-creator-wins on the royalty-routing address: a
+        # concurrent/later identical-content upload (same cid) must NOT clobber
+        # an already-recorded creator_eth_address (that would misroute on-chain
+        # royalties to the wrong creator). The get()+set below is synchronous
+        # (no await between) → atomic under the asyncio single-thread model.
+        uploaded.creator_eth_address = self._canonical_creator_eth_address(
+            self.uploaded_content.get(cid), uploaded.creator_eth_address,
         )
         self.uploaded_content[cid] = uploaded
         self._register_with_provider(uploaded)  # Phase 1.3: populate provider._local_content
