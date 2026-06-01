@@ -90,7 +90,14 @@ class StakingConfig:
     """Configuration for staking mechanism"""
     minimum_stake: int = 1000                    # Minimum FTNS to stake
     unstaking_period_seconds: int = 7 * 24 * 3600  # 7 days in seconds
-    reward_rate_annual: float = 0.05              # 5% annual reward rate
+    # Sprint 904 — staking yields ELIMINATED (PRSM_Tokenomics.md §10 #7
+    # + the utility-token posture). A mint-funded staking return is a
+    # Howey "expectation of profit from the efforts of others" flag, and
+    # the deployed v1 emission split has no staker-yield pool to fund it
+    # from. Staking confers utility benefits (lock-based service
+    # discounts / priority access — see §5.3) but NO token yield. Default
+    # is 0.0; calculate_rewards() returns no accruals regardless.
+    reward_rate_annual: float = 0.0               # NO staking yield (sp904)
     slashing_rate_base: float = 0.1               # 10% base slash rate
     max_stake_per_user: int = 10_000_000          # Maximum stake per user
     max_total_stake: int = 1_000_000_000           # Maximum total network stake
@@ -888,60 +895,17 @@ class StakingManager:
             stake_id: Specific stake (None = all user's stakes)
             
         Returns:
-            List[RewardCalculation]: Reward calculations for each stake
+            List[RewardCalculation]: empty — staking accrues NO token yield.
         """
-        
-        calculations = []
-        now = datetime.now(timezone.utc)
-        
-        async with get_async_session() as db:
-            # Build query for stakes
-            if stake_id:
-                query = select(StakeModel).where(
-                    StakeModel.stake_id == UUID(stake_id),
-                    StakeModel.user_id == user_id
-                )
-            else:
-                query = select(StakeModel).where(StakeModel.user_id == user_id)
-            
-            result = await db.execute(query)
-            stake_rows = result.scalars().all()
-            
-            for stake_row in stake_rows:
-                if stake_row.status != StakeStatus.ACTIVE.value:
-                    continue
-                
-                stake = self._stake_row_to_record(stake_row)
-                
-                # Check minimum stake age
-                stake_age = (now - stake.staked_at).total_seconds()
-                if stake_age < self.config.min_stake_age_for_rewards_seconds:
-                    continue
-                
-                # Calculate time since last calculation
-                time_staked = (now - stake.last_reward_calculation).total_seconds()
-                days_staked = time_staked / 86400
-                
-                # Calculate reward using annual rate
-                # reward = principal * rate * (days / 365)
-                annual_rate = Decimal(str(self.config.reward_rate_annual))
-                reward_amount = stake.amount * annual_rate * Decimal(str(days_staked / 365))
-                reward_amount = reward_amount.quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
-                
-                calculation = RewardCalculation(
-                    stake_id=str(stake_row.stake_id),
-                    user_id=user_id,
-                    principal=stake.amount,
-                    reward_amount=reward_amount,
-                    annual_rate=self.config.reward_rate_annual,
-                    days_staked=days_staked,
-                    calculation_timestamp=now,
-                    next_calculation=now + timedelta(seconds=self.config.reward_calculation_interval_seconds)
-                )
-                
-                calculations.append(calculation)
-        
-        return calculations
+        # Sprint 904 — staking yields ELIMINATED. There is no
+        # inflationary, mint-funded staking return (PRSM_Tokenomics.md
+        # §10 #7: "no discretionary inflation-based rewards"; the
+        # deployed v1 emission split has no staker-yield pool). Staking
+        # confers utility benefits (lock-based service discounts /
+        # priority access), not a token yield. No reward accrues, so
+        # claim_rewards() mints nothing. Stake/unstake/slash mechanics
+        # are unaffected.
+        return []
     
     async def claim_rewards(
         self,
@@ -956,51 +920,30 @@ class StakingManager:
             stake_id: Specific stake (None = all stakes)
             
         Returns:
-            Decimal: Total rewards claimed
+            Decimal: Total rewards claimed — always 0 (sp904: staking
+            accrues no token yield).
         """
-        
+        # Sprint 904 — staking yields ELIMINATED. calculate_rewards()
+        # returns no accruals, so there is nothing to claim and NOTHING
+        # IS MINTED. The previous mint-funded `reason="staking_rewards"`
+        # path is removed: it was a discretionary inflationary reward
+        # (Howey "expectation of profit" flag) with no funding source in
+        # the deployed v1 emission split (PRSM_Tokenomics.md §10 #7).
+        # Surface retained as an inert no-op so callers (auto-claim
+        # worker / CLI / MCP) don't break; staking gives utility, not
+        # yield. (Slash appeal-refund minting is a separate, legitimate
+        # path and is unaffected.)
         calculations = await self.calculate_rewards(user_id, stake_id)
-        total_rewards = Decimal('0')
-        
-        async with get_async_session() as db:
-            for calc in calculations:
-                query = select(StakeModel).where(StakeModel.stake_id == UUID(calc.stake_id))
-                result = await db.execute(query)
-                stake_row = result.scalar_one_or_none()
-                
-                if not stake_row:
-                    continue
-                
-                # Update stake
-                stake_row.rewards_earned = float(Decimal(str(stake_row.rewards_earned)) + calc.reward_amount)
-                stake_row.last_reward_calculation = calc.calculation_timestamp
-                
-                # Add to total
-                total_rewards += calc.reward_amount
-                
-                # If compounding, add to stake
-                if self.config.reward_compounding:
-                    stake_row.amount = float(Decimal(str(stake_row.amount)) + calc.reward_amount)
-            
-            if total_rewards > 0:
-                await db.commit()
-        
-        # Mint reward tokens to user
-        if total_rewards > 0:
-            await self.ftns.mint_tokens(
-                user_id,
-                total_rewards,
-                reason="staking_rewards"
-            )
-        
-        await logger.ainfo(
-            "Rewards claimed",
-            user_id=user_id,
-            total_rewards=float(total_rewards),
-            stake_count=len(calculations)
+        if not calculations:
+            return Decimal('0')
+        # Defense-in-depth: even if a future change re-introduces
+        # accruals, this method must never mint inflationary yield.
+        await logger.awarning(
+            "claim_rewards: staking yields are eliminated (sp904); "
+            "ignoring %d stale accrual(s), minting nothing",
+            len(calculations),
         )
-        
-        return total_rewards
+        return Decimal('0')
     
     # === Query Operations ===
     

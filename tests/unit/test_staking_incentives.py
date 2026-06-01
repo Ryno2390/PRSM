@@ -268,7 +268,7 @@ class TestStakingConfig:
         
         assert config.minimum_stake == 1000
         assert config.unstaking_period_seconds == 7 * 24 * 3600  # 7 days
-        assert config.reward_rate_annual == 0.05  # 5%
+        assert config.reward_rate_annual == 0.0  # sp904: staking yields eliminated
         assert config.slashing_rate_base == 0.1  # 10%
         assert config.max_stake_per_user == 10_000_000
         assert config.max_total_stake == 1_000_000_000
@@ -868,15 +868,16 @@ class TestRewards:
     """Tests for reward calculations"""
     
     @pytest.mark.asyncio
-    async def test_calculate_rewards(self, staking_manager, mock_ftns_service):
-        """Test calculating rewards"""
+    async def test_calculate_rewards_yields_nothing(self, staking_manager, mock_ftns_service):
+        """Sprint 904 — staking yields eliminated: calculate_rewards
+        accrues NOTHING even for a well-aged active stake."""
         # Create stake
         stake = await staking_manager.stake(
             user_id="user-123",
             amount=Decimal('10000')
         )
-        
-        # Update stake timestamps in database to be past minimum
+
+        # Age the stake well past the minimum reward age.
         from prsm.core.database import get_async_session, StakeModel
         from sqlalchemy import update
         from uuid import UUID
@@ -889,16 +890,10 @@ class TestRewards:
                 .values(staked_at=past_staked, last_reward_calculation=past_reward)
             )
             await session.commit()
-        
-        # Calculate rewards
+
         calculations = await staking_manager.calculate_rewards("user-123")
-        
-        assert len(calculations) == 1
-        calc = calculations[0]
-        assert calc.user_id == "user-123"
-        assert calc.principal == Decimal('10000')
-        assert calc.annual_rate == 0.05
-        assert calc.reward_amount > 0
+        # No token yield accrues — staking confers utility, not yield.
+        assert calculations == []
     
     @pytest.mark.asyncio
     async def test_calculate_rewards_too_new(self, staking_manager, mock_ftns_service):
@@ -938,11 +933,13 @@ class TestRewards:
             )
             await session.commit()
         
-        # Claim rewards
+        # Claim rewards — sp904: staking accrues no yield, so this is an
+        # inert no-op that returns 0 and MINTS NOTHING (the Howey-flag
+        # inflationary mint is removed).
         total_rewards = await staking_manager.claim_rewards("user-123")
-        
-        assert total_rewards > 0
-        mock_ftns_service.mint_tokens.assert_called_once()
+
+        assert total_rewards == Decimal('0')
+        mock_ftns_service.mint_tokens.assert_not_called()
     
     @pytest.mark.asyncio
     async def test_reward_compounding(self, async_db_session, mock_db_session, mock_ftns_service):
@@ -978,14 +975,13 @@ class TestRewards:
             )
             await session.commit()
         
-        # Claim rewards
+        # Claim rewards — sp904: no yield accrues, so compounding is a
+        # no-op. The stake principal is unchanged.
         total_rewards = await manager.claim_rewards("user-123")
-        
-        # Re-fetch stake to get updated amount from database
+
+        assert total_rewards == Decimal('0')
         updated_stake = await manager.get_stake(stake.stake_id)
-        # With compounding, stake amount should increase by the claimed rewards
-        assert updated_stake.amount == Decimal('10000') + total_rewards
-        assert updated_stake.amount > Decimal('10000')
+        assert updated_stake.amount == Decimal('10000')  # unchanged — no yield to compound
 
 
 # === Query Tests ===
