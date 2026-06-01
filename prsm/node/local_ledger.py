@@ -555,6 +555,25 @@ class LocalLedger:
         await self._db.commit()
         return cursor.rowcount == 1
 
+    async def release_nonce(self, nonce: str) -> bool:
+        """Sp918 — RELEASE a previously-claimed nonce so it can be re-claimed.
+
+        Used ONLY to undo an idempotency claim whose on-chain tx definitively
+        did NOT pay (OnChainRevertedError = atomic rollback, or
+        BroadcastFailedError = never reached the network), so a legitimate
+        retry can re-dispatch instead of being permanently
+        skipped_already_dispatched. Returns True if a row was removed (was
+        claimed), False if absent (harmless no-op → idempotent).
+
+        SAFETY: the caller MUST NOT release a claim whose tx may still confirm
+        (a 'pending' broadcast) — that re-opens the double-pay window the claim
+        was guarding. See onchain_content_royalty.keys_to_release."""
+        cursor = await self._db.execute(
+            "DELETE FROM seen_nonces WHERE nonce = ?", (nonce,)
+        )
+        await self._db.commit()
+        return cursor.rowcount == 1
+
     async def get_recent_tx_ids(self, wallet_id: str, limit: int = 50) -> List[str]:
         """Get recent transaction IDs for reconciliation."""
         cursor = await self._db.execute(

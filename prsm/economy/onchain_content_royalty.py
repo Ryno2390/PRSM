@@ -54,6 +54,35 @@ def royalty_dispatch_key(settlement_key: str, cid: str) -> str:
     return f"royalty_dispatch:{settlement_key}:{cid}"
 
 
+# sp918 — statuses whose idempotency claim is SAFE to release so a future
+# settlement can re-dispatch. ONLY definitively-no-payment outcomes:
+#   "reverted" — the EVM rolled the tx back atomically; no tokens moved.
+#   "failed"   — BroadcastFailedError; the tx never reached the network.
+# Deliberately EXCLUDES "pending" (in mempool — may still confirm; releasing +
+# re-dispatching would DOUBLE-PAY), "sent", "error" (unknown exception —
+# fail-safe), and "skipped_*" (either not our claim, or a deterministic skip).
+_RELEASABLE_STATUSES = frozenset({"reverted", "failed"})
+
+
+def keys_to_release(results, settlement_key) -> list:
+    """sp918 — given dispatch results, return the per-shard idempotency keys
+    whose claim is SAFE to release (the definitively-no-payment outcomes).
+
+    The caller pre-claimed each shard's key (record_nonce) before dispatch; on
+    a revert / broadcast-failure no payment occurred, so the claim must be
+    released or the documented "safe to retry" is impossible (the royalty would
+    be permanently skipped_already_dispatched). Returns ``[]`` when there is no
+    settlement_key (idempotency was not in play)."""
+    if settlement_key is None:
+        return []
+    out = []
+    for r in results:
+        cid = getattr(r, "cid", None)
+        if getattr(r, "status", None) in _RELEASABLE_STATUSES and cid:
+            out.append(royalty_dispatch_key(settlement_key, cid))
+    return out
+
+
 @dataclass(frozen=True)
 class DispatchResult:
     """One per shard. ``status`` is one of:
@@ -71,8 +100,12 @@ class DispatchResult:
         length / non-hex
       - ``skipped_zero_amount``: per-shard amount was 0
       - ``failed``: broadcast never reached the network
-        (BroadcastFailedError) or an unexpected error; ``error`` carries
-        the text. Safe to retry (the chain saw nothing).
+        (BroadcastFailedError); ``error`` carries the text. The chain saw
+        nothing → definitively no payment, so it is SAFE to release the
+        idempotency claim (sp918) and re-dispatch on a later settlement.
+      - ``error`` (sp918): an UNEXPECTED, non-typed exception. We cannot prove
+        the chain saw nothing, so this is NOT safe-to-release — the claim is
+        kept (fail-safe toward no double-pay) and the shard is not auto-retried.
     """
 
     cid: str
@@ -352,17 +385,33 @@ def dispatch_content_access_royalties(
                 cid=cid, status="reverted", error=str(exc),
             ))
             continue
-        except (BroadcastFailedError, Exception) as exc:  # noqa: BLE001
-            # BroadcastFailedError: never reached the network — safe retry.
-            # Any other unexpected error is treated the same (chain saw
-            # nothing it could settle from this path).
+        except BroadcastFailedError as exc:
+            # Never reached the network — the chain saw nothing, so no payment
+            # occurred. sp918: distinct 'failed' status so the caller may SAFELY
+            # release this shard's idempotency claim (keys_to_release) and let a
+            # future settlement re-dispatch.
             logger.warning(
-                "distribute_royalty failed for cid=%s: %s",
+                "distribute_royalty broadcast-failed for cid=%s: %s",
                 cid[:12], exc,
             )
             results.append(DispatchResult(
                 cid=cid,
                 status="failed",
+                error=str(exc),
+            ))
+            continue
+        except Exception as exc:  # noqa: BLE001
+            # sp918 — an UNKNOWN exception (not a typed broadcast/revert/pending
+            # signal). We cannot prove the chain saw nothing, so this is NOT
+            # safe-to-release: keep the claim (fail-safe toward no double-pay)
+            # via a distinct 'error' status that keys_to_release excludes.
+            logger.warning(
+                "distribute_royalty errored for cid=%s: %s",
+                cid[:12], exc,
+            )
+            results.append(DispatchResult(
+                cid=cid,
+                status="error",
                 error=str(exc),
             ))
             continue

@@ -1690,6 +1690,18 @@ class DAGLedger:
             await self._db.commit()
             return cursor.rowcount == 1
 
+    async def release_nonce(self, nonce: str) -> bool:
+        """Sp918 — release a claimed nonce so it can be re-claimed (see
+        LocalLedger.release_nonce; ONLY for definitively-no-payment reverts /
+        never-broadcasts — never a 'pending' tx). Under the sp910 write lock
+        for shared-connection safety. Returns True if a row was removed."""
+        async with self._get_write_lock():
+            cursor = await self._db.execute(
+                "DELETE FROM seen_nonces WHERE nonce = ?", (nonce,)
+            )
+            await self._db.commit()
+            return cursor.rowcount == 1
+
 
 class DAGLedgerAdapter:
     """
@@ -1777,6 +1789,10 @@ class DAGLedgerAdapter:
         # Sp898 — propagate the atomic-claim bool so ledger_sync's
         # double-credit gate works on the DAG backend too.
         return await self._dag.record_nonce(nonce, origin)
+
+    async def release_nonce(self, nonce: str) -> bool:
+        # Sp918 — release a claimed nonce (definitive-no-payment reverts only).
+        return await self._dag.release_nonce(nonce)
         
     async def get_recent_tx_ids(self, wallet_id: str, limit: int = 50) -> List[str]:
         history = await self._dag.get_transaction_history(wallet_id, limit)

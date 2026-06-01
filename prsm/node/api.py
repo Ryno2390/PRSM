@@ -6422,6 +6422,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                         allocate_royalty_amounts,
                                         dispatch_content_access_royalties,
                                         royalty_dispatch_key as _royalty_key,
+                                        keys_to_release as _royalty_keys_to_release,
                                     )
                                     # sp911 — idempotent dispatch. Atomically
                                     # claim a per-(job, shard) key on the
@@ -6509,6 +6510,33 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                                 claim_fn=_royalty_claim_fn,
                                             )
                                         )
+                                    # sp918 — release the idempotency claim for
+                                    # shards whose on-chain tx definitively did
+                                    # NOT pay (reverted = atomic rollback;
+                                    # failed = never broadcast), so a future
+                                    # settlement can re-dispatch instead of the
+                                    # royalty being permanently
+                                    # skipped_already_dispatched. keys_to_release
+                                    # NEVER returns a 'pending' shard (still in
+                                    # the mempool — releasing would re-open the
+                                    # double-pay window). Best-effort.
+                                    if (
+                                        node.ledger is not None
+                                        and _royalty_settle_key is not None
+                                    ):
+                                        for _rk in _royalty_keys_to_release(
+                                            _royalty_results,
+                                            _royalty_settle_key,
+                                        ):
+                                            try:
+                                                await node.ledger.release_nonce(
+                                                    _rk,
+                                                )
+                                            except Exception:  # noqa: BLE001
+                                                logger.warning(
+                                                    "sp918: release_nonce "
+                                                    "failed for %s", _rk,
+                                                )
                                     _sent = sum(
                                         1 for r in _royalty_results
                                         if r.status == "sent"
@@ -6521,12 +6549,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                         1 for r in _royalty_results
                                         if r.status == "failed"
                                     )
+                                    # sp918 — count the distinct non-success
+                                    # outcomes so telemetry isn't blind to them
+                                    # (the BroadcastFailedError/Exception split
+                                    # moved generic errors out of "failed").
+                                    _reverted = sum(
+                                        1 for r in _royalty_results
+                                        if r.status == "reverted"
+                                    )
+                                    _pending = sum(
+                                        1 for r in _royalty_results
+                                        if r.status == "pending"
+                                    )
+                                    _errored = sum(
+                                        1 for r in _royalty_results
+                                        if r.status == "error"
+                                    )
                                     logger.info(
                                         "on-chain content royalty "
                                         "dispatch for job %s: sent=%d "
-                                        "skipped=%d failed=%d",
+                                        "skipped=%d failed=%d reverted=%d "
+                                        "pending=%d error=%d",
                                         job_id[:8], _sent, _skipped,
-                                        _failed,
+                                        _failed, _reverted, _pending,
+                                        _errored,
                                     )
                                     # Sprint 249 — append each
                                     # per-shard outcome to the audit
