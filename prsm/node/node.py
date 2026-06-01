@@ -4488,6 +4488,53 @@ class PRSMNode:
                 "InboundMonitor launched (interval=%.0fs)",
                 _inbound_interval,
             )
+        # sp916 — pending-withdraw reconciler. The /wallet/withdraw handler
+        # records each broadcast-but-unconfirmed withdraw into the store; this
+        # worker polls the tx receipt and, on a REVERT, refunds the off-chain
+        # debit idempotently (the debit was taken BEFORE broadcast — sp914 —
+        # so a revert otherwise loses the user's FTNS with no recovery). Cheap
+        # when idle (no-ops on an empty store). Enabled by default; disable via
+        # PRSM_PENDING_WITHDRAW_RECONCILER_ENABLED=0.
+        if self.ftns_ledger is not None and getattr(self, "ledger", None) is not None:
+            from prsm.node.pending_withdraw_reconciler import (
+                PendingWithdrawStore,
+                PendingWithdrawReconciler,
+                resolve_pending_withdraw_reconciler_config_from_env,
+            )
+            _pw_enabled, _pw_interval = (
+                resolve_pending_withdraw_reconciler_config_from_env()
+            )
+            _pw_dir = os.environ.get("PRSM_PENDING_WITHDRAW_DIR")
+            if _pw_dir in ("", ":memory:"):
+                _pw_dir = None
+            elif _pw_dir is None:
+                _pw_dir = str(Path.home() / ".prsm")
+            try:
+                self._pending_withdraw_store = PendingWithdrawStore(
+                    persist_dir=_pw_dir,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "PendingWithdrawStore init failed (%s); using in-memory",
+                    exc,
+                )
+                self._pending_withdraw_store = PendingWithdrawStore(
+                    persist_dir=None,
+                )
+            if _pw_enabled:
+                self._pending_withdraw_reconciler = PendingWithdrawReconciler(
+                    store=self._pending_withdraw_store,
+                    ftns_ledger=self.ftns_ledger,
+                    local_ledger=self.ledger,
+                    interval_seconds=_pw_interval,
+                )
+                self._pending_withdraw_reconciler_task = asyncio.create_task(
+                    self._pending_withdraw_reconciler.run_forever(),
+                )
+                logger.info(
+                    "PendingWithdrawReconciler launched (interval=%.0fs)",
+                    _pw_interval,
+                )
         if hasattr(self, '_batch_settlement') and self._batch_settlement:
             # Update connected_address now that ftns_ledger may have initialized
             if self.ftns_ledger and hasattr(self.ftns_ledger, '_connected_address'):
@@ -5175,6 +5222,8 @@ class PRSMNode:
             await self._job_reaper.stop()
         if getattr(self, "_daemon_watchdog", None) is not None:
             await self._daemon_watchdog.stop()
+        if getattr(self, "_pending_withdraw_reconciler", None) is not None:
+            await self._pending_withdraw_reconciler.stop()  # sp916
         for task_attr in (
             "_heartbeat_scheduler_task",
             "_job_reaper_task",
@@ -5183,6 +5232,7 @@ class PRSMNode:
             "_key_distribution_watcher_task",
             "_storage_slashing_watcher_task",
             "_compensation_distributor_watcher_task",
+            "_pending_withdraw_reconciler_task",  # sp916
         ):
             task = getattr(self, task_attr, None)
             if task is not None:

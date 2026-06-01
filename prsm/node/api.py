@@ -2250,8 +2250,30 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # "pending" (not None), so we must NOT claim "confirmed" for it. The
         # off-chain debit is intentionally NOT refunded for a pending tx — it
         # is in the mempool and refunding would double-pay once it confirms.
+        _tx_status = getattr(tx_record, "status", "confirmed") or "confirmed"
+        if _tx_status == "pending":
+            # sp916 — record the pending withdraw so the reconciler can refund
+            # this off-chain debit IF the on-chain tx ultimately reverts (the
+            # debit already happened above; without this record the refund-on-
+            # revert path has no wallet_id/amount linkage). Confirmed withdraws
+            # need no record. Best-effort: never fail the response on store I/O.
+            _pw_store = getattr(node, "_pending_withdraw_store", None)
+            if _pw_store is not None:
+                try:
+                    _pw_store.record(
+                        job_id=job_id,
+                        wallet_id=wallet_id,
+                        amount=float(body.amount_ftns),
+                        to_addr=to_addr,
+                        tx_hash=getattr(tx_record, "tx_hash", "") or "",
+                    )
+                except Exception as _exc:  # noqa: BLE001
+                    logger.warning(
+                        "withdraw: failed to record pending intent for "
+                        "job=%s: %s", job_id, _exc,
+                    )
         return {
-            "status": getattr(tx_record, "status", "confirmed") or "confirmed",
+            "status": _tx_status,
             "wallet_id": wallet_id,
             "amount_ftns": body.amount_ftns,
             "to_eth_address": to_addr,
