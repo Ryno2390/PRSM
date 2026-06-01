@@ -33,9 +33,25 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+from prsm.economy.web3.provenance_registry import (
+    BroadcastFailedError,
+    OnChainPendingError,
+    OnChainRevertedError,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def royalty_dispatch_key(settlement_key: str, cid: str) -> str:
+    """sp911 — the deterministic idempotency key for one shard's royalty
+    dispatch within a settlement event. Callers atomically claim this key
+    (e.g. ledger.record_nonce) BEFORE dispatching so a retry of the same
+    settlement does not re-pay on chain. `settlement_key` must be STABLE
+    across logical retries (a content/query hash + epoch), NOT a random
+    per-request job id."""
+    return f"royalty_dispatch:{settlement_key}:{cid}"
 
 
 @dataclass(frozen=True)
@@ -43,11 +59,20 @@ class DispatchResult:
     """One per shard. ``status`` is one of:
 
       - ``sent``: distribute_royalty returned successfully
+      - ``pending``: broadcast succeeded but the receipt is unconfirmed
+        (OnChainPendingError). ``tx_hash`` is set. The caller MUST NOT
+        re-dispatch — the tx may still settle; reconcile via tx_hash.
+      - ``reverted``: the tx confirmed and reverted on chain
+        (OnChainRevertedError) — safe to retry / fall back (no state change)
+      - ``skipped_already_dispatched``: this (settlement_key, cid) was
+        already claimed — idempotent retry short-circuit (no double-pay)
       - ``skipped_no_record``: ContentIndex.lookup(cid) was None
       - ``skipped_bad_hash``: content_hash missing / wrong
         length / non-hex
-      - ``failed``: distribute_royalty raised; ``error`` carries
-        the exception text
+      - ``skipped_zero_amount``: per-shard amount was 0
+      - ``failed``: broadcast never reached the network
+        (BroadcastFailedError) or an unexpected error; ``error`` carries
+        the text. Safe to retry (the chain saw nothing).
     """
 
     cid: str
@@ -173,6 +198,8 @@ def dispatch_content_access_royalties(
     serving_node_address: str,
     gross_per_shard_wei: Optional[int] = None,
     gross_amounts_wei: Optional[Dict[str, int]] = None,
+    settlement_key: Optional[str] = None,
+    claim_fn: Optional[Callable[[str], bool]] = None,
 ) -> List[DispatchResult]:
     """Send one ``distribute_royalty`` tx per shard.
 
@@ -182,6 +209,19 @@ def dispatch_content_access_royalties(
       - ``gross_amounts_wei``: per-shard ``{cid: wei}`` dict
         produced by :func:`allocate_royalty_amounts`. Allows
         rate-weighted or other non-uniform policies.
+
+    Idempotency (sp911)
+    -------------------
+    When BOTH ``settlement_key`` (a stable per-settlement-event id — NOT a
+    random job id) and ``claim_fn`` are supplied, each shard is gated on
+    ``claim_fn(royalty_dispatch_key(settlement_key, cid))``. ``claim_fn``
+    must ATOMICALLY claim the key and return True iff THIS call won it
+    (the sp898 ledger.record_nonce primitive); a shard whose key was
+    already claimed is short-circuited as ``skipped_already_dispatched`` —
+    so a retry of the same settlement does NOT re-pay on chain. The async
+    caller pre-claims via ``await ledger.record_nonce(...)`` and passes a
+    sync lookup of the per-shard result. When omitted, no dedup is applied
+    (back-compat).
 
     Raises
     ------
@@ -225,6 +265,32 @@ def dispatch_content_access_royalties(
                 status="skipped_zero_amount",
             ))
             continue
+        # sp911 — idempotency: atomically claim this (settlement, shard)
+        # BEFORE the on-chain tx. A retry of the same settlement finds the
+        # key already claimed and short-circuits, so no double-pay.
+        if settlement_key is not None and claim_fn is not None:
+            _key = royalty_dispatch_key(settlement_key, cid)
+            try:
+                won = claim_fn(_key)
+            except Exception as exc:  # noqa: BLE001
+                # Fail-CLOSED on a claim error: do NOT dispatch if we can't
+                # confirm we won the claim (avoids a double-pay on a flaky
+                # claim store). Surface for operator retry.
+                logger.warning(
+                    "royalty dispatch claim raised for cid=%s: %s",
+                    cid[:12], exc,
+                )
+                results.append(DispatchResult(
+                    cid=cid, status="failed",
+                    error=f"claim error: {exc}",
+                ))
+                continue
+            if not won:
+                results.append(DispatchResult(
+                    cid=cid,
+                    status="skipped_already_dispatched",
+                ))
+                continue
         try:
             record = content_index.lookup(cid)
         except Exception as exc:  # noqa: BLE001
@@ -258,7 +324,38 @@ def dispatch_content_access_royalties(
                 serving_node_address,
                 amount_for_cid,
             )
-        except Exception as exc:  # noqa: BLE001
+        except OnChainPendingError as exc:
+            # sp911 — broadcast SUCCEEDED but the receipt is unconfirmed.
+            # The tx may still settle, so do NOT present this as a plain
+            # 'failed' that invites the operator to re-dispatch (→ double
+            # pay). Surface a distinct 'pending' status carrying the
+            # tx_hash so reconciliation polls the receipt instead.
+            logger.warning(
+                "distribute_royalty PENDING for cid=%s (tx=%s); do not "
+                "re-dispatch, reconcile via tx_hash",
+                cid[:12], getattr(exc, "tx_hash", None),
+            )
+            results.append(DispatchResult(
+                cid=cid,
+                status="pending",
+                tx_hash=getattr(exc, "tx_hash", None),
+                error=str(exc),
+            ))
+            continue
+        except OnChainRevertedError as exc:
+            # Confirmed + reverted: the chain rolled it back atomically, so
+            # no payment occurred — safe to retry / fall back.
+            logger.warning(
+                "distribute_royalty REVERTED for cid=%s: %s", cid[:12], exc,
+            )
+            results.append(DispatchResult(
+                cid=cid, status="reverted", error=str(exc),
+            ))
+            continue
+        except (BroadcastFailedError, Exception) as exc:  # noqa: BLE001
+            # BroadcastFailedError: never reached the network — safe retry.
+            # Any other unexpected error is treated the same (chain saw
+            # nothing it could settle from this path).
             logger.warning(
                 "distribute_royalty failed for cid=%s: %s",
                 cid[:12], exc,

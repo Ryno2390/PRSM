@@ -6368,6 +6368,40 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                     from prsm.economy.onchain_content_royalty import (
                                         allocate_royalty_amounts,
                                         dispatch_content_access_royalties,
+                                        royalty_dispatch_key as _royalty_key,
+                                    )
+                                    # sp911 — idempotent dispatch. Atomically
+                                    # claim a per-(job, shard) key on the
+                                    # durable ledger (sp898 record_nonce)
+                                    # BEFORE the on-chain tx, so a re-entry /
+                                    # re-delivery of THIS settlement does not
+                                    # re-pay. settlement_key = job_id: stable
+                                    # for one execution (catches re-dispatch)
+                                    # yet distinct across separate accesses
+                                    # (which correctly pay separately). Claim
+                                    # in the async caller; pass a sync result
+                                    # lookup to the (sync) dispatcher.
+                                    _claimed_keys: Dict[str, bool] = {}
+                                    if node.ledger is not None:
+                                        for _shard_cid in _contributing:
+                                            _ck = _royalty_key(str(job_id), _shard_cid)
+                                            try:
+                                                _claimed_keys[_ck] = (
+                                                    await node.ledger.record_nonce(
+                                                        _ck, _op_addr,
+                                                    )
+                                                )
+                                            except Exception:  # noqa: BLE001
+                                                # fail-closed: don't dispatch
+                                                # if the claim couldn't be made
+                                                _claimed_keys[_ck] = False
+                                    _royalty_claim_fn = (
+                                        (lambda _k: _claimed_keys.get(_k, False))
+                                        if node.ledger is not None else None
+                                    )
+                                    _royalty_settle_key = (
+                                        str(job_id) if node.ledger is not None
+                                        else None
                                     )
                                     # Sprint 257 — choose allocation
                                     # mode. uniform = each shard gets
@@ -6406,6 +6440,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                                 royalty_client=_client,
                                                 serving_node_address=_op_addr,
                                                 gross_amounts_wei=_amounts,
+                                                settlement_key=_royalty_settle_key,
+                                                claim_fn=_royalty_claim_fn,
                                             )
                                         )
                                     else:
@@ -6416,6 +6452,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                                                 royalty_client=_client,
                                                 serving_node_address=_op_addr,
                                                 gross_per_shard_wei=_wei,
+                                                settlement_key=_royalty_settle_key,
+                                                claim_fn=_royalty_claim_fn,
                                             )
                                         )
                                     _sent = sum(
