@@ -55,6 +55,7 @@ class InvariantStatus(str, Enum):
 
 class InvariantKind(str, Enum):
     UINT256_EQ = "uint256_eq"
+    UINT256_AT_WORD_EQ = "uint256_at_word_eq"
     UINT256_GTE = "uint256_gte"
     UINT256_LTE = "uint256_lte"
     ADDRESS_EQ = "address_eq"
@@ -125,6 +126,9 @@ class FormalBackend(Protocol):
     def call_uint256(
         self, addr: str, selector: str,
     ) -> Optional[int]: ...
+    def call_uint256_at_word(
+        self, addr: str, selector: str, word_index: int,
+    ) -> Optional[int]: ...
     def call_address(
         self, addr: str, selector: str,
     ) -> Optional[str]: ...
@@ -172,6 +176,13 @@ _SEL_BASE_MAINNET_CHAIN_ID = (
 )
 _SEL_MIN_WEIGHT_SCHEDULE_DELAY = (
     "0x5a7d67c9"                       # MIN_WEIGHT_SCHEDULE_DELAY()
+)
+_SEL_MINT_CAP = "0x76c71ca1"          # mintCap()
+_SEL_BASELINE_RATE_PER_SECOND = (
+    "0x968226be"                       # baselineRatePerSecond()
+)
+_SEL_CURRENT_WEIGHTS = (
+    "0x322db68a"                       # currentWeights() -> PoolWeights
 )
 _SEL_MIN_HEARTBEAT_GRACE = (
     "0xebf2fbfe"                       # MIN_HEARTBEAT_GRACE()
@@ -519,6 +530,57 @@ INVARIANT_REGISTRY: Dict[str, List[Invariant]] = {
             selector=_SEL_BASE_MAINNET_CHAIN_ID,
             expected=8453,
         ),
+        Invariant(
+            id="INV-EC-3",
+            contract_name="emission_controller",
+            title=(
+                "mintCap pinned at 900M FTNS (the v1 emission cap)"
+            ),
+            description=(
+                "Phase 8 emissions are hard-bounded by an "
+                "immutable mintCap. With 100M genesis already "
+                "minted, a 900M emission cap caps lifetime FTNS "
+                "supply at the 1B MAX_SUPPLY enforced by "
+                "FTNSToken — the Bitcoin-style scarcity ceiling "
+                "early-adopter value depends on (PRSM_Tokenomics "
+                "v1, §4.2 / §10 #1, #8). Drift in this constant "
+                "would either dilute holders (higher cap) or "
+                "prematurely starve worker compensation (lower). "
+                "Pinned to the mainnet deploy "
+                "(phase8-emission-base-1778164608198.json)."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "mintCap() == 900_000_000 * 1e18"
+            ),
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_MINT_CAP,
+            expected=900_000_000 * 10**18,
+        ),
+        Invariant(
+            id="INV-EC-4",
+            contract_name="emission_controller",
+            title=(
+                "baselineRatePerSecond pinned at 1 FTNS/sec"
+            ),
+            description=(
+                "The opening emission rate (epoch 0) is 1 FTNS "
+                "per second ≈ 31.536M FTNS/yr, halved every 4 "
+                "years toward zero (PRSM_Tokenomics v1, §4.2). "
+                "This immutable baseline sets the early-adopter "
+                "reward gradient; substitution to a higher value "
+                "would inflate issuance pace and erode scarcity. "
+                "Pinned to the mainnet deploy "
+                "(phase8-emission-base-1778164608198.json)."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "baselineRatePerSecond() == 1e18"
+            ),
+            kind=InvariantKind.UINT256_EQ,
+            selector=_SEL_BASELINE_RATE_PER_SECOND,
+            expected=10**18,
+        ),
     ],
     "compensation_distributor": [
         Invariant(
@@ -561,6 +623,76 @@ INVARIANT_REGISTRY: Dict[str, List[Invariant]] = {
             kind=InvariantKind.ADDRESS_EQ,
             selector=_SEL_OWNER,
             expected=_FOUNDATION_SAFE_BASE,
+        ),
+        Invariant(
+            id="INV-CD-3",
+            contract_name="compensation_distributor",
+            title=(
+                "creator pool weight pinned at 5000 bps (50%)"
+            ),
+            description=(
+                "The v1 reward split is 50/30/20 "
+                "(creator / operator / grant), enforced "
+                "on-chain (PRSM_Tokenomics v1, §10 #3). "
+                "currentWeights() returns the PoolWeights "
+                "tuple (creatorPoolBps, operatorPoolBps, "
+                "grantPoolBps); word 0 is the creator share. "
+                "A weight change is only reachable via the "
+                "90-day-gated updateWeights path (INV-CD-1) — "
+                "this invariant surfaces any such drift "
+                "against the mainnet deploy "
+                "(phase8-emission-base-1778164608198.json)."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "currentWeights().creatorPoolBps == 5000"
+            ),
+            kind=InvariantKind.UINT256_AT_WORD_EQ,
+            selector=_SEL_CURRENT_WEIGHTS,
+            expected=5000,
+            params={"word_index": 0},
+        ),
+        Invariant(
+            id="INV-CD-4",
+            contract_name="compensation_distributor",
+            title=(
+                "operator pool weight pinned at 3000 bps (30%)"
+            ),
+            description=(
+                "Word 1 of the currentWeights() PoolWeights "
+                "tuple — the operator share of the v1 50/30/20 "
+                "split. See INV-CD-3."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "currentWeights().operatorPoolBps == 3000"
+            ),
+            kind=InvariantKind.UINT256_AT_WORD_EQ,
+            selector=_SEL_CURRENT_WEIGHTS,
+            expected=3000,
+            params={"word_index": 1},
+        ),
+        Invariant(
+            id="INV-CD-5",
+            contract_name="compensation_distributor",
+            title=(
+                "grant pool weight pinned at 2000 bps (20%)"
+            ),
+            description=(
+                "Word 2 of the currentWeights() PoolWeights "
+                "tuple — the grant share of the v1 50/30/20 "
+                "split. Rounding remainder accrues to grant; "
+                "the three weights sum to 10000 bps. See "
+                "INV-CD-3."
+            ),
+            severity=InvariantSeverity.CRITICAL,
+            spec_text=(
+                "currentWeights().grantPoolBps == 2000"
+            ),
+            kind=InvariantKind.UINT256_AT_WORD_EQ,
+            selector=_SEL_CURRENT_WEIGHTS,
+            expected=2000,
+            params={"word_index": 2},
         ),
     ],
     "storage_slashing": [
@@ -753,6 +885,10 @@ class InvariantChecker:
             return self._check_uint256_eq(
                 inv, contract_address,
             )
+        if inv.kind == InvariantKind.UINT256_AT_WORD_EQ:
+            return self._check_uint256_at_word_eq(
+                inv, contract_address,
+            )
         if inv.kind == InvariantKind.UINT256_GTE:
             return self._check_uint256_gte(
                 inv, contract_address,
@@ -828,6 +964,45 @@ class InvariantChecker:
             value=v, expected=inv.expected,
             diagnostic=(
                 f"got {v}, expected {inv.expected}"
+            ),
+        )
+
+    def _check_uint256_at_word_eq(
+        self, inv: Invariant, addr: str,
+    ) -> InvariantResult:
+        """Pin a single 32-byte word of a multi-word return
+        (e.g. one field of a struct getter). `word_index`
+        selects the word; 0 is the first."""
+        word_index = int(inv.params.get("word_index", 0))
+        try:
+            v = self._backend.call_uint256_at_word(
+                addr, inv.selector, word_index,
+            )
+        except Exception as e:  # noqa: BLE001
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error=f"RPC error: {e}",
+            )
+        if v is None:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.SKIPPED,
+                error="backend returned None",
+            )
+        if v == inv.expected:
+            return InvariantResult(
+                invariant_id=inv.id,
+                status=InvariantStatus.PASS,
+                value=v, expected=inv.expected,
+            )
+        return InvariantResult(
+            invariant_id=inv.id,
+            status=InvariantStatus.FAIL,
+            value=v, expected=inv.expected,
+            diagnostic=(
+                f"word[{word_index}] got {v}, "
+                f"expected {inv.expected}"
             ),
         )
 

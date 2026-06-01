@@ -79,8 +79,13 @@ export interface StakingInfo {
   availableForUnstaking: number;
   /** Pending unstaking */
   pendingUnstaking: number;
-  /** Annual percentage yield */
+  /** @deprecated Staking pays no token yield in v1 (always 0.0). Staking
+   *  confers utility benefits only — see `yieldModel` / `benefits`. */
   apy: number;
+  /** Staking yield model: "utility_only" in deployed v1 (no token yield). */
+  yieldModel?: string;
+  /** Human-readable staking benefits (lock-based discounts + priority). */
+  benefits?: string;
   /** Rewards earned */
   rewardsEarned: number;
   /** Next reward date */

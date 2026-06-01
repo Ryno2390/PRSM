@@ -322,6 +322,31 @@ async def list_user_files(user_id: str = None) -> Dict[str, Any]:
 
 # === Tokenomics Dashboard ===
 
+
+def _staking_view(*, config, staked_amount, rewards_earned, next_reward_date):
+    """Build the dashboard's staking block.
+
+    Staking confers UTILITY benefits only — lock-based service discounts
+    and priority access — and pays no token yield (sprint 904 eliminated
+    the inflationary staking reward; the deployed v1 compensation split
+    has no staker-yield pool). `apy` is derived from
+    `config.reward_rate_annual`, which is 0.0 in v1; it is retained at
+    0.0 for back-compat with the JS SDK type rather than advertised.
+    """
+    return {
+        "staked_amount":    staked_amount,
+        "staking_rewards":  rewards_earned,
+        "yield_model":      "utility_only",
+        "benefits": (
+            "Lock-based service discounts and priority access "
+            "(no token yield)"
+        ),
+        "apy":              config.reward_rate_annual * 100,
+        "lock_period_days": config.unstaking_period_seconds / 86400,
+        "next_reward_date": next_reward_date,
+    }
+
+
 @router.get("/tokenomics/{user_id}")
 async def get_tokenomics_ui(user_id: str) -> Dict[str, Any]:
     """Return real FTNS tokenomics data for the dashboard."""
@@ -407,13 +432,12 @@ async def get_tokenomics_ui(user_id: str) -> Dict[str, Any]:
                     "locked":    balance_data["locked_balance"],
                     "currency":  "FTNS",
                 },
-                "staking": {
-                    "staked_amount":    staked_amount,
-                    "staking_rewards":  rewards_earned,
-                    "apy":              config.reward_rate_annual * 100,
-                    "lock_period_days": config.unstaking_period_seconds / 86400,
-                    "next_reward_date": next_reward,
-                },
+                "staking": _staking_view(
+                    config=config,
+                    staked_amount=staked_amount,
+                    rewards_earned=rewards_earned,
+                    next_reward_date=next_reward,
+                ),
                 "earnings": {
                     "daily":          daily,
                     "weekly":         weekly,

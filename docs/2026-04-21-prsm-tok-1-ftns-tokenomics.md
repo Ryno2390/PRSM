@@ -1,10 +1,18 @@
 # PRSM-TOK-1: FTNS Tokenomics Standard
 
 **Document identifier:** PRSM-TOK-1
-**Version:** 0.2 Draft (revised 2026-04-24)
+**Version:** 0.3 Draft (revised 2026-06-01)
 **Status:** Consolidates prior tokenomics drafting into standards-track form. Parameter values below are the current recommendations, pending Foundation board ratification and counsel confirmation (§13).
 **Date:** 2026-04-21 (revised 2026-04-24)
 **Drafting authority:** PRSM founder, pending Foundation convocation
+
+**Revision note (2026-06-01) — reconciliation to deployed v1:** The Phase-8 monetary contracts were deployed to Base mainnet (chain 8453) on 2026-05-07 (`contracts/deployments/phase8-emission-base-1778164608198.json`). They implement the **v1 "halving-to-cap"** design, and this revision reconciles the standard to that deployed reality. Three parameters below were drafted pre-deploy and are now corrected:
+
+1. **Staking yield is removed.** The deployed compensation split (`CompensationDistributor` 50/30/20 creator/operator/grant) has no staker-yield pool, and the off-chain `StakingManager` was changed to mint no yield (sprint 904). Staking confers **utility benefits only** (lock-based service discounts + priority access), **not** a token yield. The §3 yield-multiplier row, §9.1–9.3 yield tables/APYs, and the §12 "staking yield pool" line are superseded — read them as utility-only.
+2. **Burn-on-use is a future/optional lever, not deployed.** `burnFrom` exists and irreversibly reduces supply, but **no payment or royalty contract burns a percentage today**. The 20%-burn rows in §3, the §8.1 payment split, §8.2, and the §14 acknowledgement describe an *aspirational* lever addable later via governance — not live behavior. The deployed payment split carries no burn.
+3. **Emission is on-chain protocol issuance, split 50/30/20.** The deployed `EmissionController` mints protocol FTNS at a `baselineRatePerSecond` of 1 FTNS/sec (≈31.5M FTNS/yr at epoch 0), **halving every 4 years toward zero**, hard-bounded by a **900M `mintCap`** on top of the 100M genesis (= the 1B `MAX_SUPPLY` ceiling). The §6 framing of halving as applying "to Foundation-paid bonus rates only" and "drawn from the 100M genesis" is superseded: halving governs the protocol emission itself, which is distributed by `CompensationDistributor`, not drawn from genesis.
+
+These three deployed parameters are now pinned by runtime formal invariants — `INV-EC-3` (mintCap), `INV-EC-4` (baselineRatePerSecond), `INV-CD-3/4/5` (the 50/30/20 split) in `prsm/economy/web3/formal_invariants.py` (sprint 905) — so any future drift is surfaced against mainnet. The authoritative scenario math + rationale live in the reconciled `PRSM_Tokenomics.md` (external vault) §4.2 + §10.
 
 **Revision note (2026-04-24):** Per canonical Vision docs (`PRSM_Vision.md`, `Prismatica_Vision.md`, `PRSM_Tokenomics.md` in founder materials), PRSM-CIS-1 (confidential-silicon standard) is reclassified as deferred research exploration rather than an active Foundation standard. PRSM-ECON-WP-1 (economic-model white paper) is a CIS-derivative analysis priced around chip unit economics; it has been archived alongside the CIS-1 source docs. Tokenomics sections that referenced CIS-1 as a companion standard or relied on the CIS-priced ECON-WP framing have been updated inline. The **core tokenomics primitives (halving, burn, staking, POL, compensation-only distribution)** are independent of CIS-1 and remain unchanged.
 
@@ -96,12 +104,14 @@ Out of scope:
 | Distribution method | Compensation-only | Normative (§4) |
 | Bootstrap capital source | Prismatica equity (Reg D 506(c)) | Normative (§5) |
 | Network fee baseline | 200 bps (2%) | **[RATIFY]** — hybrid proposal may reduce to 50 bps, see §8.5 |
-| Burn rate | 2,000 bps (20%) of each payment | Normative (§8) |
+| Burn rate | 0 bps deployed (20% is a future/optional lever) | Future/optional — **not deployed** (see 2026-06-01 note, §8) |
 | Max royalty rate | 9,800 bps (98%) per content, set by creator | Fixed (contract level) |
 | Staking lock options | 30 / 90 / 365 days | Normative (§9) |
-| Staking yield multipliers | 1× / 1.5× / 3× | Normative (§9) |
-| Halving epoch duration | 4 years | Normative (§6) |
-| Halving scope | Foundation-paid compensation rates only | Normative (§6.2) |
+| Staking yield multipliers | None — staking pays **no token yield** | Superseded (sprint 904); utility benefits only (§9) |
+| Halving epoch duration | 4 years | Fixed (on-chain, `EmissionController`, mainnet `INV-EC-1`) |
+| Emission baseline rate | 1 FTNS/sec (≈31.5M FTNS/yr at epoch 0) | Fixed (on-chain, `INV-EC-4`) |
+| Halving scope | Protocol emission, split 50/30/20 by `CompensationDistributor` | Normative (§6); superseded the pre-deploy "bonus rates only" framing |
+| Emission mint cap | 900,000,000 FTNS | Fixed (on-chain, `INV-EC-3`; + 100M genesis = 1B `MAX_SUPPLY`) |
 | Asymptotic emission limit | 1,000,000,000 FTNS | Fixed (hard cap; halving ensures asymptotic convergence) |
 
 ---
@@ -195,21 +205,23 @@ The replacement (Prismatica equity raise of comparable dollar magnitude) provide
 
 ## 6. Emission schedule
 
+> **Reconciled 2026-06-01:** As deployed, halving governs the **on-chain protocol emission** itself — `EmissionController` mints FTNS at `baselineRatePerSecond` (1 FTNS/sec at epoch 0), halving every 4 years, and routes it to `CompensationDistributor` for the 50/30/20 split. The emission is **bounded by the 900M `mintCap`** (on top of 100M genesis = 1B `MAX_SUPPLY`); it is *not* drawn from the 100M genesis. The "applies to Foundation-paid bonus rates only" framing in §6.2 below predates the Phase-8 deploy and is superseded.
+
 ### 6.1 Bitcoin-style halving
 
-Foundation-paid compensation rates halve every 4 years on a published schedule:
+Protocol emission halves every 4 years on a deterministic on-chain schedule:
 
-| Epoch | Years post-mainnet | Rate | Approx emission budget (of 100M genesis) |
+| Epoch | Years post-mainnet | Rate | Approx emission (toward 900M mint cap) |
 |---|---|---|---|
-| 1 | 0–4 | Baseline (R) | Up to ~40M FTNS distributed |
-| 2 | 4–8 | R/2 | Up to ~20M FTNS |
-| 3 | 8–12 | R/4 | Up to ~10M FTNS |
-| 4 | 12–16 | R/8 | Up to ~5M FTNS |
-| 5 | 16–20 | R/16 | Up to ~2.5M FTNS |
+| 1 | 0–4 | Baseline (R = 1 FTNS/sec ≈ 31.5M/yr) | ~126M FTNS |
+| 2 | 4–8 | R/2 | ~63M FTNS |
+| 3 | 8–12 | R/4 | ~31.5M FTNS |
+| 4 | 12–16 | R/8 | ~15.8M FTNS |
+| 5 | 16–20 | R/16 | ~7.9M FTNS |
 | 10 | 36–40 | R/512 | Negligible |
-| Asymptotic | ∞ | → 0 | 1B hard cap never reached |
+| Asymptotic | ∞ | → 0 | 900M mint cap never reached |
 
-Rate halving applies to foundation-paid compensation streams at each epoch transition (one administrative action per epoch). **The 1B FTNS hard cap is never reached — emissions asymptotically converge to zero.**
+Rate halving applies to the protocol emission at each epoch transition (deterministic, on-chain). **The 900M mint cap (and thus the 1B `MAX_SUPPLY` ceiling) is never reached — a geometric halving sums to a finite total below the cap, so emissions asymptotically converge to zero.**
 
 ### 6.2 Scope: what halves and what doesn't
 
@@ -220,9 +232,8 @@ Halving applies to:
 
 Halving does NOT apply to:
 - User-to-user payments for services (a user paying a creator 1 FTNS for content access is a transaction, not an emission).
-- On-chain royalty-split percentages (a creator's 8% share remains 8%; what halves is the Foundation-issued bonus).
-- Protocol fees and burn mechanics.
-- Staking yield distribution.
+- On-chain royalty-split percentages (a creator's 8% share remains 8%).
+- Protocol fees.
 
 ### 6.3 Governance and enforcement
 
@@ -295,32 +306,35 @@ Per PRSM-GOV-1 §4.3 item 4, the Foundation's FTNS treasury MUST NOT exceed 20% 
 
 ## 8. Fee flows and burn
 
-### 8.1 Payment distribution (from Phase 3 onward)
+### 8.1 Payment distribution (deployed)
+
+> **Reconciled 2026-06-01:** No deployed contract burns a percentage of a payment. The split below is the **deployed, burn-free** distribution. The 20%-burn variant that earlier drafts showed is retained as a future/optional lever in §8.2.
 
 Every FTNS payment on the network is split as follows:
 
 ```
-  burn:          20.0%  (permanently destroyed)
-  treasury:       1.6%  (2% network fee × 80% of remainder)
-  creator:        6.4%  (8% royalty × 80% of remainder)
-  serving node: 72.0%  (90% × 80% of remainder)
+  treasury:       2.0%  (network fee)
+  creator:        8.0%  (royalty, default rate; creator-set 0–98%)
+  serving node:  90.0%
                 ─────
   total:        100.0%
 ```
 
-The 20% burn is taken off the top; the remaining 80% is split per the royalty/treasury/operator ratios established in Phase 1.1.
+The split is the 2/8/90 (treasury / creator / operator) distribution established in Phase 1.1, with no burn. The creator's share is governed by their user-set royalty rate (0–98%, §8.4); 8% is the default.
 
-### 8.2 Burn-on-use rationale
+### 8.2 Burn-on-use — future/optional lever (NOT deployed)
 
-The 20% burn creates continuous deflationary pressure proportional to utility. At the $100M/year volume scenario with $2/FTNS price:
+> **Reconciled 2026-06-01:** This subsection describes an *aspirational* lever, not live behavior. `burnFrom` exists at the token level and irreversibly reduces supply, but no payment or royalty contract burns a percentage today, and re-mint up to `MAX_SUPPLY` is not separately blocked. A 20%-burn-on-payment could be added later via governance; it would strengthen the Bitcoin-style scarcity that serves early adopters. The figures below are illustrative of *that* future design, not current state.
+
+A 20% burn would create continuous deflationary pressure proportional to utility. At the $100M/year volume scenario with $2/FTNS price:
 - Annual burn: `$100M × 20% / $2 = 10M FTNS/year`
 - At 50M circulating supply: **20% annual supply reduction**
 
-Crossover point (where burn exceeds emission) depends on halving epoch and transaction volume. At Epoch 1 low-volume conditions, emissions typically exceed burn. By Epoch 3 with compounded adoption and halved emissions, burn typically dominates.
+Crossover point (where burn exceeds emission) would depend on halving epoch and transaction volume. At Epoch 1 low-volume conditions, emissions would typically exceed burn; by Epoch 3 with compounded adoption and halved emissions, burn would typically dominate.
 
 ### 8.3 Network fee destination
 
-The 2% network fee (on the 80% non-burned portion, yielding 1.6% of total) flows to Foundation treasury. This funds:
+The 2% network fee flows to Foundation treasury. This funds:
 - Foundation operations (staff, audits, certifications overhead not covered by cost-recovery certification fees).
 - Research grants.
 - POL reserve replenishment.
@@ -330,7 +344,7 @@ Foundation fee revenue is disclosed in the annual report (PRSM-GOV-1 §11.1 item
 
 ### 8.4 Creator royalty mechanics
 
-User-set royalty rates 0–98% determine the creator's share of each access payment (before the 20% burn / 80% distribution above). A creator setting 8% royalty receives 8% of the 80% post-burn — i.e., 6.4% of the gross payment.
+User-set royalty rates 0–98% determine the creator's share of each access payment. A creator setting 8% royalty receives 8% of the gross payment (per the deployed burn-free 2/8/90 split, §8.1). *(If the §8.2 future burn lever were adopted, the royalty would instead apply to the post-burn remainder.)*
 
 ### 8.5 Hybrid fee model — **[COUNSEL REQUIRED]**
 
@@ -362,41 +376,30 @@ Four open gates before hybrid adoption:
 
 ## 9. Staking
 
-### 9.1 Lock tiers and yield multipliers
+> **Reconciled 2026-06-01:** Staking pays **no token yield** (sprint 904). The deployed compensation split has no staker-yield pool, and minting yield from the emission stream is forbidden (§4.4 Howey analysis, §10 #7 of `PRSM_Tokenomics.md`). Staking confers **utility benefits only** — lock-based service discounts and priority access. The yield-multiplier and APY content from earlier drafts is superseded; it is preserved below only as struck-through history. Node-operator *security bonding* is the separate on-chain `StakeBond.sol` mechanism, which also pays no yield.
 
-| Lock period | Yield multiplier | Service discount | Priority access |
+### 9.1 Lock tiers and utility benefits
+
+| Lock period | Token yield | Service discount | Priority access |
 |---|---|---|---|
-| None | 0× (not staked) | 0% | Standard |
-| 30 days | 1× (baseline) | 2% | +10% |
-| 90 days | 1.5× | 5% | +25% |
-| 365 days | 3× | 10% | +50% |
+| None | None | 0% | Standard |
+| 30 days | None | 2% | +10% |
+| 90 days | None | 5% | +25% |
+| 365 days | None | 10% | +50% |
 
-### 9.2 Yield source
+Staking benefits are **utility**, not return: a longer lock buys a larger service discount and higher dispatch priority. There is no inflationary or fee-funded payout to stakers.
 
-Staking rewards flow from the 2% network fee pool (or 50 bps under hybrid, §8.5), distributed pro-rata to stakers weighted by `(multiplier × locked amount)`.
+### 9.2 ~~Yield source~~ (superseded — no yield)
 
-### 9.3 Yield calculation example
+~~Staking rewards flow from the 2% network fee pool, distributed pro-rata to stakers weighted by `(multiplier × locked amount)`.~~ **Superseded (sprint 904): there is no staking yield.** The 2% network fee flows to Foundation treasury (§8.3); none is distributed to stakers.
 
-Assumptions:
-- Total staked: 15M FTNS (30% of 50M circulating)
-  - 5M at 30-day (1×): weight 5M
-  - 7M at 90-day (1.5×): weight 10.5M
-  - 3M at 365-day (3×): weight 9M
-  - Total weighted: 24.5M
-- Annual network fee pool: `$100M volume × 2% = $2M`
+### 9.3 ~~Yield calculation example~~ (superseded — no yield)
 
-Per-weighted-FTNS yield: `$2M / 24.5M = $0.0816 per weighted FTNS per year`
-
-At $2/FTNS price:
-- 30-day staker APY: ~4.1%
-- 90-day staker APY: ~6.1%
-- 365-day staker APY: ~12.2%
-
-Yields scale with network volume. At low volume, yield is small; **service discounts (up to 10%) and priority access may be more valuable than yield for high-volume users.**
+~~Prior drafts modeled per-staker APYs of ~4.1% / ~6.1% / ~12.2% across the 30/90/365-day tiers from a fee-funded pool.~~ **Superseded:** no such pool exists. The value of staking is the **service discount (up to 10%) and priority access**, which scale with the user's own network spend rather than with any token payout.
 
 ### 9.4 Staking is optional
 
-No FTNS holder is required to stake. Staking is a user-optional mechanism that trades short-term liquidity for yield + service-access benefits. This matters for regulatory classification — a token that pays yield automatically to all holders carries different analysis than one where yield is a function of user-elected lock.
+No FTNS holder is required to stake. Staking is a user-optional mechanism that trades short-term liquidity for service-access benefits (discounts + priority). It confers no token yield, so it does not introduce a "passive return to all holders" mechanic — the cleanest posture for the §11 Howey analysis.
 
 ### 9.5 Staking implementation
 
@@ -480,7 +483,7 @@ The following items REQUIRE counsel opinion before finalization (flagged **[COUN
 |-------|--------|-----------|-------------|
 | Genesis | Mainnet launch (target post-hardware, ~2026 Q3) | 100M FTNS minted to Foundation treasury | Contract-level |
 | Bootstrap | Year 0-3 | Compensation distribution begins; halving operational policy | Foundation policy + public logs |
-| Phase 3 | Year 0-1 | Marketplace dispatch + Phase-3-rate burn on every payment | On-chain contract |
+| Phase 3 | Year 0-1 | Marketplace dispatch + burn-free 2/8/90 payment split | On-chain contract |
 | Phase 7 | Year 1-3 | Staking contract + stake-tier enforcement | On-chain contract |
 | Phase 8 | Year 2-3 | On-chain halving enforcement (`EmissionController.sol`) | Strict on-chain |
 | Steady state | Year 5+ | All stages active; Foundation treasury long-run cap (20%) enforced by policy + disclosure | Hybrid |
@@ -494,14 +497,14 @@ The following items REQUIRE counsel opinion before finalization (flagged **[COUN
 - POL reserve initial funding: $0 (grows from network fee revenue).
 
 **Phase 3 (Q3 2026 target, post-hardware):**
-- 20% burn on every payment.
+- Burn-free 2/8/90 payment split (no burn deployed; §8.1).
 - Network fee flows to Foundation treasury.
 - Marketplace distributions into full payment-split pattern.
 
 **Phase 7:**
-- Staking contract with 30/90/365-day tiers.
+- Staking contract with 30/90/365-day tiers (utility-only: lock-based discounts + priority).
 - Marketplace stake-tier enforcement (replaces Phase 3 self-reported advisory).
-- Staking yield pool funded from network fees.
+- No staking yield pool (sprint 904 — staking pays no token yield).
 
 **Phase 8:**
 - `EmissionController.sol` deployed.
@@ -510,7 +513,7 @@ The following items REQUIRE counsel opinion before finalization (flagged **[COUN
 
 ### 12.3 Independence from deferred research standards
 
-FTNS tokenomics do not depend on any single protocol-standard arc (CIS-1, FHE, MPC, etc.). The core mechanisms — halving emissions, burn-on-use, staking locks, Protocol-Owned Liquidity reserve, compensation-only distribution — operate against any compute tier Prismatica or third-party operators provision on PRSM (T1 consumer edge, T2 prosumer, T3 cloud arbitrage, T4 meganodes). Revenue-mix composition shifts as the network matures and research tracks ship or are deferred, but the core tokenomics primitives remain identical.
+FTNS tokenomics do not depend on any single protocol-standard arc (CIS-1, FHE, MPC, etc.). The core mechanisms — halving-to-cap emissions, staking locks (utility-only), Protocol-Owned Liquidity reserve, compensation-only distribution (plus burn-on-use as a future/optional lever, §8.2) — operate against any compute tier Prismatica or third-party operators provision on PRSM (T1 consumer edge, T2 prosumer, T3 cloud arbitrage, T4 meganodes). Revenue-mix composition shifts as the network matures and research tracks ship or are deferred, but the core tokenomics primitives remain identical.
 
 *(Previous §12.3 "Interaction with PRSM-CIS-1" was removed 2026-04-24 alongside the CIS-1 reclassification as deferred research. If CIS-1 is revived under the §9 ratification path, a new §12.x covering that standard's FTNS-denomination semantics can be added at that time.)*
 
@@ -555,7 +558,7 @@ Input data: PRSM_Tokenomics.md §6 scenario simulations (bull / base / bear) pro
 3. Counsel opinion (3-6 months, $100K-$300K).
 4. Foundation governance ratification.
 
-Timeline: hybrid adoption, if pursued, ratifies ~Year 1 post-mainnet. This PRSM-TOK-1 v0.1 specifies the 2% baseline and treats hybrid as an amendment path.
+Timeline: hybrid adoption, if pursued, ratifies ~Year 1 post-mainnet. This PRSM-TOK-1 draft specifies the 2% baseline and treats hybrid as an amendment path.
 
 ### 13.4 Foundation jurisdiction dependency
 
@@ -572,7 +575,7 @@ The cleanest structure: Prismatica's 5-10% vests over 4 years tied to specific s
 
 ### 13.6 Staking contract specifics — **[DEFER to Phase 7 plan document]**
 
-§9 specifies tiers, multipliers, yield source. Remaining contract-level questions (early-unlock penalty schedules, yield-compounding mechanics, slashing for any staking-related misbehavior) belong in a Phase 7 plan document (not yet authored).
+§9 specifies utility-only tiers (discounts + priority; no token yield, sprint 904). Remaining contract-level questions (early-unlock penalty schedules, how discount/priority benefits are enforced on-chain, slashing for any staking-related misbehavior) belong in a Phase 7 plan document (not yet authored).
 
 ### 13.7 FTNS minting contract beyond genesis **[DEFER]**
 
@@ -601,14 +604,18 @@ Design inheritances:
 - **Ethereum** — Foundation governance model (Ethereum Foundation / Zug pattern).
 - **Helium, Filecoin, Arweave** — utility-token network designs; relevant as cautionary and positive examples across different regulatory outcomes.
 
-Where this standard diverges from predecessors, it's typically toward stricter compensation-framing (§4) and more aggressive burn (20% vs network precedents closer to 5-10%). The 20% burn is calibrated for PRSM's expected adoption curve; see PRSM_Tokenomics.md §5.2 for the supporting scenario math.
+Where this standard diverges from predecessors, it's typically toward stricter compensation-framing (§4) and a hard-capped, halving-to-cap emission (Bitcoin-style scarcity). A 20%-burn-on-use lever was modeled in earlier drafts but is **not deployed** (§8.2 — future/optional); the supporting scenario math lives in PRSM_Tokenomics.md §5.2 as illustrative of that optional lever.
 
 ---
 
 ## 15. Change log
 
+**v0.3 (2026-06-01):** Reconciled to the deployed v1 monetary contracts (Base mainnet, 2026-05-07). Three corrections: (1) staking pays no token yield — utility benefits only (sprint 904); (2) burn-on-use is a future/optional lever, not deployed; (3) emission is on-chain protocol issuance (1 FTNS/sec baseline, 4-year halving, 900M mint cap) split 50/30/20 by `CompensationDistributor`. The deployed params are pinned by formal invariants `INV-EC-3`, `INV-EC-4`, `INV-CD-3/4/5` (sprint 905). See the 2026-06-01 revision note. Authoritative scenario math: `PRSM_Tokenomics.md` (vault) §4.2 + §10.
+
+**v0.2 (2026-04-24):** Reclassified PRSM-CIS-1 as deferred research; archived PRSM-ECON-WP-1.
+
 **v0.1 (2026-04-21):** Initial consolidation of PRSM_Tokenomics.md + halving implementation plan + hybrid legal tracking into standards-track form. Parameter ranges specified; specific values deferred to Foundation board ratification (§13). Counsel consultation required before any allocation is finalized (§11.5).
 
 ---
 
-**End of PRSM-TOK-1 v0.1 Draft.**
+**End of PRSM-TOK-1 v0.3 Draft.**

@@ -885,7 +885,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tokenomicsContent.innerHTML = `
             <p>Monitor your FTNS token balance, earnings, and staking.</p>
             <p><strong>Balance:</strong> ${balance.total} FTNS (Available: ${balance.available})</p>
-            <p><strong>Staked:</strong> ${staking.staked_amount} FTNS (APY: ${staking.apy}%)</p>
+            <p><strong>Staked:</strong> ${staking.staked_amount} FTNS (${staking.benefits || 'lock-based service discounts and priority access'})</p>
             <p><strong>Earnings Source:</strong> ${earnings.current_status} (Total: ${earnings.total_earned} FTNS)</p>
             <button>Stake Tokens</button> <button>View Transactions</button>
         `;

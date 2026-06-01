@@ -769,6 +769,17 @@ class _Web3FormalBackend:
             return None
         return int.from_bytes(raw[-32:], "big")
 
+    def call_uint256_at_word(self, addr, selector, word_index):
+        """Decode the `word_index`-th 32-byte word of a return
+        value (e.g. one field of a struct getter). Returns None
+        if the return is too short to contain that word."""
+        raw = self._eth_call(addr, selector)
+        start = word_index * 32
+        end = start + 32
+        if raw is None or len(raw) < end:
+            return None
+        return int.from_bytes(raw[start:end], "big")
+
     def call_address(self, addr, selector):
         raw = self._eth_call(addr, selector)
         if raw is None or len(raw) < 32:
