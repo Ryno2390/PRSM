@@ -89,6 +89,14 @@ class PaymentEscrow:
         self.node_id = node_id
         self.broadcast_tx = broadcast_transaction  # async func(tx)
         self._escrows: Dict[str, EscrowEntry] = {}
+        # sp907 — per-job_id locks serialize release/refund/split so the
+        # PENDING->terminal status transition is not a check-then-act race
+        # across the ledger.transfer await. Without this, two concurrent
+        # release/refund calls on the same job both observe PENDING during
+        # their awaits and both pay out (escrow wallet goes negative =
+        # FTNS minted from nothing). Single-event-loop asyncio.Lock is the
+        # right serialization primitive here (the escrow state is in-memory).
+        self._job_locks: Dict[str, asyncio.Lock] = {}
         self._tasks: List[asyncio.Task] = []
         self._running = False
         # Optional async callback invoked after each periodic cleanup
@@ -214,7 +222,29 @@ class PaymentEscrow:
             )
             raise
 
+    def _job_lock(self, job_id: str) -> asyncio.Lock:
+        """sp907 — the per-job_id lock that serializes release/refund/split.
+        `setdefault` is atomic w.r.t. the event loop (no await), so lazily
+        creating the lock is itself race-free."""
+        return self._job_locks.setdefault(job_id, asyncio.Lock())
+
     async def release_escrow(
+        self,
+        job_id: str,
+        provider_id: str,
+        consensus_reached: bool = True,
+        partial_amount: Optional[float] = None,
+    ) -> Optional[Transaction]:
+        """Release escrow payment to the winning provider — sp907 lock wrapper.
+        Holds the per-job lock across the whole body so a concurrent
+        release/refund on the same job cannot interleave (the loser
+        re-evaluates after the winner's terminal status is committed)."""
+        async with self._job_lock(job_id):
+            return await self._release_escrow_locked(
+                job_id, provider_id, consensus_reached, partial_amount,
+            )
+
+    async def _release_escrow_locked(
         self,
         job_id: str,
         provider_id: str,
@@ -314,6 +344,20 @@ class PaymentEscrow:
             return None
 
     async def release_escrow_split(
+        self,
+        job_id: str,
+        splits: List[tuple],
+        consensus_reached: bool = True,
+    ) -> Optional[List[Transaction]]:
+        """Release an escrow to multiple recipients — sp907 lock wrapper.
+        Serialized per job_id so concurrent split-releases (or a split
+        racing a release/refund) cannot double-pay recipients."""
+        async with self._job_lock(job_id):
+            return await self._release_escrow_split_locked(
+                job_id, splits, consensus_reached,
+            )
+
+    async def _release_escrow_split_locked(
         self,
         job_id: str,
         splits: List[tuple],
@@ -545,6 +589,14 @@ class PaymentEscrow:
         return txs
 
     async def refund_escrow(self, job_id: str, reason: str = "") -> bool:
+        """Refund escrow to the requester — sp907 lock wrapper.
+        Serialized per job_id so a refund cannot interleave with a
+        concurrent release of the same job (which would pay the provider
+        AND refund the requester from one escrow)."""
+        async with self._job_lock(job_id):
+            return await self._refund_escrow_locked(job_id, reason)
+
+    async def _refund_escrow_locked(self, job_id: str, reason: str = "") -> bool:
         """Refund escrow to the requester (job failed or cancelled).
 
         State-machine guards:
