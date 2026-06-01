@@ -1302,3 +1302,123 @@ class TestIntegration:
         # Re-fetch stake to get restored amount
         stake = await staking_manager.get_stake(stake.stake_id)
         assert stake.amount == Decimal('10000')
+
+
+# === Sprint 906 — staking utility benefits (lock discounts + priority) ===
+
+class TestStakingBenefits:
+    """Lock-based discounts + priority access (PRSM_Tokenomics.md §5.3)."""
+
+    @pytest.mark.asyncio
+    async def test_stake_with_lock_records_benefit_tier(
+        self, staking_manager, mock_ftns_service
+    ):
+        await staking_manager.stake(
+            user_id="staker-90",
+            amount=Decimal('5000'),
+            lock_period_days=90,
+        )
+        benefits = await staking_manager.get_user_benefits("staker-90")
+        assert benefits.tier_label == "90d"
+        assert benefits.discount_fraction == 0.05
+        assert benefits.priority_boost == 0.25
+        assert benefits.is_active is True
+
+    @pytest.mark.asyncio
+    async def test_stake_rejects_invalid_lock_period(self, staking_manager):
+        with pytest.raises(ValueError, match="lock_period_days must be one of"):
+            await staking_manager.stake(
+                user_id="staker-x",
+                amount=Decimal('5000'),
+                lock_period_days=45,  # not a valid tier threshold
+            )
+
+    @pytest.mark.asyncio
+    async def test_no_lock_confers_no_benefits(
+        self, staking_manager, mock_ftns_service
+    ):
+        await staking_manager.stake(
+            user_id="staker-none",
+            amount=Decimal('5000'),
+        )
+        benefits = await staking_manager.get_user_benefits("staker-none")
+        assert benefits.is_active is False
+        assert benefits.tier_label == "none"
+
+    @pytest.mark.asyncio
+    async def test_unstake_blocked_while_locked(
+        self, staking_manager, mock_ftns_service
+    ):
+        stake = await staking_manager.stake(
+            user_id="staker-locked",
+            amount=Decimal('5000'),
+            lock_period_days=365,
+        )
+        with pytest.raises(ValueError, match="locked until"):
+            await staking_manager.unstake(
+                user_id="staker-locked",
+                stake_id=stake.stake_id,
+            )
+
+    @pytest.mark.asyncio
+    async def test_unstake_allowed_and_benefit_lapses_after_lock_expires(
+        self, staking_manager, mock_ftns_service, async_db_session
+    ):
+        from prsm.core.database import StakeModel
+        from sqlalchemy import select as _select
+        from uuid import UUID as _UUID
+
+        stake = await staking_manager.stake(
+            user_id="staker-expire",
+            amount=Decimal('5000'),
+            lock_period_days=30,
+        )
+        # Fast-forward: rewrite the lock expiry to the past.
+        past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        async with async_db_session() as db:
+            row = (await db.execute(
+                _select(StakeModel).where(
+                    StakeModel.stake_id == _UUID(stake.stake_id)
+                )
+            )).scalar_one()
+            md = dict(row.stake_metadata or {})
+            md["lock_expires_at"] = past
+            row.stake_metadata = md
+            await db.commit()
+
+        # Benefit has lapsed (lock expired) ...
+        benefits = await staking_manager.get_user_benefits("staker-expire")
+        assert benefits.is_active is False
+        # ... and unstaking is now permitted.
+        req = await staking_manager.unstake(
+            user_id="staker-expire",
+            stake_id=stake.stake_id,
+        )
+        assert req is not None
+
+    @pytest.mark.asyncio
+    async def test_best_tier_wins_across_multiple_locks(
+        self, staking_manager, mock_ftns_service
+    ):
+        await staking_manager.stake(
+            user_id="staker-multi", amount=Decimal('2000'), lock_period_days=30,
+        )
+        await staking_manager.stake(
+            user_id="staker-multi", amount=Decimal('2000'), lock_period_days=365,
+        )
+        benefits = await staking_manager.get_user_benefits("staker-multi")
+        # Highest tier (365d → 10%) wins.
+        assert benefits.tier_label == "365d"
+        assert benefits.discount_fraction == 0.10
+
+    @pytest.mark.asyncio
+    async def test_below_minimum_stake_confers_no_benefit(
+        self, staking_manager, mock_ftns_service
+    ):
+        # minimum_stake is 1000 in the test config; a 1500 stake qualifies,
+        # but verify the guard path by checking a sub-minimum stake can't
+        # even be created (so it can never confer a benefit).
+        with pytest.raises(ValueError, match="below minimum"):
+            await staking_manager.stake(
+                user_id="staker-tiny", amount=Decimal('500'), lock_period_days=90,
+            )

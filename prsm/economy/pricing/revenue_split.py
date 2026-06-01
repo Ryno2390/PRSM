@@ -38,6 +38,16 @@ class RevenueSplit:
     compute_amounts: Dict[str, Decimal] = field(default_factory=dict)  # provider_id -> amount
     treasury_amount: Decimal = Decimal("0")
     has_data_owner: bool = False
+    # sp906 — staking utility discount. The waived portion of the
+    # treasury (network-fee) share; the payer funds `effective_total_paid`
+    # rather than `total_payment`. Data-owner + compute shares are
+    # unaffected (operators/creators are never shortchanged).
+    fee_discount_amount: Decimal = Decimal("0")
+
+    @property
+    def effective_total_paid(self) -> Decimal:
+        """What the payer actually funds after the network-fee discount."""
+        return self.total_payment - self.fee_discount_amount
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -47,6 +57,8 @@ class RevenueSplit:
             "compute_amounts": {k: str(v) for k, v in self.compute_amounts.items()},
             "treasury_amount": str(self.treasury_amount),
             "has_data_owner": self.has_data_owner,
+            "fee_discount_amount": str(self.fee_discount_amount),
+            "effective_total_paid": str(self.effective_total_paid),
         }
 
 
@@ -68,6 +80,7 @@ class RevenueSplitEngine:
         total_payment: Decimal,
         data_owner_id: str = "",
         compute_providers: Optional[Dict[str, float]] = None,
+        network_fee_discount_fraction: float = 0.0,
     ) -> RevenueSplit:
         """Calculate the revenue split for a job.
 
@@ -76,6 +89,12 @@ class RevenueSplitEngine:
             data_owner_id: ID of data owner (empty if no proprietary data).
             compute_providers: Dict of {provider_id: pcu_contributed}.
                 Used to split compute share proportionally.
+            network_fee_discount_fraction: sp906 staking utility discount,
+                in [0, 1). Waives this fraction of the treasury (network-
+                fee) share only — data-owner and compute shares are
+                unaffected, so operators/creators are never shortchanged.
+                The waived amount is surfaced as ``fee_discount_amount``
+                and the payer funds ``effective_total_paid``.
 
         Returns:
             RevenueSplit with amounts per party.
@@ -91,6 +110,14 @@ class RevenueSplitEngine:
             data_amount = Decimal("0")
             compute_pool = total_payment * COMPUTE_ONLY_SHARE
             treasury = total_payment * TREASURY_ONLY_SHARE
+
+        # sp906 — apply the staking network-fee discount to the treasury
+        # share only. The waived portion is a payer rebate.
+        fee_discount = Decimal("0")
+        disc = Decimal(str(network_fee_discount_fraction))
+        if disc > 0:
+            fee_discount = treasury * disc
+            treasury = treasury - fee_discount
 
         # Split compute pool proportionally by PCU contribution
         compute_amounts = {}
@@ -112,4 +139,5 @@ class RevenueSplitEngine:
             compute_amounts=compute_amounts,
             treasury_amount=treasury,
             has_data_owner=has_data,
+            fee_discount_amount=fee_discount,
         )

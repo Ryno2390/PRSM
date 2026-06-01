@@ -15519,6 +15519,15 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         )
         stake_type: str = Field(default="general", description="Type of staking: governance, validation, compute, storage, liquidity, general")
         metadata: Optional[Dict[str, Any]] = Field(default=None, description="Optional metadata for the stake")
+        lock_period_days: Optional[int] = Field(
+            default=None,
+            description=(
+                "Optional utility-benefit lock (30/90/365 days). Locking "
+                "confers service discounts + priority access (no token "
+                "yield); the stake cannot be unstaked until the lock "
+                "expires. None = no lock, no benefit."
+            ),
+        )
 
     class StakeResponse(BaseModel):
         """Response model for a stake operation."""
@@ -15605,7 +15614,8 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 user_id=node.identity.node_id,
                 amount=Decimal(str(req.amount)),
                 stake_type=stake_type,
-                metadata=req.metadata
+                metadata=req.metadata,
+                lock_period_days=req.lock_period_days,
             )
             
             return StakeResponse(
@@ -15674,6 +15684,35 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         except Exception as e:
             logger.error(f"Error unstaking tokens: {e}")
             raise HTTPException(status_code=500, detail=f"Unstake failed: {str(e)}")
+
+    @app.get("/staking/benefits/{user_id}", tags=["staking"])
+    async def get_staking_benefits(user_id: str) -> Dict[str, Any]:
+        """Sprint 906 — the staking utility benefits currently in effect
+        for a user.
+
+        Returns the best (highest) active lock tier's service discount +
+        priority boost. This is the single source of truth the pricing
+        layer (network-fee discount) and dispatch layer (priority access)
+        consume. A user with no active, sufficiently-funded, still-locked
+        stake gets the inert "none" tier (0% discount, +0 priority).
+
+        Staking pays NO token yield (sp904); the value is the utility
+        benefits reported here.
+        """
+        if not node.staking_manager:
+            raise HTTPException(status_code=503, detail="Staking manager not initialized")
+        try:
+            benefits = await node.staking_manager.get_user_benefits(user_id)
+            return {
+                "user_id": user_id,
+                "yield_model": "utility_only",
+                **benefits.to_dict(),
+                "service_discount_pct": round(benefits.discount_fraction * 100, 4),
+                "priority_boost_pct": round(benefits.priority_boost * 100, 4),
+            }
+        except Exception as e:
+            logger.error(f"Error getting staking benefits: {e}")
+            raise HTTPException(status_code=500, detail=f"Benefits lookup failed: {str(e)}")
 
     @app.get("/staking/status", response_model=StakingStatusResponse, tags=["staking"])
     async def get_staking_status() -> StakingStatusResponse:

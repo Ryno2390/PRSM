@@ -45,3 +45,9 @@ class DispatchPolicy:
     #   - "byzantine": reserved — raises NotImplementedError until 7.1x
     consensus_mode: Optional[str] = None
     consensus_k: int = 3
+    # sp906 — staking priority access. A requester's staking lock confers
+    # a priority boost (>= 0) that biases provider selection toward
+    # higher-capacity (faster) providers. 0.0 = no boost (default;
+    # behavior identical to pre-sp906). Populated by the caller from the
+    # requester's StakingBenefits.priority_boost.
+    requester_priority_boost: float = 0.0

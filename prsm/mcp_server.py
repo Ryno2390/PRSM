@@ -4585,19 +4585,34 @@ async def handle_prsm_stake(arguments: Dict[str, Any]) -> str:
     amount = arguments.get("amount", 0)
     execute = bool(arguments.get("execute", False))
     stake_type = arguments.get("stake_type", "general")
+    lock_period_days = arguments.get("lock_period_days")
 
+    # sp906 — staking confers UTILITY benefits (lock-based service
+    # discounts + priority access), NOT token yield (sp904). Preview the
+    # benefit tier the chosen lock unlocks.
     try:
-        from prsm.economy.pricing.models import ProsumerTier
-        tier = ProsumerTier.from_stake(int(amount))
+        from prsm.economy.tokenomics.staking_manager import StakingConfig
+        benefits = StakingConfig().benefits_for_lock_days(lock_period_days)
     except Exception as e:
         return f"Staking info failed: {e}"
 
     if not execute:
+        if benefits.is_active:
+            benefit_line = (
+                f"  Lock: {benefits.tier_label} → "
+                f"{benefits.discount_fraction * 100:.0f}% network-fee discount, "
+                f"+{benefits.priority_boost * 100:.0f}% dispatch priority\n"
+            )
+        else:
+            benefit_line = (
+                "  Lock: none → no utility benefit. Pass "
+                "lock_period_days=30/90/365 for service discounts + priority "
+                "(staking pays no token yield).\n"
+            )
         return (
             f"Staking Preview (no transaction submitted)\n"
             f"  Amount: {amount} FTNS\n"
-            f"  Tier: {tier.name}\n"
-            f"  Yield Boost: {tier.yield_boost}x\n"
+            f"{benefit_line}"
             f"  To actually stake, call prsm_stake again with execute=true."
         )
 
@@ -4608,7 +4623,12 @@ async def handle_prsm_stake(arguments: Dict[str, Any]) -> str:
         result = await _call_node_api(
             "POST",
             "/staking/stake",
-            {"amount": float(amount), "stake_type": stake_type, "metadata": {}},
+            {
+                "amount": float(amount),
+                "stake_type": stake_type,
+                "metadata": {},
+                "lock_period_days": lock_period_days,
+            },
         )
     except Exception as e:
         return (
@@ -4622,8 +4642,14 @@ async def handle_prsm_stake(arguments: Dict[str, Any]) -> str:
         f"  Amount: {result.get('amount', amount)} FTNS\n"
         f"  Type: {result.get('stake_type', stake_type)}\n"
         f"  Status: {result.get('status', 'unknown')}\n"
-        f"  Tier: {tier.name} (yield boost {tier.yield_boost}x)\n"
-        f"  Staked at: {result.get('staked_at', '')}"
+        f"  Lock: {benefits.tier_label}"
+        + (
+            f" ({benefits.discount_fraction * 100:.0f}% fee discount, "
+            f"+{benefits.priority_boost * 100:.0f}% priority)\n"
+            if benefits.is_active
+            else " (no utility benefit — unlocked stake)\n"
+        )
+        + f"  Staked at: {result.get('staked_at', '')}"
     )
 
 
@@ -4631,21 +4657,40 @@ async def handle_prsm_revenue_split(arguments: Dict[str, Any]) -> str:
     total = arguments.get("total_payment", 0)
     has_data = arguments.get("has_data_owner", True)
     providers = arguments.get("compute_providers", 1)
+    # sp906 — optional staking network-fee discount. Pass a fraction
+    # directly, or a staker_user_id to look up the live tier on the node.
+    fee_discount = float(arguments.get("network_fee_discount_fraction", 0.0) or 0.0)
+    staker_user_id = arguments.get("staker_user_id")
     try:
         from decimal import Decimal
         from prsm.economy.pricing.revenue_split import RevenueSplitEngine
+        if staker_user_id and fee_discount == 0.0:
+            try:
+                b = await _call_node_api(
+                    "GET", f"/staking/benefits/{staker_user_id}",
+                )
+                fee_discount = float(b.get("discount_fraction", 0.0) or 0.0)
+            except Exception:
+                fee_discount = 0.0
         engine = RevenueSplitEngine()
         provider_dict = {f"provider-{i}": 100.0/max(providers,1) for i in range(max(providers,1))}
         split = engine.calculate_split(
             total_payment=Decimal(str(total)),
             data_owner_id="data-owner" if has_data else "",
             compute_providers=provider_dict,
+            network_fee_discount_fraction=fee_discount,
         )
         lines = [f"Revenue Split for {total} FTNS"]
         if has_data:
             lines.append(f"  Data Owner: {split.data_owner_amount} FTNS (80%)")
         lines.append(f"  Compute ({providers} providers): {sum(split.compute_amounts.values())} FTNS")
         lines.append(f"  Treasury: {split.treasury_amount} FTNS (5%)")
+        if split.fee_discount_amount > 0:
+            lines.append(
+                f"  Staking fee discount: -{split.fee_discount_amount} FTNS "
+                f"({fee_discount * 100:.0f}% off the network fee)"
+            )
+            lines.append(f"  Payer pays: {split.effective_total_paid} FTNS")
         return "\n".join(lines)
     except Exception as e:
         return f"Split calculation failed: {e}"

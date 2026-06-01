@@ -387,7 +387,7 @@ Four open gates before hybrid adoption:
 | 90 days | None | 5% | +25% |
 | 365 days | None | 10% | +50% |
 
-Staking benefits are **utility**, not return: a longer lock buys a larger service discount and higher dispatch priority. There is no inflationary or fee-funded payout to stakers.
+Staking benefits are **utility**, not return: a longer lock buys a larger service discount and higher dispatch priority. There is no inflationary or fee-funded payout to stakers. **Implemented (sprint 906):** lock tiers + lock-enforced unstake + `get_user_benefits()` + the network-fee discount (`RevenueSplitEngine`, treasury-share only — operators/creators untouched) + the dispatch priority boost (marketplace provider selection), surfaced at `GET /staking/benefits/{user_id}`. The discount applies to the network-fee portion (not the full service price), so the savings are bounded; priority-access to faster providers is the larger practical value for power users.
 
 ### 9.2 ~~Yield source~~ (superseded — no yield)
 

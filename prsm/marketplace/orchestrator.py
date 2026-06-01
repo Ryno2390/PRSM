@@ -332,7 +332,9 @@ class MarketplaceOrchestrator:
                 f"least {k} eligible providers after tier gating; got "
                 f"{len(tier_eligible)}"
             )
-        selected = self._select_top_k(tier_eligible, k)
+        selected = self._select_top_k(
+            tier_eligible, k, policy.requester_priority_boost,
+        )
 
         # Step 3: fair escrow split across the k. MVP uses the policy's
         # max_price_per_shard_ftns as the budget (no per-provider price
@@ -403,6 +405,7 @@ class MarketplaceOrchestrator:
     @staticmethod
     def _select_top_k(
         listings: List[ProviderListing], k: int,
+        priority_boost: float = 0.0,
     ) -> List[ProviderListing]:
         """Phase 7.1 Task 5 top-k selection.
 
@@ -414,17 +417,34 @@ class MarketplaceOrchestrator:
         Multiply by (1 / price) and take the top k. Ties broken by
         lexicographic provider_id (deterministic — the requester can
         audit why a given set was picked).
+
+        sp906 — staking priority access. When ``priority_boost`` > 0 (a
+        requester with an active staking lock, see DispatchPolicy
+        .requester_priority_boost), the score is scaled by
+        ``(1 + priority_boost * capacity_norm)`` where capacity_norm is
+        the provider's capacity relative to the fastest in the set. This
+        biases selection toward faster providers — "priority access" =
+        access to faster service — without overriding tier/price for
+        unboosted (boost=0 → multiplier 1.0 → identical to pre-sp906)
+        requests. The influence is bounded (normalized, scaled by boost).
         """
         tier_score = {"open": 1, "standard": 2, "premium": 3, "critical": 4}
+        max_cap = max(
+            (l.capacity_shards_per_sec for l in listings), default=0.0,
+        )
 
         def score(listing: ProviderListing) -> Tuple[float, str]:
             tier = tier_score.get(listing.stake_tier, 0)
             # Guard against division by zero even though the filter's
             # min_price_per_shard_ftns rejects <=0 listings already.
             price = max(listing.price_per_shard_ftns, 1e-9)
-            # Negate because we'll sort descending by (score, then
+            base = tier / price
+            if priority_boost > 0 and max_cap > 0:
+                cap_norm = listing.capacity_shards_per_sec / max_cap
+                base = base * (1.0 + priority_boost * cap_norm)
+            # Negate because we'll sort ascending by (score, then
             # ascending by provider_id — stable tiebreak).
-            return (-tier / price, listing.provider_id)
+            return (-base, listing.provider_id)
 
         sorted_listings = sorted(listings, key=score)
         return sorted_listings[:k]

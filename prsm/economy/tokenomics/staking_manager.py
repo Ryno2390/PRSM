@@ -83,6 +83,63 @@ class StakeType(str, Enum):
     GENERAL = "general"              # General purpose staking
 
 
+# === Staking utility benefits (sp906) ===
+# PRSM_Tokenomics.md §5.3: staking confers UTILITY benefits — lock-based
+# service discounts + priority access — and NO token yield (sp904). The
+# discount applies to the network-fee (treasury) portion of a payment
+# only (the foundation's take), never the operator/creator share, so it
+# can't shortchange providers. Priority biases dispatch ordering toward
+# faster / higher-quality providers.
+#
+# Schedule, high→low (first match wins):
+#   (min_lock_days, discount_fraction, priority_boost, tier_label)
+_DEFAULT_BENEFIT_TIERS: Tuple[Tuple[int, float, float, str], ...] = (
+    (365, 0.10, 0.50, "365d"),
+    (90, 0.05, 0.25, "90d"),
+    (30, 0.02, 0.10, "30d"),
+)
+
+# Lock commitments a staker may choose (days). 0/None = no lock, no benefit.
+ALLOWED_LOCK_DAYS: Tuple[int, ...] = (30, 90, 365)
+
+
+@dataclass(frozen=True)
+class StakingBenefits:
+    """The utility benefits a staker's active lock confers."""
+    lock_period_days: int
+    tier_label: str
+    discount_fraction: float   # network-fee discount, in [0, 1)
+    priority_boost: float      # dispatch-priority multiplier addend (>= 0)
+
+    @classmethod
+    def none(cls) -> "StakingBenefits":
+        """No qualifying lock — inert benefits."""
+        return cls(0, "none", 0.0, 0.0)
+
+    @property
+    def is_active(self) -> bool:
+        return self.discount_fraction > 0 or self.priority_boost > 0
+
+    def discounted_fee(self, fee: Decimal) -> Decimal:
+        """Apply the network-fee discount to a treasury-fee amount."""
+        if self.discount_fraction <= 0:
+            return fee
+        return fee * (Decimal("1") - Decimal(str(self.discount_fraction)))
+
+    def boosted_priority(self, base: float) -> float:
+        """Scale a base dispatch-priority score by the priority boost."""
+        return base * (1.0 + self.priority_boost)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "lock_period_days": self.lock_period_days,
+            "tier_label": self.tier_label,
+            "discount_fraction": self.discount_fraction,
+            "priority_boost": self.priority_boost,
+            "is_active": self.is_active,
+        }
+
+
 # === Dataclasses ===
 
 @dataclass
@@ -117,6 +174,30 @@ class StakingConfig:
     # Slashing thresholds
     downtime_slash_threshold_seconds: int = 24 * 3600  # 24 hours offline triggers slash
     max_slash_per_event: float = 0.5            # Max 50% slash per event
+
+    # Staking utility-benefit schedule (sp906) — lock_days → (discount, priority)
+    benefit_tiers: Tuple[Tuple[int, float, float, str], ...] = _DEFAULT_BENEFIT_TIERS
+
+    def benefits_for_lock_days(
+        self, lock_period_days: Optional[int]
+    ) -> StakingBenefits:
+        """Map a lock period (days) to its utility benefits.
+
+        Returns the highest tier whose ``min_lock_days`` threshold the
+        lock meets; ``StakingBenefits.none()`` if the lock is None/0 or
+        below the lowest tier. Tiers are stored high→low so the first
+        match wins."""
+        if not lock_period_days or lock_period_days <= 0:
+            return StakingBenefits.none()
+        for min_days, discount, priority, label in self.benefit_tiers:
+            if lock_period_days >= min_days:
+                return StakingBenefits(
+                    lock_period_days=lock_period_days,
+                    tier_label=label,
+                    discount_fraction=discount,
+                    priority_boost=priority,
+                )
+        return StakingBenefits.none()
 
 
 @dataclass
@@ -338,29 +419,44 @@ class StakingManager:
         user_id: str,
         amount: Decimal,
         stake_type: StakeType = StakeType.GENERAL,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        lock_period_days: Optional[int] = None,
     ) -> StakeRecord:
         """
         Stake FTNS tokens
-        
+
         Args:
             user_id: User making the stake
             amount: Amount to stake
             stake_type: Type of staking (governance, validation, etc.)
             metadata: Additional metadata for the stake
-            
+            lock_period_days: sp906 — optional utility-benefit lock
+                commitment (one of ALLOWED_LOCK_DAYS = 30/90/365). While
+                the lock is in effect the stake cannot be unstaked and the
+                staker earns the tier's service discount + priority access
+                (§5.3). None/0 = no lock, no benefit, 7-day unstake as
+                before.
+
         Returns:
             StakeRecord: The created stake record
-            
+
         Raises:
             ValueError: If stake validation fails
         """
-        
+
         # Validate amount
         if amount < Decimal(self.config.minimum_stake):
             raise ValueError(
                 f"Stake amount {amount} below minimum {self.config.minimum_stake}"
             )
+
+        # Validate lock commitment (sp906).
+        if lock_period_days is not None and lock_period_days != 0:
+            if lock_period_days not in ALLOWED_LOCK_DAYS:
+                raise ValueError(
+                    f"lock_period_days must be one of {ALLOWED_LOCK_DAYS} "
+                    f"(or None); got {lock_period_days}"
+                )
         
         # Check user's current total stake
         user_total_stake = await self.get_user_total_stake(user_id)
@@ -392,7 +488,17 @@ class StakingManager:
         # Create stake record
         stake_id = uuid4()
         now = datetime.now(timezone.utc)
-        
+
+        # sp906 — record the lock commitment + expiry in metadata so
+        # get_user_benefits() can compute the tier and unstake() can
+        # enforce the lock. No DB-schema change (uses stake_metadata JSON).
+        stake_metadata = dict(metadata or {})
+        if lock_period_days:
+            stake_metadata["lock_period_days"] = int(lock_period_days)
+            stake_metadata["lock_expires_at"] = (
+                now + timedelta(days=int(lock_period_days))
+            ).isoformat()
+
         async with get_async_session() as db:
             model = StakeModel(
                 stake_id=stake_id,
@@ -404,7 +510,7 @@ class StakingManager:
                 rewards_claimed=0.0,
                 last_reward_calculation=now,
                 staked_at=now,
-                stake_metadata=metadata or {},
+                stake_metadata=stake_metadata,
             )
             db.add(model)
             await db.commit()
@@ -458,7 +564,21 @@ class StakingManager:
             
             if stake_row.status != StakeStatus.ACTIVE.value:
                 raise ValueError(f"Stake is not active: {stake_row.status}")
-            
+
+            # sp906 — enforce the utility-benefit lock. A staker who
+            # committed to a 30/90/365-day lock (to earn discounts +
+            # priority) cannot unstake until it expires; otherwise the
+            # benefit would be trivially gameable (stake, get the
+            # discount, immediately unstake).
+            lock_expires = self._lock_expires_at(stake_row.stake_metadata)
+            if lock_expires is not None and (
+                datetime.now(timezone.utc) < lock_expires
+            ):
+                raise ValueError(
+                    f"Stake is locked until {lock_expires.isoformat()} "
+                    f"(utility-benefit lock commitment); cannot unstake yet"
+                )
+
             stake = self._stake_row_to_record(stake_row)
             
             # Determine amount
@@ -980,9 +1100,81 @@ class StakingManager:
             
             result = await db.execute(query)
             rows = result.scalars().all()
-            
+
             return [self._stake_row_to_record(row) for row in rows]
-    
+
+    @staticmethod
+    def _lock_expires_at(stake_metadata: Any) -> Optional[datetime]:
+        """sp906 — parse the lock expiry from a stake's metadata, if any.
+
+        Returns a tz-aware UTC datetime, or None when the stake carries
+        no lock commitment (legacy stakes / no lock chosen). Defensive
+        against malformed metadata (SQLite stores JSON as text)."""
+        if not stake_metadata:
+            return None
+        meta = stake_metadata
+        if isinstance(meta, str):
+            try:
+                import json
+                meta = json.loads(meta)
+            except (ValueError, TypeError):
+                return None
+        if not isinstance(meta, dict):
+            return None
+        raw = meta.get("lock_expires_at")
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(raw))
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    async def get_user_benefits(self, user_id: str) -> StakingBenefits:
+        """sp906 — the staking utility benefits currently in effect for a
+        user.
+
+        Scans the user's ACTIVE stakes and returns the BEST (highest
+        discount) tier among those that (a) meet the minimum stake and
+        (b) are still within their lock period. A staker can hold several
+        locks; they get the strongest one's benefits. Returns
+        ``StakingBenefits.none()`` when no active, sufficiently-funded,
+        still-locked stake exists.
+
+        This is the single source of truth the pricing layer
+        (network-fee discount) and dispatch layer (priority access)
+        consume."""
+        now = datetime.now(timezone.utc)
+        best = StakingBenefits.none()
+        async with get_async_session() as db:
+            query = select(StakeModel).where(
+                StakeModel.user_id == user_id,
+                StakeModel.status == StakeStatus.ACTIVE.value,
+            )
+            result = await db.execute(query)
+            rows = result.scalars().all()
+
+        for row in rows:
+            if Decimal(str(row.amount)) < Decimal(self.config.minimum_stake):
+                continue
+            lock_expires = self._lock_expires_at(row.stake_metadata)
+            if lock_expires is None or now >= lock_expires:
+                continue  # no lock, or lock already expired → no benefit
+            meta = row.stake_metadata
+            if isinstance(meta, str):
+                try:
+                    import json
+                    meta = json.loads(meta)
+                except (ValueError, TypeError):
+                    meta = {}
+            lock_days = (meta or {}).get("lock_period_days")
+            candidate = self.config.benefits_for_lock_days(lock_days)
+            if candidate.discount_fraction > best.discount_fraction:
+                best = candidate
+        return best
+
     async def get_user_total_stake(self, user_id: str) -> Decimal:
         """Get total staked amount for a user"""
         
