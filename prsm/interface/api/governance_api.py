@@ -254,12 +254,12 @@ async def stake_tokens_for_governance(
 ) -> GovernanceResponse:
     """
     Stake FTNS tokens for governance voting power
-    
-    🗳️ STAKING BENEFITS:
-    - Increased voting power based on stake amount and lock duration
-    - Staking rewards (5% of staked amount)
-    - Longer lock periods provide voting power multipliers (up to 4x)
+
+    🗳️ STAKING BENEFITS (utility-only — sp904 deployed v1 tokenomics):
+    - Voting power based on the staked amount and lock duration
+    - Network-fee discount + dispatch priority (via StakingManager)
     - Participation in governance decisions and proposals
+    - NOTE: staking pays NO token yield (no minted reward, no burn)
     """
     try:
         distributor = get_governance_distributor()

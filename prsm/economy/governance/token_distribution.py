@@ -505,21 +505,15 @@ class GovernanceTokenDistributor:
             
             # Update statistics
             self.activation_stats["total_staked_tokens"] += amount
-            
-            # Create distribution record for staking reward
-            staking_reward = amount * Decimal('0.05')  # 5% staking reward
-            if staking_reward > 0:
-                await self._create_token_distribution(
-                    recipient_user_id=user_id,
-                    distribution_type=DistributionType.STAKING_REWARD,
-                    amount=staking_reward,
-                    metadata={
-                        "staked_amount": str(amount),
-                        "lock_duration_days": lock_duration_days,
-                        "voting_power": str(voting_power)
-                    }
-                )
-            
+
+            # sp913 — staking is UTILITY-ONLY (sp904 deployed v1 tokenomics):
+            # the value of staking is the network-fee discount + dispatch
+            # priority (StakingManager), NOT a token yield. The former
+            # phantom "5% STAKING_REWARD" distribution record contradicted the
+            # deployed monetary policy (no yield, no burn) and inflated
+            # get_distribution_statistics with rewards that were never minted.
+            # Removed: staking returns voting power only.
+
             self.logger.info(
                 "Tokens staked for governance",
                 user_id=user_id,
